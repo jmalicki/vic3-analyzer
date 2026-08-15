@@ -15,14 +15,20 @@ export interface WasmApi {
     solveOptsJson: string,
     whatIfOptsJson: string,
   ): string | Promise<string>
-  // The Rust wasm export is scheduled for P10/follow-up work. Keeping it
-  // optional lets the UI use a mocked implementation until that lands.
+  // Optional until a wasm gaps export ships; UI tests mock this.
   gaps?(
     save: Uint8Array,
     tokens: Uint8Array | undefined,
     defs: Uint8Array,
     solveOptsJson: string,
     goal: string,
+  ): string | Promise<string>
+  plan(
+    save: Uint8Array,
+    tokens: Uint8Array | undefined,
+    defs: Uint8Array,
+    solveOptsJson: string,
+    planOptsJson: string,
   ): string | Promise<string>
   what_if_schema(): string
   prices_schema(): string

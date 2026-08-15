@@ -10,6 +10,8 @@ import type {
   GapAtom,
   GapsResult,
   JsonSchema,
+  PlanAction,
+  PlanResult,
   PricesResult,
   SaveSummary,
 } from './types'
@@ -45,6 +47,24 @@ function newId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+function actionLabel(action: PlanAction): string {
+  if ('QueueTech' in action) return `Queue technology: ${action.QueueTech.tech}`
+  return `Wait ${action.WaitForEvent.days} days for ${action.WaitForEvent.event.TechCompleted.tech}`
+}
+
+function kindLabel(kind: AnalysisKind): string {
+  switch (kind) {
+    case 'what_if':
+      return 'What-if'
+    case 'gaps':
+      return 'Gaps'
+    case 'plan':
+      return 'Plan'
+    default:
+      return 'Prices'
+  }
+}
+
 function App({ wasmApi }: Props) {
   const [api, setApi] = useState<WasmApi>()
   const [saveFile, setSaveFile] = useState<File>()
@@ -52,8 +72,10 @@ function App({ wasmApi }: Props) {
   const [defsFile, setDefsFile] = useState<File>()
   const [summary, setSummary] = useState<SaveSummary>()
   const [result, setResult] = useState<PricesResult>()
-  const [goal, setGoal] = useState('')
   const [gapsResult, setGapsResult] = useState<GapsResult>()
+  const [planResult, setPlanResult] = useState<PlanResult>()
+  const [goal, setGoal] = useState('research(tech=nitroglycerin)')
+  const [label, setLabel] = useState('')
   const [schema, setSchema] = useState<JsonSchema>(fallbackSchema)
   const [whatIfOpts, setWhatIfOpts] = useState<Record<string, unknown>>(() =>
     initialValue(fallbackSchema),
@@ -101,10 +123,12 @@ function App({ wasmApi }: Props) {
     analysisResult: AnalysisResult,
     saveBytes: Uint8Array,
     tokenBytes?: Uint8Array,
+    recordLabel?: string,
   ) => {
     const record: AnalysisRecord = {
       id: newId(),
       created_at: new Date().toISOString(),
+      label: recordLabel || undefined,
       kind,
       fingerprint: await fingerprint(saveBytes),
       date: summary?.date,
@@ -185,7 +209,32 @@ function App({ wasmApi }: Props) {
     }
   }
 
-  const formatGap = (atom: GapAtom) => typeof atom === 'string' ? atom : JSON.stringify(atom)
+  const submitPlan = (event: FormEvent) => {
+    event.preventDefault()
+    if (!api || !saveFile || !defsFile) return
+    setBusy(true)
+    setError(undefined)
+    void Promise.all([bytes(saveFile), bytes(tokensFile), bytes(defsFile)])
+      .then(async ([saveBytes, tokenBytes, defsBytes]) => {
+        const opts = { goal, max_days: 3650, label: label || null }
+        const json = await api.plan(
+          saveBytes!,
+          tokenBytes,
+          defsBytes!,
+          '{}',
+          JSON.stringify(opts),
+        )
+        const nextResult = JSON.parse(json) as PlanResult
+        setPlanResult(nextResult)
+        await archiveResult('plan', opts, nextResult, saveBytes!, tokenBytes, label)
+      })
+      .catch((reason: unknown) => {
+        setError(reason instanceof Error ? reason.message : String(reason))
+      })
+      .finally(() => setBusy(false))
+  }
+
+  const formatGap = (atom: GapAtom) => (typeof atom === 'string' ? atom : JSON.stringify(atom))
 
   const ready = Boolean(api && saveFile && defsFile)
 
@@ -246,6 +295,20 @@ function App({ wasmApi }: Props) {
             Run what-if
           </button>
         </form>
+        <form onSubmit={submitPlan}>
+          <h2>Plan timeline</h2>
+          <label>
+            Goal
+            <input aria-label="Plan goal" value={goal} onChange={(event) => setGoal(event.target.value)} />
+          </label>
+          <label>
+            Label
+            <input aria-label="Plan label" value={label} onChange={(event) => setLabel(event.target.value)} />
+          </label>
+          <button disabled={!ready || busy || !goal.trim()} type="submit">
+            Run plan
+          </button>
+        </form>
       </section>
 
       <section aria-labelledby="gaps-form-heading">
@@ -254,7 +317,7 @@ function App({ wasmApi }: Props) {
           <label>
             Goal
             <input
-              aria-label="Goal"
+              aria-label="Gaps goal"
               value={goal}
               onChange={(event) => setGoal(event.target.value)}
               placeholder="research(tech=nitroglycerin)"
@@ -277,13 +340,19 @@ function App({ wasmApi }: Props) {
           ) : (
             <ul className="gap-list">
               {gapsResult.gaps.map((atom, index) => (
-                <li key={`${formatGap(atom)}-${index}`}><code>{formatGap(atom)}</code></li>
+                <li key={`${formatGap(atom)}-${index}`}>
+                  <code>{formatGap(atom)}</code>
+                </li>
               ))}
             </ul>
           )}
           <div className="limitations">
             <h3>Model limitations</h3>
-            <ul>{gapsResult.limitations.map((item) => <li key={item}>{item}</li>)}</ul>
+            <ul>
+              {gapsResult.limitations.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
           </div>
         </section>
       )}
@@ -292,12 +361,20 @@ function App({ wasmApi }: Props) {
         <section aria-labelledby="prices-heading">
           <div className="result-heading">
             <h2 id="prices-heading">Goods prices</h2>
-            <span>{result.status} · residual {result.residual.toPrecision(4)}</span>
+            <span>
+              {result.status} · residual {result.residual.toPrecision(4)}
+            </span>
           </div>
           <div className="table-scroll">
             <table>
               <thead>
-                <tr><th>Good</th><th>Base</th><th>Price</th><th>Buy</th><th>Sell</th></tr>
+                <tr>
+                  <th>Good</th>
+                  <th>Base</th>
+                  <th>Price</th>
+                  <th>Buy</th>
+                  <th>Sell</th>
+                </tr>
               </thead>
               <tbody>
                 {result.goods.map((good) => (
@@ -314,7 +391,36 @@ function App({ wasmApi }: Props) {
           </div>
           <div className="limitations">
             <h3>Model limitations</h3>
-            <ul>{result.limitations.map((item) => <li key={item}>{item}</li>)}</ul>
+            <ul>
+              {result.limitations.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
+
+      {planResult && (
+        <section aria-labelledby="plan-heading">
+          <div className="result-heading">
+            <h2 id="plan-heading">Plan timeline</h2>
+            <span>{planResult.day_cost} total days</span>
+          </div>
+          <ol className="timeline">
+            {planResult.actions.map((step, index) => (
+              <li key={`${step.day}-${index}`}>
+                <strong>Day {step.day}</strong>
+                <span>{actionLabel(step.action)}</span>
+              </li>
+            ))}
+          </ol>
+          <div className="limitations">
+            <h3>Model limitations</h3>
+            <ul>
+              {planResult.limitations.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
           </div>
         </section>
       )}
@@ -328,9 +434,12 @@ function App({ wasmApi }: Props) {
             {records.map((record) => (
               <li key={record.id}>
                 <strong>
-                  {record.kind === 'what_if' ? 'What-if' : record.kind === 'gaps' ? 'Gaps' : 'Prices'}
+                  {kindLabel(record.kind)}
+                  {record.label ? ` · ${record.label}` : ''}
                 </strong>
-                <span>{record.country ?? '—'} · {record.date ?? '—'}</span>
+                <span>
+                  {record.country ?? '—'} · {record.date ?? '—'}
+                </span>
                 <time dateTime={record.created_at}>{new Date(record.created_at).toLocaleString()}</time>
               </li>
             ))}

@@ -22,6 +22,24 @@ const gapsResult = JSON.stringify({
   limitations: ['Goal gaps use prices from a frozen-world solve.'],
 })
 
+const planResult = JSON.stringify({
+  day_cost: 365,
+  actions: [
+    { day: 0, action: { QueueTech: { tech: 'nitroglycerin' } } },
+    {
+      day: 365,
+      action: {
+        WaitForEvent: {
+          event: { TechCompleted: { tech: 'nitroglycerin' } },
+          days: 365,
+        },
+      },
+    },
+  ],
+  residual: 0.00001,
+  limitations: ['Research duration is fixed by the compact simulator.'],
+})
+
 const schema = JSON.stringify({
   title: 'WhatIfOpts',
   type: 'object',
@@ -38,6 +56,7 @@ function mockApi(): WasmApi {
     prices: vi.fn(() => result),
     what_if: vi.fn(() => result),
     gaps: vi.fn(() => gapsResult),
+    plan: vi.fn(() => planResult),
     what_if_schema: vi.fn(() => schema),
     prices_schema: vi.fn(() => '{}'),
   }
@@ -97,12 +116,15 @@ describe('prices UI', () => {
     render(<App wasmApi={api} />)
     await selectFiles(user)
 
-    await user.type(screen.getByLabelText('Goal'), 'research(tech=nitroglycerin)')
+    await user.clear(screen.getByLabelText('Gaps goal'))
+    await user.type(screen.getByLabelText('Gaps goal'), 'research(tech=nitroglycerin)')
     await user.click(screen.getByRole('button', { name: 'Run gaps' }))
 
     expect(await screen.findByText('Satisfied: No')).toBeInTheDocument()
     expect(screen.getByText('{"HasTech":"nitroglycerin"}')).toBeInTheDocument()
-    expect(screen.getByText('{"GoodPrice":{"good":"ammunition","rel":"Le","value":40}}')).toBeInTheDocument()
+    expect(
+      screen.getByText('{"GoodPrice":{"good":"ammunition","rel":"Le","value":40}}'),
+    ).toBeInTheDocument()
     expect(screen.getByText('Solvent')).toBeInTheDocument()
     expect(screen.getByText('Goal gaps use prices from a frozen-world solve.')).toBeInTheDocument()
     expect(api.gaps).toHaveBeenCalledWith(
@@ -113,5 +135,25 @@ describe('prices UI', () => {
       'research(tech=nitroglycerin)',
     )
     await waitFor(async () => expect((await listAnalyses())[0].kind).toBe('gaps'))
+  })
+
+  it('renders a mocked plan timeline and archives its label', async () => {
+    const user = userEvent.setup()
+    const api = mockApi()
+    render(<App wasmApi={api} />)
+    await selectFiles(user)
+
+    await user.clear(screen.getByLabelText('Plan goal'))
+    await user.type(screen.getByLabelText('Plan goal'), 'research(tech=nitroglycerin)')
+    await user.type(screen.getByLabelText('Plan label'), 'rush')
+    await user.click(screen.getByRole('button', { name: 'Run plan' }))
+
+    expect(await screen.findByText('365 total days')).toBeInTheDocument()
+    expect(screen.getByText('Queue technology: nitroglycerin')).toBeInTheDocument()
+    expect(screen.getByText('Wait 365 days for nitroglycerin')).toBeInTheDocument()
+    await waitFor(() => expect(api.plan).toHaveBeenCalled())
+    const records = await listAnalyses()
+    expect(records[0]).toMatchObject({ kind: 'plan', label: 'rush' })
+    expect(records[0].result).toMatchObject({ day_cost: 365 })
   })
 })

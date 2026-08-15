@@ -21,7 +21,23 @@ export interface GapsResult {
   limitations: string[]
 }
 
-export type AnalysisResult = PricesResult | GapsResult
+export type PlanAction =
+  | { QueueTech: { tech: string } }
+  | { WaitForEvent: { event: { TechCompleted: { tech: string } }; days: number } }
+
+export interface PlanStep {
+  day: number
+  action: PlanAction
+}
+
+export interface PlanResult {
+  day_cost: number
+  actions: PlanStep[]
+  residual: number
+  limitations: string[]
+}
+
+export type AnalysisResult = PricesResult | GapsResult | PlanResult
 
 export interface SaveSummary {
   tag?: string

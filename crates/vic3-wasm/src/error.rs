@@ -12,4 +12,16 @@ pub enum WasmError {
     /// Option JSON could not be parsed.
     #[error("invalid JSON: {0}")]
     Json(#[from] serde_json::Error),
+    /// Goal DSL could not be compiled.
+    #[error(transparent)]
+    Goal(#[from] vic3_goals::GoalError),
+    /// Save projection could not be built.
+    #[error(transparent)]
+    World(#[from] vic3_world::WorldError),
+    /// No plan fits the current model and limits.
+    #[error(transparent)]
+    Plan(#[from] vic3_plan::PlanError),
+    /// The save contains no playable country.
+    #[error("save has no playable country")]
+    NoCountry,
 }
