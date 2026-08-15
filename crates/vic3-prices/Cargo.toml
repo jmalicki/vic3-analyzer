@@ -11,9 +11,12 @@ workspace = true
 
 [dependencies]
 basin.workspace = true
+schemars.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 vic3-defs = { path = "../vic3-defs" }
+vic3-load = { path = "../vic3-load" }
 
 [dev-dependencies]
 proptest.workspace = true
+serde_json.workspace = true

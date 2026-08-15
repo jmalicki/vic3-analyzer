@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Extra building levels applied before a re-solve. Employment stays frozen.",
+  "properties": {
+    "building": {
+      "description": "Building type id (matches [`crate::WorldBuilding::building`]).",
+      "type": "string"
+    },
+    "extra_levels": {
+      "description": "Non-negative extra levels added to matching buildings.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "building",
+    "extra_levels"
+  ],
+  "title": "WhatIfOpts",
+  "type": "object"
+}
