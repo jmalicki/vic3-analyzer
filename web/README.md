@@ -38,5 +38,19 @@ The app loads `parse_save`, `prices`, `what_if`, `gaps`, `plan`,
 
 `npm run build:defs` writes `public/defs.postcard` from the in-repo
 `vic3-defs` fixture tree via `emit_fixture_blob`. The GitHub Pages demo uses
-that blob so analysis works without a Victoria 3 install. Do not redistribute
-binary token maps.
+that blob so analysis works without a Victoria 3 install.
+
+## Token maps
+
+Victoria 3 writes binary saves by default, so field names are numeric tokens. A
+token map is plain text with one `0x1234 field_name` pair per line.
+
+Most players can avoid it: outside Ironman, set
+`"save_file_format": "zip_text_all"` in `pdx_settings.json` (in the Victoria 3
+documents folder) and re-save. The resulting save loads without a token map. See
+[Save-game editing](https://vic3.paradoxwikis.com/Save-game_editing).
+
+Ironman saves stay binary and need a map. There is no official download; Paradox
+does not publish the mapping and this project does not redistribute it. Maps are
+extracted from a user's own game build, the same user-supplied arrangement other
+tools (for example pdx-tools) expect.

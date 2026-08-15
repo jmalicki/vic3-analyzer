@@ -404,12 +404,30 @@ function App({ wasmApi }: Props) {
                 Token map (binary saves only)
                 <FieldHelp label="About token maps">
                   <p>
-                    Binary (Ironman) saves store field names as numbers. A token map is a text file
-                    that translates those numbers back into names so this tool can read the save.
+                    Victoria 3 saves are binary by default: field names are stored as numeric
+                    tokens. A token map is a plain-text file with one{' '}
+                    <code>0x1234 field_name</code> pair per line that translates them back.
                   </p>
                   <p>
-                    Plaintext saves do not need a token map. Token maps stay on your machine and are
-                    never uploaded; this project does not redistribute Paradox tokens.
+                    <strong>Most players do not need one.</strong> Outside Ironman, you can make the
+                    game write readable saves: in <code>pdx_settings.json</code> (next to your save
+                    folder) set <code>&quot;save_file_format&quot;: &quot;zip_text_all&quot;</code>,
+                    then re-save. That save loads here with no token map. See the{' '}
+                    <a
+                      href="https://vic3.paradoxwikis.com/Save-game_editing"
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      Victoria 3 wiki
+                    </a>
+                    .
+                  </p>
+                  <p>
+                    Ironman saves stay binary, so they do need a map. There is no official download:
+                    Paradox does not publish the mapping and this project will not redistribute it.
+                    Token maps are extracted from your own game build, and other tools (such as
+                    pdx-tools) likewise expect a user-supplied file. Anything you pick stays in your
+                    browser.
                   </p>
                 </FieldHelp>
               </span>
