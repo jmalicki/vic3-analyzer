@@ -3,27 +3,29 @@ import { useEffect, useRef, type ReactNode } from 'react'
 interface Props {
   title: string
   onClose: () => void
+  /** While true, Escape and backdrop clicks cannot discard in-flight work. */
+  locked?: boolean
   children: ReactNode
 }
 
-/** Focus-grabbing overlay dialog closed with Escape, the backdrop, or the X. */
-export function Modal({ title, onClose, children }: Props) {
+/** Focus-grabbing overlay dialog closed with Escape, the backdrop, or Close. */
+export function Modal({ title, onClose, locked = false, children }: Props) {
   const panel = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape' && !locked) onClose()
     }
     document.addEventListener('keydown', onKeyDown)
     panel.current?.focus()
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+  }, [locked, onClose])
 
   return (
     <div
       className="modal-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
+        if (event.target === event.currentTarget && !locked) onClose()
       }}
     >
       <div
@@ -36,7 +38,7 @@ export function Modal({ title, onClose, children }: Props) {
       >
         <div className="modal-head">
           <h3>{title}</h3>
-          <button type="button" className="secondary" onClick={onClose}>
+          <button type="button" className="secondary" disabled={locked} onClick={onClose}>
             Close
           </button>
         </div>

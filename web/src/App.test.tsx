@@ -322,16 +322,29 @@ describe('prices UI', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('greys out analysis tools until definitions are available', async () => {
+  it('greys out analysis tools and names every missing input', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('no defs'))
     render(<App wasmApi={mockApi()} />)
 
-    expect(await screen.findByText(/Definitions are required before analysis/)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/Analysis needs a \.v3 save and game definitions/),
+    ).toBeInTheDocument()
     await waitFor(() =>
       expect(document.querySelector('.workspace-page')).toHaveClass('needs-defs'),
     )
     expect(screen.getByRole('button', { name: 'Analyze prices' })).toBeDisabled()
     fetchMock.mockRestore()
+  })
+
+  it('drops the lock once a save and definitions are present', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+
+    await waitFor(() =>
+      expect(document.querySelector('.workspace-page')).not.toHaveClass('needs-defs'),
+    )
+    expect(screen.queryByText(/Analysis needs/)).not.toBeInTheDocument()
   })
 
   it('shows version, revision, and build time in the footer', () => {

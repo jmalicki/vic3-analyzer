@@ -113,6 +113,7 @@ function App({ wasmApi }: Props) {
   const [archiveNote, setArchiveNote] = useState<string>()
   const [busy, setBusy] = useState(false)
   const [builderOpen, setBuilderOpen] = useState(false)
+  const [builderBusy, setBuilderBusy] = useState(false)
   const [error, setError] = useState<string>()
   const saveInputRef = useRef<HTMLInputElement>(null)
   const savePaths = useMemo(() => victoria3SavePaths(), [])
@@ -381,8 +382,12 @@ function App({ wasmApi }: Props) {
 
   const hasDefs = Boolean(effectiveDefs)
   const ready = Boolean(api && saveFile && effectiveDefs)
-  // The archive only reads stored records, so it stays usable without defs.
-  const gated = !hasDefs && activeView !== 'archive'
+  const missing = [
+    ...(saveFile ? [] : ['a .v3 save']),
+    ...(hasDefs ? [] : ['game definitions']),
+  ]
+  // The archive only reads stored records, so it stays usable without inputs.
+  const gated = missing.length > 0 && activeView !== 'archive'
 
   return (
     <main>
@@ -493,13 +498,16 @@ function App({ wasmApi }: Props) {
       </section>
 
       {builderOpen && (
-        <Modal title="Build definitions from game files" onClose={() => setBuilderOpen(false)}>
+        <Modal
+          title="Build definitions from game files"
+          locked={builderBusy}
+          onClose={() => setBuilderOpen(false)}
+        >
           <DefsBuilder
             api={api}
-            onBuilt={(file) => {
-              setDefsFile(file)
-              setBuilderOpen(false)
-            }}
+            onBuilt={setDefsFile}
+            onBusyChange={setBuilderBusy}
+            onDone={() => setBuilderOpen(false)}
           />
         </Modal>
       )}
@@ -535,11 +543,13 @@ function App({ wasmApi }: Props) {
         ))}
       </nav>
 
-      {!hasDefs && (
+      {gated && (
         <p className="defs-required" role="status">
-          {bundledDefsStatus === 'loading'
+          {!hasDefs && bundledDefsStatus === 'loading'
             ? 'Loading definitions…'
-            : 'Definitions are required before analysis. Build them from your game files or choose a postcard blob above.'}
+            : `Analysis needs ${missing.join(' and ')}. Add ${
+                missing.length > 1 ? 'them' : 'it'
+              } above; the tools below stay locked until then.`}
         </p>
       )}
 

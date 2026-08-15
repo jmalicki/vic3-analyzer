@@ -1,5 +1,6 @@
 import { unzipSync } from 'fflate'
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -20,6 +21,10 @@ import type { WasmApi } from './wasm'
 interface Props {
   api?: WasmApi
   onBuilt: (file: File) => void
+  /** Called when the user acknowledges a finished build. */
+  onDone?: () => void
+  /** Reports whether work is in flight so the dialog cannot be dismissed. */
+  onBusyChange?: (busy: boolean) => void
 }
 
 type Progress = {
@@ -43,18 +48,32 @@ async function zippedFiles(file: File): Promise<DefsSourceFile[]> {
     .map(([path, bytes]) => ({ path, bytes }))
 }
 
-export function DefsBuilder({ api, onBuilt }: Props) {
+export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
   const [status, setStatus] = useState<string>()
+  const [error, setError] = useState<string>()
   const [blob, setBlob] = useState<File>()
   const [dragging, setDragging] = useState(false)
   const [progress, setProgress] = useState<Progress>()
   const folderInputRef = useRef<HTMLInputElement>(null)
   const commonPaths = useMemo(() => victoria3GameCommonPaths(), [])
+  const busy = progress !== undefined
+
+  useEffect(() => onBusyChange?.(busy), [busy, onBusyChange])
+
+  const fail = (reason: unknown) => {
+    setProgress(undefined)
+    setStatus(undefined)
+    setError(reason instanceof Error ? reason.message : String(reason))
+  }
 
   const build = async (files: DefsSourceFile[]) => {
-    if (!api) return
+    if (!api) {
+      fail(new Error('The analysis engine is still loading. Try again in a moment.'))
+      return
+    }
     setProgress({ label: 'Parsing definitions in wasm' })
     setStatus(undefined)
+    setError(undefined)
     try {
       const packed = packDefsFiles(files)
       const manifest = JSON.parse(packed.manifestJson) as unknown[]
@@ -65,15 +84,14 @@ export function DefsBuilder({ api, onBuilt }: Props) {
       const file = new File([bytes.slice().buffer as ArrayBuffer], 'defs.postcard', {
         type: 'application/octet-stream',
       })
+      setProgress(undefined)
       setBlob(file)
       onBuilt(file)
       setStatus(
-        `Built ${file.name} from ${manifest.length} definition files (${file.size.toLocaleString()} bytes).`,
+        `Built ${file.name} from ${manifest.length} definition files (${file.size.toLocaleString()} bytes). Analysis tools are unlocked.`,
       )
     } catch (reason) {
-      setStatus(reason instanceof Error ? reason.message : String(reason))
-    } finally {
-      setProgress(undefined)
+      fail(reason)
     }
   }
 
@@ -99,23 +117,31 @@ export function DefsBuilder({ api, onBuilt }: Props) {
   const handleDrop = async (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setDragging(false)
-    const zip = [...event.dataTransfer.files].find((file) => file.name.endsWith('.zip'))
-    if (zip) {
-      setProgress({ label: 'Unpacking zip' })
-      await build(await zippedFiles(zip))
-      return
+    if (busy) return
+    try {
+      const zip = [...event.dataTransfer.files].find((file) => file.name.endsWith('.zip'))
+      if (zip) {
+        setProgress({ label: 'Unpacking zip' })
+        await build(await zippedFiles(zip))
+        return
+      }
+      const label = 'Reading dropped files'
+      setProgress({ label, done: 0 })
+      const files = await collectDroppedDefsFiles(event.dataTransfer.items ?? [], (read) => {
+        if (read % PROGRESS_STRIDE === 0) setProgress({ label, done: read })
+      })
+      if (files.length === 0) {
+        fail(
+          new Error(
+            'That drop had no common/*.txt files. Drag the common folder itself (or game/common).',
+          ),
+        )
+        return
+      }
+      await build(files)
+    } catch (reason) {
+      fail(reason)
     }
-    const label = 'Reading dropped files'
-    setProgress({ label, done: 0 })
-    const files = await collectDroppedDefsFiles(event.dataTransfer.items ?? [], (read) => {
-      if (read % PROGRESS_STRIDE === 0) setProgress({ label, done: read })
-    })
-    if (files.length === 0) {
-      setProgress(undefined)
-      setStatus('That drop had no common/*.txt files. Drag the common folder itself (or game/common).')
-      return
-    }
-    await build(files)
   }
 
   const copyPath = async () => {
@@ -187,6 +213,7 @@ export function DefsBuilder({ api, onBuilt }: Props) {
         <button
           type="button"
           className="file-button secondary"
+          disabled={busy}
           onClick={() => folderInputRef.current?.click()}
         >
           Choose game/common folder
@@ -200,7 +227,11 @@ export function DefsBuilder({ api, onBuilt }: Props) {
           aria-label="Victoria 3 definitions folder"
           onChange={(event) => {
             const files = event.target.files
-            if (files) void readSelected(files).then(build)
+            if (files?.length) {
+              void readSelected(files).then(build).catch(fail)
+            } else {
+              fail(new Error('No files came back from that folder. Nothing was read.'))
+            }
             event.target.value = ''
           }}
         />
@@ -214,7 +245,7 @@ export function DefsBuilder({ api, onBuilt }: Props) {
               const file = event.target.files?.[0]
               if (file) {
                 setProgress({ label: 'Unpacking zip' })
-                void zippedFiles(file).then(build)
+                void zippedFiles(file).then(build).catch(fail)
               }
               event.target.value = ''
             }}
@@ -237,7 +268,19 @@ export function DefsBuilder({ api, onBuilt }: Props) {
       {progress && (
         <ProgressBar label={progress.label} done={progress.done} total={progress.total} />
       )}
+      {error && (
+        <p className="builder-error" role="alert">
+          {error}
+        </p>
+      )}
       {status && <small role="status">{status}</small>}
+      {blob && !busy && (
+        <div className="defs-builder-actions">
+          <button type="button" onClick={() => onDone?.()}>
+            OK
+          </button>
+        </div>
+      )}
     </div>
   )
 }

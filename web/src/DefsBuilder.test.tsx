@@ -142,6 +142,66 @@ describe('DefsBuilder', () => {
     expect(click).toHaveBeenCalled()
   })
 
+  it('stays open until the user acknowledges a finished build', async () => {
+    const onDone = vi.fn()
+    const onBuilt = vi.fn()
+    render(<DefsBuilder api={api()} onBuilt={onBuilt} onDone={onDone} />)
+    const common = dirEntry('common', [
+      dirEntry('goods', [fileEntry('00_goods.txt', 'grain = { cost = 20 }')]),
+    ])
+
+    fireEvent.drop(screen.getByLabelText('Drop the game/common folder'), {
+      dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
+    })
+
+    expect(await screen.findByText(/Analysis tools are unlocked/)).toBeInTheDocument()
+    expect(onBuilt).toHaveBeenCalled()
+    expect(onDone).not.toHaveBeenCalled()
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'OK' }))
+    expect(onDone).toHaveBeenCalled()
+  })
+
+  it('shows an error when wasm rejects the definition files', async () => {
+    const wasm = {
+      build_defs_blob: vi.fn(() => {
+        throw new Error('bad goods file')
+      }),
+    } as unknown as WasmApi
+    render(<DefsBuilder api={wasm} onBuilt={vi.fn()} onDone={vi.fn()} />)
+    const common = dirEntry('common', [
+      dirEntry('goods', [fileEntry('00_goods.txt', 'grain = {')]),
+    ])
+
+    fireEvent.drop(screen.getByLabelText('Drop the game/common folder'), {
+      dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
+    })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('bad goods file')
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'OK' })).not.toBeInTheDocument()
+  })
+
+  it('reports busy state so the dialog cannot be dismissed mid-build', async () => {
+    let release: (bytes: Uint8Array) => void = () => {}
+    const wasm = {
+      build_defs_blob: vi.fn(() => new Promise<Uint8Array>((resolve) => (release = resolve))),
+    } as unknown as WasmApi
+    const onBusyChange = vi.fn()
+    render(<DefsBuilder api={wasm} onBuilt={vi.fn()} onBusyChange={onBusyChange} />)
+    const common = dirEntry('common', [
+      dirEntry('goods', [fileEntry('00_goods.txt', 'grain = { cost = 20 }')]),
+    ])
+
+    fireEvent.drop(screen.getByLabelText('Drop the game/common folder'), {
+      dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
+    })
+    await waitFor(() => expect(onBusyChange).toHaveBeenCalledWith(true))
+
+    release(new Uint8Array([1, 2, 3]))
+    await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false))
+  })
+
   it('reports progress while wasm parses the definitions', async () => {
     let release: (bytes: Uint8Array) => void = () => {}
     const wasm = {

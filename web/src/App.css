@@ -167,6 +167,7 @@ section[aria-labelledby] { margin-top: 1rem; }
 .modal-head { align-items: center; display: flex; gap: 1rem; justify-content: space-between; }
 .modal-head h3 { margin: 0; }
 .needs-defs { opacity: .45; pointer-events: none; }
+.builder-error { border-left: 3px solid #ffb5a9; color: #ffb5a9; margin: .6rem 0 0; padding-left: .8rem; }
 .defs-required { border-left: 3px solid #c3a65d; color: #d8c793; margin: 1rem 0 0; padding-left: .8rem; }
 .secondary { background: #29362c; color: #e9eadf; font-size: .85rem; }
 .site-footer {
