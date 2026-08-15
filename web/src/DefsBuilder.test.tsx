@@ -34,9 +34,20 @@ function dirEntry(name: string, children: DefsDropEntry[]): DefsDropEntry {
   }
 }
 
+function defsSummaryJson(goods = 53): string {
+  return JSON.stringify({
+    goods,
+    production_methods: 412,
+    pop_needs: 7,
+    buy_packages: 5,
+    price_range: 0.75,
+  })
+}
+
 function api(): WasmApi {
   return {
     build_defs_blob: vi.fn(() => new Uint8Array([1, 2, 3])),
+    defs_summary: vi.fn(() => defsSummaryJson()),
   } as unknown as WasmApi
 }
 
@@ -94,6 +105,22 @@ describe('DefsBuilder', () => {
     await waitFor(() => expect(wasm.build_defs_blob).toHaveBeenCalled())
     expect(onBuilt).toHaveBeenCalledWith(expect.objectContaining({ name: 'defs.postcard' }))
     expect(await screen.findByText(/Built defs.postcard from 1 definition files/)).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('53 goods, 412 production methods')
+  })
+
+  it('warns when the built blob has too few goods to be a real install', async () => {
+    const user = userEvent.setup()
+    const wasm = api()
+    wasm.defs_summary = vi.fn(() => defsSummaryJson(2))
+    render(<DefsBuilder api={wasm} onBuilt={vi.fn()} />)
+    const file = new File(['grain = { cost = 20 }'], 'goods.txt')
+    Object.defineProperty(file, 'webkitRelativePath', {
+      value: 'common/goods/goods.txt',
+    })
+
+    await user.upload(screen.getByLabelText('Victoria 3 definitions folder'), file)
+
+    expect(await screen.findByText(/common\/goods was probably missed/)).toBeInTheDocument()
   })
 
   it('walks a dropped folder tree through the entries API', async () => {

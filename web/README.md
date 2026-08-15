@@ -41,8 +41,15 @@ only path-independent option. The card also shows the usual Steam path for your
 OS with a copy button and the dialog shortcut (`Cmd+Shift+G`, `Ctrl+L`, or the
 Windows address bar). The
 files are packed into an in-memory manifest, parsed by `vic3-defs` in wasm, and
-never uploaded. The footer reports the package version, git revision, and UTC
-build time injected by Vite.
+never uploaded.
+
+Because a partial pick produces a blob that silently prices only a few goods,
+`defs_summary` reports the counts inside whichever blob is active. The builder and
+the definitions field both show them, a blob under ten goods is called out as
+demo-sized or incomplete, and swapping the save or definitions clears the
+previous result table so it cannot be mistaken for the new inputs' output. The
+footer reports the package version, git revision, and UTC build time injected by
+Vite.
 
 ## wasm and definitions
 

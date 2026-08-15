@@ -54,6 +54,15 @@ const schema = JSON.stringify({
 function mockApi(): WasmApi {
   return {
     build_defs_blob: vi.fn(() => new Uint8Array([7, 8, 9])),
+    defs_summary: vi.fn(() =>
+      JSON.stringify({
+        goods: 3,
+        production_methods: 5,
+        pop_needs: 2,
+        buy_packages: 1,
+        price_range: 0.75,
+      }),
+    ),
     parse_save: vi.fn(() =>
       JSON.stringify({
         tag: 'FRA',
@@ -91,7 +100,7 @@ function mockBundledDefs(ok = true) {
 async function selectSave(user: ReturnType<typeof userEvent.setup>) {
   await user.upload(screen.getByLabelText('Save file'), new File(['save'], 'campaign.v3'))
   await screen.findByText('FRA')
-  await screen.findByText('Using the bundled demo definitions blob.')
+  await screen.findByText(/Using the bundled demo definitions blob/)
 }
 
 describe('prices UI', () => {
@@ -118,6 +127,68 @@ describe('prices UI', () => {
     expect(screen.getByRole('link', { name: 'Method and limitations' })).toBeInTheDocument()
     await waitFor(async () => expect(await listAnalyses()).toHaveLength(1))
     expect(api.prices).toHaveBeenCalled()
+  })
+
+  it('reports what the active definitions blob contains', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+
+    expect(
+      await screen.findByText(/3 goods, 5 production methods/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/Demo definitions contain only a few fixture goods/),
+    ).toBeInTheDocument()
+  })
+
+  it('drops the thin-definitions warning once a full blob is loaded', async () => {
+    const user = userEvent.setup()
+    const api = mockApi()
+    api.defs_summary = vi.fn(() =>
+      JSON.stringify({
+        goods: 53,
+        production_methods: 412,
+        pop_needs: 7,
+        buy_packages: 5,
+        price_range: 0.75,
+      }),
+    )
+    render(<App wasmApi={api} />)
+    await selectSave(user)
+
+    expect(await screen.findByText(/53 goods, 412 production methods/)).toBeInTheDocument()
+    expect(
+      screen.queryByText(/Demo definitions contain only a few fixture goods/),
+    ).not.toBeInTheDocument()
+  })
+
+  it('clears a stale price table when the definitions change', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+    await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
+    expect(await screen.findByText('iron')).toBeInTheDocument()
+
+    await user.upload(
+      screen.getByLabelText('Choose definitions blob'),
+      new File(['rebuilt'], 'rebuilt.postcard'),
+    )
+
+    await waitFor(() => expect(screen.queryByText('iron')).not.toBeInTheDocument())
+  })
+
+  it('flags a user blob that is missing common/goods', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+
+    await user.upload(
+      screen.getByLabelText('Choose definitions blob'),
+      new File(['blob'], 'partial.postcard'),
+    )
+
+    expect(await screen.findByText(/partial.postcard only defines 3 goods/)).toBeInTheDocument()
   })
 
   it('builds and submits the what-if form from the wasm schema', async () => {
@@ -249,7 +320,7 @@ describe('prices UI', () => {
     await selectSave(user)
 
     await user.upload(screen.getByLabelText('Choose definitions blob'), new File(['custom'], 'custom.postcard'))
-    expect(await screen.findByText('Using your file: custom.postcard')).toBeInTheDocument()
+    expect(await screen.findByText(/Using your file: custom\.postcard/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
     await waitFor(() => expect(api.prices).toHaveBeenCalled())
@@ -272,7 +343,7 @@ describe('prices UI', () => {
 
     const user = userEvent.setup()
     render(<App wasmApi={mockApi()} />)
-    await screen.findByText('Using the bundled demo definitions blob.')
+    await screen.findByText(/Using the bundled demo definitions blob/)
     await user.click(screen.getByRole('button', { name: 'Choose save' }))
 
     expect(showOpenFilePicker).toHaveBeenCalledWith(

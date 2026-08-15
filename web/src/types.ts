@@ -46,6 +46,14 @@ export interface SaveSummary {
   buildings?: string[]
 }
 
+export interface DefsSummary {
+  goods: number
+  production_methods: number
+  pop_needs: number
+  buy_packages: number
+  price_range: number
+}
+
 export type AnalysisKind = 'prices' | 'what_if' | 'gaps' | 'plan'
 
 export interface AnalysisRecord {

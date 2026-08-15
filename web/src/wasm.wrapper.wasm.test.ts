@@ -49,6 +49,9 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     const blob = await api.build_defs_blob(manifest, goods)
     expect(blob).toBeInstanceOf(Uint8Array)
     expect(blob.length).toBeGreaterThan(0)
+
+    const summary = JSON.parse(await api.defs_summary(blob))
+    expect(summary.goods).toBe(1)
   })
 
   it('prices returns residual and limitations', async () => {

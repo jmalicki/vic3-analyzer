@@ -21,6 +21,7 @@ import type {
   AnalysisKind,
   AnalysisRecord,
   AnalysisResult,
+  DefsSummary,
   GapAtom,
   GapsResult,
   PlanAction,
@@ -98,6 +99,7 @@ function App({ wasmApi }: Props) {
     'loading',
   )
   const [summary, setSummary] = useState<SaveSummary>()
+  const [defsSummary, setDefsSummary] = useState<DefsSummary>()
   const [result, setResult] = useState<PricesResult>()
   const [gapsResult, setGapsResult] = useState<GapsResult>()
   const [planResult, setPlanResult] = useState<PlanResult>()
@@ -171,6 +173,33 @@ function App({ wasmApi }: Props) {
       cancelled = true
     }
   }, [api, saveFile, tokensFile])
+
+  // Swapping inputs invalidates any table on screen; keeping it would read as
+  // the new blob's output.
+  useEffect(() => {
+    setResult(undefined)
+    setGapsResult(undefined)
+    setPlanResult(undefined)
+  }, [saveFile, effectiveDefs])
+
+  useEffect(() => {
+    if (!api || !effectiveDefs) {
+      setDefsSummary(undefined)
+      return
+    }
+    let cancelled = false
+    void bytes(effectiveDefs)
+      .then(async (defsBytes) => {
+        const json = await api.defs_summary(defsBytes!)
+        if (!cancelled) setDefsSummary(JSON.parse(json) as DefsSummary)
+      })
+      .catch(() => {
+        if (!cancelled) setDefsSummary(undefined)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [api, effectiveDefs])
 
   useEffect(() => {
     const firstBuilding = summary?.buildings?.[0]
@@ -388,6 +417,12 @@ function App({ wasmApi }: Props) {
   ]
   // The archive only reads stored records, so it stays usable without inputs.
   const gated = missing.length > 0 && activeView !== 'archive'
+  const defsCounts = defsSummary
+    ? ` — ${defsSummary.goods} goods, ${defsSummary.production_methods} production methods`
+    : ''
+  // A real install has dozens of goods; a handful means the fixture blob or a
+  // folder pick that missed common/goods.
+  const thinDefs = Boolean(defsSummary && defsSummary.goods < 10)
 
   return (
     <main>
@@ -483,9 +518,9 @@ function App({ wasmApi }: Props) {
             </label>
             <small>
               {defsFile
-                ? `Using your file: ${defsFile.name}`
+                ? `Using your file: ${defsFile.name}${defsCounts}`
                 : bundledDefsStatus === 'ready'
-                  ? 'Using the bundled demo definitions blob.'
+                  ? `Using the bundled demo definitions blob${defsCounts}.`
                   : bundledDefsStatus === 'loading'
                     ? 'Loading bundled demo definitions…'
                     : 'Bundled demo definitions are unavailable; choose a postcard blob.'}
@@ -570,10 +605,11 @@ function App({ wasmApi }: Props) {
               Analyze prices
             </button>
           </div>
-          {!defsFile && bundledDefsStatus === 'ready' && (
+          {thinDefs && (
             <p className="demo-warning">
-              Demo definitions contain only a few fixture goods. Choose a definitions blob built
-              from your Victoria 3 install for the full goods list.
+              {defsFile
+                ? `${defsFile.name} only defines ${defsSummary?.goods} goods, so prices below cover just those. Rebuild from the game/common folder itself — picking a subfolder skips common/goods.`
+                : 'Demo definitions contain only a few fixture goods. Choose a definitions blob built from your Victoria 3 install for the full goods list.'}
             </p>
           )}
         </section>

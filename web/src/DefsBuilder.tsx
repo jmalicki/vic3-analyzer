@@ -16,6 +16,7 @@ import {
 import { FieldHelp } from './FieldHelp'
 import { ProgressBar } from './ProgressBar'
 import { victoria3GameCommonPaths } from './savePicker'
+import type { DefsSummary } from './types'
 import type { WasmApi } from './wasm'
 
 interface Props {
@@ -84,11 +85,15 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
       const file = new File([bytes.slice().buffer as ArrayBuffer], 'defs.postcard', {
         type: 'application/octet-stream',
       })
+      const summary = JSON.parse(await api.defs_summary(bytes)) as DefsSummary
       setProgress(undefined)
       setBlob(file)
       onBuilt(file)
       setStatus(
-        `Built ${file.name} from ${manifest.length} definition files (${file.size.toLocaleString()} bytes). Analysis tools are unlocked.`,
+        `Built ${file.name} from ${manifest.length} definition files: ${summary.goods} goods, ${summary.production_methods} production methods. Analysis tools are unlocked.` +
+          (summary.goods < 10
+            ? ' That is far fewer goods than a full install — common/goods was probably missed, so drag the common folder itself and rebuild.'
+            : ''),
       )
     } catch (reason) {
       fail(reason)

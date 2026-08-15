@@ -52,6 +52,13 @@ pub fn build_defs_blob(manifest_json: &str, contents: &[u8]) -> Result<Vec<u8>, 
     build_defs_blob_bytes(manifest_json, contents).map_err(to_js)
 }
 
+/// Report what a definitions blob contains, so a UI can tell a full install
+/// blob from the tiny demo fixture.
+#[wasm_bindgen]
+pub fn defs_summary(defs_blob: &[u8]) -> Result<String, JsError> {
+    defs_summary_json(defs_blob).map_err(to_js)
+}
+
 /// Solve market prices. `defs_blob` is a postcard blob from [`vic3_defs::encode_blob`].
 /// `solve_opts_json` is a [`SolveOpts`] object; empty / `{}` uses defaults.
 #[wasm_bindgen]
@@ -303,6 +310,28 @@ pub fn build_defs_blob_bytes(manifest_json: &str, contents: &[u8]) -> Result<Vec
     Ok(vic3_defs::encode_blob(&defs)?)
 }
 
+/// Counts carried by a definitions blob.
+#[derive(Debug, Serialize)]
+struct DefsSummary {
+    goods: usize,
+    production_methods: usize,
+    pop_needs: usize,
+    buy_packages: usize,
+    price_range: f64,
+}
+
+/// Native/test entry for [`defs_summary`].
+pub fn defs_summary_json(defs_blob: &[u8]) -> Result<String, WasmError> {
+    let defs = vic3_defs::decode_blob(defs_blob)?;
+    Ok(serde_json::to_string(&DefsSummary {
+        goods: defs.goods.len(),
+        production_methods: defs.production_methods.len(),
+        pop_needs: defs.pop_needs.len(),
+        buy_packages: defs.buy_packages.len(),
+        price_range: defs.price_range,
+    })?)
+}
+
 fn load_save(save_bytes: &[u8], tokens_bytes: Option<&[u8]>) -> Result<Save, WasmError> {
     match tokens_bytes {
         None | Some([]) => Ok(load_slice(save_bytes, empty_tokens())?),
@@ -413,6 +442,14 @@ mod tests {
         let blob = build_defs_blob_bytes(&manifest, goods).expect("browser defs blob");
         let defs = vic3_defs::decode_blob(&blob).expect("decode browser blob");
         assert_eq!(defs.base_price("grain"), Some(20.0));
+    }
+
+    #[test]
+    fn defs_summary_counts_blob_contents() {
+        let json = defs_summary_json(&defs_blob()).expect("defs summary");
+        let v: Value = serde_json::from_str(&json).expect("summary json");
+        assert_eq!(v["goods"], 3);
+        assert!(v["price_range"].as_f64().is_some_and(|range| range > 0.0));
     }
 
     fn schema_properties(schema_json: &str) -> serde_json::Map<String, Value> {
