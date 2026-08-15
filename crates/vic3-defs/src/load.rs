@@ -324,10 +324,9 @@ impl RawGood {
 fn goods_modifier_key(key: &str) -> Option<(&str, bool)> {
     let (rest, is_output) = if let Some(rest) = key.strip_prefix("goods_output_") {
         (rest, true)
-    } else if let Some(rest) = key.strip_prefix("goods_input_") {
-        (rest, false)
     } else {
-        return None;
+        let rest = key.strip_prefix("goods_input_")?;
+        (rest, false)
     };
     let good = rest.strip_suffix("_add").unwrap_or(rest);
     if good.is_empty() {
