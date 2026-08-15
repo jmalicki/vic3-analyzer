@@ -16,6 +16,7 @@ mod schema;
 mod world;
 
 use serde::Serialize;
+use std::collections::BTreeSet;
 use vic3_goals::Atom;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save};
 use vic3_plan::PlanOpts;
@@ -281,6 +282,7 @@ struct SaveSummary {
     date: Option<String>,
     version: String,
     counts: SaveCounts,
+    buildings: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -309,6 +311,15 @@ impl From<&Save> for SaveSummary {
             tag,
             date,
             version: save.meta_data.version.clone(),
+            buildings: save
+                .building_manager
+                .iter_present()
+                .filter_map(|(_, building)| {
+                    (!building.building.is_empty()).then_some(building.building.clone())
+                })
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect(),
             counts: SaveCounts {
                 countries: save.country_manager.iter_present().count(),
                 states: save.states.iter_present().count(),
@@ -377,6 +388,7 @@ mod tests {
         assert_eq!(v["counts"]["pops"], 1);
         assert_eq!(v["counts"]["markets"], 1);
         assert_eq!(v["counts"]["trade_routes"], 1);
+        assert_eq!(v["buildings"][0], "building_rye_farm");
     }
 
     #[test]

@@ -43,6 +43,7 @@ export interface SaveSummary {
   tag?: string
   date?: string
   version: string
+  buildings?: string[]
 }
 
 export type AnalysisKind = 'prices' | 'what_if' | 'gaps' | 'plan'

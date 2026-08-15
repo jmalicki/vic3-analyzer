@@ -34,6 +34,7 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     expect(summary.tag).toBe('GER')
     expect(summary.date).toBe('1836.1.1')
     expect(summary.version).toBe('1.9.0')
+    expect(summary.buildings).toContain('building_rye_farm')
   })
 
   it('prices returns residual and limitations', async () => {

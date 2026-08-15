@@ -43,6 +43,12 @@ export type LoadWasmOptions = {
 
 let cached: Promise<WasmApi> | undefined
 
+// Keep Vite from transforming a runtime public-asset import. wasm-pack's glue
+// must remain a standalone module beside its `.wasm` file.
+const nativeImport = Function('url', 'return import(url)') as (
+  url: string,
+) => Promise<Record<string, unknown>>
+
 function defaultModuleUrl(): string {
   const base = import.meta.env.BASE_URL || '/'
   const prefix = base.endsWith('/') ? base : `${base}/`
@@ -51,7 +57,10 @@ function defaultModuleUrl(): string {
 
 export function loadWasm(options?: LoadWasmOptions): Promise<WasmApi> {
   const wasmPath = options?.moduleUrl ?? defaultModuleUrl()
-  cached ??= import(/* @vite-ignore */ wasmPath).then(async (module) => {
+  const modulePromise = options?.moduleUrl
+    ? import(/* @vite-ignore */ wasmPath)
+    : nativeImport(wasmPath)
+  cached ??= modulePromise.then(async (module) => {
     if (typeof module.default === 'function') {
       await module.default(
         options?.moduleOrPath !== undefined ? options.moduleOrPath : undefined,

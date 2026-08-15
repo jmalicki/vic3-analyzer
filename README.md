@@ -6,6 +6,18 @@ AGPL-3.0 Victoria 3 save loader and planner. Given a `.v3` and a high-level goal
 
 **Live demo:** [https://jmalicki.github.io/vic3-analyzer/](https://jmalicki.github.io/vic3-analyzer/) — drop a plaintext `.v3` (or fixture bytes); the site ships a fixture defs postcard so prices/what-if/plan work without a game install. Binary token maps are not redistributed.
 
+The hosted definitions are intentionally tiny test fixtures. For all goods in
+a real campaign, build a private blob from your installed game:
+
+```text
+cargo run -p vic3-cli -- defs export \
+  --game "/path/to/Victoria 3/game" \
+  --out defs.postcard
+```
+
+Upload `defs.postcard` in the web UI. Do not commit or publish it: it is derived
+from Paradox game data.
+
 ## Docs
 
 | Doc | Contents |

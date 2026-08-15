@@ -33,18 +33,29 @@ Flatten groups (clap in `vic3-cli` only):
 - `PlanOpts` — `goal`, `max_days`, `label`, …
 - Paths stay on the outer `*Cli` struct
 
-## UI (target)
+## UI
 
 1. Drop a `.v3` (and tokens if binary). Parse in-browser.
-2. Price table + limitations under the table.
-3. What-if form from exported schema (nested structs = fieldsets).
-4. Gaps / plan screens later.
-5. Every run can be saved to IndexedDB. Browse past saves, name alternative plans, compare (see [`archive.md`](archive.md)).
+2. Use the task navigation for Prices, What-if, Timeline, Goal gaps, or Archive.
+3. What-if uses building types read from the save; timeline and gaps use a guided goal builder, with the DSL retained as an advanced option.
+4. Every run is saved to IndexedDB. Browse past saves, name alternative plans, and compare them (see [`archive.md`](archive.md)).
 
 ## Defs
 
-CLI reads the game install. wasm ships a **prebuilt defs blob** from a supported patch. Mismatch with the save’s version is reported, not silently ignored.
+The CLI reads a game install. The hosted wasm demo ships a tiny fixture blob,
+which intentionally includes only a few goods. Build a complete, local blob
+from your own install:
+
+```text
+vic3-cli defs export --game "/path/to/Victoria 3/game" --out defs.postcard
+```
+
+Upload that blob in the web UI. It is derived from Paradox game data and must
+not be committed or published.
 
 ## Limitations in the answer
 
-The residual and the frozen-world caveats are **part of the result**, not a footnote we omit. CLI `--json.limitations`, rustdoc on `solve`, and the React table all carry the same strings.
+The residual and frozen-world caveats remain part of CLI/wasm result JSON and
+archived records. The web UI keeps normal results focused on goods and actions,
+shows a warning only when the solve did not converge, and links to
+[`prices.md`](prices.md) for method details.

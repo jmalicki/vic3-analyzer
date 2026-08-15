@@ -151,6 +151,28 @@ fn what_if_json_has_residual_and_limitations() {
 }
 
 #[test]
+fn defs_export_writes_browser_blob_from_game_tree() {
+    let root = temp_archive();
+    let out = root.join("defs.postcard");
+    bin()
+        .args([
+            "defs",
+            "export",
+            "--game",
+            defs_fixture().to_str().expect("utf8 defs path"),
+            "--out",
+            out.to_str().expect("utf8 output path"),
+        ])
+        .assert()
+        .success();
+
+    let blob = std::fs::read(&out).expect("exported defs blob");
+    let defs = vic3_defs::decode_blob(&blob).expect("valid postcard defs");
+    assert_eq!(defs.goods.len(), 3);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn gaps_json_has_declare_war_atoms_and_limitations() {
     let assert = gaps_cmd().arg("--json").assert().success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);

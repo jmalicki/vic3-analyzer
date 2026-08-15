@@ -34,6 +34,7 @@ fn main() -> Result<()> {
         }
         Commands::Gaps(cmd) => run_gaps(cmd),
         Commands::Plan(cmd) => run_plan(cmd),
+        Commands::Defs(cmd) => run_defs(cmd),
         Commands::Archive(cmd) => run_archive(cmd),
     }
 }
@@ -56,8 +57,32 @@ enum Commands {
     Gaps(GapsCli),
     /// Find and archive a shortest goal-relevant action sequence.
     Plan(PlanCli),
+    /// Build definition blobs for the browser UI.
+    Defs(DefsCli),
     /// Browse local analysis records.
     Archive(ArchiveCli),
+}
+
+#[derive(Debug, Args)]
+struct DefsCli {
+    #[command(subcommand)]
+    command: DefsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum DefsCommand {
+    /// Encode a game install's definitions as a postcard blob for the web UI.
+    ///
+    /// The blob contains Paradox game data, so keep it local: do not commit it
+    /// or publish it with the site.
+    Export {
+        /// Victoria 3 install, or a fixture tree with `common/` at the root.
+        #[arg(long, env = "VIC3_GAME")]
+        game: PathBuf,
+        /// Destination file, conventionally `defs.postcard`.
+        #[arg(long, short)]
+        out: PathBuf,
+    },
 }
 
 /// Filesystem inputs. Inner option structs (`SolveOpts`, `WhatIfOpts`) have no `PathBuf`.
@@ -212,6 +237,25 @@ fn load_inputs(io: &IoArgs) -> Result<(Save, World, GameDefs)> {
     .with_context(|| format!("loading save from {}", io.save.display()))?;
     let world = World::from_save(&save);
     Ok((save, world, defs))
+}
+
+fn run_defs(cmd: DefsCli) -> Result<()> {
+    let DefsCommand::Export { game, out } = cmd.command;
+    let defs = vic3_defs::load_from_path(&game)
+        .with_context(|| format!("loading defs from {}", game.display()))?;
+    let blob = vic3_defs::encode_blob(&defs).context("encoding defs blob")?;
+    if let Some(parent) = out.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    fs::write(&out, &blob).with_context(|| format!("writing {}", out.display()))?;
+    writeln!(
+        io::stderr(),
+        "wrote {} goods, {} bytes to {}",
+        defs.goods.len(),
+        blob.len(),
+        out.display()
+    )?;
+    Ok(())
 }
 
 fn run_gaps(cmd: GapsCli) -> Result<()> {

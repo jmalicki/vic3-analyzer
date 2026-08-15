@@ -48,9 +48,10 @@ Non-pop orders (buildings, government, construction, trade as recorded in the sa
 
 Apply a delta (e.g. extra building levels) to the frozen building side, then re-solve. Pop consumption re-equilibrates; employment does not.
 
-## Limitations (must appear in rustdoc, CLI JSON, UI)
+## Limitations
 
-Copy these strings (P4 `LIMITATIONS` const):
+These strings are carried by rustdoc and CLI/wasm JSON. The web UI links here
+instead of placing solver diagnostics above the main results:
 
 1. Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.
 2. Prices are clamped to ±`PRICE_RANGE`; the clamp is part of the model.

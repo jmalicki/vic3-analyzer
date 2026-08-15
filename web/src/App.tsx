@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from 'react'
-import whatIfSchemaJson from '../../schema/what-if.json'
 import './App.css'
 import {
   compareAnalyses,
@@ -9,7 +8,7 @@ import {
   serializeAnalysis,
 } from './archive'
 import { FieldHelp } from './FieldHelp'
-import { SchemaForm } from './SchemaForm'
+import { GoalBuilder } from './GoalBuilder'
 import {
   canUseRememberedSavePicker,
   pickSaveWithRememberedFolder,
@@ -21,13 +20,12 @@ import type {
   AnalysisResult,
   GapAtom,
   GapsResult,
-  JsonSchema,
   PlanAction,
   PlanResult,
   PricesResult,
   SaveSummary,
 } from './types'
-import { loadWasm, parseSchema, runGaps, type WasmApi } from './wasm'
+import { loadWasm, runGaps, type WasmApi } from './wasm'
 
 function bundledDefsUrl(): string {
   const base = import.meta.env.BASE_URL || '/'
@@ -39,16 +37,20 @@ interface Props {
   wasmApi?: WasmApi | Promise<WasmApi>
 }
 
-const fallbackSchema = whatIfSchemaJson as JsonSchema
+type WorkspaceView = 'prices' | 'what-if' | 'timeline' | 'gaps' | 'archive'
 
-function initialValue(schema: JsonSchema): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(schema.properties ?? {}).map(([name, field]) => {
-      if (field.type === 'object' || field.properties) return [name, initialValue(field)]
-      if (field.default !== undefined) return [name, field.default]
-      if (field.type === 'integer' || field.type === 'number') return [name, field.minimum ?? 0]
-      return [name, '']
-    }),
+const MODEL_DOCS =
+  'https://github.com/jmalicki/vic3-analyzer/blob/main/docs/prices.md#limitations-must-appear-in-rustdoc-cli-json-ui'
+
+function ModelInfo({ status }: { status?: PricesResult['status'] }) {
+  return (
+    <p className="model-info">
+      {status && status !== 'converged' && <strong>Solver status: {status}. </strong>}
+      Results use a simplified economy model.{' '}
+      <a href={MODEL_DOCS} target="_blank" rel="noreferrer noopener">
+        Method and limitations
+      </a>
+    </p>
   )
 }
 
@@ -98,10 +100,11 @@ function App({ wasmApi }: Props) {
   const [planResult, setPlanResult] = useState<PlanResult>()
   const [goal, setGoal] = useState('research(tech=nitroglycerin)')
   const [label, setLabel] = useState('')
-  const [schema, setSchema] = useState<JsonSchema>(fallbackSchema)
-  const [whatIfOpts, setWhatIfOpts] = useState<Record<string, unknown>>(() =>
-    initialValue(fallbackSchema),
-  )
+  const [whatIfOpts, setWhatIfOpts] = useState<Record<string, unknown>>({
+    building: '',
+    extra_levels: 1,
+  })
+  const [activeView, setActiveView] = useState<WorkspaceView>('prices')
   const [records, setRecords] = useState<AnalysisRecord[]>([])
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
   const [archiveNote, setArchiveNote] = useState<string>()
@@ -117,9 +120,6 @@ function App({ wasmApi }: Props) {
     void Promise.resolve(wasmApi ?? loadWasm())
       .then((loaded) => {
         setApi(loaded)
-        const loadedSchema = parseSchema(loaded.what_if_schema())
-        setSchema(loadedSchema)
-        setWhatIfOpts(initialValue(loadedSchema))
       })
       .catch(() => {
         if (wasmApi) setError('Could not load the analysis engine.')
@@ -166,6 +166,13 @@ function App({ wasmApi }: Props) {
       cancelled = true
     }
   }, [api, saveFile, tokensFile])
+
+  useEffect(() => {
+    const firstBuilding = summary?.buildings?.[0]
+    if (firstBuilding && !whatIfOpts.building) {
+      setWhatIfOpts((current) => ({ ...current, building: firstBuilding }))
+    }
+  }, [summary, whatIfOpts.building])
 
   const archiveResult = async (
     kind: AnalysisKind,
@@ -483,52 +490,153 @@ function App({ wasmApi }: Props) {
 
       {error && <p role="alert">{error}</p>}
 
-      <section className="actions">
-        <button disabled={!ready || busy} onClick={() => void run('prices')}>
-          Analyze prices
-        </button>
-        <form onSubmit={submitWhatIf}>
-          <h2>What-if scenario</h2>
-          <SchemaForm schema={schema} value={whatIfOpts} onChange={setWhatIfOpts} />
-          <button disabled={!ready || busy} type="submit">
-            Run what-if
+      <nav className="workspace-nav" aria-label="Analysis tools">
+        {(
+          [
+            ['prices', 'Prices'],
+            ['what-if', 'What-if'],
+            ['timeline', 'Timeline'],
+            ['gaps', 'Goal gaps'],
+            ['archive', 'Archive'],
+          ] as const
+        ).map(([view, label]) => (
+          <button
+            type="button"
+            key={view}
+            aria-current={activeView === view ? 'page' : undefined}
+            onClick={() => setActiveView(view)}
+          >
+            {label}
           </button>
-        </form>
-        <form onSubmit={submitPlan}>
-          <h2>Plan timeline</h2>
-          <label>
-            Goal
-            <input aria-label="Plan goal" value={goal} onChange={(event) => setGoal(event.target.value)} />
-          </label>
-          <label>
-            Label
-            <input aria-label="Plan label" value={label} onChange={(event) => setLabel(event.target.value)} />
-          </label>
-          <button disabled={!ready || busy || !goal.trim()} type="submit">
-            Run plan
-          </button>
-        </form>
-      </section>
+        ))}
+      </nav>
 
-      <section aria-labelledby="gaps-form-heading">
-        <form className="gaps-form" onSubmit={(event) => void submitGaps(event)}>
-          <h2 id="gaps-form-heading">Goal gaps</h2>
-          <label>
-            Goal
-            <input
-              aria-label="Gaps goal"
+      {activeView === 'prices' && (
+        <section className="workspace-page" aria-labelledby="prices-tool-heading">
+          <div className="tool-heading">
+            <div>
+              <p className="eyebrow">MARKET</p>
+              <h2 id="prices-tool-heading">Goods prices</h2>
+              <p>Estimate current prices from your save and selected game definitions.</p>
+            </div>
+            <button disabled={!ready || busy} onClick={() => void run('prices')}>
+              Analyze prices
+            </button>
+          </div>
+          {!defsFile && bundledDefsStatus === 'ready' && (
+            <p className="demo-warning">
+              Demo definitions contain only a few fixture goods. Choose a definitions blob built
+              from your Victoria 3 install for the full goods list.
+            </p>
+          )}
+        </section>
+      )}
+
+      {activeView === 'what-if' && (
+        <section className="workspace-page" aria-labelledby="what-if-heading">
+          <form className="guided-form" onSubmit={submitWhatIf}>
+            <p className="eyebrow">SCENARIO</p>
+            <h2 id="what-if-heading">What-if scenario</h2>
+            <p>Add levels to one building type and compare the resulting prices.</p>
+            <label>
+              Building type
+              {summary?.buildings?.length ? (
+                <select
+                  aria-label="Building"
+                  value={String(whatIfOpts.building)}
+                  onChange={(event) =>
+                    setWhatIfOpts((current) => ({ ...current, building: event.target.value }))
+                  }
+                >
+                  {summary.buildings.map((building) => (
+                    <option value={building} key={building}>
+                      {building.replaceAll('_', ' ')}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  aria-label="Building"
+                  value={String(whatIfOpts.building)}
+                  onChange={(event) =>
+                    setWhatIfOpts((current) => ({ ...current, building: event.target.value }))
+                  }
+                  placeholder="Select a save first"
+                />
+              )}
+            </label>
+            <label>
+              Extra levels
+              <input
+                aria-label="Extra Levels"
+                type="number"
+                min="1"
+                step="1"
+                value={Number(whatIfOpts.extra_levels)}
+                onChange={(event) =>
+                  setWhatIfOpts((current) => ({
+                    ...current,
+                    extra_levels: Number(event.target.value),
+                  }))
+                }
+              />
+            </label>
+            <button
+              disabled={!ready || busy || !String(whatIfOpts.building)}
+              type="submit"
+            >
+              Run what-if
+            </button>
+          </form>
+        </section>
+      )}
+
+      {activeView === 'timeline' && (
+        <section className="workspace-page" aria-labelledby="timeline-tool-heading">
+          <form className="guided-form" onSubmit={submitPlan}>
+            <p className="eyebrow">PLANNING</p>
+            <h2 id="timeline-tool-heading">Plan timeline</h2>
+            <GoalBuilder
+              idPrefix="Plan"
+              goods={result?.goods.map((good) => good.id) ?? []}
               value={goal}
-              onChange={(event) => setGoal(event.target.value)}
-              placeholder="research(tech=nitroglycerin)"
+              onChange={setGoal}
             />
-          </label>
-          <button disabled={!ready || busy || !goal.trim()} type="submit">
-            Run gaps
-          </button>
-        </form>
-      </section>
+            <label>
+              Plan label (optional)
+              <input
+                aria-label="Plan label"
+                value={label}
+                onChange={(event) => setLabel(event.target.value)}
+                placeholder="e.g. Rush explosives"
+              />
+            </label>
+            <button disabled={!ready || busy || !goal.trim()} type="submit">
+              Build timeline
+            </button>
+          </form>
+        </section>
+      )}
 
-      {gapsResult && (
+      {activeView === 'gaps' && (
+        <section className="workspace-page" aria-labelledby="gaps-form-heading">
+          <form className="guided-form" onSubmit={(event) => void submitGaps(event)}>
+            <p className="eyebrow">READINESS</p>
+            <h2 id="gaps-form-heading">Goal gaps</h2>
+            <GoalBuilder
+              idPrefix="Gaps"
+              goods={result?.goods.map((good) => good.id) ?? []}
+              value={goal}
+              onChange={setGoal}
+            />
+            <button disabled={!ready || busy || !goal.trim()} type="submit">
+              Check readiness
+            </button>
+          </form>
+        </section>
+      )}
+
+      {activeView === 'gaps' && gapsResult && (
         <section aria-labelledby="gaps-heading">
           <div className="result-heading">
             <h2 id="gaps-heading">Goal gaps</h2>
@@ -545,24 +653,17 @@ function App({ wasmApi }: Props) {
               ))}
             </ul>
           )}
-          <div className="limitations">
-            <h3>Model limitations</h3>
-            <ul>
-              {gapsResult.limitations.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </div>
+          <ModelInfo />
         </section>
       )}
 
-      {result && (
+      {(activeView === 'prices' || activeView === 'what-if') && result && (
         <section aria-labelledby="prices-heading">
           <div className="result-heading">
-            <h2 id="prices-heading">Goods prices</h2>
-            <span>
-              {result.status} · residual {result.residual.toPrecision(4)}
-            </span>
+            <h2 id="prices-heading">
+              {activeView === 'what-if' ? 'Scenario prices' : 'Goods prices'}
+            </h2>
+            <span>{result.goods.length} goods</span>
           </div>
           <div className="table-scroll">
             <table>
@@ -588,18 +689,11 @@ function App({ wasmApi }: Props) {
               </tbody>
             </table>
           </div>
-          <div className="limitations">
-            <h3>Model limitations</h3>
-            <ul>
-              {result.limitations.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </div>
+          <ModelInfo status={result.status} />
         </section>
       )}
 
-      {planResult && (
+      {activeView === 'timeline' && planResult && (
         <section aria-labelledby="plan-heading">
           <div className="result-heading">
             <h2 id="plan-heading">Plan timeline</h2>
@@ -613,18 +707,11 @@ function App({ wasmApi }: Props) {
               </li>
             ))}
           </ol>
-          <div className="limitations">
-            <h3>Model limitations</h3>
-            <ul>
-              {planResult.limitations.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </div>
+          <ModelInfo />
         </section>
       )}
 
-      <section aria-labelledby="archive-heading">
+      {activeView === 'archive' && <section aria-labelledby="archive-heading">
         <div className="result-heading">
           <h2 id="archive-heading">Past saves</h2>
           <label className="file-button">
@@ -682,9 +769,9 @@ function App({ wasmApi }: Props) {
             ))}
           </div>
         )}
-      </section>
+      </section>}
 
-      {comparison && (
+      {activeView === 'archive' && comparison && (
         <section aria-labelledby="compare-heading">
           <div className="result-heading">
             <h2 id="compare-heading">Archive comparison</h2>

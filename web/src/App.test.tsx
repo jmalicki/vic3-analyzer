@@ -53,7 +53,14 @@ const schema = JSON.stringify({
 
 function mockApi(): WasmApi {
   return {
-    parse_save: vi.fn(() => JSON.stringify({ tag: 'FRA', date: '1840.2.3', version: '1.9.0' })),
+    parse_save: vi.fn(() =>
+      JSON.stringify({
+        tag: 'FRA',
+        date: '1840.2.3',
+        version: '1.9.0',
+        buildings: ['building_rye_farm', 'building_steel_mills'],
+      }),
+    ),
     prices: vi.fn(() => result),
     what_if: vi.fn(() => result),
     gaps: vi.fn(() => gapsResult),
@@ -107,7 +114,7 @@ describe('prices UI', () => {
 
     expect(await screen.findByText('iron')).toBeInTheDocument()
     expect(screen.getByText('43.50')).toBeInTheDocument()
-    expect(screen.getByText('Employment and production methods stay frozen.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Method and limitations' })).toBeInTheDocument()
     await waitFor(async () => expect(await listAnalyses()).toHaveLength(1))
     expect(api.prices).toHaveBeenCalled()
   })
@@ -117,8 +124,9 @@ describe('prices UI', () => {
     const api = mockApi()
     render(<App wasmApi={api} />)
     await selectSave(user)
+    await user.click(screen.getByRole('button', { name: 'What-if' }))
 
-    await user.type(screen.getByLabelText('Building'), 'building_steel_mills')
+    await user.selectOptions(screen.getByLabelText('Building'), 'building_steel_mills')
     await user.clear(screen.getByLabelText('Extra Levels'))
     await user.type(screen.getByLabelText('Extra Levels'), '5')
     await user.click(screen.getByRole('button', { name: 'Run what-if' }))
@@ -140,10 +148,9 @@ describe('prices UI', () => {
     const api = mockApi()
     render(<App wasmApi={api} />)
     await selectSave(user)
+    await user.click(screen.getByRole('button', { name: 'Goal gaps' }))
 
-    await user.clear(screen.getByLabelText('Gaps goal'))
-    await user.type(screen.getByLabelText('Gaps goal'), 'research(tech=nitroglycerin)')
-    await user.click(screen.getByRole('button', { name: 'Run gaps' }))
+    await user.click(screen.getByRole('button', { name: 'Check readiness' }))
 
     expect(await screen.findByText('Satisfied: No')).toBeInTheDocument()
     expect(screen.getByText('{"HasTech":"nitroglycerin"}')).toBeInTheDocument()
@@ -151,7 +158,7 @@ describe('prices UI', () => {
       screen.getByText('{"GoodPrice":{"good":"ammunition","rel":"Le","value":40}}'),
     ).toBeInTheDocument()
     expect(screen.getByText('Solvent')).toBeInTheDocument()
-    expect(screen.getByText('Goal gaps use prices from a frozen-world solve.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Method and limitations' })).toBeInTheDocument()
     expect(api.gaps).toHaveBeenCalledWith(
       expect.any(Uint8Array),
       undefined,
@@ -167,11 +174,10 @@ describe('prices UI', () => {
     const api = mockApi()
     render(<App wasmApi={api} />)
     await selectSave(user)
+    await user.click(screen.getByRole('button', { name: 'Timeline' }))
 
-    await user.clear(screen.getByLabelText('Plan goal'))
-    await user.type(screen.getByLabelText('Plan goal'), 'research(tech=nitroglycerin)')
     await user.type(screen.getByLabelText('Plan label'), 'rush')
-    await user.click(screen.getByRole('button', { name: 'Run plan' }))
+    await user.click(screen.getByRole('button', { name: 'Build timeline' }))
 
     expect(await screen.findByText('365 total days')).toBeInTheDocument()
     expect(screen.getByText('Queue technology: nitroglycerin')).toBeInTheDocument()
@@ -205,6 +211,7 @@ describe('prices UI', () => {
 
     const user = userEvent.setup()
     render(<App wasmApi={mockApi()} />)
+    await user.click(screen.getByRole('button', { name: 'Archive' }))
     await user.click(await screen.findByLabelText('Compare rush'))
     await user.click(screen.getByLabelText('Compare steady'))
 
