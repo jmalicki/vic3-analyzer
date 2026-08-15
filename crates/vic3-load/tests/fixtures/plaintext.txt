@@ -1,0 +1,90 @@
+SAV01000000000000000000
+meta_data={
+	version="1.9.0"
+	game_date=1836.1.1
+	name="Fixture"
+}
+country_manager={
+	database={
+		1=none
+		16777216={
+			definition="GER"
+			government="gov_absolute_monarchy"
+			capital=1
+			infamy=12.5
+			states={ 1 }
+			budget={
+				gold_reserves=10000
+				credit=500
+				weekly_income={ 0.0 100.0 }
+			}
+		}
+	}
+}
+states={
+	database={
+		1={
+			region="STATE_BRANDENBURG"
+			country=16777216
+			market=1
+		}
+	}
+}
+building_manager={
+	database={
+		1={
+			building="building_rye_farm"
+			state=1
+			level=2
+			staffing=1.0
+		}
+		2=none
+	}
+}
+pops={
+	database={
+		1={
+			type="farmers"
+			size=10000
+			wealth=8
+			culture="north_german"
+			location=1
+		}
+	}
+}
+market_manager={
+	database={
+		1={
+			states={ 1 }
+		}
+	}
+}
+trade_route_manager={
+	database={
+		1={
+			goods="grain"
+			volume=50
+		}
+		2=none
+	}
+}
+building_constructions={
+	database={
+		1={
+			building="building_construction_sector"
+			state=1
+			remaining=20
+		}
+	}
+}
+government_constructions={
+	database={
+		1=none
+	}
+}
+previous_played={
+	{
+		idtype=16777216
+		name="GER"
+	}
+}
