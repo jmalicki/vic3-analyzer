@@ -10,5 +10,10 @@ description = "Goal DSL (chumsky) and declare-war / research / gdp compilation"
 workspace = true
 
 [dependencies]
+chumsky.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+vic3-world = { path = "../vic3-world" }
+
+[dev-dependencies]
+proptest.workspace = true
