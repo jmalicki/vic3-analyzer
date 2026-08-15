@@ -12,6 +12,16 @@ const result = JSON.stringify({
   limitations: ['Employment and production methods stay frozen.'],
 })
 
+const gapsResult = JSON.stringify({
+  satisfied: false,
+  gaps: [
+    { HasTech: 'nitroglycerin' },
+    { GoodPrice: { good: 'ammunition', rel: 'Le', value: 40 } },
+    'Solvent',
+  ],
+  limitations: ['Goal gaps use prices from a frozen-world solve.'],
+})
+
 const schema = JSON.stringify({
   title: 'WhatIfOpts',
   type: 'object',
@@ -27,6 +37,7 @@ function mockApi(): WasmApi {
     parse_save: vi.fn(() => JSON.stringify({ tag: 'FRA', date: '1840.2.3', version: '1.9.0' })),
     prices: vi.fn(() => result),
     what_if: vi.fn(() => result),
+    gaps: vi.fn(() => gapsResult),
     what_if_schema: vi.fn(() => schema),
     prices_schema: vi.fn(() => '{}'),
   }
@@ -78,5 +89,29 @@ describe('prices UI', () => {
       ),
     )
     expect((await listAnalyses())[0].kind).toBe('what_if')
+  })
+
+  it('renders mocked gap atoms, satisfaction, and limitations', async () => {
+    const user = userEvent.setup()
+    const api = mockApi()
+    render(<App wasmApi={api} />)
+    await selectFiles(user)
+
+    await user.type(screen.getByLabelText('Goal'), 'research(tech=nitroglycerin)')
+    await user.click(screen.getByRole('button', { name: 'Run gaps' }))
+
+    expect(await screen.findByText('Satisfied: No')).toBeInTheDocument()
+    expect(screen.getByText('{"HasTech":"nitroglycerin"}')).toBeInTheDocument()
+    expect(screen.getByText('{"GoodPrice":{"good":"ammunition","rel":"Le","value":40}}')).toBeInTheDocument()
+    expect(screen.getByText('Solvent')).toBeInTheDocument()
+    expect(screen.getByText('Goal gaps use prices from a frozen-world solve.')).toBeInTheDocument()
+    expect(api.gaps).toHaveBeenCalledWith(
+      expect.any(Uint8Array),
+      undefined,
+      expect.any(Uint8Array),
+      '{}',
+      'research(tech=nitroglycerin)',
+    )
+    await waitFor(async () => expect((await listAnalyses())[0].kind).toBe('gaps'))
   })
 })

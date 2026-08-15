@@ -13,6 +13,16 @@ export interface PricesResult {
   limitations: string[]
 }
 
+export type GapAtom = string | Record<string, unknown>
+
+export interface GapsResult {
+  satisfied: boolean
+  gaps: GapAtom[]
+  limitations: string[]
+}
+
+export type AnalysisResult = PricesResult | GapsResult
+
 export interface SaveSummary {
   tag?: string
   date?: string
@@ -31,7 +41,7 @@ export interface AnalysisRecord {
   country?: string
   filename?: string
   opts: Record<string, unknown>
-  result: PricesResult
+  result: AnalysisResult
   limitations: string[]
   parent_id?: string
   blob?: {

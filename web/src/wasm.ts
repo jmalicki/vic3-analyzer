@@ -15,6 +15,15 @@ export interface WasmApi {
     solveOptsJson: string,
     whatIfOptsJson: string,
   ): string | Promise<string>
+  // The Rust wasm export is scheduled for P10/follow-up work. Keeping it
+  // optional lets the UI use a mocked implementation until that lands.
+  gaps?(
+    save: Uint8Array,
+    tokens: Uint8Array | undefined,
+    defs: Uint8Array,
+    solveOptsJson: string,
+    goal: string,
+  ): string | Promise<string>
   what_if_schema(): string
   prices_schema(): string
 }
@@ -32,4 +41,17 @@ export function loadWasm(): Promise<WasmApi> {
 
 export function parseSchema(json: string): JsonSchema {
   return JSON.parse(json) as JsonSchema
+}
+
+export function runGaps(
+  api: WasmApi,
+  save: Uint8Array,
+  tokens: Uint8Array | undefined,
+  defs: Uint8Array,
+  goal: string,
+): Promise<string> {
+  if (!api.gaps) {
+    return Promise.reject(new Error('Gaps analysis is unavailable in this wasm build.'))
+  }
+  return Promise.resolve(api.gaps(save, tokens, defs, '{}', goal))
 }
