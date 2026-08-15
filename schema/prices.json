@@ -1,0 +1,88 @@
+{
+  "$defs": {
+    "GoodPrice": {
+      "description": "One row of the goods table in [`PricesResult`].",
+      "properties": {
+        "base": {
+          "format": "double",
+          "type": "number"
+        },
+        "buy": {
+          "format": "double",
+          "type": "number"
+        },
+        "id": {
+          "type": "string"
+        },
+        "price": {
+          "format": "double",
+          "type": "number"
+        },
+        "sell": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "base",
+        "price",
+        "buy",
+        "sell"
+      ],
+      "type": "object"
+    },
+    "SolveStatus": {
+      "description": "Why [`crate::solve`] stopped.",
+      "oneOf": [
+        {
+          "const": "converged",
+          "description": "[`PricesResult::residual`] is below [`SolveOpts::residual_eps`] (I5).",
+          "type": "string"
+        },
+        {
+          "const": "max_iters",
+          "description": "Iteration budget exhausted with residual still at or above ε.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "Basin reported failure and successive substitution did not recover.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Price-equilibrium output. `limitations` is always the crate [`crate::LIMITATIONS`].",
+  "properties": {
+    "goods": {
+      "items": {
+        "$ref": "#/$defs/GoodPrice"
+      },
+      "type": "array"
+    },
+    "limitations": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "residual": {
+      "description": "`‖r − r_formula(orders(r))‖₂`. Always present (I5).",
+      "format": "double",
+      "type": "number"
+    },
+    "status": {
+      "$ref": "#/$defs/SolveStatus"
+    }
+  },
+  "required": [
+    "goods",
+    "residual",
+    "status",
+    "limitations"
+  ],
+  "title": "PricesResult",
+  "type": "object"
+}

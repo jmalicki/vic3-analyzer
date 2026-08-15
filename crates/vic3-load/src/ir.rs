@@ -131,6 +131,9 @@ pub struct Building {
     pub level: i32,
     #[serde(default)]
     pub staffing: f64,
+    /// Active production method when the save records a single id.
+    #[serde(default)]
+    pub production_method: Option<String>,
 }
 
 /// A pop in `pops.database`.
@@ -146,6 +149,9 @@ pub struct Pop {
     pub culture: Option<String>,
     #[serde(default, rename = "location", alias = "state")]
     pub state: Option<u32>,
+    /// Frozen wage bill when present; omitted pops keep wealth at the saved integer.
+    #[serde(default)]
+    pub wages: Option<f64>,
 }
 
 /// A market in `market_manager.database`.
@@ -162,6 +168,9 @@ pub struct TradeRoute {
     pub goods: Option<String>,
     #[serde(default)]
     pub volume: Option<f64>,
+    /// `true` = export (frozen sell), `false` = import (frozen buy). Missing → skip.
+    #[serde(default, alias = "is_export")]
+    pub export: Option<bool>,
 }
 
 /// A queued construction (private or government) when the save has one.
