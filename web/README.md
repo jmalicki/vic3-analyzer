@@ -11,11 +11,17 @@ npm install
 npm run build:wasm
 npm run build:defs
 npm test
+npm run test:wasm
 npm run build
 ```
 
-Unit tests inject a mocked wasm API and use fake IndexedDB. They do not require
-the game, wasm-pack, or a real save.
+`npm test` runs mocked App/RTL tests (no wasm required). `npm run test:wasm`
+builds wasm + the fixture defs blob, then exercises the real wrapper against
+in-repo save fixtures.
+
+The Vite `base` is `/vic3-analyzer/` so assets resolve on GitHub Pages at
+`https://jmalicki.github.io/vic3-analyzer/`. `loadWasm` joins
+`import.meta.env.BASE_URL` with `wasm/vic3_wasm.js`.
 
 ## wasm and definitions
 

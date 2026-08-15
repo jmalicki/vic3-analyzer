@@ -15,8 +15,7 @@ export interface WasmApi {
     solveOptsJson: string,
     whatIfOptsJson: string,
   ): string | Promise<string>
-  // Optional until a wasm gaps export ships; UI tests mock this.
-  gaps?(
+  gaps(
     save: Uint8Array,
     tokens: Uint8Array | undefined,
     defs: Uint8Array,
@@ -34,15 +33,38 @@ export interface WasmApi {
   prices_schema(): string
 }
 
+/** Options for loading wasm outside the default Pages/public URL (e.g. Vitest). */
+export type LoadWasmOptions = {
+  /** Module URL passed to dynamic `import()`. */
+  moduleUrl?: string
+  /** Bytes or URL passed to wasm-bindgen's default init (skips fetch of `.wasm`). */
+  moduleOrPath?: BufferSource | string | URL
+}
+
 let cached: Promise<WasmApi> | undefined
 
-export function loadWasm(): Promise<WasmApi> {
-  const wasmPath = '/wasm/vic3_wasm.js'
+function defaultModuleUrl(): string {
+  const base = import.meta.env.BASE_URL || '/'
+  const prefix = base.endsWith('/') ? base : `${base}/`
+  return `${prefix}wasm/vic3_wasm.js`
+}
+
+export function loadWasm(options?: LoadWasmOptions): Promise<WasmApi> {
+  const wasmPath = options?.moduleUrl ?? defaultModuleUrl()
   cached ??= import(/* @vite-ignore */ wasmPath).then(async (module) => {
-    if (typeof module.default === 'function') await module.default()
+    if (typeof module.default === 'function') {
+      await module.default(
+        options?.moduleOrPath !== undefined ? options.moduleOrPath : undefined,
+      )
+    }
     return module as unknown as WasmApi
   })
   return cached
+}
+
+/** Clear the cached module promise (tests only). */
+export function resetWasmCache(): void {
+  cached = undefined
 }
 
 export function parseSchema(json: string): JsonSchema {
@@ -56,8 +78,5 @@ export function runGaps(
   defs: Uint8Array,
   goal: string,
 ): Promise<string> {
-  if (!api.gaps) {
-    return Promise.reject(new Error('Gaps analysis is unavailable in this wasm build.'))
-  }
   return Promise.resolve(api.gaps(save, tokens, defs, '{}', goal))
 }
