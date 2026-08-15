@@ -22,6 +22,11 @@ input { width: 100%; border: 1px solid #4e5c50; background: #111713; color: #f4f
 .actions > button { min-height: 4rem; font-size: 1rem; }
 button:disabled { opacity: .45; cursor: not-allowed; }
 form h2 { margin-top: 0; }
+.gaps-form { border: 0; padding: 0; }
+.gaps-form label { display: grid; gap: .4rem; }
+.gaps-form button { margin-top: .8rem; }
+.gap-list { display: grid; gap: .5rem; padding-left: 1.4rem; }
+.gap-list code { overflow-wrap: anywhere; }
 .schema-field { margin: .8rem 0; }
 fieldset { border: 1px solid #4e5c50; margin: .8rem 0; }
 .result-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }

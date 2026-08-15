@@ -3,8 +3,17 @@ import whatIfSchemaJson from '../../schema/what-if.json'
 import './App.css'
 import { listAnalyses, saveAnalysis } from './archive'
 import { SchemaForm } from './SchemaForm'
-import type { AnalysisKind, AnalysisRecord, JsonSchema, PricesResult, SaveSummary } from './types'
-import { loadWasm, parseSchema, type WasmApi } from './wasm'
+import type {
+  AnalysisKind,
+  AnalysisRecord,
+  AnalysisResult,
+  GapAtom,
+  GapsResult,
+  JsonSchema,
+  PricesResult,
+  SaveSummary,
+} from './types'
+import { loadWasm, parseSchema, runGaps, type WasmApi } from './wasm'
 
 interface Props {
   wasmApi?: WasmApi | Promise<WasmApi>
@@ -43,6 +52,8 @@ function App({ wasmApi }: Props) {
   const [defsFile, setDefsFile] = useState<File>()
   const [summary, setSummary] = useState<SaveSummary>()
   const [result, setResult] = useState<PricesResult>()
+  const [goal, setGoal] = useState('')
+  const [gapsResult, setGapsResult] = useState<GapsResult>()
   const [schema, setSchema] = useState<JsonSchema>(fallbackSchema)
   const [whatIfOpts, setWhatIfOpts] = useState<Record<string, unknown>>(() =>
     initialValue(fallbackSchema),
@@ -87,7 +98,7 @@ function App({ wasmApi }: Props) {
   const archiveResult = async (
     kind: AnalysisKind,
     opts: Record<string, unknown>,
-    pricesResult: PricesResult,
+    analysisResult: AnalysisResult,
     saveBytes: Uint8Array,
     tokenBytes?: Uint8Array,
   ) => {
@@ -100,8 +111,8 @@ function App({ wasmApi }: Props) {
       country: summary?.tag,
       filename: saveFile?.name,
       opts,
-      result: pricesResult,
-      limitations: pricesResult.limitations,
+      result: analysisResult,
+      limitations: analysisResult.limitations,
       blob: { save: saveBytes, tokens: tokenBytes },
     }
     await saveAnalysis(record)
@@ -151,6 +162,30 @@ function App({ wasmApi }: Props) {
     event.preventDefault()
     void run('what_if')
   }
+
+  const submitGaps = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!api || !saveFile || !defsFile || !goal.trim()) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      const [saveBytes, tokenBytes, defsBytes] = await Promise.all([
+        bytes(saveFile),
+        bytes(tokensFile),
+        bytes(defsFile),
+      ])
+      const json = await runGaps(api, saveBytes!, tokenBytes, defsBytes!, goal.trim())
+      const nextResult = JSON.parse(json) as GapsResult
+      setGapsResult(nextResult)
+      await archiveResult('gaps', { goal: goal.trim() }, nextResult, saveBytes!, tokenBytes)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const formatGap = (atom: GapAtom) => typeof atom === 'string' ? atom : JSON.stringify(atom)
 
   const ready = Boolean(api && saveFile && defsFile)
 
@@ -213,6 +248,46 @@ function App({ wasmApi }: Props) {
         </form>
       </section>
 
+      <section aria-labelledby="gaps-form-heading">
+        <form className="gaps-form" onSubmit={(event) => void submitGaps(event)}>
+          <h2 id="gaps-form-heading">Goal gaps</h2>
+          <label>
+            Goal
+            <input
+              aria-label="Goal"
+              value={goal}
+              onChange={(event) => setGoal(event.target.value)}
+              placeholder="research(tech=nitroglycerin)"
+            />
+          </label>
+          <button disabled={!ready || busy || !goal.trim()} type="submit">
+            Run gaps
+          </button>
+        </form>
+      </section>
+
+      {gapsResult && (
+        <section aria-labelledby="gaps-heading">
+          <div className="result-heading">
+            <h2 id="gaps-heading">Goal gaps</h2>
+            <strong>Satisfied: {gapsResult.satisfied ? 'Yes' : 'No'}</strong>
+          </div>
+          {gapsResult.gaps.length === 0 ? (
+            <p>No unsatisfied atoms.</p>
+          ) : (
+            <ul className="gap-list">
+              {gapsResult.gaps.map((atom, index) => (
+                <li key={`${formatGap(atom)}-${index}`}><code>{formatGap(atom)}</code></li>
+              ))}
+            </ul>
+          )}
+          <div className="limitations">
+            <h3>Model limitations</h3>
+            <ul>{gapsResult.limitations.map((item) => <li key={item}>{item}</li>)}</ul>
+          </div>
+        </section>
+      )}
+
       {result && (
         <section aria-labelledby="prices-heading">
           <div className="result-heading">
@@ -252,7 +327,9 @@ function App({ wasmApi }: Props) {
           <ul className="archive-list">
             {records.map((record) => (
               <li key={record.id}>
-                <strong>{record.kind === 'what_if' ? 'What-if' : 'Prices'}</strong>
+                <strong>
+                  {record.kind === 'what_if' ? 'What-if' : record.kind === 'gaps' ? 'Gaps' : 'Prices'}
+                </strong>
                 <span>{record.country ?? '—'} · {record.date ?? '—'}</span>
                 <time dateTime={record.created_at}>{new Date(record.created_at).toLocaleString()}</time>
               </li>
