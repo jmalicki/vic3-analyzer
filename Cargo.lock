@@ -1208,8 +1208,11 @@ dependencies = [
 name = "vic3-sim"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "serde",
  "thiserror",
+ "vic3-goals",
+ "vic3-world",
 ]
 
 [[package]]

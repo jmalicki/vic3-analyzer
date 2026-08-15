@@ -12,3 +12,8 @@ workspace = true
 [dependencies]
 serde.workspace = true
 thiserror.workspace = true
+vic3-goals = { path = "../vic3-goals" }
+vic3-world = { path = "../vic3-world" }
+
+[dev-dependencies]
+proptest.workspace = true
