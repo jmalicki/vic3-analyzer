@@ -10,5 +10,10 @@ description = "Victoria 3 game definitions (goods, needs, PMs)"
 workspace = true
 
 [dependencies]
+jomini.workspace = true
+postcard.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

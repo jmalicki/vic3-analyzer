@@ -1,0 +1,20 @@
+# Minimal goods fixture. `cost` is Vic3's base price.
+# Vanilla-like values so tests can assert known prices.
+
+grain = {
+	texture = "gfx/interface/icons/goods_icons/grain.dds"
+	cost = 20
+	category = staple
+}
+
+wood = {
+	texture = "gfx/interface/icons/goods_icons/wood.dds"
+	cost = 20
+	category = staple
+}
+
+coal = {
+	texture = "gfx/interface/icons/goods_icons/coal.dds"
+	cost = 30
+	category = staple
+}
