@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run build:wasm && npm run build:defs && tsc -b && vite build",
+    "build:wasm": "wasm-pack build ../crates/vic3-wasm --target web --out-dir ../../web/public/wasm --out-name vic3_wasm",
+    "build:defs": "cargo run -q -p vic3-defs --bin emit_fixture_blob -- public/defs.postcard",
     "lint": "oxlint",
     "test": "vitest run",
     "preview": "vite preview"

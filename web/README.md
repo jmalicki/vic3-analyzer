@@ -8,6 +8,8 @@ what-if analysis is stored in IndexedDB. Nothing is uploaded.
 
 ```sh
 npm install
+npm run build:wasm
+npm run build:defs
 npm test
 npm run build
 ```
@@ -17,11 +19,13 @@ the game, wasm-pack, or a real save.
 
 ## wasm and definitions
 
-For a browser build, place wasm-pack's web output at
-`public/wasm/vic3_wasm.js` and its referenced `.wasm` file beside it. The app
-uses the exported `parse_save`, `prices`, `what_if`, `what_if_schema`, and
-`prices_schema` functions. Those functions return JSON strings.
+`npm run build:wasm` runs `wasm-pack --target web` into `public/wasm/`
+(`vic3_wasm.js` + `.wasm`). Generated wasm artifacts are gitignored.
 
-Definitions are deliberately not rebuilt from a Victoria 3 installation in
-the browser or CI. Supply a prebuilt postcard blob produced offline by
-`vic3_defs::encode_blob`. It must match the save's supported game patch.
+The app loads `parse_save`, `prices`, `what_if`, `gaps`, `plan`,
+`what_if_schema`, and `prices_schema`. Those functions return JSON strings.
+
+`npm run build:defs` writes `public/defs.postcard` from the in-repo
+`vic3-defs` fixture tree via `emit_fixture_blob`. The GitHub Pages demo uses
+that blob so analysis works without a Victoria 3 install. Do not redistribute
+binary token maps.
