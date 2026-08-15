@@ -57,6 +57,187 @@ pub struct AnalysisRecord {
     pub blob: Option<Value>,
 }
 
+/// A stored-result comparison shared by the CLI and web UI.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompareResult {
+    pub left: String,
+    pub right: String,
+    pub same_fingerprint: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub day_cost_delta: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<ActionDiff>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prices: Vec<PriceDelta>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gaps: Vec<GapDiff>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActionDiff {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub left: Option<PlanStep>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub right: Option<PlanStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PriceDelta {
+    pub good: String,
+    pub delta: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GapStatus {
+    StillFailing,
+    Cleared,
+    NewlyFailing,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GapDiff {
+    pub atom: Value,
+    pub status: GapStatus,
+}
+
+#[derive(Deserialize)]
+struct StoredPricesResult {
+    goods: Vec<StoredGoodPrice>,
+}
+
+#[derive(Deserialize)]
+struct StoredGoodPrice {
+    id: String,
+    price: f64,
+}
+
+/// Compare archived result JSON without re-running the planner or price solver.
+pub fn compare(left: &AnalysisRecord, right: &AnalysisRecord) -> CompareResult {
+    let mut result = CompareResult {
+        left: left.id.clone(),
+        right: right.id.clone(),
+        same_fingerprint: left.fingerprint == right.fingerprint,
+        day_cost_delta: None,
+        actions: Vec::new(),
+        prices: Vec::new(),
+        gaps: Vec::new(),
+    };
+
+    if left.kind == "plan" && right.kind == "plan" {
+        if let (Ok(left_plan), Ok(right_plan)) = (
+            serde_json::from_value::<PlanResult>(left.result.clone()),
+            serde_json::from_value::<PlanResult>(right.result.clone()),
+        ) {
+            result.day_cost_delta =
+                Some(i64::from(right_plan.day_cost) - i64::from(left_plan.day_cost));
+            result.actions = align_actions(&left_plan.actions, &right_plan.actions);
+        }
+    } else if matches!(left.kind.as_str(), "prices" | "what_if")
+        && matches!(right.kind.as_str(), "prices" | "what_if")
+    {
+        if let (Ok(left_prices), Ok(right_prices)) = (
+            serde_json::from_value::<StoredPricesResult>(left.result.clone()),
+            serde_json::from_value::<StoredPricesResult>(right.result.clone()),
+        ) {
+            for left_good in left_prices.goods {
+                if let Some(right_good) = right_prices
+                    .goods
+                    .iter()
+                    .find(|good| good.id == left_good.id)
+                {
+                    let delta = right_good.price - left_good.price;
+                    if delta != 0.0 {
+                        result.prices.push(PriceDelta {
+                            good: left_good.id,
+                            delta,
+                        });
+                    }
+                }
+            }
+        }
+    } else if left.kind == "gaps" && right.kind == "gaps" && left != right {
+        let left_gaps = stored_gaps(&left.result);
+        let right_gaps = stored_gaps(&right.result);
+        for atom in &left_gaps {
+            result.gaps.push(GapDiff {
+                atom: atom.clone(),
+                status: if right_gaps.contains(atom) {
+                    GapStatus::StillFailing
+                } else {
+                    GapStatus::Cleared
+                },
+            });
+        }
+        for atom in right_gaps {
+            if !left_gaps.contains(&atom) {
+                result.gaps.push(GapDiff {
+                    atom,
+                    status: GapStatus::NewlyFailing,
+                });
+            }
+        }
+    }
+
+    result
+}
+
+fn stored_gaps(result: &Value) -> Vec<Value> {
+    result
+        .get("gaps")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn align_actions(left: &[PlanStep], right: &[PlanStep]) -> Vec<ActionDiff> {
+    let mut lengths = vec![vec![0; right.len() + 1]; left.len() + 1];
+    for left_index in (0..left.len()).rev() {
+        for right_index in (0..right.len()).rev() {
+            lengths[left_index][right_index] =
+                if left[left_index].action == right[right_index].action {
+                    lengths[left_index + 1][right_index + 1] + 1
+                } else {
+                    lengths[left_index + 1][right_index].max(lengths[left_index][right_index + 1])
+                };
+        }
+    }
+
+    let (mut left_index, mut right_index) = (0, 0);
+    let mut differences = Vec::new();
+    while left_index < left.len() || right_index < right.len() {
+        if left_index < left.len()
+            && right_index < right.len()
+            && left[left_index].action == right[right_index].action
+        {
+            if left[left_index] != right[right_index] {
+                differences.push(ActionDiff {
+                    left: Some(left[left_index].clone()),
+                    right: Some(right[right_index].clone()),
+                });
+            }
+            left_index += 1;
+            right_index += 1;
+        } else if right_index < right.len()
+            && (left_index == left.len()
+                || lengths[left_index][right_index + 1] >= lengths[left_index + 1][right_index])
+        {
+            differences.push(ActionDiff {
+                left: None,
+                right: Some(right[right_index].clone()),
+            });
+            right_index += 1;
+        } else {
+            differences.push(ActionDiff {
+                left: Some(left[left_index].clone()),
+                right: None,
+            });
+            left_index += 1;
+        }
+    }
+    differences
+}
+
 /// Planner failures that can be reported consistently by clients.
 #[derive(Debug, thiserror::Error)]
 pub enum PlanError {
@@ -114,6 +295,7 @@ pub fn plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use vic3_goals::compile;
     use vic3_world::{PlanningParts, PlanningState};
 
@@ -141,5 +323,60 @@ mod tests {
             Action::WaitForEvent { days: 365, .. }
         ));
         assert_eq!(result.actions[1].day, 365);
+    }
+
+    fn record(id: &str, day_cost: u32) -> AnalysisRecord {
+        AnalysisRecord {
+            id: id.into(),
+            created_at: "2026-08-15T12:00:00Z".into(),
+            label: Some("rush".into()),
+            kind: "plan".into(),
+            fingerprint: "abc123".into(),
+            date: Some("1840.2.3".into()),
+            country: Some("FRA".into()),
+            filename: Some("campaign.v3".into()),
+            opts: json!({"goal": "research(tech=nitroglycerin)"}),
+            result: json!({
+                "day_cost": day_cost,
+                "actions": [],
+                "limitations": [],
+                "residual": 0.0
+            }),
+            limitations: vec![],
+            parent_id: None,
+            blob: None,
+        }
+    }
+
+    #[test]
+    fn i9_analysis_record_json_round_trip_preserves_contract_fields() {
+        let original = record("record-1", 365);
+        let decoded: AnalysisRecord =
+            serde_json::from_str(&serde_json::to_string(&original).unwrap()).unwrap();
+
+        assert_eq!(decoded.id, original.id);
+        assert_eq!(decoded.fingerprint, original.fingerprint);
+        assert_eq!(decoded.kind, original.kind);
+        assert_eq!(decoded.opts, original.opts);
+        assert_eq!(decoded.result, original.result);
+    }
+
+    #[test]
+    fn i9_compare_self_has_zero_cost_and_empty_diffs() {
+        let original = record("record-1", 365);
+        let diff = compare(&original, &original);
+
+        assert_eq!(diff.day_cost_delta, Some(0));
+        assert!(diff.actions.is_empty());
+        assert!(diff.prices.is_empty());
+        assert!(diff.gaps.is_empty());
+    }
+
+    #[test]
+    fn plan_fixture_pair_has_known_day_cost_delta() {
+        let left = record("left", 365);
+        let right = record("right", 480);
+
+        assert_eq!(compare(&left, &right).day_cost_delta, Some(115));
     }
 }

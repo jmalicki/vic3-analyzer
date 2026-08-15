@@ -232,6 +232,54 @@ fn archive_list_and_show_persist_plan_record() {
 }
 
 #[test]
+fn archive_diff_emits_compare_result_json() {
+    let archive = temp_archive();
+    let records_dir = archive.join("vic3-analyzer");
+    std::fs::create_dir_all(&records_dir).unwrap();
+    for (id, day_cost) in [("left", 365), ("right", 480)] {
+        let record = serde_json::json!({
+            "id": id,
+            "created_at": "2026-08-15T12:00:00Z",
+            "label": null,
+            "kind": "plan",
+            "fingerprint": "same-save",
+            "date": "1840.2.3",
+            "country": "FRA",
+            "filename": "campaign.v3",
+            "opts": {"goal": "research(tech=nitroglycerin)"},
+            "result": {
+                "day_cost": day_cost,
+                "actions": [],
+                "limitations": [],
+                "residual": 0.0
+            },
+            "limitations": [],
+            "parent_id": null,
+            "blob": null
+        });
+        std::fs::write(
+            records_dir.join(format!("{id}.json")),
+            serde_json::to_vec(&record).unwrap(),
+        )
+        .unwrap();
+    }
+
+    let output = bin()
+        .env("XDG_DATA_HOME", &archive)
+        .args(["archive", "diff", "left", "right"])
+        .assert()
+        .success();
+    let comparison: Value =
+        serde_json::from_slice(&output.get_output().stdout).expect("CompareResult JSON");
+    assert_eq!(comparison["left"], "left");
+    assert_eq!(comparison["right"], "right");
+    assert_eq!(comparison["same_fingerprint"], true);
+    assert_eq!(comparison["day_cost_delta"], 115);
+    assert!(comparison.get("actions").is_none());
+    std::fs::remove_dir_all(archive).unwrap();
+}
+
+#[test]
 fn fixtures_exist() {
     assert!(Path::new(&defs_fixture()).join("common/goods").is_dir());
     assert!(save_fixture().is_file());

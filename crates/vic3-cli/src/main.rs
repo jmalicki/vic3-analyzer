@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use vic3_defs::GameDefs;
 use vic3_goals::Atom;
 use vic3_load::{empty_tokens, load_path, load_tokens_path, Save};
-use vic3_plan::{AnalysisRecord, PlanOpts, PlanResult};
+use vic3_plan::{compare, AnalysisRecord, PlanOpts, PlanResult};
 use vic3_prices::{solve, what_if, PricesResult, SolveOpts, WhatIfOpts, World};
 use vic3_sim::SimConfig;
 use vic3_world::PlanningState;
@@ -184,6 +184,12 @@ enum ArchiveCommand {
     List,
     /// Print one AnalysisRecord as JSON.
     Show { id: String },
+    /// Compare two stored results without re-running analysis.
+    Diff { left: String, right: String },
+    /// Write one AnalysisRecord JSON file.
+    Export { id: String, path: PathBuf },
+    /// Add an AnalysisRecord JSON file to the local archive.
+    Import { path: PathBuf },
 }
 
 #[derive(Debug, Serialize)]
@@ -348,6 +354,15 @@ fn load_records() -> Result<Vec<AnalysisRecord>> {
     Ok(records)
 }
 
+fn load_record(id: &str) -> Result<AnalysisRecord> {
+    ensure_plain_id(id)?;
+    let path = archive_dir()?.join(format!("{id}.json"));
+    serde_json::from_slice(
+        &fs::read(&path).with_context(|| format!("reading archive record {}", path.display()))?,
+    )
+    .with_context(|| format!("parsing archive record {}", path.display()))
+}
+
 fn run_archive(cmd: ArchiveCli) -> Result<()> {
     match cmd.command {
         ArchiveCommand::List => {
@@ -363,14 +378,29 @@ fn run_archive(cmd: ArchiveCli) -> Result<()> {
             }
         }
         ArchiveCommand::Show { id } => {
-            let path = archive_dir()?.join(format!("{id}.json"));
-            ensure_plain_id(&id)?;
-            let record: AnalysisRecord = serde_json::from_slice(
-                &fs::read(&path)
-                    .with_context(|| format!("reading archive record {}", path.display()))?,
-            )?;
+            let record = load_record(&id)?;
             serde_json::to_writer_pretty(io::stdout(), &record)?;
             writeln!(io::stdout())?;
+        }
+        ArchiveCommand::Diff { left, right } => {
+            let result = compare(&load_record(&left)?, &load_record(&right)?);
+            serde_json::to_writer_pretty(io::stdout(), &result)?;
+            writeln!(io::stdout())?;
+        }
+        ArchiveCommand::Export { id, path } => {
+            let record = load_record(&id)?;
+            fs::write(&path, serde_json::to_vec_pretty(&record)?)
+                .with_context(|| format!("writing exported record {}", path.display()))?;
+        }
+        ArchiveCommand::Import { path } => {
+            let record: AnalysisRecord = serde_json::from_slice(
+                &fs::read(&path)
+                    .with_context(|| format!("reading imported record {}", path.display()))?,
+            )
+            .with_context(|| format!("parsing imported record {}", path.display()))?;
+            ensure_plain_id(&record.id)?;
+            save_record(&record)?;
+            writeln!(io::stdout(), "{}", record.id)?;
         }
     }
     Ok(())

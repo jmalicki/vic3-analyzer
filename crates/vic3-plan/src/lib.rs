@@ -14,7 +14,10 @@ mod vic3;
 pub use vic3::Vic3Node;
 
 mod result;
-pub use result::{plan, AnalysisRecord, PlanError, PlanOpts, PlanResult, PlanStep};
+pub use result::{
+    compare, plan, ActionDiff, AnalysisRecord, CompareResult, GapDiff, GapStatus, PlanError,
+    PlanOpts, PlanResult, PlanStep, PriceDelta,
+};
 
 /// Crate version from Cargo.
 pub fn version() -> &'static str {

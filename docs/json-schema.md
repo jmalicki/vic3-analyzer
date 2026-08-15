@@ -113,9 +113,38 @@ Save bytes are **not** in this JSON when talking to the UI list endpoint; they l
     "right": { "type": "string", "format": "uuid" },
     "same_fingerprint": { "type": "boolean" },
     "day_cost_delta": { "type": "integer" },
-    "actions": { "type": "array" },
-    "prices": { "type": "array" },
-    "gaps": { "type": "array" }
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "left": { "type": "object" },
+          "right": { "type": "object" }
+        }
+      }
+    },
+    "prices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["good", "delta"],
+        "properties": {
+          "good": { "type": "string" },
+          "delta": { "type": "number" }
+        }
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["atom", "status"],
+        "properties": {
+          "atom": {},
+          "status": { "enum": ["still_failing", "cleared", "newly_failing"] }
+        }
+      }
+    }
   }
 }
 ```

@@ -66,6 +66,31 @@ export interface AnalysisRecord {
   }
 }
 
+export interface ActionDiff {
+  left?: PlanStep
+  right?: PlanStep
+}
+
+export interface PriceDelta {
+  good: string
+  delta: number
+}
+
+export interface GapDiff {
+  atom: GapAtom
+  status: 'still_failing' | 'cleared' | 'newly_failing'
+}
+
+export interface CompareResult {
+  left: string
+  right: string
+  same_fingerprint: boolean
+  day_cost_delta?: number
+  actions?: ActionDiff[]
+  prices?: PriceDelta[]
+  gaps?: GapDiff[]
+}
+
 export interface JsonSchema {
   title?: string
   description?: string

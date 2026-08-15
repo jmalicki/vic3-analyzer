@@ -1,7 +1,13 @@
-import { useEffect, useState, type DragEvent, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type ChangeEvent, type DragEvent, type FormEvent } from 'react'
 import whatIfSchemaJson from '../../schema/what-if.json'
 import './App.css'
-import { listAnalyses, saveAnalysis } from './archive'
+import {
+  compareAnalyses,
+  listAnalyses,
+  parseAnalysis,
+  saveAnalysis,
+  serializeAnalysis,
+} from './archive'
 import { SchemaForm } from './SchemaForm'
 import type {
   AnalysisKind,
@@ -81,6 +87,8 @@ function App({ wasmApi }: Props) {
     initialValue(fallbackSchema),
   )
   const [records, setRecords] = useState<AnalysisRecord[]>([])
+  const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
+  const [archiveNote, setArchiveNote] = useState<string>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -235,6 +243,74 @@ function App({ wasmApi }: Props) {
   }
 
   const formatGap = (atom: GapAtom) => (typeof atom === 'string' ? atom : JSON.stringify(atom))
+
+  const groupedRecords = useMemo(() => {
+    const groups = new Map<string, AnalysisRecord[]>()
+    for (const record of records) {
+      const group = groups.get(record.fingerprint) ?? []
+      group.push(record)
+      groups.set(record.fingerprint, group)
+    }
+    return [...groups.entries()]
+  }, [records])
+
+  const selectedRecords = selectedRecordIds
+    .map((id) => records.find((record) => record.id === id))
+    .filter((record): record is AnalysisRecord => Boolean(record))
+  const comparison =
+    selectedRecords.length === 2 ? compareAnalyses(selectedRecords[0], selectedRecords[1]) : undefined
+
+  const toggleComparison = (id: string) => {
+    setSelectedRecordIds((current) =>
+      current.includes(id)
+        ? current.filter((selected) => selected !== id)
+        : current.length < 2
+          ? [...current, id]
+          : [current[1], id],
+    )
+  }
+
+  const importRecord = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    try {
+      const record = parseAnalysis(await file.text())
+      await saveAnalysis(record)
+      setRecords(await listAnalyses())
+      setArchiveNote(`Imported ${record.label ?? record.id}.`)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      event.target.value = ''
+    }
+  }
+
+  const exportRecord = (record: AnalysisRecord) => {
+    const url = URL.createObjectURL(
+      new Blob([serializeAnalysis(record)], { type: 'application/json' }),
+    )
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${record.id}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const reopenRecord = (record: AnalysisRecord) => {
+    if (!record.blob) {
+      setArchiveNote(`Re-drop ${record.filename ?? 'the save'}; its fingerprint must match.`)
+      return
+    }
+    setSaveFile(
+      new File([record.blob.save.slice().buffer as ArrayBuffer], record.filename ?? 'archive.v3'),
+    )
+    setTokensFile(
+      record.blob.tokens
+        ? new File([record.blob.tokens.slice().buffer as ArrayBuffer], 'tokens.txt')
+        : undefined,
+    )
+    setArchiveNote(`Reopened ${record.filename ?? record.id} from the local archive.`)
+  }
 
   const ready = Boolean(api && saveFile && defsFile)
 
@@ -426,26 +502,126 @@ function App({ wasmApi }: Props) {
       )}
 
       <section aria-labelledby="archive-heading">
-        <h2 id="archive-heading">Past runs</h2>
+        <div className="result-heading">
+          <h2 id="archive-heading">Past saves</h2>
+          <label className="file-button">
+            Import record
+            <input
+              aria-label="Import AnalysisRecord"
+              type="file"
+              accept=".json,application/json"
+              onChange={(event) => void importRecord(event)}
+            />
+          </label>
+        </div>
+        <p>Select two analyses to compare stored results without running the solver again.</p>
+        {archiveNote && <p role="status">{archiveNote}</p>}
         {records.length === 0 ? (
           <p>No archived analyses yet.</p>
         ) : (
-          <ul className="archive-list">
-            {records.map((record) => (
-              <li key={record.id}>
-                <strong>
-                  {kindLabel(record.kind)}
-                  {record.label ? ` · ${record.label}` : ''}
-                </strong>
-                <span>
-                  {record.country ?? '—'} · {record.date ?? '—'}
-                </span>
-                <time dateTime={record.created_at}>{new Date(record.created_at).toLocaleString()}</time>
-              </li>
+          <div className="archive-groups">
+            {groupedRecords.map(([fingerprintValue, group]) => (
+              <section className="archive-group" key={fingerprintValue}>
+                <h3>
+                  {group[0].country ?? 'Unknown country'} · {group[0].date ?? 'Unknown date'}
+                </h3>
+                <small title={fingerprintValue}>Save {fingerprintValue.slice(0, 12)}</small>
+                <ul className="archive-list">
+                  {group.map((record) => (
+                    <li key={record.id}>
+                      <label>
+                        <input
+                          type="checkbox"
+                          aria-label={`Compare ${record.label ?? record.id}`}
+                          checked={selectedRecordIds.includes(record.id)}
+                          onChange={() => toggleComparison(record.id)}
+                        />
+                        <strong>
+                          {kindLabel(record.kind)}
+                          {record.label ? ` · ${record.label}` : ''}
+                        </strong>
+                      </label>
+                      <time dateTime={record.created_at}>
+                        {new Date(record.created_at).toLocaleString()}
+                      </time>
+                      <div className="archive-buttons">
+                        <button type="button" onClick={() => reopenRecord(record)}>
+                          {record.blob ? 'Reopen save' : 'Re-drop save'}
+                        </button>
+                        <button type="button" onClick={() => exportRecord(record)}>
+                          Export
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             ))}
-          </ul>
+          </div>
         )}
       </section>
+
+      {comparison && (
+        <section aria-labelledby="compare-heading">
+          <div className="result-heading">
+            <h2 id="compare-heading">Archive comparison</h2>
+            <strong>
+              {comparison.same_fingerprint ? 'Alternative plans' : 'Campaign progression'}
+            </strong>
+          </div>
+          {comparison.day_cost_delta !== undefined && (
+            <p>
+              Day cost delta:{' '}
+              <strong>
+                {comparison.day_cost_delta > 0 ? '+' : ''}
+                {comparison.day_cost_delta}
+              </strong>
+            </p>
+          )}
+          {comparison.actions && (
+            <>
+              <h3>Action changes</h3>
+              <ul>
+                {comparison.actions.map((change, index) => (
+                  <li key={index}>
+                    {change.left ? `${actionLabel(change.left.action)} → ` : 'Added: '}
+                    {change.right ? actionLabel(change.right.action) : 'removed'}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {comparison.prices && (
+            <>
+              <h3>Price changes</h3>
+              <ul>
+                {comparison.prices.map((change) => (
+                  <li key={change.good}>
+                    {change.good}: {change.delta > 0 ? '+' : ''}
+                    {change.delta.toFixed(2)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {comparison.gaps && (
+            <>
+              <h3>Gap changes</h3>
+              <ul>
+                {comparison.gaps.map((change, index) => (
+                  <li key={`${formatGap(change.atom)}-${index}`}>
+                    {formatGap(change.atom)} · {change.status.replaceAll('_', ' ')}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {!comparison.actions?.length &&
+            !comparison.prices?.length &&
+            !comparison.gaps?.length &&
+            comparison.day_cost_delta === undefined && <p>No comparable stored-result changes.</p>}
+        </section>
+      )}
     </main>
   )
 }
