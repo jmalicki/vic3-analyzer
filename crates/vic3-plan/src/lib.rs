@@ -2,12 +2,16 @@
 //! Shared option/archive types will live here (phase 5+).
 //!
 //! Phase 9a toys: [`timed`] graphs with cheap [`timed::TimedNode`] intern keys.
+//! Phase 9b: [`Vic3Node`] wires that search API to `vic3-sim`.
 
 /// Ensure the heaps crate stays in the graph (pathfinding API used in phase 9a).
 pub use rust_advanced_heaps::pathfinding;
 
 pub mod timed;
 pub use timed::{TimedEdge, TimedGraph, TimedNode};
+
+mod vic3;
+pub use vic3::Vic3Node;
 
 /// Crate version from Cargo.
 pub fn version() -> &'static str {
