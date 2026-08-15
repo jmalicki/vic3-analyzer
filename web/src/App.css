@@ -63,9 +63,16 @@ button:focus-visible {
 .path-hint-path {
   display: block;
   max-width: 100%;
+  margin-top: .25rem;
   overflow-wrap: anywhere;
-  color: #c8ccc5;
+  border: 1px solid #3d4a40;
+  border-radius: .25rem;
+  background: #111713;
+  color: #d7e6a7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: .78rem;
+  line-height: 1.35;
+  padding: .4rem .55rem;
   text-align: center;
 }
 input, select, textarea { width: 100%; border: 1px solid #4e5c50; background: #111713; color: #f4f5eb; padding: .55rem; }
@@ -122,7 +129,7 @@ section[aria-labelledby] { margin-top: 1rem; }
 .defs-builder p { color: #9ba79d; font-size: .88rem; line-height: 1.4; margin: 0; }
 .defs-builder code { color: #d7e6a7; }
 .defs-builder .path-hint { max-width: none; text-align: left; }
-.defs-builder .path-hint-path { display: block; margin-top: .2rem; text-align: left; word-break: break-all; }
+.defs-builder .path-hint-path { text-align: left; }
 .defs-builder-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .secondary { background: #29362c; color: #e9eadf; font-size: .85rem; }
 .site-footer {

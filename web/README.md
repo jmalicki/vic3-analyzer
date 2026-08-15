@@ -29,9 +29,12 @@ Chromium can remember the last chosen save folder; other browsers keep the
 standard file input (sites cannot force an arbitrary local path).
 
 For real campaigns, the UI can build `defs.postcard` entirely in-browser from a
-selected `Victoria 3/game/common` folder or a zip containing it. It shows the
-usual Steam install path for your OS (browsers cannot open that path
-automatically; Chromium may remember the folder after you choose it once). The
+selected `Victoria 3/game/common` folder or a zip containing it. Folder choice
+uses the plain `webkitdirectory` input: Chromium's File System Access blocklist
+marks `~/Library` (macOS) and `Program Files` (Windows) as block-all-children,
+so `showDirectoryPicker` cannot reach a default Steam install. The card shows
+the usual Steam path for your OS with a copy button and the dialog shortcut for
+reaching it (`Cmd+Shift+G`, `Ctrl+L`, or the Windows address bar). The
 files are packed into an in-memory manifest, parsed by `vic3-defs` in wasm, and
 never uploaded. The footer reports the package version, git revision, and UTC
 build time injected by Vite.

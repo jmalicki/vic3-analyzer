@@ -402,8 +402,9 @@ function App({ wasmApi }: Props) {
             onChange={(event) => setSaveFile(event.target.files?.[0])}
           />
           {saveFile && <output>{saveFile.name}</output>}
-          <p className="path-hint">{savePaths.summary}</p>
+          <p className="path-hint">{savePaths.label}</p>
           <code className="path-hint-path">{savePaths.local}</code>
+          <p className="path-hint">{savePaths.summary}</p>
         </div>
         <div className="support-files">
           <div className="field-with-help">

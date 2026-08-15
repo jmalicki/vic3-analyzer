@@ -6,11 +6,7 @@ import {
   type DefsSourceFile,
 } from './defsFiles'
 import { FieldHelp } from './FieldHelp'
-import {
-  canUseRememberedDirectoryPicker,
-  pickGameCommonWithRememberedFolder,
-  victoria3GameCommonPaths,
-} from './savePicker'
+import { victoria3GameCommonPaths } from './savePicker'
 import type { WasmApi } from './wasm'
 
 interface Props {
@@ -46,7 +42,6 @@ export function DefsBuilder({ api, onBuilt }: Props) {
   const [blob, setBlob] = useState<File>()
   const folderInputRef = useRef<HTMLInputElement>(null)
   const commonPaths = useMemo(() => victoria3GameCommonPaths(), [])
-  const rememberedFolder = canUseRememberedDirectoryPicker()
 
   const build = async (files: DefsSourceFile[]) => {
     if (!api) return
@@ -71,27 +66,13 @@ export function DefsBuilder({ api, onBuilt }: Props) {
     }
   }
 
-  const chooseFolder = async () => {
-    if (rememberedFolder) {
-      try {
-        const picked = await pickGameCommonWithRememberedFolder()
-        if (!picked) return
-        const files = await Promise.all(
-          picked
-            .filter((entry) => usefulDefsPath(entry.path))
-            .map(async (entry) => ({
-              path: entry.path,
-              bytes: new Uint8Array(await entry.file.arrayBuffer()),
-            })),
-        )
-        await build(files)
-        return
-      } catch (reason) {
-        setStatus(reason instanceof Error ? reason.message : String(reason))
-        return
-      }
+  const copyPath = async () => {
+    try {
+      await navigator.clipboard.writeText(commonPaths.local)
+      setStatus('Path copied. Paste it into the folder dialog to jump straight there.')
+    } catch {
+      setStatus(`Copy this path into the folder dialog: ${commonPaths.local}`)
     }
-    folderInputRef.current?.click()
   }
 
   const download = () => {
@@ -118,8 +99,14 @@ export function DefsBuilder({ api, onBuilt }: Props) {
           <p>
             This builder packs those Clausewitz files into a local <code>defs.postcard</code> blob
             the price solver can use. Without it, only goods present in the tiny demo fixture get
-            prices. Files never leave the browser; Chromium can remember the folder after you choose
-            it once.
+            prices. Files never leave the browser.
+          </p>
+          <p>
+            Browsers cannot open a path for you, and Chrome&apos;s newer folder API refuses Steam&apos;s
+            install location outright (<code>~/Library</code> on macOS, <code>Program Files</code> on
+            Windows). Copy the path below, then paste it in the folder dialog — macOS{' '}
+            <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>, Linux <kbd>Ctrl</kbd>+<kbd>L</kbd>, Windows
+            address bar. Picking a zip of <code>common</code> avoids the dialog entirely.
           </p>
         </FieldHelp>
       </div>
@@ -128,7 +115,11 @@ export function DefsBuilder({ api, onBuilt }: Props) {
         carry them. Pick that folder (or a zip of it) to build a local defs blob.
       </p>
       <div className="defs-builder-actions">
-        <button type="button" className="file-button secondary" onClick={() => void chooseFolder()}>
+        <button
+          type="button"
+          className="file-button secondary"
+          onClick={() => folderInputRef.current?.click()}
+        >
           Choose game/common folder
         </button>
         <input
@@ -163,8 +154,14 @@ export function DefsBuilder({ api, onBuilt }: Props) {
           </button>
         )}
       </div>
-      <p className="path-hint">{commonPaths.summary}</p>
+      <p className="path-hint">{commonPaths.label}</p>
       <code className="path-hint-path">{commonPaths.local}</code>
+      <div className="defs-builder-actions">
+        <button type="button" className="secondary" onClick={() => void copyPath()}>
+          Copy path
+        </button>
+      </div>
+      <p className="path-hint">{commonPaths.summary}</p>
       {status && <small role="status">{status}</small>}
     </div>
   )

@@ -4,7 +4,6 @@ import { zipSync } from 'fflate'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DefsBuilder } from './DefsBuilder'
 import { packDefsFiles } from './defsFiles'
-import * as savePicker from './savePicker'
 import type { WasmApi } from './wasm'
 
 function api(): WasmApi {
@@ -14,7 +13,10 @@ function api(): WasmApi {
 }
 
 describe('DefsBuilder', () => {
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
 
   it('packs supported common files with byte offsets', () => {
     const packed = packDefsFiles([
@@ -31,8 +33,9 @@ describe('DefsBuilder', () => {
 
   it('shows a platform game/common path hint under the picker', () => {
     render(<DefsBuilder api={api()} onBuilt={vi.fn()} />)
-    expect(screen.getByText(/Usual Steam folder:/)).toBeInTheDocument()
+    expect(screen.getByText('Usual Steam folder')).toBeInTheDocument()
     expect(document.querySelector('.path-hint-path')).toHaveTextContent(/game\/common|game\\common/)
+    expect(screen.getByText(/Chrome cannot open that path for you|Cmd\+Shift\+G|Ctrl\+L/)).toBeInTheDocument()
   })
 
   it('shows a short explanation and deeper FieldHelp content', async () => {
@@ -53,7 +56,6 @@ describe('DefsBuilder', () => {
     const user = userEvent.setup()
     const wasm = api()
     const onBuilt = vi.fn()
-    vi.spyOn(savePicker, 'canUseRememberedDirectoryPicker').mockReturnValue(false)
     render(<DefsBuilder api={wasm} onBuilt={onBuilt} />)
     const file = new File(['grain = { cost = 20 }'], 'goods.txt')
     Object.defineProperty(file, 'webkitRelativePath', {
@@ -66,20 +68,28 @@ describe('DefsBuilder', () => {
     expect(await screen.findByText(/Built defs.postcard from 1 definition files/)).toBeInTheDocument()
   })
 
-  it('uses the remembered Chromium directory picker when available', async () => {
+  it('opens the folder input from the visible button', async () => {
     const user = userEvent.setup()
-    const wasm = api()
-    const onBuilt = vi.fn()
-    const file = new File(['grain = { cost = 20 }'], 'goods.txt')
-    vi.spyOn(savePicker, 'canUseRememberedDirectoryPicker').mockReturnValue(true)
-    vi.spyOn(savePicker, 'pickGameCommonWithRememberedFolder').mockResolvedValue([
-      { path: 'game/common/goods/goods.txt', file },
-    ])
-    render(<DefsBuilder api={wasm} onBuilt={onBuilt} />)
+    render(<DefsBuilder api={api()} onBuilt={vi.fn()} />)
+    const input = screen.getByLabelText('Victoria 3 definitions folder')
+    const click = vi.spyOn(input, 'click')
 
     await user.click(screen.getByRole('button', { name: 'Choose game/common folder' }))
-    await waitFor(() => expect(wasm.build_defs_blob).toHaveBeenCalled())
-    expect(onBuilt).toHaveBeenCalledWith(expect.objectContaining({ name: 'defs.postcard' }))
+    expect(click).toHaveBeenCalled()
+  })
+
+  it('copies the platform path for pasting into the folder dialog', async () => {
+    const user = userEvent.setup()
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    render(<DefsBuilder api={api()} onBuilt={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: 'Copy path' }))
+    expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/game.common/))
+    expect(await screen.findByText(/Path copied/)).toBeInTheDocument()
   })
 
   it('builds from a definitions zip', async () => {

@@ -3,11 +3,13 @@ export type Platform = 'windows' | 'macos' | 'linux' | 'unknown'
 
 export type SavePathHint = {
   platform: Platform
+  /** Short lead-in before the path, e.g. "Usual local folder". */
+  label: string
   /** Typical local Paradox documents path for this platform. */
   local: string
   /** Typical Steam Cloud cache path when applicable. */
   steamCloud?: string
-  /** Short copy shown under the save picker. */
+  /** Browser caveat shown under the path. */
   summary: string
 }
 
@@ -37,37 +39,40 @@ export function detectPlatform(userAgent = globalThis.navigator?.userAgent ?? ''
 
 /** Return the usual Victoria 3 save locations for a platform. */
 export function victoria3SavePaths(platform: Platform = detectPlatform()): SavePathHint {
+  const remembered =
+    'Browsers cannot open that path automatically; Chromium may remember the folder after you choose it once.'
   switch (platform) {
     case 'windows':
       return {
         platform,
+        label: 'Usual local folder',
         local: 'Documents\\Paradox Interactive\\Victoria 3\\save games',
         steamCloud: 'Steam\\userdata\\<id>\\529340\\remote\\save games',
-        summary:
-          'Usual local folder: Documents\\Paradox Interactive\\Victoria 3\\save games. Browsers cannot open that path automatically; Chromium may remember the folder after you choose it once.',
+        summary: remembered,
       }
     case 'macos':
       return {
         platform,
+        label: 'Usual local folder',
         local: '~/Documents/Paradox Interactive/Victoria 3/save games',
         steamCloud: '~/Library/Application Support/Steam/userdata/<id>/529340/remote/save games',
-        summary:
-          'Usual local folder: ~/Documents/Paradox Interactive/Victoria 3/save games. Browsers cannot open that path automatically; Chromium may remember the folder after you choose it once.',
+        summary: remembered,
       }
     case 'linux':
       return {
         platform,
+        label: 'Usual local folder',
         local: '~/.local/share/Paradox Interactive/Victoria 3/save games',
         steamCloud: '~/.steam/steam/userdata/<id>/529340/remote/save games',
-        summary:
-          'Usual local folder: ~/.local/share/Paradox Interactive/Victoria 3/save games. Browsers cannot open that path automatically; Chromium may remember the folder after you choose it once.',
+        summary: remembered,
       }
     default:
       return {
         platform,
+        label: 'Usual local folder',
         local: 'Paradox Interactive/Victoria 3/save games',
         summary:
-          'Look under Paradox Interactive/Victoria 3/save games in your Documents (or Linux game-data) folder. Browsers cannot open that path automatically.',
+          'Look in your Documents (or Linux game-data) folder. Browsers cannot open that path automatically.',
       }
   }
 }
@@ -109,23 +114,23 @@ export async function pickSaveWithRememberedFolder(
 
 export type GameCommonPathHint = {
   platform: Platform
+  /** Short lead-in before the path, e.g. "Usual Steam folder". */
+  label: string
   /** Typical Steam `game/common` path for this platform. */
   local: string
-  /** Short copy shown under the definitions folder picker. */
+  /** Browser caveat shown under the path. */
   summary: string
 }
 
-const GAME_COMMON_PICKER_ID = 'vic3-analyzer-game-common'
-
-type DirectoryPickerWindow = Window & {
-  showDirectoryPicker?: (options?: {
-    id?: string
-    mode?: 'read' | 'readwrite'
-    startIn?: 'desktop' | 'documents' | 'downloads' | 'music' | 'pictures' | 'videos'
-  }) => Promise<FileSystemDirectoryHandle>
-}
-
-/** Return the usual Steam Victoria 3 `game/common` locations for a platform. */
+/**
+ * Return the usual Steam Victoria 3 `game/common` locations for a platform.
+ *
+ * These paths are shown, never fed to a picker API: Chromium's File System
+ * Access blocklist marks `~/Library` (macOS) and `Program Files` (Windows) as
+ * block-all-children, so `showDirectoryPicker` cannot open a Steam install
+ * there. The plain `webkitdirectory` input has no such restriction, so the
+ * hint tells users how to reach the path in the native dialog.
+ */
 export function victoria3GameCommonPaths(
   platform: Platform = detectPlatform(),
 ): GameCommonPathHint {
@@ -133,81 +138,37 @@ export function victoria3GameCommonPaths(
     case 'windows':
       return {
         platform,
+        label: 'Usual Steam folder',
         local:
           'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Victoria 3\\game\\common',
         summary:
-          'Usual Steam folder: C:\\Program Files (x86)\\Steam\\steamapps\\common\\Victoria 3\\game\\common. Browsers cannot open that path automatically; Chromium may remember the folder after you choose it once.',
+          'Chrome cannot open that path for you. In the folder dialog, paste the path into the address bar.',
       }
     case 'macos':
       return {
         platform,
+        label: 'Usual Steam folder',
         local:
           '~/Library/Application Support/Steam/steamapps/common/Victoria 3/game/common',
         summary:
-          'Usual Steam folder: ~/Library/Application Support/Steam/steamapps/common/Victoria 3/game/common. Browsers cannot open that path automatically; Chromium may remember the folder after you choose it once.',
+          'Finder hides ~/Library, and Chrome blocks it in the newer folder API. In the folder dialog press Cmd+Shift+G, then paste the path.',
       }
     case 'linux':
       return {
         platform,
+        label: 'Usual Steam folder',
         local: '~/.local/share/Steam/steamapps/common/Victoria 3/game/common',
         summary:
-          'Usual Steam folder: ~/.local/share/Steam/steamapps/common/Victoria 3/game/common (or ~/.steam/steam/steamapps/…). Browsers cannot open that path automatically; Chromium may remember the folder after you choose it once.',
+          'Also try ~/.steam/steam/steamapps/…. In the folder dialog press Ctrl+L, then paste the path.',
       }
     default:
       return {
         platform,
+        label: 'Usual Steam folder',
         local: 'Steam/steamapps/common/Victoria 3/game/common',
-        summary:
-          'Look under Steam/steamapps/common/Victoria 3/game/common in your Steam library. Browsers cannot open that path automatically.',
+        summary: 'Look under your Steam library, then paste the path in the folder dialog.',
       }
   }
 }
 
-/** True when the File System Access API directory picker is available. */
-export function canUseRememberedDirectoryPicker(
-  win: DirectoryPickerWindow = globalThis.window as DirectoryPickerWindow,
-): boolean {
-  return typeof win?.showDirectoryPicker === 'function'
-}
-
-/**
- * Open a Chromium directory picker that can remember the last approved folder.
- * Returns collected definition files, or `undefined` when unsupported/cancelled.
- */
-export async function pickGameCommonWithRememberedFolder(
-  win: DirectoryPickerWindow = globalThis.window as DirectoryPickerWindow,
-): Promise<Array<{ path: string; file: File }> | undefined> {
-  if (!canUseRememberedDirectoryPicker(win) || !win.showDirectoryPicker) {
-    return undefined
-  }
-  try {
-    const root = await win.showDirectoryPicker({
-      id: GAME_COMMON_PICKER_ID,
-      mode: 'read',
-    })
-    return await collectDirectoryFiles(root)
-  } catch (reason) {
-    if (reason instanceof DOMException && reason.name === 'AbortError') {
-      return undefined
-    }
-    throw reason
-  }
-}
-
-async function collectDirectoryFiles(
-  handle: FileSystemDirectoryHandle,
-  prefix = '',
-): Promise<Array<{ path: string; file: File }>> {
-  const out: Array<{ path: string; file: File }> = []
-  for await (const [name, entry] of handle.entries()) {
-    const path = prefix ? `${prefix}/${name}` : name
-    if (entry.kind === 'directory') {
-      out.push(...(await collectDirectoryFiles(entry, path)))
-    } else if (entry.kind === 'file') {
-      out.push({ path, file: await entry.getFile() })
-    }
-  }
-  return out
-}
-
-export { SAVE_PICKER_ID, GAME_COMMON_PICKER_ID }
+export { SAVE_PICKER_ID }
