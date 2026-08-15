@@ -25,5 +25,10 @@ web/coverage/
 *token*map*
 /defs-blob.bin
 
+# Generated wasm-pack output and fixture defs blob for the web demo
+web/public/wasm/*
+!web/public/wasm/.gitkeep
+web/public/defs.postcard
+
 # Archive dumps
 /archive-export/

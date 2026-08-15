@@ -1,5 +1,13 @@
 //! In-browser facade: bytes in, JSON strings out. No filesystem, no clap.
 //!
+//! Build for the browser with:
+//! ```text
+//! wasm-pack build crates/vic3-wasm --target web --out-dir web/public/wasm
+//! ```
+//! (or `npm run build:wasm` from `web/`). The crate already compiles for
+//! `wasm32-unknown-unknown` without extra `getrandom` feature flags on the
+//! current dependency set.
+//!
 //! wasm-bindgen exports return JSON text (not `JsValue`) so native tests can
 //! round-trip the same payload the CLI prints.
 
@@ -8,6 +16,7 @@ mod schema;
 mod world;
 
 use serde::Serialize;
+use vic3_goals::Atom;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save};
 use vic3_plan::PlanOpts;
 use vic3_prices::{solve, what_if as solve_what_if, PricesResult, SolveOpts, WhatIfOpts};
@@ -103,6 +112,25 @@ pub fn plan(
     .map_err(to_js)
 }
 
+/// Evaluate a goal and return unsatisfied atoms (`GapsResult` JSON, CLI parity).
+#[wasm_bindgen]
+pub fn gaps(
+    save_bytes: &[u8],
+    tokens_bytes: Option<Vec<u8>>,
+    defs_blob: &[u8],
+    solve_opts_json: &str,
+    goal: &str,
+) -> Result<String, JsError> {
+    gaps_json(
+        save_bytes,
+        tokens_bytes.as_deref(),
+        defs_blob,
+        solve_opts_json,
+        goal,
+    )
+    .map_err(to_js)
+}
+
 /// Native/test entry: same JSON as [`parse_save`].
 pub fn parse_save_json(
     save_bytes: &[u8],
@@ -154,16 +182,7 @@ pub fn plan_json(
     let plan_opts: PlanOpts = serde_json::from_str(plan_opts_json)?;
     let world = world::world_from_save(&save);
     let prices = solve(&world, &defs, solve_opts);
-    let country = save
-        .previous_played
-        .iter()
-        .find_map(|player| player.name.as_deref())
-        .or_else(|| {
-            save.countries()
-                .next()
-                .map(|(_, country)| country.definition.as_str())
-        })
-        .ok_or(WasmError::NoCountry)?;
+    let country = country_tag(&save)?;
     let state = PlanningState::from_save(&save, country, &prices)?;
     let goal = vic3_goals::parse(&plan_opts.goal)?;
     let result = vic3_plan::plan(
@@ -175,6 +194,50 @@ pub fn plan_json(
         prices.limitations,
     )?;
     Ok(serde_json::to_string(&result)?)
+}
+
+/// Native/test entry: same `GapsResult` JSON as the CLI `gaps` command.
+pub fn gaps_json(
+    save_bytes: &[u8],
+    tokens_bytes: Option<&[u8]>,
+    defs_blob: &[u8],
+    solve_opts_json: &str,
+    goal: &str,
+) -> Result<String, WasmError> {
+    let save = load_save(save_bytes, tokens_bytes)?;
+    let defs = vic3_defs::decode_blob(defs_blob)?;
+    let opts = parse_solve_opts(solve_opts_json)?;
+    let world = world::world_from_save(&save);
+    let prices = solve(&world, &defs, opts);
+    let country = country_tag(&save)?;
+    let state = PlanningState::from_save(&save, country, &prices)?;
+    let goal = vic3_goals::parse(goal)?;
+    let result = GapsResult {
+        satisfied: vic3_goals::evaluate(&goal, &state),
+        gaps: vic3_goals::gaps(&goal, &state),
+        limitations: prices.limitations,
+    };
+    Ok(serde_json::to_string(&result)?)
+}
+
+fn country_tag(save: &Save) -> Result<&str, WasmError> {
+    save.previous_played
+        .iter()
+        .find_map(|player| player.name.as_deref())
+        .or_else(|| {
+            save.countries()
+                .next()
+                .map(|(_, country)| country.definition.as_str())
+        })
+        .ok_or(WasmError::NoCountry)
+}
+
+/// CLI-parity gaps payload (`satisfied`, `gaps`, `limitations`).
+#[derive(Debug, Serialize)]
+struct GapsResult {
+    satisfied: bool,
+    gaps: Vec<Atom>,
+    limitations: Vec<String>,
 }
 
 fn run_prices(
@@ -273,6 +336,14 @@ mod tests {
                 .join("../vic3-load/tests/fixtures/plaintext.txt"),
         )
         .expect("plaintext fixture")
+    }
+
+    fn barren_fixture() -> Vec<u8> {
+        std::fs::read(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../vic3-cli/tests/fixtures/barren.txt"),
+        )
+        .expect("barren fixture")
     }
 
     fn defs_blob() -> Vec<u8> {
@@ -390,6 +461,48 @@ mod tests {
         assert_eq!(result.actions.len(), 2);
         assert!(result.residual.is_finite());
         assert!(!result.limitations.is_empty());
+    }
+
+    #[test]
+    fn gaps_json_matches_cli_shape_on_barren_fixture() {
+        let json = gaps_json(
+            &barren_fixture(),
+            None,
+            &defs_blob(),
+            "{}",
+            "declare-war(tag=FRA, wargoal=conquer_state, state=alsace)",
+        )
+        .expect("gaps");
+        let value: Value = serde_json::from_str(&json).expect("GapsResult JSON");
+        assert_eq!(value.get("satisfied"), Some(&Value::Bool(false)));
+        let gaps = value
+            .get("gaps")
+            .and_then(Value::as_array)
+            .expect("gaps array");
+        assert_eq!(gaps.len(), 4, "expected all declare-war gaps: {value}");
+        assert!(
+            gaps.iter().any(|gap| gap.get("InterestIn").is_some()),
+            "interest gap: {gaps:?}"
+        );
+        assert!(
+            gaps.iter().any(|gap| gap.get("ArmyPower").is_some()),
+            "army gap: {gaps:?}"
+        );
+        assert!(
+            gaps.iter().any(|gap| gap.get("GoodPrice").is_some()),
+            "munitions-price gap: {gaps:?}"
+        );
+        assert!(
+            gaps.iter().any(|gap| gap == "Solvent"),
+            "solvent gap: {gaps:?}"
+        );
+        assert!(
+            value
+                .get("limitations")
+                .and_then(Value::as_array)
+                .is_some_and(|limitations| !limitations.is_empty()),
+            "price limitations: {value}"
+        );
     }
 
     #[test]
