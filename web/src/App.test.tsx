@@ -63,21 +63,45 @@ function mockApi(): WasmApi {
   }
 }
 
-async function selectFiles(user: ReturnType<typeof userEvent.setup>) {
+function mockBundledDefs(ok = true) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (!url.includes('defs.postcard')) {
+        return new Response(null, { status: 404 })
+      }
+      if (!ok) return new Response(null, { status: 404 })
+      return new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      })
+    }),
+  )
+}
+
+async function selectSave(user: ReturnType<typeof userEvent.setup>) {
   await user.upload(screen.getByLabelText('Save file'), new File(['save'], 'campaign.v3'))
-  await user.upload(screen.getByLabelText('Definitions blob'), new File(['defs'], 'defs.postcard'))
   await screen.findByText('FRA')
+  await screen.findByText('Using the bundled demo definitions blob.')
 }
 
 describe('prices UI', () => {
-  beforeEach(clearAnalyses)
-  afterEach(cleanup)
+  beforeEach(async () => {
+    await clearAnalyses()
+    mockBundledDefs()
+  })
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
 
   it('renders mocked wasm goods and limitations, then archives the run', async () => {
     const user = userEvent.setup()
     const api = mockApi()
     render(<App wasmApi={api} />)
-    await selectFiles(user)
+    await selectSave(user)
 
     await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
 
@@ -92,7 +116,7 @@ describe('prices UI', () => {
     const user = userEvent.setup()
     const api = mockApi()
     render(<App wasmApi={api} />)
-    await selectFiles(user)
+    await selectSave(user)
 
     await user.type(screen.getByLabelText('Building'), 'building_steel_mills')
     await user.clear(screen.getByLabelText('Extra Levels'))
@@ -115,7 +139,7 @@ describe('prices UI', () => {
     const user = userEvent.setup()
     const api = mockApi()
     render(<App wasmApi={api} />)
-    await selectFiles(user)
+    await selectSave(user)
 
     await user.clear(screen.getByLabelText('Gaps goal'))
     await user.type(screen.getByLabelText('Gaps goal'), 'research(tech=nitroglycerin)')
@@ -142,7 +166,7 @@ describe('prices UI', () => {
     const user = userEvent.setup()
     const api = mockApi()
     render(<App wasmApi={api} />)
-    await selectFiles(user)
+    await selectSave(user)
 
     await user.clear(screen.getByLabelText('Plan goal'))
     await user.type(screen.getByLabelText('Plan goal'), 'research(tech=nitroglycerin)')
@@ -187,5 +211,84 @@ describe('prices UI', () => {
     expect(await screen.findByRole('heading', { name: 'Archive comparison' })).toBeInTheDocument()
     expect(screen.getByText('Alternative plans')).toBeInTheDocument()
     expect(screen.getByText('+115')).toBeInTheDocument()
+  })
+
+  it('explains token maps and definitions through accessible help', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+
+    await user.click(screen.getByRole('button', { name: 'About token maps' }))
+    expect(await screen.findByText(/Binary \(Ironman\) saves store field names as numbers/)).toBeInTheDocument()
+    expect(screen.getByText(/does not redistribute Paradox tokens/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'About definitions' }))
+    expect(await screen.findByText(/postcard-encoded snapshot of goods/)).toBeInTheDocument()
+  })
+
+  it('uses bundled defs by default and lets a custom blob override them', async () => {
+    const user = userEvent.setup()
+    const api = mockApi()
+    render(<App wasmApi={api} />)
+    await selectSave(user)
+
+    await user.upload(screen.getByLabelText('Choose definitions blob'), new File(['custom'], 'custom.postcard'))
+    expect(await screen.findByText('Using your file: custom.postcard')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
+    await waitFor(() => expect(api.prices).toHaveBeenCalled())
+    const defsArg = vi.mocked(api.prices).mock.calls[0][2]
+    expect(Array.from(defsArg)).toEqual([99, 117, 115, 116, 111, 109]) // "custom"
+  })
+
+  it('shows a missing-bundled-defs message when the fixture cannot load', async () => {
+    mockBundledDefs(false)
+    render(<App wasmApi={mockApi()} />)
+    expect(
+      await screen.findByText(/Bundled demo definitions are unavailable/),
+    ).toBeInTheDocument()
+  })
+
+  it('uses the remembered Chromium picker when available', async () => {
+    const picked = new File(['ironman'], 'ironman.v3')
+    const showOpenFilePicker = vi.fn(async () => [{ getFile: async () => picked }])
+    vi.stubGlobal('showOpenFilePicker', showOpenFilePicker)
+
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await screen.findByText('Using the bundled demo definitions blob.')
+    await user.click(screen.getByRole('button', { name: 'Choose save' }))
+
+    expect(showOpenFilePicker).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'vic3-analyzer-save',
+        startIn: 'documents',
+      }),
+    )
+    expect(await screen.findByText('ironman.v3')).toBeInTheDocument()
+  })
+
+  it('ignores remembered-picker cancellation and keeps the file-input fallback', async () => {
+    const showOpenFilePicker = vi.fn(async () => {
+      throw new DOMException('The user aborted a request.', 'AbortError')
+    })
+    vi.stubGlobal('showOpenFilePicker', showOpenFilePicker)
+
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await user.click(screen.getByRole('button', { name: 'Choose save' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    vi.unstubAllGlobals()
+    mockBundledDefs()
+    await user.upload(screen.getByLabelText('Save file'), new File(['save'], 'fallback.v3'))
+    expect(await screen.findByText('fallback.v3')).toBeInTheDocument()
+  })
+
+  it('shows a platform save-path hint under the picker', async () => {
+    render(<App wasmApi={mockApi()} />)
+    expect(screen.getByText(/cannot open that path automatically/)).toBeInTheDocument()
+    expect(document.querySelector('.path-hint-path')?.textContent).toMatch(
+      /Paradox Interactive[/\\]Victoria 3[/\\]save games/,
+    )
   })
 })

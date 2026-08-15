@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type DragEvent, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from 'react'
 import whatIfSchemaJson from '../../schema/what-if.json'
 import './App.css'
 import {
@@ -8,7 +8,13 @@ import {
   saveAnalysis,
   serializeAnalysis,
 } from './archive'
+import { FieldHelp } from './FieldHelp'
 import { SchemaForm } from './SchemaForm'
+import {
+  canUseRememberedSavePicker,
+  pickSaveWithRememberedFolder,
+  victoria3SavePaths,
+} from './savePicker'
 import type {
   AnalysisKind,
   AnalysisRecord,
@@ -22,6 +28,12 @@ import type {
   SaveSummary,
 } from './types'
 import { loadWasm, parseSchema, runGaps, type WasmApi } from './wasm'
+
+function bundledDefsUrl(): string {
+  const base = import.meta.env.BASE_URL || '/'
+  const prefix = base.endsWith('/') ? base : `${base}/`
+  return `${prefix}defs.postcard`
+}
 
 interface Props {
   wasmApi?: WasmApi | Promise<WasmApi>
@@ -76,6 +88,10 @@ function App({ wasmApi }: Props) {
   const [saveFile, setSaveFile] = useState<File>()
   const [tokensFile, setTokensFile] = useState<File>()
   const [defsFile, setDefsFile] = useState<File>()
+  const [bundledDefsFile, setBundledDefsFile] = useState<File>()
+  const [bundledDefsStatus, setBundledDefsStatus] = useState<'loading' | 'ready' | 'missing'>(
+    'loading',
+  )
   const [summary, setSummary] = useState<SaveSummary>()
   const [result, setResult] = useState<PricesResult>()
   const [gapsResult, setGapsResult] = useState<GapsResult>()
@@ -91,6 +107,10 @@ function App({ wasmApi }: Props) {
   const [archiveNote, setArchiveNote] = useState<string>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  const saveInputRef = useRef<HTMLInputElement>(null)
+  const savePaths = useMemo(() => victoria3SavePaths(), [])
+  const rememberedPicker = canUseRememberedSavePicker()
+  const effectiveDefs = defsFile ?? bundledDefsFile
 
   useEffect(() => {
     void listAnalyses().then(setRecords)
@@ -105,6 +125,28 @@ function App({ wasmApi }: Props) {
         if (wasmApi) setError('Could not load the analysis engine.')
       })
   }, [wasmApi])
+
+  useEffect(() => {
+    let cancelled = false
+    setBundledDefsStatus('loading')
+    void fetch(bundledDefsUrl())
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const buffer = await response.arrayBuffer()
+        if (cancelled) return
+        setBundledDefsFile(new File([buffer], 'defs.postcard'))
+        setBundledDefsStatus('ready')
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBundledDefsFile(undefined)
+          setBundledDefsStatus('missing')
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (!api || !saveFile) {
@@ -152,14 +194,14 @@ function App({ wasmApi }: Props) {
   }
 
   const run = async (kind: 'prices' | 'what_if') => {
-    if (!api || !saveFile || !defsFile) return
+    if (!api || !saveFile || !effectiveDefs) return
     setBusy(true)
     setError(undefined)
     try {
       const [saveBytes, tokenBytes, defsBytes] = await Promise.all([
         bytes(saveFile),
         bytes(tokensFile),
-        bytes(defsFile),
+        bytes(effectiveDefs),
       ])
       const json =
         kind === 'prices'
@@ -190,6 +232,20 @@ function App({ wasmApi }: Props) {
     if (tokens) setTokensFile(tokens)
   }
 
+  const chooseSave = async () => {
+    if (rememberedPicker) {
+      try {
+        const file = await pickSaveWithRememberedFolder()
+        if (file) setSaveFile(file)
+        return
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : String(reason))
+        return
+      }
+    }
+    saveInputRef.current?.click()
+  }
+
   const submitWhatIf = (event: FormEvent) => {
     event.preventDefault()
     void run('what_if')
@@ -197,14 +253,14 @@ function App({ wasmApi }: Props) {
 
   const submitGaps = async (event: FormEvent) => {
     event.preventDefault()
-    if (!api || !saveFile || !defsFile || !goal.trim()) return
+    if (!api || !saveFile || !effectiveDefs || !goal.trim()) return
     setBusy(true)
     setError(undefined)
     try {
       const [saveBytes, tokenBytes, defsBytes] = await Promise.all([
         bytes(saveFile),
         bytes(tokensFile),
-        bytes(defsFile),
+        bytes(effectiveDefs),
       ])
       const json = await runGaps(api, saveBytes!, tokenBytes, defsBytes!, goal.trim())
       const nextResult = JSON.parse(json) as GapsResult
@@ -219,10 +275,10 @@ function App({ wasmApi }: Props) {
 
   const submitPlan = (event: FormEvent) => {
     event.preventDefault()
-    if (!api || !saveFile || !defsFile) return
+    if (!api || !saveFile || !effectiveDefs) return
     setBusy(true)
     setError(undefined)
-    void Promise.all([bytes(saveFile), bytes(tokensFile), bytes(defsFile)])
+    void Promise.all([bytes(saveFile), bytes(tokensFile), bytes(effectiveDefs)])
       .then(async ([saveBytes, tokenBytes, defsBytes]) => {
         const opts = { goal, max_days: 3650, label: label || null }
         const json = await api.plan(
@@ -312,7 +368,7 @@ function App({ wasmApi }: Props) {
     setArchiveNote(`Reopened ${record.filename ?? record.id} from the local archive.`)
   }
 
-  const ready = Boolean(api && saveFile && defsFile)
+  const ready = Boolean(api && saveFile && effectiveDefs)
 
   return (
     <main>
@@ -326,27 +382,76 @@ function App({ wasmApi }: Props) {
         <div className="drop-zone" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
           <strong>Drop your .v3 save</strong>
           <span>Optionally drop its token map at the same time</span>
-          <label className="file-button">
+          <button type="button" className="file-button" onClick={() => void chooseSave()}>
             Choose save
-            <input
-              aria-label="Save file"
-              type="file"
-              accept=".v3"
-              onChange={(event) => setSaveFile(event.target.files?.[0])}
-            />
-          </label>
+          </button>
+          <input
+            ref={saveInputRef}
+            aria-label="Save file"
+            type="file"
+            accept=".v3"
+            className="visually-hidden"
+            onChange={(event) => setSaveFile(event.target.files?.[0])}
+          />
           {saveFile && <output>{saveFile.name}</output>}
+          <p className="path-hint">{savePaths.summary}</p>
+          <code className="path-hint-path">{savePaths.local}</code>
         </div>
         <div className="support-files">
-          <label>
-            Token map (binary saves only)
-            <input type="file" aria-label="Tokens file" onChange={(e) => setTokensFile(e.target.files?.[0])} />
-          </label>
-          <label>
-            Prebuilt definitions blob
-            <input type="file" aria-label="Definitions blob" onChange={(e) => setDefsFile(e.target.files?.[0])} />
-          </label>
-          <small>Definitions must be an offline postcard blob for the save's game patch.</small>
+          <div className="field-with-help">
+            <label>
+              <span className="field-label-row">
+                Token map (binary saves only)
+                <FieldHelp label="About token maps">
+                  <p>
+                    Binary (Ironman) saves store field names as numbers. A token map is a text file
+                    that translates those numbers back into names so this tool can read the save.
+                  </p>
+                  <p>
+                    Plaintext saves do not need a token map. Token maps stay on your machine and are
+                    never uploaded; this project does not redistribute Paradox tokens.
+                  </p>
+                </FieldHelp>
+              </span>
+              <input
+                type="file"
+                aria-label="Tokens file"
+                onChange={(e) => setTokensFile(e.target.files?.[0])}
+              />
+            </label>
+          </div>
+          <div className="field-with-help">
+            <label>
+              <span className="field-label-row">
+                Definitions blob
+                <FieldHelp label="About definitions">
+                  <p>
+                    Definitions are a postcard-encoded snapshot of goods, needs, and production
+                    methods for a game patch. Analysis uses that blob instead of reading a Victoria
+                    3 install in the browser.
+                  </p>
+                  <p>
+                    The demo ships a fixture blob for local experiments. Prefer a blob built for
+                    your save&apos;s patch when analyzing a real campaign.
+                  </p>
+                </FieldHelp>
+              </span>
+              <input
+                type="file"
+                aria-label="Choose definitions blob"
+                onChange={(e) => setDefsFile(e.target.files?.[0])}
+              />
+            </label>
+            <small>
+              {defsFile
+                ? `Using your file: ${defsFile.name}`
+                : bundledDefsStatus === 'ready'
+                  ? 'Using the bundled demo definitions blob.'
+                  : bundledDefsStatus === 'loading'
+                    ? 'Loading bundled demo definitions…'
+                    : 'Bundled demo definitions are unavailable; choose a postcard blob.'}
+            </small>
+          </div>
         </div>
       </section>
 
