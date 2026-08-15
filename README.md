@@ -4,6 +4,8 @@ AGPL-3.0 Victoria 3 save loader and planner. Given a `.v3` and a high-level goal
 
 **CLI first**, then an in-browser UI (`wasm-bindgen` + React). Saves are never uploaded. Past runs and alternative plans live in a **local archive** (CLI: XDG; UI: IndexedDB).
 
+**Live demo:** [https://jmalicki.github.io/vic3-analyzer/](https://jmalicki.github.io/vic3-analyzer/) — drop a plaintext `.v3` (or fixture bytes); the site ships a fixture defs postcard so prices/what-if/plan work without a game install. Binary token maps are not redistributed.
+
 ## Docs
 
 | Doc | Contents |
@@ -23,10 +25,10 @@ AGPL-3.0 Victoria 3 save loader and planner. Given a `.v3` and a high-level goal
 ```text
 cargo test --workspace
 cargo run -p vic3-cli
-cd web && npm install && npm run dev
+cd web && npm install && npm run build:wasm && npm run build:defs && npm run dev
 ```
 
-CI: `cargo fmt`, `clippy -D warnings`, `cargo test --workspace`. Node lint starts in the UI phase.
+CI runs Rust (`fmt`, `clippy`, `test`) and the web job (`npm test`, `npm run test:wasm`, `npm run build`). Pushes to `main` deploy `web/dist` to GitHub Pages.
 
 ## License
 
