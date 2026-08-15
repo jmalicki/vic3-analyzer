@@ -1,0 +1,29 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+web/dist/
+web/coverage/
+*.local
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Env / secrets
+.env
+.env.*
+*.pem
+
+# Vic3 user data (never commit saves or token maps)
+*.v3
+*tokens*.txt
+*token*map*
+/defs-blob.bin
+
+# Archive dumps
+/archive-export/
