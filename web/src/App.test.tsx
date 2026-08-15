@@ -218,11 +218,20 @@ describe('prices UI', () => {
     render(<App wasmApi={mockApi()} />)
 
     await user.click(screen.getByRole('button', { name: 'About token maps' }))
-    expect(await screen.findByText(/Binary \(Ironman\) saves store field names as numbers/)).toBeInTheDocument()
-    expect(screen.getByText(/does not redistribute Paradox tokens/)).toBeInTheDocument()
+    const tokenHelp = await screen.findByRole('region', { name: 'About token maps' })
+    expect(tokenHelp).toHaveTextContent('0x1234 field_name')
+    expect(tokenHelp).toHaveTextContent('Most players do not need one.')
+    expect(tokenHelp).toHaveTextContent('"save_file_format": "zip_text_all"')
+    expect(tokenHelp).toHaveTextContent('There is no official download')
+    expect(tokenHelp).toHaveTextContent('extracted from your own game build')
+    expect(screen.getByRole('link', { name: 'Victoria 3 wiki' })).toHaveAttribute(
+      'href',
+      'https://vic3.paradoxwikis.com/Save-game_editing',
+    )
 
     await user.click(screen.getByRole('button', { name: 'About definitions' }))
-    expect(await screen.findByText(/postcard-encoded snapshot of goods/)).toBeInTheDocument()
+    const defsHelp = await screen.findByRole('region', { name: 'About definitions' })
+    expect(defsHelp).toHaveTextContent('postcard-encoded snapshot of goods')
   })
 
   it('uses bundled defs by default and lets a custom blob override them', async () => {

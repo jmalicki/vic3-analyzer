@@ -57,6 +57,8 @@ button:focus-visible {
 }
 .field-help-panel p { margin: 0 0 .55rem; font-size: .92rem; line-height: 1.4; font-weight: 400; }
 .field-help-panel p:last-child { margin-bottom: 0; }
+.field-help-panel code { overflow-wrap: anywhere; color: #d7e6a7; font-size: .85em; }
+.field-help-panel a { color: #b9c78c; }
 .path-hint { margin: .35rem 0 0; max-width: 28rem; text-align: center; color: #9ba79d; font-size: .85rem; line-height: 1.4; }
 .path-hint-path {
   display: block;
