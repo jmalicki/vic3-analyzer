@@ -2,7 +2,8 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
-import { clearAnalyses, listAnalyses } from './archive'
+import { clearAnalyses, listAnalyses, saveAnalysis } from './archive'
+import type { AnalysisRecord } from './types'
 import type { WasmApi } from './wasm'
 
 const result = JSON.stringify({
@@ -155,5 +156,36 @@ describe('prices UI', () => {
     const records = await listAnalyses()
     expect(records[0]).toMatchObject({ kind: 'plan', label: 'rush' })
     expect(records[0].result).toMatchObject({ day_cost: 365 })
+  })
+
+  it('compares two mocked archived plan records', async () => {
+    const planRecord = (id: string, label: string, dayCost: number): AnalysisRecord => ({
+      id,
+      created_at: `2026-08-15T12:0${id === 'left' ? '0' : '1'}:00.000Z`,
+      label,
+      kind: 'plan',
+      fingerprint: 'same-save',
+      date: '1840.2.3',
+      country: 'FRA',
+      opts: { goal: 'research(tech=nitroglycerin)' },
+      result: {
+        day_cost: dayCost,
+        actions: [],
+        residual: 0,
+        limitations: [],
+      },
+      limitations: [],
+    })
+    await saveAnalysis(planRecord('left', 'rush', 365))
+    await saveAnalysis(planRecord('right', 'steady', 480))
+
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await user.click(await screen.findByLabelText('Compare rush'))
+    await user.click(screen.getByLabelText('Compare steady'))
+
+    expect(await screen.findByRole('heading', { name: 'Archive comparison' })).toBeInTheDocument()
+    expect(screen.getByText('Alternative plans')).toBeInTheDocument()
+    expect(screen.getByText('+115')).toBeInTheDocument()
   })
 })
