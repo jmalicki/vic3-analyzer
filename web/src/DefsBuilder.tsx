@@ -1,10 +1,16 @@
 import { unzipSync } from 'fflate'
-import { useState, type InputHTMLAttributes } from 'react'
+import { useMemo, useRef, useState, type InputHTMLAttributes } from 'react'
 import {
   packDefsFiles,
   usefulDefsPath,
   type DefsSourceFile,
 } from './defsFiles'
+import { FieldHelp } from './FieldHelp'
+import {
+  canUseRememberedDirectoryPicker,
+  pickGameCommonWithRememberedFolder,
+  victoria3GameCommonPaths,
+} from './savePicker'
 import type { WasmApi } from './wasm'
 
 interface Props {
@@ -38,6 +44,9 @@ async function zippedFiles(file: File): Promise<DefsSourceFile[]> {
 export function DefsBuilder({ api, onBuilt }: Props) {
   const [status, setStatus] = useState<string>()
   const [blob, setBlob] = useState<File>()
+  const folderInputRef = useRef<HTMLInputElement>(null)
+  const commonPaths = useMemo(() => victoria3GameCommonPaths(), [])
+  const rememberedFolder = canUseRememberedDirectoryPicker()
 
   const build = async (files: DefsSourceFile[]) => {
     if (!api) return
@@ -54,10 +63,35 @@ export function DefsBuilder({ api, onBuilt }: Props) {
       })
       setBlob(file)
       onBuilt(file)
-      setStatus(`Built ${file.name} from ${manifest.length} definition files (${file.size.toLocaleString()} bytes).`)
+      setStatus(
+        `Built ${file.name} from ${manifest.length} definition files (${file.size.toLocaleString()} bytes).`,
+      )
     } catch (reason) {
       setStatus(reason instanceof Error ? reason.message : String(reason))
     }
+  }
+
+  const chooseFolder = async () => {
+    if (rememberedFolder) {
+      try {
+        const picked = await pickGameCommonWithRememberedFolder()
+        if (!picked) return
+        const files = await Promise.all(
+          picked
+            .filter((entry) => usefulDefsPath(entry.path))
+            .map(async (entry) => ({
+              path: entry.path,
+              bytes: new Uint8Array(await entry.file.arrayBuffer()),
+            })),
+        )
+        await build(files)
+        return
+      } catch (reason) {
+        setStatus(reason instanceof Error ? reason.message : String(reason))
+        return
+      }
+    }
+    folderInputRef.current?.click()
   }
 
   const download = () => {
@@ -72,26 +106,44 @@ export function DefsBuilder({ api, onBuilt }: Props) {
 
   return (
     <div className="defs-builder">
-      <strong>Build definitions in this browser</strong>
+      <div className="field-label-row">
+        <strong>Build definitions in this browser</strong>
+        <FieldHelp label="Why definitions are needed">
+          <p>
+            Saves freeze the market situation — pops, buildings, trade volumes — but not the game
+            rules those orders depend on. Base prices (<code>cost</code> in{' '}
+            <code>common/goods</code>), production-method recipes, pop needs, and buy packages live
+            under your Victoria 3 install&apos;s <code>game/common</code> tree.
+          </p>
+          <p>
+            This builder packs those Clausewitz files into a local <code>defs.postcard</code> blob
+            the price solver can use. Without it, only goods present in the tiny demo fixture get
+            prices. Files never leave the browser; Chromium can remember the folder after you choose
+            it once.
+          </p>
+        </FieldHelp>
+      </div>
       <p>
-        Select your Victoria 3 <code>game/common</code> folder, or a zip containing it. Files are
-        read locally and are never uploaded.
+        Prices need base costs and recipes from <code>game/common</code>; the save alone does not
+        carry them. Pick that folder (or a zip of it) to build a local defs blob.
       </p>
       <div className="defs-builder-actions">
-        <label className="file-button secondary">
+        <button type="button" className="file-button secondary" onClick={() => void chooseFolder()}>
           Choose game/common folder
-          <input
-            {...directoryProps}
-            type="file"
-            multiple
-            aria-label="Victoria 3 definitions folder"
-            onChange={(event) => {
-              const files = event.target.files
-              if (files) void browserFiles(files).then(build)
-              event.target.value = ''
-            }}
-          />
-        </label>
+        </button>
+        <input
+          {...directoryProps}
+          ref={folderInputRef}
+          type="file"
+          multiple
+          className="visually-hidden"
+          aria-label="Victoria 3 definitions folder"
+          onChange={(event) => {
+            const files = event.target.files
+            if (files) void browserFiles(files).then(build)
+            event.target.value = ''
+          }}
+        />
         <label className="file-button secondary">
           Choose definitions zip
           <input
@@ -111,6 +163,8 @@ export function DefsBuilder({ api, onBuilt }: Props) {
           </button>
         )}
       </div>
+      <p className="path-hint">{commonPaths.summary}</p>
+      <code className="path-hint-path">{commonPaths.local}</code>
       {status && <small role="status">{status}</small>}
     </div>
   )

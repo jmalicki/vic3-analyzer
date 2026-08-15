@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  canUseRememberedDirectoryPicker,
   canUseRememberedSavePicker,
   detectPlatform,
+  pickGameCommonWithRememberedFolder,
   pickSaveWithRememberedFolder,
+  victoria3GameCommonPaths,
   victoria3SavePaths,
   type Platform,
 } from './savePicker'
@@ -56,5 +59,71 @@ describe('remembered save picker', () => {
       }),
     } as unknown as Window
     await expect(pickSaveWithRememberedFolder(cancelled)).resolves.toBeUndefined()
+  })
+})
+
+describe('game common paths', () => {
+  it('returns the Windows Steam game/common path', () => {
+    const hint = victoria3GameCommonPaths('windows')
+    expect(hint.local).toContain('steamapps\\common\\Victoria 3\\game\\common')
+    expect(hint.summary).toContain('cannot open that path automatically')
+  })
+
+  it('returns the macOS Steam game/common path', () => {
+    const hint = victoria3GameCommonPaths('macos')
+    expect(hint.local).toBe(
+      '~/Library/Application Support/Steam/steamapps/common/Victoria 3/game/common',
+    )
+  })
+
+  it('returns the Linux Steam game/common path', () => {
+    const hint = victoria3GameCommonPaths('linux')
+    expect(hint.local).toBe(
+      '~/.local/share/Steam/steamapps/common/Victoria 3/game/common',
+    )
+  })
+})
+
+describe('remembered game-common directory picker', () => {
+  it('reports support only when showDirectoryPicker exists', () => {
+    expect(canUseRememberedDirectoryPicker({} as Window)).toBe(false)
+    expect(
+      canUseRememberedDirectoryPicker({
+        showDirectoryPicker: async () => ({}) as FileSystemDirectoryHandle,
+      } as unknown as Window),
+    ).toBe(true)
+  })
+
+  it('walks the selected directory and swallows AbortError', async () => {
+    const file = new File(['grain = { cost = 20 }'], 'goods.txt')
+    const goodsDir = {
+      kind: 'directory',
+      async *entries() {
+        yield ['goods.txt', { kind: 'file', getFile: async () => file }] as const
+      },
+    }
+    const commonDir = {
+      kind: 'directory',
+      async *entries() {
+        yield ['goods', goodsDir] as const
+      },
+    }
+    const win = {
+      showDirectoryPicker: vi.fn(async () => ({
+        async *entries() {
+          yield ['common', commonDir] as const
+        },
+      })),
+    } as unknown as Window
+    await expect(pickGameCommonWithRememberedFolder(win)).resolves.toEqual([
+      { path: 'common/goods/goods.txt', file },
+    ])
+
+    const cancelled = {
+      showDirectoryPicker: vi.fn(async () => {
+        throw new DOMException('cancelled', 'AbortError')
+      }),
+    } as unknown as Window
+    await expect(pickGameCommonWithRememberedFolder(cancelled)).resolves.toBeUndefined()
   })
 })

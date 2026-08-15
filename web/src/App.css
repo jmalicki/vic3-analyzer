@@ -121,6 +121,8 @@ section[aria-labelledby] { margin-top: 1rem; }
 .defs-builder { border-top: 1px solid #37433a; display: grid; gap: .65rem; padding-top: 1rem; }
 .defs-builder p { color: #9ba79d; font-size: .88rem; line-height: 1.4; margin: 0; }
 .defs-builder code { color: #d7e6a7; }
+.defs-builder .path-hint { max-width: none; text-align: left; }
+.defs-builder .path-hint-path { display: block; margin-top: .2rem; text-align: left; word-break: break-all; }
 .defs-builder-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .secondary { background: #29362c; color: #e9eadf; font-size: .85rem; }
 .site-footer {

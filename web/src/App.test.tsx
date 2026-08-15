@@ -303,10 +303,11 @@ describe('prices UI', () => {
 
   it('shows a platform save-path hint under the picker', async () => {
     render(<App wasmApi={mockApi()} />)
-    expect(screen.getByText(/cannot open that path automatically/)).toBeInTheDocument()
-    expect(document.querySelector('.path-hint-path')?.textContent).toMatch(
-      /Paradox Interactive[/\\]Victoria 3[/\\]save games/,
-    )
+    expect(screen.getByText(/Usual local folder:/)).toBeInTheDocument()
+    expect(screen.getByText(/Usual Steam folder:/)).toBeInTheDocument()
+    expect(
+      [...document.querySelectorAll('.path-hint-path')].map((el) => el.textContent).join('\n'),
+    ).toMatch(/Paradox Interactive[/\\]Victoria 3[/\\]save games/)
   })
 
   it('shows version, revision, and build time in the footer', () => {
