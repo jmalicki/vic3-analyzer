@@ -17,6 +17,10 @@ fn save_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vic3-load/tests/fixtures/plaintext.txt")
 }
 
+fn barren_save_fixture() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/barren.txt")
+}
+
 fn prices_cmd() -> Command {
     let mut cmd = bin();
     cmd.args([
@@ -41,6 +45,20 @@ fn what_if_cmd() -> Command {
         "building_rye_farm",
         "--extra-levels",
         "5",
+    ]);
+    cmd
+}
+
+fn gaps_cmd() -> Command {
+    let mut cmd = bin();
+    cmd.args([
+        "gaps",
+        "--save",
+        barren_save_fixture().to_str().expect("utf8 save path"),
+        "--game",
+        defs_fixture().to_str().expect("utf8 defs path"),
+        "--goal",
+        "declare-war(tag=FRA, wargoal=conquer_state, state=alsace)",
     ]);
     cmd
 }
@@ -103,7 +121,45 @@ fn what_if_json_has_residual_and_limitations() {
 }
 
 #[test]
+fn gaps_json_has_declare_war_atoms_and_limitations() {
+    let assert = gaps_cmd().arg("--json").assert().success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let value: Value = serde_json::from_str(&stdout).expect("GapsResult JSON");
+
+    assert_eq!(value.get("satisfied"), Some(&Value::Bool(false)));
+    let gaps = value
+        .get("gaps")
+        .and_then(Value::as_array)
+        .expect("gaps array");
+    assert_eq!(gaps.len(), 4, "expected all declare-war gaps: {value}");
+    assert!(
+        gaps.iter().any(|gap| gap.get("InterestIn").is_some()),
+        "interest gap: {gaps:?}"
+    );
+    assert!(
+        gaps.iter().any(|gap| gap.get("ArmyPower").is_some()),
+        "army gap: {gaps:?}"
+    );
+    assert!(
+        gaps.iter().any(|gap| gap.get("GoodPrice").is_some()),
+        "munitions-price gap: {gaps:?}"
+    );
+    assert!(
+        gaps.iter().any(|gap| gap == "Solvent"),
+        "solvent gap: {gaps:?}"
+    );
+    assert!(
+        value
+            .get("limitations")
+            .and_then(Value::as_array)
+            .is_some_and(|limitations| !limitations.is_empty()),
+        "price limitations: {value}"
+    );
+}
+
+#[test]
 fn fixtures_exist() {
     assert!(Path::new(&defs_fixture()).join("common/goods").is_dir());
     assert!(save_fixture().is_file());
+    assert!(barren_save_fixture().is_file());
 }

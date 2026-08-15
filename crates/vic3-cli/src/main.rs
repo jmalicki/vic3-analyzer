@@ -1,28 +1,32 @@
-//! CLI: `prices` / `what-if`. clap lives only in this crate.
+//! CLI: `prices` / `what-if` / `gaps`. clap lives only in this crate.
 
 use std::io::{self, Write};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
+use serde::Serialize;
 use vic3_defs::GameDefs;
-use vic3_load::{empty_tokens, load_path, load_tokens_path};
+use vic3_goals::Atom;
+use vic3_load::{empty_tokens, load_path, load_tokens_path, Save};
 use vic3_prices::{solve, what_if, PricesResult, SolveOpts, WhatIfOpts, World};
+use vic3_world::PlanningState;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Prices(cmd) => {
-            let (world, defs) = load_inputs(&cmd.io)?;
+            let (_, world, defs) = load_inputs(&cmd.io)?;
             emit(&solve(&world, &defs, cmd.solve.into()), cmd.json)
         }
         Commands::WhatIf(cmd) => {
-            let (world, defs) = load_inputs(&cmd.io)?;
+            let (_, world, defs) = load_inputs(&cmd.io)?;
             emit(
                 &what_if(&world, &defs, &cmd.what_if.into(), cmd.solve.into()),
                 cmd.json,
             )
         }
+        Commands::Gaps(cmd) => run_gaps(cmd),
     }
 }
 
@@ -40,6 +44,8 @@ enum Commands {
     Prices(PricesCli),
     /// Apply extra building levels and re-solve. Employment stays frozen.
     WhatIf(WhatIfCli),
+    /// Evaluate a goal and list its currently unsatisfied atoms.
+    Gaps(GapsCli),
 }
 
 /// Filesystem inputs. Inner option structs (`SolveOpts`, `WhatIfOpts`) have no `PathBuf`.
@@ -120,7 +126,28 @@ struct WhatIfCli {
     solve: SolveArgs,
 }
 
-fn load_inputs(io: &IoArgs) -> Result<(World, GameDefs)> {
+#[derive(Debug, Args)]
+struct GapsCli {
+    #[command(flatten)]
+    io: IoArgs,
+    /// Goal DSL expression to evaluate.
+    #[arg(long)]
+    goal: String,
+    /// Print gap JSON (includes price-solve `limitations`).
+    #[arg(long)]
+    json: bool,
+    #[command(flatten)]
+    solve: SolveArgs,
+}
+
+#[derive(Debug, Serialize)]
+struct GapsResult {
+    satisfied: bool,
+    gaps: Vec<Atom>,
+    limitations: Vec<String>,
+}
+
+fn load_inputs(io: &IoArgs) -> Result<(Save, World, GameDefs)> {
     let defs = vic3_defs::load_from_path(&io.game)
         .with_context(|| format!("loading defs from {}", io.game.display()))?;
     let save = if let Some(tokens) = &io.tokens {
@@ -131,7 +158,48 @@ fn load_inputs(io: &IoArgs) -> Result<(World, GameDefs)> {
         load_path(&io.save, empty_tokens())
     }
     .with_context(|| format!("loading save from {}", io.save.display()))?;
-    Ok((World::from_save(&save), defs))
+    let world = World::from_save(&save);
+    Ok((save, world, defs))
+}
+
+fn run_gaps(cmd: GapsCli) -> Result<()> {
+    let (save, world, defs) = load_inputs(&cmd.io)?;
+    let prices = solve(&world, &defs, cmd.solve.into());
+    let country_tag = save
+        .previous_played
+        .iter()
+        .find_map(|player| player.name.as_deref())
+        .or_else(|| {
+            save.countries()
+                .next()
+                .map(|(_, country)| country.definition.as_str())
+        })
+        .context("save has no playable country")?;
+    let state = PlanningState::from_save(&save, country_tag, &prices)?;
+    let goal = vic3_goals::parse(&cmd.goal)?;
+    let result = GapsResult {
+        satisfied: vic3_goals::evaluate(&goal, &state),
+        gaps: vic3_goals::gaps(&goal, &state),
+        limitations: prices.limitations,
+    };
+    emit_gaps(&result, cmd.json)
+}
+
+fn emit_gaps(result: &GapsResult, json: bool) -> Result<()> {
+    if json {
+        serde_json::to_writer(io::stdout(), result)?;
+        writeln!(io::stdout())?;
+        return Ok(());
+    }
+    if result.gaps.is_empty() {
+        writeln!(io::stdout(), "goal satisfied")?;
+    } else {
+        for gap in &result.gaps {
+            writeln!(io::stdout(), "- {gap:?}")?;
+        }
+    }
+    writeln!(io::stderr(), "warning: {}", result.limitations.join(" "))?;
+    Ok(())
 }
 
 fn emit(result: &PricesResult, json: bool) -> Result<()> {
