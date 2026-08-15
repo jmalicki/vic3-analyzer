@@ -20,6 +20,7 @@ repository = "https://github.com/jmalicki/vic3-analyzer"
 rust-version = "1.85"
 
 [workspace.dependencies]
+basin = "1.5"
 jomini = { version = "0.35", features = ["envelope"] }
 postcard = { version = "1.1", default-features = false, features = ["use-std"] }
 proptest = "1"
