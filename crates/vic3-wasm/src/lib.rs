@@ -340,8 +340,7 @@ mod tests {
 
     fn barren_fixture() -> Vec<u8> {
         std::fs::read(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../vic3-cli/tests/fixtures/barren.txt"),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vic3-cli/tests/fixtures/barren.txt"),
         )
         .expect("barren fixture")
     }

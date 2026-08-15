@@ -48,10 +48,6 @@ fn main() -> ExitCode {
         eprintln!("write {}: {err}", out.display());
         return ExitCode::FAILURE;
     }
-    eprintln!(
-        "wrote {} bytes to {}",
-        blob.len(),
-        out.display()
-    );
+    eprintln!("wrote {} bytes to {}", blob.len(), out.display());
     ExitCode::SUCCESS
 }
