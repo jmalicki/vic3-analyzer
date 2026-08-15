@@ -16,10 +16,13 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 vic3-defs = { path = "../vic3-defs" }
+vic3-goals = { path = "../vic3-goals" }
 vic3-load = { path = "../vic3-load" }
 vic3-prices = { path = "../vic3-prices" }
+vic3-world = { path = "../vic3-world" }
 
 [dev-dependencies]
 assert_cmd = "2"

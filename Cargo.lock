@@ -1139,10 +1139,13 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
+ "serde",
  "serde_json",
  "vic3-defs",
+ "vic3-goals",
  "vic3-load",
  "vic3-prices",
+ "vic3-world",
 ]
 
 [[package]]
