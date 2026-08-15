@@ -23,6 +23,11 @@ The Vite `base` is `/vic3-analyzer/` so assets resolve on GitHub Pages at
 `https://jmalicki.github.io/vic3-analyzer/`. `loadWasm` joins
 `import.meta.env.BASE_URL` with `wasm/vic3_wasm.js`.
 
+The UI loads `public/defs.postcard` by default, explains token maps / definitions
+via accessible help, and shows the usual Victoria 3 save folder for your OS.
+Chromium can remember the last chosen save folder; other browsers keep the
+standard file input (sites cannot force an arbitrary local path).
+
 ## wasm and definitions
 
 `npm run build:wasm` runs `wasm-pack --target web` into `public/wasm/`
