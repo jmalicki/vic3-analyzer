@@ -10,6 +10,8 @@ import {
 import { DefsBuilder } from './DefsBuilder'
 import { FieldHelp } from './FieldHelp'
 import { GoalBuilder } from './GoalBuilder'
+import { Modal } from './Modal'
+import { ProgressBar } from './ProgressBar'
 import {
   canUseRememberedSavePicker,
   pickSaveWithRememberedFolder,
@@ -110,6 +112,7 @@ function App({ wasmApi }: Props) {
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
   const [archiveNote, setArchiveNote] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const [builderOpen, setBuilderOpen] = useState(false)
   const [error, setError] = useState<string>()
   const saveInputRef = useRef<HTMLInputElement>(null)
   const savePaths = useMemo(() => victoria3SavePaths(), [])
@@ -376,7 +379,10 @@ function App({ wasmApi }: Props) {
     setArchiveNote(`Reopened ${record.filename ?? record.id} from the local archive.`)
   }
 
+  const hasDefs = Boolean(effectiveDefs)
   const ready = Boolean(api && saveFile && effectiveDefs)
+  // The archive only reads stored records, so it stays usable without defs.
+  const gated = !hasDefs && activeView !== 'archive'
 
   return (
     <main>
@@ -479,10 +485,24 @@ function App({ wasmApi }: Props) {
                     ? 'Loading bundled demo definitions…'
                     : 'Bundled demo definitions are unavailable; choose a postcard blob.'}
             </small>
-            <DefsBuilder api={api} onBuilt={setDefsFile} />
+            <button type="button" className="secondary" onClick={() => setBuilderOpen(true)}>
+              Build definitions from game files…
+            </button>
           </div>
         </div>
       </section>
+
+      {builderOpen && (
+        <Modal title="Build definitions from game files" onClose={() => setBuilderOpen(false)}>
+          <DefsBuilder
+            api={api}
+            onBuilt={(file) => {
+              setDefsFile(file)
+              setBuilderOpen(false)
+            }}
+          />
+        </Modal>
+      )}
 
       {summary && (
         <section className="save-summary" aria-label="Save summary">
@@ -515,8 +535,21 @@ function App({ wasmApi }: Props) {
         ))}
       </nav>
 
+      {!hasDefs && (
+        <p className="defs-required" role="status">
+          {bundledDefsStatus === 'loading'
+            ? 'Loading definitions…'
+            : 'Definitions are required before analysis. Build them from your game files or choose a postcard blob above.'}
+        </p>
+      )}
+
+      {busy && <ProgressBar label="Analyzing in wasm" />}
+
       {activeView === 'prices' && (
-        <section className="workspace-page" aria-labelledby="prices-tool-heading">
+        <section
+          className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
+          aria-labelledby="prices-tool-heading"
+        >
           <div className="tool-heading">
             <div>
               <p className="eyebrow">MARKET</p>
@@ -537,7 +570,10 @@ function App({ wasmApi }: Props) {
       )}
 
       {activeView === 'what-if' && (
-        <section className="workspace-page" aria-labelledby="what-if-heading">
+        <section
+          className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
+          aria-labelledby="what-if-heading"
+        >
           <form className="guided-form" onSubmit={submitWhatIf}>
             <p className="eyebrow">SCENARIO</p>
             <h2 id="what-if-heading">What-if scenario</h2>
@@ -596,7 +632,10 @@ function App({ wasmApi }: Props) {
       )}
 
       {activeView === 'timeline' && (
-        <section className="workspace-page" aria-labelledby="timeline-tool-heading">
+        <section
+          className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
+          aria-labelledby="timeline-tool-heading"
+        >
           <form className="guided-form" onSubmit={submitPlan}>
             <p className="eyebrow">PLANNING</p>
             <h2 id="timeline-tool-heading">Plan timeline</h2>
@@ -623,7 +662,10 @@ function App({ wasmApi }: Props) {
       )}
 
       {activeView === 'gaps' && (
-        <section className="workspace-page" aria-labelledby="gaps-form-heading">
+        <section
+          className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
+          aria-labelledby="gaps-form-heading"
+        >
           <form className="guided-form" onSubmit={(event) => void submitGaps(event)}>
             <p className="eyebrow">READINESS</p>
             <h2 id="gaps-form-heading">Goal gaps</h2>

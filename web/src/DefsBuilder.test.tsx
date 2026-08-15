@@ -1,10 +1,38 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { zipSync } from 'fflate'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DefsBuilder } from './DefsBuilder'
-import { packDefsFiles } from './defsFiles'
+import {
+  collectDroppedDefsFiles,
+  packDefsFiles,
+  type DefsDropEntry,
+} from './defsFiles'
 import type { WasmApi } from './wasm'
+
+function fileEntry(name: string, contents: string): DefsDropEntry {
+  return {
+    isFile: true,
+    isDirectory: false,
+    name,
+    file: (resolve: (file: File) => void) => resolve(new File([contents], name)),
+  }
+}
+
+function dirEntry(name: string, children: DefsDropEntry[]): DefsDropEntry {
+  let sent = false
+  return {
+    isFile: false,
+    isDirectory: true,
+    name,
+    createReader: () => ({
+      readEntries: (resolve: (entries: DefsDropEntry[]) => void) => {
+        resolve(sent ? [] : children)
+        sent = true
+      },
+    }),
+  }
+}
 
 function api(): WasmApi {
   return {
@@ -68,6 +96,42 @@ describe('DefsBuilder', () => {
     expect(await screen.findByText(/Built defs.postcard from 1 definition files/)).toBeInTheDocument()
   })
 
+  it('walks a dropped folder tree through the entries API', async () => {
+    const common = dirEntry('common', [
+      dirEntry('goods', [fileEntry('00_goods.txt', 'grain = { cost = 20 }')]),
+      dirEntry('art', [fileEntry('ignored.txt', 'x')]),
+    ])
+
+    const files = await collectDroppedDefsFiles([{ webkitGetAsEntry: () => common }])
+    expect(files.map((file) => file.path)).toEqual(['common/goods/00_goods.txt'])
+  })
+
+  it('builds from a folder dragged onto the drop zone', async () => {
+    const wasm = api()
+    const onBuilt = vi.fn()
+    render(<DefsBuilder api={wasm} onBuilt={onBuilt} />)
+    const common = dirEntry('common', [
+      dirEntry('goods', [fileEntry('00_goods.txt', 'grain = { cost = 20 }')]),
+    ])
+
+    fireEvent.drop(screen.getByLabelText('Drop the game/common folder'), {
+      dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
+    })
+
+    await waitFor(() => expect(wasm.build_defs_blob).toHaveBeenCalled())
+    expect(onBuilt).toHaveBeenCalledWith(expect.objectContaining({ name: 'defs.postcard' }))
+  })
+
+  it('explains an empty drop instead of failing silently', async () => {
+    render(<DefsBuilder api={api()} onBuilt={vi.fn()} />)
+
+    fireEvent.drop(screen.getByLabelText('Drop the game/common folder'), {
+      dataTransfer: { files: [], items: [] },
+    })
+
+    expect(await screen.findByText(/no common\/\*\.txt files/)).toBeInTheDocument()
+  })
+
   it('opens the folder input from the visible button', async () => {
     const user = userEvent.setup()
     render(<DefsBuilder api={api()} onBuilt={vi.fn()} />)
@@ -76,6 +140,29 @@ describe('DefsBuilder', () => {
 
     await user.click(screen.getByRole('button', { name: 'Choose game/common folder' }))
     expect(click).toHaveBeenCalled()
+  })
+
+  it('reports progress while wasm parses the definitions', async () => {
+    let release: (bytes: Uint8Array) => void = () => {}
+    const wasm = {
+      build_defs_blob: vi.fn(
+        () => new Promise<Uint8Array>((resolve) => (release = resolve)),
+      ),
+    } as unknown as WasmApi
+    render(<DefsBuilder api={wasm} onBuilt={vi.fn()} />)
+    const common = dirEntry('common', [
+      dirEntry('goods', [fileEntry('00_goods.txt', 'grain = { cost = 20 }')]),
+    ])
+
+    fireEvent.drop(screen.getByLabelText('Drop the game/common folder'), {
+      dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
+    })
+
+    const bar = await screen.findByRole('progressbar', { name: 'Parsing definitions in wasm' })
+    expect(bar).not.toHaveAttribute('value')
+
+    release(new Uint8Array([1, 2, 3]))
+    await waitFor(() => expect(screen.queryByRole('progressbar')).not.toBeInTheDocument())
   })
 
   it('copies the platform path for pasting into the folder dialog', async () => {

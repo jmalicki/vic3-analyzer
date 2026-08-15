@@ -1,11 +1,19 @@
 import { unzipSync } from 'fflate'
-import { useMemo, useRef, useState, type InputHTMLAttributes } from 'react'
 import {
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type InputHTMLAttributes,
+} from 'react'
+import {
+  collectDroppedDefsFiles,
   packDefsFiles,
   usefulDefsPath,
   type DefsSourceFile,
 } from './defsFiles'
 import { FieldHelp } from './FieldHelp'
+import { ProgressBar } from './ProgressBar'
 import { victoria3GameCommonPaths } from './savePicker'
 import type { WasmApi } from './wasm'
 
@@ -14,21 +22,19 @@ interface Props {
   onBuilt: (file: File) => void
 }
 
+type Progress = {
+  label: string
+  done?: number
+  total?: number
+}
+
 const directoryProps = {
   webkitdirectory: '',
   directory: '',
 } as InputHTMLAttributes<HTMLInputElement>
 
-async function browserFiles(files: FileList): Promise<DefsSourceFile[]> {
-  return Promise.all(
-    [...files]
-      .filter((file) => usefulDefsPath(file.webkitRelativePath || file.name))
-      .map(async (file) => ({
-        path: file.webkitRelativePath || file.name,
-        bytes: new Uint8Array(await file.arrayBuffer()),
-      })),
-  )
-}
+/** Repaint every 32 files so a 3000-file install does not thrash React. */
+const PROGRESS_STRIDE = 32
 
 async function zippedFiles(file: File): Promise<DefsSourceFile[]> {
   const archive = unzipSync(new Uint8Array(await file.arrayBuffer()))
@@ -40,12 +46,15 @@ async function zippedFiles(file: File): Promise<DefsSourceFile[]> {
 export function DefsBuilder({ api, onBuilt }: Props) {
   const [status, setStatus] = useState<string>()
   const [blob, setBlob] = useState<File>()
+  const [dragging, setDragging] = useState(false)
+  const [progress, setProgress] = useState<Progress>()
   const folderInputRef = useRef<HTMLInputElement>(null)
   const commonPaths = useMemo(() => victoria3GameCommonPaths(), [])
 
   const build = async (files: DefsSourceFile[]) => {
     if (!api) return
-    setStatus('Building definitions…')
+    setProgress({ label: 'Parsing definitions in wasm' })
+    setStatus(undefined)
     try {
       const packed = packDefsFiles(files)
       const manifest = JSON.parse(packed.manifestJson) as unknown[]
@@ -63,7 +72,50 @@ export function DefsBuilder({ api, onBuilt }: Props) {
       )
     } catch (reason) {
       setStatus(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setProgress(undefined)
     }
+  }
+
+  const readSelected = async (list: FileList): Promise<DefsSourceFile[]> => {
+    const chosen = [...list].filter((file) =>
+      usefulDefsPath(file.webkitRelativePath || file.name),
+    )
+    const label = 'Reading definition files'
+    setProgress({ label, done: 0, total: chosen.length })
+    const out: DefsSourceFile[] = []
+    for (const file of chosen) {
+      out.push({
+        path: file.webkitRelativePath || file.name,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+      })
+      if (out.length % PROGRESS_STRIDE === 0 || out.length === chosen.length) {
+        setProgress({ label, done: out.length, total: chosen.length })
+      }
+    }
+    return out
+  }
+
+  const handleDrop = async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setDragging(false)
+    const zip = [...event.dataTransfer.files].find((file) => file.name.endsWith('.zip'))
+    if (zip) {
+      setProgress({ label: 'Unpacking zip' })
+      await build(await zippedFiles(zip))
+      return
+    }
+    const label = 'Reading dropped files'
+    setProgress({ label, done: 0 })
+    const files = await collectDroppedDefsFiles(event.dataTransfer.items ?? [], (read) => {
+      if (read % PROGRESS_STRIDE === 0) setProgress({ label, done: read })
+    })
+    if (files.length === 0) {
+      setProgress(undefined)
+      setStatus('That drop had no common/*.txt files. Drag the common folder itself (or game/common).')
+      return
+    }
+    await build(files)
   }
 
   const copyPath = async () => {
@@ -102,18 +154,35 @@ export function DefsBuilder({ api, onBuilt }: Props) {
             prices. Files never leave the browser.
           </p>
           <p>
-            Browsers cannot open a path for you, and Chrome&apos;s newer folder API refuses Steam&apos;s
-            install location outright (<code>~/Library</code> on macOS, <code>Program Files</code> on
-            Windows). Copy the path below, then paste it in the folder dialog — macOS{' '}
-            <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>, Linux <kbd>Ctrl</kbd>+<kbd>L</kbd>, Windows
-            address bar. Picking a zip of <code>common</code> avoids the dialog entirely.
+            Chrome blocks Steam&apos;s install location in its folder APIs (<code>~/Library</code> on
+            macOS, <code>Program Files</code> on Windows), and it will not open a path for you.
+            <strong> Dragging the folder in is not restricted</strong>, so that is the reliable route;
+            a zip of <code>common</code> works too. If you do use the dialog, paste the copied path
+            with <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> (macOS) or <kbd>Ctrl</kbd>+<kbd>L</kbd>{' '}
+            (Linux).
           </p>
         </FieldHelp>
       </div>
       <p>
         Prices need base costs and recipes from <code>game/common</code>; the save alone does not
-        carry them. Pick that folder (or a zip of it) to build a local defs blob.
+        carry them. Drag that folder here, or pick it (or a zip of it) below.
       </p>
+      <div
+        className={dragging ? 'defs-drop dragging' : 'defs-drop'}
+        aria-label="Drop the game/common folder"
+        onDragOver={(event) => {
+          event.preventDefault()
+          setDragging(true)
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(event) => void handleDrop(event)}
+      >
+        <strong>Drag the <code>common</code> folder from Finder or Explorer</strong>
+        <span>
+          Dropping works even where the folder picker is blocked. In Steam: right-click Victoria 3 →
+          Manage → Browse local files.
+        </span>
+      </div>
       <div className="defs-builder-actions">
         <button
           type="button"
@@ -131,7 +200,7 @@ export function DefsBuilder({ api, onBuilt }: Props) {
           aria-label="Victoria 3 definitions folder"
           onChange={(event) => {
             const files = event.target.files
-            if (files) void browserFiles(files).then(build)
+            if (files) void readSelected(files).then(build)
             event.target.value = ''
           }}
         />
@@ -143,7 +212,10 @@ export function DefsBuilder({ api, onBuilt }: Props) {
             aria-label="Victoria 3 definitions zip"
             onChange={(event) => {
               const file = event.target.files?.[0]
-              if (file) void zippedFiles(file).then(build)
+              if (file) {
+                setProgress({ label: 'Unpacking zip' })
+                void zippedFiles(file).then(build)
+              }
               event.target.value = ''
             }}
           />
@@ -162,6 +234,9 @@ export function DefsBuilder({ api, onBuilt }: Props) {
         </button>
       </div>
       <p className="path-hint">{commonPaths.summary}</p>
+      {progress && (
+        <ProgressBar label={progress.label} done={progress.done} total={progress.total} />
+      )}
       {status && <small role="status">{status}</small>}
     </div>
   )

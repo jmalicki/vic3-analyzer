@@ -304,10 +304,34 @@ describe('prices UI', () => {
   it('shows a platform save-path hint under the picker', async () => {
     render(<App wasmApi={mockApi()} />)
     expect(screen.getByText('Usual local folder')).toBeInTheDocument()
-    expect(screen.getByText('Usual Steam folder')).toBeInTheDocument()
-    expect(
-      [...document.querySelectorAll('.path-hint-path')].map((el) => el.textContent).join('\n'),
-    ).toMatch(/Paradox Interactive[/\\]Victoria 3[/\\]save games/)
+    expect(document.querySelector('.path-hint-path')?.textContent).toMatch(
+      /Paradox Interactive[/\\]Victoria 3[/\\]save games/,
+    )
+  })
+
+  it('opens the definitions builder in a modal dialog', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Build definitions from game files/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Build definitions from game files' })
+    expect(dialog).toHaveTextContent('Usual Steam folder')
+
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('greys out analysis tools until definitions are available', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('no defs'))
+    render(<App wasmApi={mockApi()} />)
+
+    expect(await screen.findByText(/Definitions are required before analysis/)).toBeInTheDocument()
+    await waitFor(() =>
+      expect(document.querySelector('.workspace-page')).toHaveClass('needs-defs'),
+    )
+    expect(screen.getByRole('button', { name: 'Analyze prices' })).toBeDisabled()
+    fetchMock.mockRestore()
   })
 
   it('shows version, revision, and build time in the footer', () => {
