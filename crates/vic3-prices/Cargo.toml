@@ -10,5 +10,10 @@ description = "Victoria 3 market price equilibrium (Basin NLS + pop consumption)
 workspace = true
 
 [dependencies]
+basin.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+vic3-defs = { path = "../vic3-defs" }
+
+[dev-dependencies]
+proptest.workspace = true
