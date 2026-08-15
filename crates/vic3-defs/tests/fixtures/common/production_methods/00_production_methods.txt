@@ -1,0 +1,16 @@
+pm_simple_forestry = {
+	building_modifiers = {
+		workforce_scaled = {
+			goods_input_tools_add = 1
+			goods_output_wood_add = 30
+		}
+	}
+}
+
+pm_simple_mining = {
+	building_modifiers = {
+		workforce_scaled = {
+			goods_output_coal_add = 25
+		}
+	}
+}

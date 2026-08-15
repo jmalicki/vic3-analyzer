@@ -1,0 +1,6 @@
+# Simplified vs a full Vic3 `00_defines.txt`. The loader also accepts
+# `NDefines.NEconomy.PRICE_RANGE` and a bare top-level `PRICE_RANGE`.
+
+NEconomy = {
+	PRICE_RANGE = 0.75
+}

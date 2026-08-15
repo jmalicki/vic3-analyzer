@@ -1,0 +1,15 @@
+# Two wealth packages so substitution/caps can be exercised across SoL.
+
+wealth_1 = {
+	political_strength = 0.03
+	goods = {
+		popneed_heating = 15
+	}
+}
+
+wealth_2 = {
+	political_strength = 0.04
+	goods = {
+		popneed_heating = 17
+	}
+}

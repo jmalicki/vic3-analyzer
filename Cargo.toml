@@ -21,6 +21,8 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 jomini = { version = "0.35", features = ["envelope"] }
+postcard = { version = "1.1", default-features = false, features = ["use-std"] }
+proptest = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 vic3save = { git = "https://github.com/pdx-tools/pdx-tools", rev = "092edec7a853f67eea892c0d3a145329b924e103", package = "vic3save" }

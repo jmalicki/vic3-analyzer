@@ -1,0 +1,5 @@
+# No obsessions in this fixture; the loader still scans `common/cultures`.
+
+test_culture = {
+	religion = protestant
+}
