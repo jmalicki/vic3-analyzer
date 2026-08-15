@@ -13,3 +13,6 @@ workspace = true
 serde.workspace = true
 thiserror.workspace = true
 rust-advanced-heaps.workspace = true
+
+[dev-dependencies]
+proptest = "1"
