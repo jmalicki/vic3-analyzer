@@ -1188,6 +1188,9 @@ dependencies = [
  "rust-advanced-heaps",
  "serde",
  "thiserror",
+ "vic3-goals",
+ "vic3-sim",
+ "vic3-world",
 ]
 
 [[package]]

@@ -13,6 +13,9 @@ workspace = true
 serde.workspace = true
 thiserror.workspace = true
 rust-advanced-heaps.workspace = true
+vic3-goals = { path = "../vic3-goals" }
+vic3-sim = { path = "../vic3-sim" }
+vic3-world = { path = "../vic3-world" }
 
 [dev-dependencies]
 proptest = "1"
