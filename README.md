@@ -18,6 +18,11 @@ cargo run -p vic3-cli -- defs export \
 Upload `defs.postcard` in the web UI. Do not commit or publish it: it is derived
 from Paradox game data.
 
+Alternatively, the web UI can build the blob locally: choose the installed
+`Victoria 3/game/common` folder (Chromium-family browsers) or a zip containing
+that folder. The Clausewitz files are parsed in wasm and never leave the
+browser.
+
 ## Docs
 
 | Doc | Contents |

@@ -53,6 +53,7 @@ const schema = JSON.stringify({
 
 function mockApi(): WasmApi {
   return {
+    build_defs_blob: vi.fn(() => new Uint8Array([7, 8, 9])),
     parse_save: vi.fn(() =>
       JSON.stringify({
         tag: 'FRA',
@@ -306,5 +307,13 @@ describe('prices UI', () => {
     expect(document.querySelector('.path-hint-path')?.textContent).toMatch(
       /Paradox Interactive[/\\]Victoria 3[/\\]save games/,
     )
+  })
+
+  it('shows version, revision, and build time in the footer', () => {
+    render(<App wasmApi={mockApi()} />)
+    const footer = document.querySelector('.site-footer')
+    expect(footer).toHaveTextContent('vic3-analyzer v0.1.0')
+    expect(footer).toHaveTextContent('Built')
+    expect(footer?.querySelector('time')).toHaveAttribute('dateTime')
   })
 })

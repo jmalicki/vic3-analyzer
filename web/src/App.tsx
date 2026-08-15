@@ -7,6 +7,7 @@ import {
   saveAnalysis,
   serializeAnalysis,
 } from './archive'
+import { DefsBuilder } from './DefsBuilder'
 import { FieldHelp } from './FieldHelp'
 import { GoalBuilder } from './GoalBuilder'
 import {
@@ -457,7 +458,8 @@ function App({ wasmApi }: Props) {
                   </p>
                   <p>
                     The demo ships a fixture blob for local experiments. Prefer a blob built for
-                    your save&apos;s patch when analyzing a real campaign.
+                    your save&apos;s patch when analyzing a real campaign. Use the folder or zip
+                    builder below; all extraction happens in your browser.
                   </p>
                 </FieldHelp>
               </span>
@@ -476,6 +478,7 @@ function App({ wasmApi }: Props) {
                     ? 'Loading bundled demo definitions…'
                     : 'Bundled demo definitions are unavailable; choose a postcard blob.'}
             </small>
+            <DefsBuilder api={api} onBuilt={setDefsFile} />
           </div>
         </div>
       </section>
@@ -832,6 +835,14 @@ function App({ wasmApi }: Props) {
             comparison.day_cost_delta === undefined && <p>No comparable stored-result changes.</p>}
         </section>
       )}
+      <footer className="site-footer">
+        <span>
+          vic3-analyzer v{__APP_VERSION__} ({__GIT_REVISION__})
+        </span>
+        <span>
+          Built <time dateTime={__BUILD_TIME__}>{new Date(__BUILD_TIME__).toLocaleString()}</time>
+        </span>
+      </footer>
     </main>
   )
 }

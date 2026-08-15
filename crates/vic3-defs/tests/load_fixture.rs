@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use vic3_defs::{decode_blob, encode_blob, load_from_path, DEFAULT_PRICE_RANGE};
+use vic3_defs::{decode_blob, encode_blob, load_from_files, load_from_path, DEFAULT_PRICE_RANGE};
 
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
@@ -86,4 +86,30 @@ fn load_accepts_game_subdirectory_layout() {
     // wrapper must still resolve via `common/goods`.
     let defs = load_from_path(fixture_root()).unwrap();
     assert!(defs.goods.contains_key("grain"));
+}
+
+#[test]
+fn in_memory_files_match_filesystem_loader() {
+    fn collect(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(String, Vec<u8>)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect(root, &path, out);
+            } else if path.extension().is_some_and(|extension| extension == "txt") {
+                out.push((
+                    path.strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string(),
+                    std::fs::read(path).unwrap(),
+                ));
+            }
+        }
+    }
+
+    let root = fixture_root();
+    let mut files = Vec::new();
+    collect(&root, &root, &mut files);
+    let memory = load_from_files(files).expect("in-memory fixture tree");
+    assert_eq!(memory, load_fixture());
 }

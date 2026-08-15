@@ -12,6 +12,9 @@ pub enum WasmError {
     /// Option JSON could not be parsed.
     #[error("invalid JSON: {0}")]
     Json(#[from] serde_json::Error),
+    /// A browser definitions-file manifest referenced bytes outside its payload.
+    #[error("invalid definitions file manifest: {0}")]
+    DefsManifest(String),
     /// Goal DSL could not be compiled.
     #[error(transparent)]
     Goal(#[from] vic3_goals::GoalError),

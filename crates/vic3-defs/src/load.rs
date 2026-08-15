@@ -43,6 +43,106 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
     Ok(defs)
 }
 
+/// Load definitions from an in-memory set of game files.
+///
+/// Paths may be rooted anywhere, but must contain `common/...` (for example
+/// `game/common/goods/00_goods.txt`). This is the browser counterpart to
+/// [`load_from_path`]; callers can supply files selected from a folder or zip.
+pub fn load_from_files(
+    files: impl IntoIterator<Item = (String, Vec<u8>)>,
+) -> Result<GameDefs, DefsError> {
+    let mut files = files
+        .into_iter()
+        .filter_map(|(path, bytes)| {
+            normalize_common_path(&path).map(|relative| (relative, PathBuf::from(path), bytes))
+        })
+        .filter(|(relative, _, _)| relative.ends_with(".txt"))
+        .collect::<Vec<_>>();
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    if !files
+        .iter()
+        .any(|(path, _, _)| path.starts_with("common/goods/"))
+    {
+        return Err(DefsError::NotAGameRoot(PathBuf::from("<selected files>")));
+    }
+
+    let mut defs = GameDefs::default();
+    for (relative, path, bytes) in &files {
+        if relative.starts_with("common/defines/") {
+            let raw: RawDefinesFile = parse_bytes(path, bytes)?;
+            if let Some(value) = raw.price_range() {
+                defs.price_range = value;
+            }
+        } else if relative.starts_with("common/goods/") {
+            let raw: BTreeMap<String, RawGood> = parse_bytes(path, bytes)?;
+            for (id, good) in raw {
+                if let Some(base_price) = good.base_price() {
+                    defs.goods.insert(id.clone(), Good { id, base_price });
+                }
+            }
+        } else if relative.starts_with("common/production_methods/") {
+            for method in parse_production_methods_bytes(path, bytes)? {
+                defs.production_methods.insert(method.id.clone(), method);
+            }
+        } else if relative.starts_with("common/pop_needs/") {
+            let raw: BTreeMap<String, RawNeed> = parse_bytes(path, bytes)?;
+            for (id, need) in raw {
+                let entries = need
+                    .entry
+                    .into_iter()
+                    .filter_map(|entry| {
+                        entry.goods.map(|good| NeedEntry {
+                            good,
+                            weight: entry.weight.unwrap_or(1.0),
+                            min_supply_share: entry.min_supply_share.unwrap_or(0.0),
+                            max_supply_share: entry.max_supply_share.unwrap_or(1.0),
+                        })
+                    })
+                    .collect();
+                defs.pop_needs.insert(
+                    id.clone(),
+                    PopNeed {
+                        id,
+                        default_good: need.default,
+                        entries,
+                    },
+                );
+            }
+        } else if relative.starts_with("common/buy_packages/") {
+            let raw: BTreeMap<String, RawBuyPackage> = parse_bytes(path, bytes)?;
+            for (key, package) in raw {
+                if let Some(wealth) = parse_wealth_key(&key) {
+                    defs.buy_packages.insert(
+                        wealth,
+                        BuyPackage {
+                            wealth,
+                            political_strength: package.political_strength.unwrap_or(0.0),
+                            needs: package.goods,
+                        },
+                    );
+                }
+            }
+        } else if relative.starts_with("common/cultures/") {
+            let raw: BTreeMap<String, RawCulture> = parse_bytes(path, bytes)?;
+            for (culture, value) in raw {
+                if !value.obsessions.is_empty() {
+                    defs.obsessions.insert(culture, value.obsessions);
+                }
+            }
+        }
+    }
+    Ok(defs)
+}
+
+fn normalize_common_path(path: &str) -> Option<String> {
+    let path = path.replace('\\', "/");
+    if let Some(rest) = path.strip_prefix("common/") {
+        return Some(format!("common/{rest}"));
+    }
+    path.find("/common/")
+        .map(|index| path[index + 1..].to_string())
+}
+
 fn resolve_data_root(root: &Path) -> Result<PathBuf, DefsError> {
     if root.join("common/goods").is_dir() {
         return Ok(root.to_path_buf());
@@ -96,7 +196,14 @@ fn parse_production_methods(path: &Path) -> Result<Vec<ProductionMethod>, DefsEr
         path: path.to_path_buf(),
         source,
     })?;
-    let bytes = strip_bom(&bytes);
+    parse_production_methods_bytes(path, &bytes)
+}
+
+fn parse_production_methods_bytes(
+    path: &Path,
+    bytes: &[u8],
+) -> Result<Vec<ProductionMethod>, DefsError> {
+    let bytes = strip_bom(bytes);
     if looks_empty(bytes) {
         return Ok(Vec::new());
     }
@@ -261,7 +368,14 @@ where
         path: path.to_path_buf(),
         source,
     })?;
-    let bytes = strip_bom(&bytes);
+    parse_bytes(path, &bytes)
+}
+
+fn parse_bytes<T>(path: &Path, bytes: &[u8]) -> Result<T, DefsError>
+where
+    T: DeserializeOwned + Default,
+{
+    let bytes = strip_bom(bytes);
     if looks_empty(bytes) {
         return Ok(T::default());
     }

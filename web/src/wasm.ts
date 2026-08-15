@@ -1,6 +1,10 @@
 import type { JsonSchema } from './types'
 
 export interface WasmApi {
+  build_defs_blob(
+    manifestJson: string,
+    contents: Uint8Array,
+  ): Uint8Array | Promise<Uint8Array>
   parse_save(save: Uint8Array, tokens?: Uint8Array): string | Promise<string>
   prices(
     save: Uint8Array,

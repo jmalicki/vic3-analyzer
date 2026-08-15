@@ -37,6 +37,20 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     expect(summary.buildings).toContain('building_rye_farm')
   })
 
+  it('builds a defs blob from an in-memory browser manifest', async () => {
+    const goods = new TextEncoder().encode('grain = { cost = 20 }')
+    const manifest = JSON.stringify([
+      {
+        path: 'Victoria 3/game/common/goods/goods.txt',
+        offset: 0,
+        length: goods.length,
+      },
+    ])
+    const blob = await api.build_defs_blob(manifest, goods)
+    expect(blob).toBeInstanceOf(Uint8Array)
+    expect(blob.length).toBeGreaterThan(0)
+  })
+
   it('prices returns residual and limitations', async () => {
     const result = JSON.parse(await api.prices(save, undefined, defs, '{}'))
     expect(typeof result.residual).toBe('number')

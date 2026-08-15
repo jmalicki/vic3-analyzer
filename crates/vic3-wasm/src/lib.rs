@@ -15,7 +15,7 @@ mod error;
 mod schema;
 mod world;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use vic3_goals::Atom;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save};
@@ -41,6 +41,15 @@ pub fn version() -> String {
 #[wasm_bindgen]
 pub fn parse_save(save_bytes: &[u8], tokens_bytes: Option<Vec<u8>>) -> Result<String, JsError> {
     parse_save_json(save_bytes, tokens_bytes.as_deref()).map_err(to_js)
+}
+
+/// Build a postcard definitions blob from browser-selected Victoria 3 files.
+///
+/// `manifest_json` is an array of `{path, offset, length}` entries into the
+/// concatenated `contents` payload. Paths must include `common/...`.
+#[wasm_bindgen]
+pub fn build_defs_blob(manifest_json: &str, contents: &[u8]) -> Result<Vec<u8>, JsError> {
+    build_defs_blob_bytes(manifest_json, contents).map_err(to_js)
 }
 
 /// Solve market prices. `defs_blob` is a postcard blob from [`vic3_defs::encode_blob`].
@@ -262,6 +271,38 @@ fn parse_solve_opts(json: &str) -> Result<SolveOpts, WasmError> {
     Ok(serde_json::from_str(json)?)
 }
 
+#[derive(Debug, Deserialize)]
+struct DefsFileEntry {
+    path: String,
+    offset: usize,
+    length: usize,
+}
+
+/// Native/test entry for [`build_defs_blob`].
+pub fn build_defs_blob_bytes(manifest_json: &str, contents: &[u8]) -> Result<Vec<u8>, WasmError> {
+    let manifest: Vec<DefsFileEntry> = serde_json::from_str(manifest_json)?;
+    let files = manifest
+        .into_iter()
+        .map(|entry| {
+            let end = entry.offset.checked_add(entry.length).ok_or_else(|| {
+                WasmError::DefsManifest(format!("offset overflow for {}", entry.path))
+            })?;
+            let bytes = contents.get(entry.offset..end).ok_or_else(|| {
+                WasmError::DefsManifest(format!(
+                    "{} references {}..{} of {} bytes",
+                    entry.path,
+                    entry.offset,
+                    end,
+                    contents.len()
+                ))
+            })?;
+            Ok((entry.path, bytes.to_vec()))
+        })
+        .collect::<Result<Vec<_>, WasmError>>()?;
+    let defs = vic3_defs::load_from_files(files)?;
+    Ok(vic3_defs::encode_blob(&defs)?)
+}
+
 fn load_save(save_bytes: &[u8], tokens_bytes: Option<&[u8]>) -> Result<Save, WasmError> {
     match tokens_bytes {
         None | Some([]) => Ok(load_slice(save_bytes, empty_tokens())?),
@@ -360,6 +401,18 @@ mod tests {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vic3-defs/tests/fixtures");
         let defs = load_from_path(&root).expect("defs fixture");
         encode_blob(&defs).expect("encode defs blob")
+    }
+
+    #[test]
+    fn builds_defs_blob_from_browser_manifest() {
+        let goods = br#"grain = { cost = 20 }"#;
+        let manifest = format!(
+            r#"[{{"path":"Victoria 3/game/common/goods/goods.txt","offset":0,"length":{}}}]"#,
+            goods.len()
+        );
+        let blob = build_defs_blob_bytes(&manifest, goods).expect("browser defs blob");
+        let defs = vic3_defs::decode_blob(&blob).expect("decode browser blob");
+        assert_eq!(defs.base_price("grain"), Some(20.0));
     }
 
     fn schema_properties(schema_json: &str) -> serde_json::Map<String, Value> {

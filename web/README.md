@@ -28,6 +28,12 @@ via accessible help, and shows the usual Victoria 3 save folder for your OS.
 Chromium can remember the last chosen save folder; other browsers keep the
 standard file input (sites cannot force an arbitrary local path).
 
+For real campaigns, the UI can build `defs.postcard` entirely in-browser from a
+selected `Victoria 3/game/common` folder or a zip containing it. The files are
+packed into an in-memory manifest, parsed by `vic3-defs` in wasm, and never
+uploaded. The footer reports the package version, git revision, and UTC build
+time injected by Vite.
+
 ## wasm and definitions
 
 `npm run build:wasm` runs `wasm-pack --target web` into `public/wasm/`
