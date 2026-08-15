@@ -12,6 +12,24 @@ const result = JSON.stringify({
   limitations: ['Employment and production methods stay frozen.'],
 })
 
+const planResult = JSON.stringify({
+  day_cost: 365,
+  actions: [
+    { day: 0, action: { QueueTech: { tech: 'nitroglycerin' } } },
+    {
+      day: 365,
+      action: {
+        WaitForEvent: {
+          event: { TechCompleted: { tech: 'nitroglycerin' } },
+          days: 365,
+        },
+      },
+    },
+  ],
+  residual: 0.00001,
+  limitations: ['Research duration is fixed by the compact simulator.'],
+})
+
 const schema = JSON.stringify({
   title: 'WhatIfOpts',
   type: 'object',
@@ -27,6 +45,7 @@ function mockApi(): WasmApi {
     parse_save: vi.fn(() => JSON.stringify({ tag: 'FRA', date: '1840.2.3', version: '1.9.0' })),
     prices: vi.fn(() => result),
     what_if: vi.fn(() => result),
+    plan: vi.fn(() => planResult),
     what_if_schema: vi.fn(() => schema),
     prices_schema: vi.fn(() => '{}'),
   }
@@ -78,5 +97,25 @@ describe('prices UI', () => {
       ),
     )
     expect((await listAnalyses())[0].kind).toBe('what_if')
+  })
+
+  it('renders a mocked plan timeline and archives its label', async () => {
+    const user = userEvent.setup()
+    const api = mockApi()
+    render(<App wasmApi={api} />)
+    await selectFiles(user)
+
+    await user.clear(screen.getByLabelText('Plan goal'))
+    await user.type(screen.getByLabelText('Plan goal'), 'research(tech=nitroglycerin)')
+    await user.type(screen.getByLabelText('Plan label'), 'rush')
+    await user.click(screen.getByRole('button', { name: 'Run plan' }))
+
+    expect(await screen.findByText('365 total days')).toBeInTheDocument()
+    expect(screen.getByText('Queue technology: nitroglycerin')).toBeInTheDocument()
+    expect(screen.getByText('Wait 365 days for nitroglycerin')).toBeInTheDocument()
+    await waitFor(() => expect(api.plan).toHaveBeenCalled())
+    const records = await listAnalyses()
+    expect(records[0]).toMatchObject({ kind: 'plan', label: 'rush' })
+    expect(records[0].result).toMatchObject({ day_cost: 365 })
   })
 })

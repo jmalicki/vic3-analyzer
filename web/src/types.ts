@@ -13,6 +13,22 @@ export interface PricesResult {
   limitations: string[]
 }
 
+export type PlanAction =
+  | { QueueTech: { tech: string } }
+  | { WaitForEvent: { event: { TechCompleted: { tech: string } }; days: number } }
+
+export interface PlanStep {
+  day: number
+  action: PlanAction
+}
+
+export interface PlanResult {
+  day_cost: number
+  actions: PlanStep[]
+  residual: number
+  limitations: string[]
+}
+
 export interface SaveSummary {
   tag?: string
   date?: string
@@ -31,7 +47,7 @@ export interface AnalysisRecord {
   country?: string
   filename?: string
   opts: Record<string, unknown>
-  result: PricesResult
+  result: PricesResult | PlanResult
   limitations: string[]
   parent_id?: string
   blob?: {

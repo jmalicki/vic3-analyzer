@@ -15,6 +15,13 @@ export interface WasmApi {
     solveOptsJson: string,
     whatIfOptsJson: string,
   ): string | Promise<string>
+  plan(
+    save: Uint8Array,
+    tokens: Uint8Array | undefined,
+    defs: Uint8Array,
+    solveOptsJson: string,
+    planOptsJson: string,
+  ): string | Promise<string>
   what_if_schema(): string
   prices_schema(): string
 }

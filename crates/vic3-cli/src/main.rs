@@ -1,16 +1,22 @@
-//! CLI: `prices` / `what-if` / `gaps`. clap lives only in this crate.
+//! CLI: prices, what-if, gaps, planning, and the local archive.
 
+use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use chrono::Utc;
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use vic3_defs::GameDefs;
 use vic3_goals::Atom;
 use vic3_load::{empty_tokens, load_path, load_tokens_path, Save};
+use vic3_plan::{AnalysisRecord, PlanOpts, PlanResult};
 use vic3_prices::{solve, what_if, PricesResult, SolveOpts, WhatIfOpts, World};
+use vic3_sim::SimConfig;
 use vic3_world::PlanningState;
+use vic3save::PdsDate;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -27,6 +33,8 @@ fn main() -> Result<()> {
             )
         }
         Commands::Gaps(cmd) => run_gaps(cmd),
+        Commands::Plan(cmd) => run_plan(cmd),
+        Commands::Archive(cmd) => run_archive(cmd),
     }
 }
 
@@ -46,6 +54,10 @@ enum Commands {
     WhatIf(WhatIfCli),
     /// Evaluate a goal and list its currently unsatisfied atoms.
     Gaps(GapsCli),
+    /// Find and archive a shortest goal-relevant action sequence.
+    Plan(PlanCli),
+    /// Browse local analysis records.
+    Archive(ArchiveCli),
 }
 
 /// Filesystem inputs. Inner option structs (`SolveOpts`, `WhatIfOpts`) have no `PathBuf`.
@@ -140,6 +152,40 @@ struct GapsCli {
     solve: SolveArgs,
 }
 
+#[derive(Debug, Args)]
+struct PlanCli {
+    #[command(flatten)]
+    io: IoArgs,
+    /// Goal DSL expression to achieve.
+    #[arg(long)]
+    goal: String,
+    /// Optional name for this alternative plan.
+    #[arg(long)]
+    label: Option<String>,
+    /// Reject plans longer than this many days.
+    #[arg(long, default_value_t = 3650)]
+    max_days: u32,
+    /// Print PlanResult JSON.
+    #[arg(long)]
+    json: bool,
+    #[command(flatten)]
+    solve: SolveArgs,
+}
+
+#[derive(Debug, Args)]
+struct ArchiveCli {
+    #[command(subcommand)]
+    command: ArchiveCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ArchiveCommand {
+    /// List archived analyses, newest first.
+    List,
+    /// Print one AnalysisRecord as JSON.
+    Show { id: String },
+}
+
 #[derive(Debug, Serialize)]
 struct GapsResult {
     satisfied: bool,
@@ -183,6 +229,159 @@ fn run_gaps(cmd: GapsCli) -> Result<()> {
         limitations: prices.limitations,
     };
     emit_gaps(&result, cmd.json)
+}
+
+fn country_tag(save: &Save) -> Result<&str> {
+    save.previous_played
+        .iter()
+        .find_map(|player| player.name.as_deref())
+        .or_else(|| {
+            save.countries()
+                .next()
+                .map(|(_, country)| country.definition.as_str())
+        })
+        .context("save has no playable country")
+}
+
+fn run_plan(cmd: PlanCli) -> Result<()> {
+    let save_bytes = fs::read(&cmd.io.save)
+        .with_context(|| format!("reading save {}", cmd.io.save.display()))?;
+    let (save, world, defs) = load_inputs(&cmd.io)?;
+    let prices = solve(&world, &defs, cmd.solve.into());
+    let country = country_tag(&save)?;
+    let state = PlanningState::from_save(&save, country, &prices)?;
+    let goal = vic3_goals::parse(&cmd.goal)?;
+    let result = vic3_plan::plan(
+        state,
+        goal,
+        SimConfig::default(),
+        cmd.max_days,
+        prices.residual,
+        prices.limitations,
+    )?;
+    let opts = PlanOpts {
+        goal: cmd.goal,
+        max_days: cmd.max_days,
+        label: cmd.label.clone(),
+    };
+    let record = AnalysisRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        created_at: Utc::now().to_rfc3339(),
+        label: cmd.label,
+        kind: "plan".into(),
+        fingerprint: Sha256::digest(&save_bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+        date: save
+            .meta_data
+            .game_date
+            .map(|date| date.game_fmt().to_string()),
+        country: Some(country.to_string()),
+        filename: cmd
+            .io
+            .save
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned()),
+        opts: serde_json::to_value(opts)?,
+        result: serde_json::to_value(&result)?,
+        limitations: result.limitations.clone(),
+        parent_id: None,
+        blob: None,
+    };
+    save_record(&record)?;
+    emit_plan(&result, cmd.json)
+}
+
+fn emit_plan(result: &PlanResult, json: bool) -> Result<()> {
+    if json {
+        serde_json::to_writer(io::stdout(), result)?;
+        writeln!(io::stdout())?;
+        return Ok(());
+    }
+    writeln!(io::stdout(), "total: {} days", result.day_cost)?;
+    for step in &result.actions {
+        writeln!(io::stdout(), "day {:>4}: {:?}", step.day, step.action)?;
+    }
+    writeln!(io::stderr(), "warning: {}", result.limitations.join(" "))?;
+    Ok(())
+}
+
+fn archive_dir() -> Result<PathBuf> {
+    if let Some(root) = std::env::var_os("XDG_DATA_HOME") {
+        return Ok(PathBuf::from(root).join("vic3-analyzer"));
+    }
+    dirs::data_local_dir()
+        .map(|root| root.join("vic3-analyzer"))
+        .context("could not determine local data directory")
+}
+
+fn save_record(record: &AnalysisRecord) -> Result<PathBuf> {
+    let dir = archive_dir()?;
+    fs::create_dir_all(&dir)
+        .with_context(|| format!("creating archive directory {}", dir.display()))?;
+    let path = dir.join(format!("{}.json", record.id));
+    let bytes = serde_json::to_vec_pretty(record)?;
+    fs::write(&path, bytes)
+        .with_context(|| format!("writing archive record {}", path.display()))?;
+    Ok(path)
+}
+
+fn load_records() -> Result<Vec<AnalysisRecord>> {
+    let dir = archive_dir()?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut records = Vec::new();
+    for entry in fs::read_dir(&dir)
+        .with_context(|| format!("reading archive directory {}", dir.display()))?
+    {
+        let path = entry?.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+            continue;
+        }
+        let record = serde_json::from_slice(&fs::read(&path)?)
+            .with_context(|| format!("parsing archive record {}", path.display()))?;
+        records.push(record);
+    }
+    records.sort_by(|a: &AnalysisRecord, b| b.created_at.cmp(&a.created_at));
+    Ok(records)
+}
+
+fn run_archive(cmd: ArchiveCli) -> Result<()> {
+    match cmd.command {
+        ArchiveCommand::List => {
+            for record in load_records()? {
+                writeln!(
+                    io::stdout(),
+                    "{}\t{}\t{}\t{}",
+                    record.id,
+                    record.kind,
+                    record.label.as_deref().unwrap_or("-"),
+                    record.created_at
+                )?;
+            }
+        }
+        ArchiveCommand::Show { id } => {
+            let path = archive_dir()?.join(format!("{id}.json"));
+            ensure_plain_id(&id)?;
+            let record: AnalysisRecord = serde_json::from_slice(
+                &fs::read(&path)
+                    .with_context(|| format!("reading archive record {}", path.display()))?,
+            )?;
+            serde_json::to_writer_pretty(io::stdout(), &record)?;
+            writeln!(io::stdout())?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_plain_id(id: &str) -> Result<()> {
+    anyhow::ensure!(
+        Path::new(id).file_name().and_then(|name| name.to_str()) == Some(id),
+        "invalid archive id"
+    );
+    Ok(())
 }
 
 fn emit_gaps(result: &GapsResult, json: bool) -> Result<()> {

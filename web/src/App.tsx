@@ -3,7 +3,15 @@ import whatIfSchemaJson from '../../schema/what-if.json'
 import './App.css'
 import { listAnalyses, saveAnalysis } from './archive'
 import { SchemaForm } from './SchemaForm'
-import type { AnalysisKind, AnalysisRecord, JsonSchema, PricesResult, SaveSummary } from './types'
+import type {
+  AnalysisKind,
+  AnalysisRecord,
+  JsonSchema,
+  PlanAction,
+  PlanResult,
+  PricesResult,
+  SaveSummary,
+} from './types'
 import { loadWasm, parseSchema, type WasmApi } from './wasm'
 
 interface Props {
@@ -36,6 +44,11 @@ function newId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+function actionLabel(action: PlanAction): string {
+  if ('QueueTech' in action) return `Queue technology: ${action.QueueTech.tech}`
+  return `Wait ${action.WaitForEvent.days} days for ${action.WaitForEvent.event.TechCompleted.tech}`
+}
+
 function App({ wasmApi }: Props) {
   const [api, setApi] = useState<WasmApi>()
   const [saveFile, setSaveFile] = useState<File>()
@@ -43,6 +56,9 @@ function App({ wasmApi }: Props) {
   const [defsFile, setDefsFile] = useState<File>()
   const [summary, setSummary] = useState<SaveSummary>()
   const [result, setResult] = useState<PricesResult>()
+  const [planResult, setPlanResult] = useState<PlanResult>()
+  const [goal, setGoal] = useState('research(tech=nitroglycerin)')
+  const [label, setLabel] = useState('')
   const [schema, setSchema] = useState<JsonSchema>(fallbackSchema)
   const [whatIfOpts, setWhatIfOpts] = useState<Record<string, unknown>>(() =>
     initialValue(fallbackSchema),
@@ -87,21 +103,23 @@ function App({ wasmApi }: Props) {
   const archiveResult = async (
     kind: AnalysisKind,
     opts: Record<string, unknown>,
-    pricesResult: PricesResult,
+    analysisResult: PricesResult | PlanResult,
     saveBytes: Uint8Array,
     tokenBytes?: Uint8Array,
+    recordLabel?: string,
   ) => {
     const record: AnalysisRecord = {
       id: newId(),
       created_at: new Date().toISOString(),
+      label: recordLabel || undefined,
       kind,
       fingerprint: await fingerprint(saveBytes),
       date: summary?.date,
       country: summary?.tag,
       filename: saveFile?.name,
       opts,
-      result: pricesResult,
-      limitations: pricesResult.limitations,
+      result: analysisResult,
+      limitations: analysisResult.limitations,
       blob: { save: saveBytes, tokens: tokenBytes },
     }
     await saveAnalysis(record)
@@ -150,6 +168,31 @@ function App({ wasmApi }: Props) {
   const submitWhatIf = (event: FormEvent) => {
     event.preventDefault()
     void run('what_if')
+  }
+
+  const submitPlan = (event: FormEvent) => {
+    event.preventDefault()
+    if (!api || !saveFile || !defsFile) return
+    setBusy(true)
+    setError(undefined)
+    void Promise.all([bytes(saveFile), bytes(tokensFile), bytes(defsFile)])
+      .then(async ([saveBytes, tokenBytes, defsBytes]) => {
+        const opts = { goal, max_days: 3650, label: label || null }
+        const json = await api.plan(
+          saveBytes!,
+          tokenBytes,
+          defsBytes!,
+          '{}',
+          JSON.stringify(opts),
+        )
+        const nextResult = JSON.parse(json) as PlanResult
+        setPlanResult(nextResult)
+        await archiveResult('plan', opts, nextResult, saveBytes!, tokenBytes, label)
+      })
+      .catch((reason: unknown) => {
+        setError(reason instanceof Error ? reason.message : String(reason))
+      })
+      .finally(() => setBusy(false))
   }
 
   const ready = Boolean(api && saveFile && defsFile)
@@ -211,6 +254,20 @@ function App({ wasmApi }: Props) {
             Run what-if
           </button>
         </form>
+        <form onSubmit={submitPlan}>
+          <h2>Plan timeline</h2>
+          <label>
+            Goal
+            <input aria-label="Plan goal" value={goal} onChange={(event) => setGoal(event.target.value)} />
+          </label>
+          <label>
+            Label
+            <input aria-label="Plan label" value={label} onChange={(event) => setLabel(event.target.value)} />
+          </label>
+          <button disabled={!ready || busy || !goal.trim()} type="submit">
+            Run plan
+          </button>
+        </form>
       </section>
 
       {result && (
@@ -244,6 +301,27 @@ function App({ wasmApi }: Props) {
         </section>
       )}
 
+      {planResult && (
+        <section aria-labelledby="plan-heading">
+          <div className="result-heading">
+            <h2 id="plan-heading">Plan timeline</h2>
+            <span>{planResult.day_cost} total days</span>
+          </div>
+          <ol className="timeline">
+            {planResult.actions.map((step, index) => (
+              <li key={`${step.day}-${index}`}>
+                <strong>Day {step.day}</strong>
+                <span>{actionLabel(step.action)}</span>
+              </li>
+            ))}
+          </ol>
+          <div className="limitations">
+            <h3>Model limitations</h3>
+            <ul>{planResult.limitations.map((item) => <li key={item}>{item}</li>)}</ul>
+          </div>
+        </section>
+      )}
+
       <section aria-labelledby="archive-heading">
         <h2 id="archive-heading">Past runs</h2>
         {records.length === 0 ? (
@@ -252,7 +330,10 @@ function App({ wasmApi }: Props) {
           <ul className="archive-list">
             {records.map((record) => (
               <li key={record.id}>
-                <strong>{record.kind === 'what_if' ? 'What-if' : 'Prices'}</strong>
+                <strong>
+                  {record.kind === 'what_if' ? 'What-if' : record.kind === 'plan' ? 'Plan' : 'Prices'}
+                  {record.label ? ` · ${record.label}` : ''}
+                </strong>
                 <span>{record.country ?? '—'} · {record.date ?? '—'}</span>
                 <time dateTime={record.created_at}>{new Date(record.created_at).toLocaleString()}</time>
               </li>

@@ -18,7 +18,7 @@ h2 { font-family: Georgia, serif; font-weight: 400; font-size: 1.7rem; }
 input { width: 100%; border: 1px solid #4e5c50; background: #111713; color: #f4f5eb; padding: .55rem; }
 .save-summary { display: flex; gap: 1rem; background: #29362c; padding: .8rem 1rem; margin-top: 1rem; }
 [role="alert"] { color: #ffb5a9; }
-.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; align-items: start; }
+.actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 1rem 0; align-items: start; }
 .actions > button { min-height: 4rem; font-size: 1rem; }
 button:disabled { opacity: .45; cursor: not-allowed; }
 form h2 { margin-top: 0; }
@@ -33,6 +33,8 @@ th:first-child { text-align: left; }
 .limitations h3 { margin-bottom: .2rem; }
 .archive-list { list-style: none; padding: 0; }
 .archive-list li { display: grid; grid-template-columns: 1fr 1fr 1.5fr; gap: 1rem; padding: .7rem 0; border-bottom: 1px solid #37433a; }
+.timeline { list-style: none; padding: 0; }
+.timeline li { display: grid; grid-template-columns: 7rem 1fr; gap: 1rem; padding: .8rem 0; border-bottom: 1px solid #37433a; }
 section[aria-labelledby] { margin-top: 1rem; }
 
 @media (max-width: 700px) {

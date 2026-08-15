@@ -9,7 +9,10 @@ mod world;
 
 use serde::Serialize;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save};
+use vic3_plan::PlanOpts;
 use vic3_prices::{solve, what_if as solve_what_if, PricesResult, SolveOpts, WhatIfOpts};
+use vic3_sim::SimConfig;
+use vic3_world::PlanningState;
 use vic3save::PdsDate;
 use wasm_bindgen::prelude::*;
 
@@ -81,6 +84,25 @@ pub fn prices_schema() -> String {
     schema::prices_schema_json()
 }
 
+/// Find a shortest goal-relevant plan and return [`vic3_plan::PlanResult`] JSON.
+#[wasm_bindgen]
+pub fn plan(
+    save_bytes: &[u8],
+    tokens_bytes: Option<Vec<u8>>,
+    defs_blob: &[u8],
+    solve_opts_json: &str,
+    plan_opts_json: &str,
+) -> Result<String, JsError> {
+    plan_json(
+        save_bytes,
+        tokens_bytes.as_deref(),
+        defs_blob,
+        solve_opts_json,
+        plan_opts_json,
+    )
+    .map_err(to_js)
+}
+
 /// Native/test entry: same JSON as [`parse_save`].
 pub fn parse_save_json(
     save_bytes: &[u8],
@@ -115,6 +137,43 @@ pub fn what_if_json(
     let delta: WhatIfOpts = serde_json::from_str(what_if_opts_json)?;
     let world = world::world_from_save(&save);
     let result = solve_what_if(&world, &defs, &delta, opts);
+    Ok(serde_json::to_string(&result)?)
+}
+
+/// Native/test entry: same `PlanResult` JSON as the CLI `plan` command.
+pub fn plan_json(
+    save_bytes: &[u8],
+    tokens_bytes: Option<&[u8]>,
+    defs_blob: &[u8],
+    solve_opts_json: &str,
+    plan_opts_json: &str,
+) -> Result<String, WasmError> {
+    let save = load_save(save_bytes, tokens_bytes)?;
+    let defs = vic3_defs::decode_blob(defs_blob)?;
+    let solve_opts = parse_solve_opts(solve_opts_json)?;
+    let plan_opts: PlanOpts = serde_json::from_str(plan_opts_json)?;
+    let world = world::world_from_save(&save);
+    let prices = solve(&world, &defs, solve_opts);
+    let country = save
+        .previous_played
+        .iter()
+        .find_map(|player| player.name.as_deref())
+        .or_else(|| {
+            save.countries()
+                .next()
+                .map(|(_, country)| country.definition.as_str())
+        })
+        .ok_or(WasmError::NoCountry)?;
+    let state = PlanningState::from_save(&save, country, &prices)?;
+    let goal = vic3_goals::parse(&plan_opts.goal)?;
+    let result = vic3_plan::plan(
+        state,
+        goal,
+        SimConfig::default(),
+        plan_opts.max_days,
+        prices.residual,
+        prices.limitations,
+    )?;
     Ok(serde_json::to_string(&result)?)
 }
 
@@ -314,6 +373,23 @@ mod tests {
         assert_eq!(result.limitations.len(), vic3_prices::LIMITATIONS.len());
         assert!(json.contains("\"residual\""));
         assert!(json.contains("\"limitations\""));
+    }
+
+    #[test]
+    fn plan_json_contains_timeline_and_default_research_cost() {
+        let json = plan_json(
+            &load_fixture(),
+            None,
+            &defs_blob(),
+            "{}",
+            r#"{"goal":"research(tech=nitroglycerin)","max_days":1000,"label":"rush"}"#,
+        )
+        .expect("plan");
+        let result: vic3_plan::PlanResult = serde_json::from_str(&json).expect("PlanResult");
+        assert_eq!(result.day_cost, 365);
+        assert_eq!(result.actions.len(), 2);
+        assert!(result.residual.is_finite());
+        assert!(!result.limitations.is_empty());
     }
 
     #[test]

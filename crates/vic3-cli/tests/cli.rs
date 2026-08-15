@@ -63,6 +63,36 @@ fn gaps_cmd() -> Command {
     cmd
 }
 
+fn plan_cmd(archive_root: &Path) -> Command {
+    let mut cmd = bin();
+    cmd.env("XDG_DATA_HOME", archive_root).args([
+        "plan",
+        "--save",
+        barren_save_fixture().to_str().expect("utf8 save path"),
+        "--game",
+        defs_fixture().to_str().expect("utf8 defs path"),
+        "--goal",
+        "research(tech=nitroglycerin)",
+        "--label",
+        "rush",
+        "--json",
+    ]);
+    cmd
+}
+
+fn temp_archive() -> PathBuf {
+    let path = std::env::temp_dir().join(format!(
+        "vic3-cli-archive-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&path).unwrap();
+    path
+}
+
 fn assert_prices_json(value: &Value) {
     assert!(
         value.get("residual").and_then(Value::as_f64).is_some(),
@@ -155,6 +185,50 @@ fn gaps_json_has_declare_war_atoms_and_limitations() {
             .is_some_and(|limitations| !limitations.is_empty()),
         "price limitations: {value}"
     );
+}
+
+#[test]
+fn plan_research_fixture_costs_default_research_days() {
+    let archive = temp_archive();
+    let assert = plan_cmd(&archive).assert().success();
+    let value: Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("PlanResult JSON");
+
+    assert_eq!(value["day_cost"], 365);
+    assert_eq!(value["actions"].as_array().unwrap().len(), 2);
+    assert!(value["actions"][0]["action"]["QueueTech"].is_object());
+    assert!(value["actions"][1]["action"]["WaitForEvent"].is_object());
+    assert!(value["residual"].is_number());
+    assert!(!value["limitations"].as_array().unwrap().is_empty());
+    std::fs::remove_dir_all(archive).unwrap();
+}
+
+#[test]
+fn archive_list_and_show_persist_plan_record() {
+    let archive = temp_archive();
+    plan_cmd(&archive).assert().success();
+
+    let list = bin()
+        .env("XDG_DATA_HOME", &archive)
+        .args(["archive", "list"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&list.get_output().stdout);
+    assert!(stdout.contains("\tplan\trush\t"), "{stdout}");
+    let id = stdout.split('\t').next().expect("record id").trim();
+
+    let show = bin()
+        .env("XDG_DATA_HOME", &archive)
+        .args(["archive", "show", id])
+        .assert()
+        .success();
+    let record: Value =
+        serde_json::from_slice(&show.get_output().stdout).expect("AnalysisRecord JSON");
+    assert_eq!(record["id"], id);
+    assert_eq!(record["kind"], "plan");
+    assert_eq!(record["label"], "rush");
+    assert_eq!(record["result"]["day_cost"], 365);
+    std::fs::remove_dir_all(archive).unwrap();
 }
 
 #[test]
