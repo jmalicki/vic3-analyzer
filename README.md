@@ -18,6 +18,16 @@ AGPL-3.0 Victoria 3 save loader and planner. Given a `.v3` and a high-level goal
 | [invariants](docs/invariants.md) | I1–I9 property tests |
 | [json-schema](docs/json-schema.md) | Result/option contract (draft) |
 
+## Develop
+
+```text
+cargo test --workspace
+cargo run -p vic3-cli
+cd web && npm install && npm run dev
+```
+
+CI: `cargo fmt`, `clippy -D warnings`, `cargo test --workspace`. Node lint starts in the UI phase.
+
 ## License
 
 [AGPL-3.0](LICENSE).

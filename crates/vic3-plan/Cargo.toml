@@ -1,0 +1,15 @@
+[package]
+name = "vic3-plan"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A* glue (rust-advanced-heaps) and shared option/archive types"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+rust-advanced-heaps.workspace = true

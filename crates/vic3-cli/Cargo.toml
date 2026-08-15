@@ -1,0 +1,17 @@
+[package]
+name = "vic3-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Victoria 3 analyzer CLI"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "vic3-cli"
+path = "src/main.rs"
+
+[dependencies]
+vic3-plan = { path = "../vic3-plan" }

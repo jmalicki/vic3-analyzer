@@ -1,0 +1,16 @@
+[package]
+name = "vic3-load"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Load Victoria 3 saves into an IR (jomini + vic3save)"
+
+[lints]
+workspace = true
+
+[dependencies]
+jomini.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+vic3save.workspace = true

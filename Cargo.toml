@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/vic3-load",
+    "crates/vic3-defs",
+    "crates/vic3-prices",
+    "crates/vic3-world",
+    "crates/vic3-goals",
+    "crates/vic3-sim",
+    "crates/vic3-plan",
+    "crates/vic3-cli",
+    "crates/vic3-wasm",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+repository = "https://github.com/jmalicki/vic3-analyzer"
+rust-version = "1.85"
+
+[workspace.dependencies]
+jomini = { version = "0.35", features = ["envelope"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+vic3save = { git = "https://github.com/pdx-tools/pdx-tools", rev = "092edec7a853f67eea892c0d3a145329b924e103", package = "vic3save" }
+rust-advanced-heaps = { git = "https://github.com/jmalicki/rust-advanced-heaps", rev = "445818b845ad8daa1146df4c1215a88fb49f8d8f" }
+
+[workspace.lints.rust]
+unexpected_cfgs = "warn"

@@ -11,12 +11,12 @@ Where to look: [crates.io](https://crates.io), [lib.rs](https://lib.rs), [docs.r
 | Piece | Choice |
 | --- | --- |
 | Clausewitz parse | [jomini](https://crates.io/crates/jomini) (text + binary + envelope). Do not write a parser. |
-| Vic3 envelope | pdx-tools `vic3save` (git, AGPL) |
+| Vic3 envelope | pdx-tools `vic3save` git `092edec7` (AGPL) |
 | Serde / errors / wasm | serde, thiserror, wasm-bindgen, serde-wasm-bindgen. anyhow only in `vic3-cli` `main`. |
 | UI shell | Vite + React |
 | CI | GitHub Actions |
 | CLI parser | [clap](https://crates.io/crates/clap) in `vic3-cli` only. Not bpaf/argh. Not in wasm. |
-| A* | [rust-advanced-heaps](https://github.com/jmalicki/rust-advanced-heaps) `pathfinding::{SearchNode, shortest_path}`. Path-dep. Not crates.io `pathfinding`. |
+| A* | [rust-advanced-heaps](https://github.com/jmalicki/rust-advanced-heaps) git `445818b8` `pathfinding::{SearchNode, shortest_path}`. Not crates.io `pathfinding`. |
 | Goal DSL | [chumsky](https://crates.io/crates/chumsky) |
 | Property tests | [proptest](https://crates.io/crates/proptest). Not quickcheck. |
 | CLI tests | [assert_cmd](https://crates.io/crates/assert_cmd). trycmd deferred. |
