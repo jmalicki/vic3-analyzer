@@ -200,13 +200,34 @@ impl World {
 
     /// Clone this world and add `extra_levels` to every building of `building` type.
     ///
-    /// Staffing (employment) is left unchanged.
+    /// The saved staffing ratio and absolute saved goods IO are held constant
+    /// per level, so explicit level additions scale both proportionally. Other
+    /// employment, wages, and trade volumes remain frozen.
     pub fn with_extra_levels(&self, building: &str, extra_levels: u32) -> Self {
         let mut next = self.clone();
         let extra = f64::from(extra_levels);
         for b in &mut next.buildings {
             if b.building == building {
-                b.level += extra;
+                let old_level = b.level.max(0.0);
+                let new_level = old_level + extra;
+                if extra > 0.0 {
+                    if old_level > 0.0 {
+                        let ratio = new_level / old_level;
+                        b.staffing *= ratio;
+                        for quantity in b
+                            .saved_inputs
+                            .values_mut()
+                            .chain(b.saved_outputs.values_mut())
+                        {
+                            *quantity *= ratio;
+                        }
+                    } else {
+                        // Synthetic/empty buildings have no saved per-level
+                        // ratio; added capacity starts fully staffed.
+                        b.staffing = new_level;
+                    }
+                }
+                b.level = new_level;
             }
         }
         next
@@ -505,6 +526,31 @@ mod tests {
         let wood = result.goods.iter().find(|g| g.id == "wood").expect("wood");
         assert!(wood.price < wood.base);
         assert!(result.inputs.goods_with_orders > 0);
+    }
+
+    #[test]
+    fn extra_levels_scale_saved_io_and_staffing_ratio() {
+        let world = World {
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(7),
+                building: "building_logging_camp".into(),
+                level: 2.0,
+                staffing: 1.0,
+                production_methods: vec!["pm_unknown_modded".into()],
+                saved_inputs: BTreeMap::from([("tools".into(), 2.0)]),
+                saved_outputs: BTreeMap::from([("wood".into(), 40.0)]),
+            }],
+            ..World::default()
+        };
+
+        let bumped = world.with_extra_levels("building_logging_camp", 2);
+        assert_eq!(world.buildings[0].level, 2.0, "source world is immutable");
+        assert_eq!(world.buildings[0].staffing, 1.0);
+        assert_eq!(bumped.buildings[0].level, 4.0);
+        assert_eq!(bumped.buildings[0].staffing, 2.0);
+        assert_eq!(bumped.buildings[0].saved_inputs["tools"], 4.0);
+        assert_eq!(bumped.buildings[0].saved_outputs["wood"], 80.0);
     }
 
     #[test]

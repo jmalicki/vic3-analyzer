@@ -414,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn what_if_extra_levels_changes_price_employment_frozen() {
+    fn what_if_extra_levels_changes_price_with_source_world_unchanged() {
         let defs = two_good_defs();
         let world = balanced_world(&defs);
         let staffing_before: Vec<f64> = world.buildings.iter().map(|b| b.staffing).collect();

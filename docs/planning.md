@@ -52,12 +52,13 @@ atoms are diagnostic-only until a budget/debt or wage transition model exists.
 Army and declared-interest actions require save IR that is not parsed yet.
 
 The first supportable non-tech action is a building-level decision followed by
-a price re-solve, for `good_price` and a modeled GDP. Before wiring that into
-`vic3-sim`, `vic3-prices` must define how added levels affect buildings whose
-goods IO comes from absolute saved volumes. The current what-if path leaves
-staffing frozen and saved IO authoritative, so blindly adding levels can produce
-no change on real saves. Do not emit construction actions until that contract
-and construction timing are explicit and tested.
+a price re-solve, for `good_price` and a modeled GDP. `vic3-prices` defines an
+explicit level delta by preserving the building's staffing ratio and scaling
+absolute saved IO per level, while leaving unrelated employment, wages, and
+trade frozen. Planner wiring still requires compact building deltas in
+`PlanningState`, solver context outside the hash key, goal-relevant producer
+selection, and an explicit construction-time contract. Do not emit construction
+actions until those pieces are present and tested.
 
 ## P9a vs P9b
 
