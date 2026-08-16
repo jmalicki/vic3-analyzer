@@ -1,7 +1,18 @@
 import type { JsonSchema } from './types'
 
+/**
+ * Incremental defs build. Batching keeps the tab from holding a full install's
+ * coat-of-arms art (400 MB+) in one array and copying it again into wasm.
+ */
+export interface DefsBlobBuilder {
+  addBatch(manifestJson: string, contents: Uint8Array): void
+  finish(): Uint8Array
+  free?(): void
+}
+
 export interface WasmApi {
   classify_defs_path(path: string, isDirectory: boolean): 'read' | 'skip' | 'descend' | 'prune'
+  DefsBlobBuilder: new () => DefsBlobBuilder
   build_defs_blob(
     manifestJson: string,
     contents: Uint8Array,

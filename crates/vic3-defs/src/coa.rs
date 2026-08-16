@@ -506,17 +506,33 @@ pub fn render_library(
         .collect::<std::collections::BTreeSet<_>>();
     let decoded = used_textures
         .into_iter()
-        .filter_map(|key| {
-            let image = decode_texture(textures.get(&key)?)?;
-            Some((key, scale_to_flag(&image)))
-        })
+        .filter_map(|key| Some((key.clone(), decode_flag_texture(textures.get(&key)?)?)))
         .collect::<BTreeMap<_, _>>();
+    render_resolved(library, &decoded);
+}
+
+/// Render from textures already decoded to flag size.
+///
+/// The browser builder scales each texture as it arrives so the source art —
+/// over 400 MB across a full install — never has to be held at once.
+pub fn render_library_scaled(library: &mut CoaLibrary, textures: &BTreeMap<String, RgbaImage>) {
+    resolve_parents(&mut library.coats);
+    resolve_template_lists(library);
+    render_resolved(library, textures);
+}
+
+fn render_resolved(library: &mut CoaLibrary, textures: &BTreeMap<String, RgbaImage>) {
     let coats = library.coats.clone();
     for (id, coa) in coats {
-        if let Some(png) = render_coa(&coa, &library.colors, &decoded) {
+        if let Some(png) = render_coa(&coa, &library.colors, textures) {
             library.rendered.insert(id, png);
         }
     }
+}
+
+/// Decode one texture and immediately reduce it to flag size.
+pub(crate) fn decode_flag_texture(bytes: &[u8]) -> Option<RgbaImage> {
+    Some(scale_to_flag(&decode_texture(bytes)?))
 }
 
 fn resolve_parents(coats: &mut BTreeMap<String, CoatOfArms>) {
@@ -663,7 +679,8 @@ fn texture_key(name: &str) -> String {
     name.rsplit('/').next().unwrap_or(name).to_lowercase()
 }
 
-struct RgbaImage {
+#[derive(Debug)]
+pub struct RgbaImage {
     w: u32,
     h: u32,
     data: Vec<u8>,

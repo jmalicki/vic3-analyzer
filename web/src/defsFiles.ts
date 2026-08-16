@@ -27,39 +27,64 @@ export type DefsDropItem = {
   webkitGetAsEntry?: () => DefsDropEntry | null
 }
 
+/** Receives one batch of files; resolves once the batch may be released. */
+export type DefsBatchSink = (batch: DefsSourceFile[], read: number) => Promise<void>
+
 /**
- * Read dropped folders through the entries API.
+ * Read dropped folders through the entries API, in small batches.
  *
  * Dragging from the file manager is the one route Chromium does not restrict by
  * path, so it reaches a Steam install under `~/Library` or `Program Files` that
  * `showDirectoryPicker` refuses outright.
+ *
+ * A full install offers more than 400 MB of coat-of-arms art. Retaining all of
+ * it — then copying it again into wasm — is what wedges the tab, so files are
+ * released as soon as the sink has taken them.
  */
-export async function collectDroppedDefsFiles(
+export async function streamDroppedDefsFiles(
   items: Iterable<DefsDropItem>,
   classify: DefsPathClassifier,
-  onFile?: (read: number) => void,
-): Promise<DefsSourceFile[]> {
-  const out: DefsSourceFile[] = []
+  sink: DefsBatchSink,
+  batchSize = DEFS_BATCH_SIZE,
+): Promise<number> {
+  let batch: DefsSourceFile[] = []
+  let read = 0
+  const flush = async () => {
+    if (batch.length === 0) return
+    read += batch.length
+    const full = batch
+    batch = []
+    await sink(full, read)
+  }
   for (const item of items) {
     const entry = item.webkitGetAsEntry?.()
-    if (entry) await walkEntry(entry, entry.name, out, classify, onFile)
+    if (!entry) continue
+    await walkEntryStreaming(entry, entry.name, classify, async (file) => {
+      batch.push(file)
+      if (batch.length >= batchSize) await flush()
+    })
   }
-  return out
+  await flush()
+  return read
 }
 
-async function walkEntry(
+/**
+ * Files per wasm handoff. Small enough that a 30 MB coat-of-arms batch is the
+ * peak, large enough that per-call overhead stays invisible.
+ */
+export const DEFS_BATCH_SIZE = 24
+
+async function walkEntryStreaming(
   entry: DefsDropEntry,
   path: string,
-  out: DefsSourceFile[],
   classify: DefsPathClassifier,
-  onFile?: (read: number) => void,
+  emit: (file: DefsSourceFile) => Promise<void>,
 ): Promise<void> {
   if (entry.isFile && entry.file) {
     if (!usefulDefsPath(path, classify)) return
     const read = entry.file.bind(entry)
     const file = await new Promise<File>((resolve, reject) => read(resolve, reject))
-    out.push({ path, bytes: new Uint8Array(await file.arrayBuffer()) })
-    onFile?.(out.length)
+    await emit({ path, bytes: new Uint8Array(await file.arrayBuffer()) })
     return
   }
   if (!entry.isDirectory || !entry.createReader) return
@@ -72,7 +97,7 @@ async function walkEntry(
     )
     if (batch.length === 0) return
     for (const child of batch) {
-      await walkEntry(child, `${path}/${child.name}`, out, classify, onFile)
+      await walkEntryStreaming(child, `${path}/${child.name}`, classify, emit)
     }
   }
 }

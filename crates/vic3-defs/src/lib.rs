@@ -39,7 +39,7 @@ mod types;
 pub use blob::{decode_blob, encode_blob, BLOB_VERSION};
 pub use coa::{select_coa, select_flag_coa};
 pub use error::DefsError;
-pub use load::{load_from_files, load_from_path};
+pub use load::{load_from_files, load_from_path, DefsBuilder};
 pub use path_rules::{classify_defs_path, DefsPathClass, COMMON_DIRS};
 pub use substitution::{clamp_supply_share, substitution_shares, substitution_weight};
 pub use types::{

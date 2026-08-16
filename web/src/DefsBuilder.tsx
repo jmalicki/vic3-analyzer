@@ -7,8 +7,9 @@ import {
   type InputHTMLAttributes,
 } from 'react'
 import {
-  collectDroppedDefsFiles,
+  DEFS_BATCH_SIZE,
   packDefsFiles,
+  streamDroppedDefsFiles,
   usefulDefsPath,
   type DefsPathClassifier,
   type DefsSourceFile,
@@ -39,8 +40,10 @@ const directoryProps = {
   directory: '',
 } as InputHTMLAttributes<HTMLInputElement>
 
-/** Repaint every 32 files so a 3000-file install does not thrash React. */
-const PROGRESS_STRIDE = 32
+/** Hand the event loop a turn so progress paints between wasm handoffs. */
+function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
 
 export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
   const [status, setStatus] = useState<string>()
@@ -60,24 +63,47 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
     setError(reason instanceof Error ? reason.message : String(reason))
   }
 
-  const build = async (files: DefsSourceFile[]) => {
+  /**
+   * Run a streamed build.
+   *
+   * `pump` reads the source and hands over batches; each is packed, submitted
+   * to wasm, and released before the next is read, so the tab never holds a
+   * full install's coat-of-arms art at once. Yielding between batches lets the
+   * progress bar actually repaint.
+   */
+  const build = async (
+    pump: (submit: (batch: DefsSourceFile[]) => Promise<void>) => Promise<void>,
+    label: string,
+    emptyMessage: string,
+  ) => {
     if (!api) {
       fail(new Error('The analysis engine is still loading. Try again in a moment.'))
       return
     }
-    setProgress({ label: 'Parsing definitions in wasm' })
+    setProgress({ label, done: 0 })
     setBuilt(false)
     setStatus(undefined)
     setError(undefined)
+    const classify: DefsPathClassifier = (path, isDirectory) =>
+      api.classify_defs_path(path, isDirectory)
+    const builder = new api.DefsBlobBuilder()
+    let accepted = 0
     try {
-      const classify: DefsPathClassifier = (path, isDirectory) =>
-        api.classify_defs_path(path, isDirectory)
-      const packed = packDefsFiles(files, classify)
-      const manifest = JSON.parse(packed.manifestJson) as unknown[]
-      if (manifest.length === 0) {
-        throw new Error('No supported common/*.txt definition files were found.')
-      }
-      const bytes = await api.build_defs_blob(packed.manifestJson, packed.contents)
+      await pump(async (batch) => {
+        const packed = packDefsFiles(batch, classify)
+        const manifest = JSON.parse(packed.manifestJson) as unknown[]
+        if (manifest.length > 0) {
+          builder.addBatch(packed.manifestJson, packed.contents)
+          accepted += manifest.length
+        }
+        setProgress({ label, done: accepted })
+        await yieldToBrowser()
+      })
+      if (accepted === 0) throw new Error(emptyMessage)
+      setProgress({ label: 'Parsing definitions in wasm' })
+      // finish() blocks the thread, so let the new label paint first.
+      await yieldToBrowser()
+      const bytes = builder.finish()
       const file = new File([bytes.slice().buffer as ArrayBuffer], 'defs.postcard', {
         type: 'application/octet-stream',
       })
@@ -86,36 +112,47 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
       setBuilt(true)
       onBuilt(file)
       setStatus(
-        `Built ${file.name} format v${summary.blob_version} from ${manifest.length} definition files: ${summary.goods} goods, ${summary.labels} localized names, ${summary.icons} icons, ${summary.production_methods} production methods. Analysis tools are unlocked.` +
+        `Built ${file.name} format v${summary.blob_version} from ${accepted} definition files: ${summary.goods} goods, ${summary.labels} localized names, ${summary.icons} icons, ${summary.production_methods} production methods. Analysis tools are unlocked.` +
           (summary.goods < 10
             ? ' That is far fewer goods than a full install — common/goods was probably missed, so drag the common folder itself and rebuild.'
             : ''),
       )
     } catch (reason) {
       fail(reason)
+    } finally {
+      builder.free?.()
     }
   }
 
-  const readSelected = async (list: FileList): Promise<DefsSourceFile[]> => {
-    if (!api) throw new Error('The analysis engine is still loading. Try again in a moment.')
+  const buildFromSelection = (list: FileList) => {
+    if (!api) {
+      fail(new Error('The analysis engine is still loading. Try again in a moment.'))
+      return
+    }
     const classify: DefsPathClassifier = (path, isDirectory) =>
       api.classify_defs_path(path, isDirectory)
     const chosen = [...list].filter((file) =>
       usefulDefsPath(file.webkitRelativePath || file.name, classify),
     )
-    const label = 'Reading definition files'
-    setProgress({ label, done: 0, total: chosen.length })
-    const out: DefsSourceFile[] = []
-    for (const file of chosen) {
-      out.push({
-        path: file.webkitRelativePath || file.name,
-        bytes: new Uint8Array(await file.arrayBuffer()),
-      })
-      if (out.length % PROGRESS_STRIDE === 0 || out.length === chosen.length) {
-        setProgress({ label, done: out.length, total: chosen.length })
-      }
-    }
-    return out
+    void build(
+      async (submit) => {
+        let batch: DefsSourceFile[] = []
+        for (const file of chosen) {
+          batch.push({
+            path: file.webkitRelativePath || file.name,
+            bytes: new Uint8Array(await file.arrayBuffer()),
+          })
+          if (batch.length >= DEFS_BATCH_SIZE) {
+            const full = batch
+            batch = []
+            await submit(full)
+          }
+        }
+        if (batch.length > 0) await submit(batch)
+      },
+      'Reading definition files',
+      'No supported common/*.txt definition files were found.',
+    )
   }
 
   const handleDrop = async (event: DragEvent<HTMLDivElement>) => {
@@ -128,28 +165,14 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
     }
     const classify: DefsPathClassifier = (path, isDirectory) =>
       api.classify_defs_path(path, isDirectory)
-    try {
-      const label = 'Reading dropped files'
-      setProgress({ label, done: 0 })
-      const files = await collectDroppedDefsFiles(
-        event.dataTransfer.items ?? [],
-        classify,
-        (read) => {
-          if (read % PROGRESS_STRIDE === 0) setProgress({ label, done: read })
-        },
-      )
-      if (files.length === 0) {
-        fail(
-          new Error(
-            'That drop had no supported definitions. Drag the Victoria 3 game folder itself.',
-          ),
-        )
-        return
-      }
-      await build(files)
-    } catch (reason) {
-      fail(reason)
-    }
+    const items = [...(event.dataTransfer.items ?? [])]
+    await build(
+      async (submit) => {
+        await streamDroppedDefsFiles(items, classify, (batch) => submit(batch))
+      },
+      'Reading dropped files',
+      'That drop had no supported definitions. Drag the Victoria 3 game folder itself.',
+    )
   }
 
   const copyPath = async () => {
@@ -227,7 +250,7 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
           onChange={(event) => {
             const files = event.target.files
             if (files?.length) {
-              void readSelected(files).then(build).catch(fail)
+              buildFromSelection(files)
             } else {
               fail(new Error('No files came back from that folder. Nothing was read.'))
             }

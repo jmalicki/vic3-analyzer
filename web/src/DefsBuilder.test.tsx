@@ -1,12 +1,15 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { DefsBuilder } from './DefsBuilder'
 import {
-  collectDroppedDefsFiles,
+  DEFS_BATCH_SIZE,
   packDefsFiles,
+  streamDroppedDefsFiles,
   type DefsDropEntry,
+  type DefsDropItem,
   type DefsPathClassifier,
+  type DefsSourceFile,
 } from './defsFiles'
 import type { WasmApi } from './wasm'
 
@@ -58,12 +61,49 @@ function defsSummaryJson(goods = 53): string {
   })
 }
 
-function api(): WasmApi {
-  return {
+/** Records what the component streamed into wasm, batch by batch. */
+type BuilderSpy = {
+  batches: { manifestJson: string; contents: Uint8Array }[]
+  finish: Mock<() => Uint8Array>
+}
+
+function api(builder?: Partial<BuilderSpy>): WasmApi & { builder: BuilderSpy } {
+  const spy: BuilderSpy = {
+    batches: [],
+    finish: builder?.finish ?? vi.fn(() => new Uint8Array([1, 2, 3])),
+  }
+  const wasm = {
     classify_defs_path: vi.fn(classify),
-    build_defs_blob: vi.fn(() => new Uint8Array([1, 2, 3])),
+    DefsBlobBuilder: class {
+      addBatch(manifestJson: string, contents: Uint8Array) {
+        spy.batches.push({ manifestJson, contents })
+      }
+      finish() {
+        return spy.finish()
+      }
+    },
     defs_summary: vi.fn(() => defsSummaryJson()),
   } as unknown as WasmApi
+  return Object.assign(wasm, { builder: spy })
+}
+
+/** Drain the streaming walk into one array, for tests about which files it picks. */
+async function walkedPaths(
+  items: DefsDropItem[],
+  classify: DefsPathClassifier,
+): Promise<string[]> {
+  const seen: DefsSourceFile[] = []
+  await streamDroppedDefsFiles(items, classify, async (batch) => {
+    seen.push(...batch)
+  })
+  return seen.map((file) => file.path)
+}
+
+/** Files the component actually handed to wasm, across every batch. */
+function submittedPaths(spy: BuilderSpy): string[] {
+  return spy.batches.flatMap(
+    (batch) => (JSON.parse(batch.manifestJson) as { path: string }[]).map((entry) => entry.path),
+  )
 }
 
 describe('DefsBuilder', () => {
@@ -120,7 +160,8 @@ describe('DefsBuilder', () => {
     })
 
     await user.upload(screen.getByLabelText('Victoria 3 definitions folder'), file)
-    await waitFor(() => expect(wasm.build_defs_blob).toHaveBeenCalled())
+    await waitFor(() => expect(wasm.builder.finish).toHaveBeenCalled())
+    expect(submittedPaths(wasm.builder)).toEqual(['Victoria 3/game/common/goods/goods.txt'])
     expect(onBuilt).toHaveBeenCalledWith(expect.objectContaining({ name: 'defs.postcard' }))
     expect(await screen.findByText(/Built defs.postcard format v6 from 1 definition files/)).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent(
@@ -149,8 +190,9 @@ describe('DefsBuilder', () => {
       dirEntry('art', [fileEntry('ignored.txt', 'x')]),
     ])
 
-    const files = await collectDroppedDefsFiles([{ webkitGetAsEntry: () => common }], classify)
-    expect(files.map((file) => file.path)).toEqual(['common/goods/00_goods.txt'])
+    expect(await walkedPaths([{ webkitGetAsEntry: () => common }], classify)).toEqual([
+      'common/goods/00_goods.txt',
+    ])
   })
 
   it('accepts game root definitions and localization while pruning gfx', async () => {
@@ -167,11 +209,8 @@ describe('DefsBuilder', () => {
     ])
 
     const wasm = api()
-    const files = await collectDroppedDefsFiles(
-      [{ webkitGetAsEntry: () => game }],
-      wasm.classify_defs_path,
-    )
-    expect(files.map((file) => file.path)).toEqual([
+    const files = await walkedPaths([{ webkitGetAsEntry: () => game }], wasm.classify_defs_path)
+    expect(files).toEqual([
       'game/common/goods/00_goods.txt',
       'game/localization/english/goods_l_english.yml',
     ])
@@ -190,8 +229,29 @@ describe('DefsBuilder', () => {
       dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
     })
 
-    await waitFor(() => expect(wasm.build_defs_blob).toHaveBeenCalled())
+    await waitFor(() => expect(wasm.builder.finish).toHaveBeenCalled())
     expect(onBuilt).toHaveBeenCalledWith(expect.objectContaining({ name: 'defs.postcard' }))
+  })
+
+  it('streams a large drop in batches instead of one buffer', async () => {
+    const wasm = api()
+    render(<DefsBuilder api={wasm} onBuilt={vi.fn()} />)
+    // More files than one batch holds, so the walk must hand over several.
+    const goods = Array.from({ length: DEFS_BATCH_SIZE * 2 + 3 }, (_, index) =>
+      fileEntry(`${String(index).padStart(3, '0')}_goods.txt`, 'grain = { cost = 20 }'),
+    )
+    const common = dirEntry('common', [dirEntry('goods', goods)])
+
+    fireEvent.drop(screen.getByLabelText('Drop the Victoria 3 game folder'), {
+      dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
+    })
+
+    await waitFor(() => expect(wasm.builder.finish).toHaveBeenCalled())
+    expect(wasm.builder.batches.length).toBe(3)
+    expect(submittedPaths(wasm.builder)).toHaveLength(goods.length)
+    for (const batch of wasm.builder.batches) {
+      expect(JSON.parse(batch.manifestJson).length).toBeLessThanOrEqual(DEFS_BATCH_SIZE)
+    }
   })
 
   it('explains an empty drop instead of failing silently', async () => {
@@ -235,12 +295,11 @@ describe('DefsBuilder', () => {
   })
 
   it('shows an error when wasm rejects the definition files', async () => {
-    const wasm = {
-      ...api(),
-      build_defs_blob: vi.fn(() => {
+    const wasm = api({
+      finish: vi.fn(() => {
         throw new Error('bad goods file')
       }),
-    } as unknown as WasmApi
+    })
     render(<DefsBuilder api={wasm} onBuilt={vi.fn()} onDone={vi.fn()} />)
     const common = dirEntry('common', [
       dirEntry('goods', [fileEntry('00_goods.txt', 'grain = {')]),
@@ -256,11 +315,9 @@ describe('DefsBuilder', () => {
   })
 
   it('reports busy state so the dialog cannot be dismissed mid-build', async () => {
-    let release: (bytes: Uint8Array) => void = () => {}
-    const wasm = {
-      ...api(),
-      build_defs_blob: vi.fn(() => new Promise<Uint8Array>((resolve) => (release = resolve))),
-    } as unknown as WasmApi
+    let release: (summary: string) => void = () => {}
+    const wasm = api()
+    wasm.defs_summary = vi.fn(() => new Promise<string>((resolve) => (release = resolve)))
     const onBusyChange = vi.fn()
     render(<DefsBuilder api={wasm} onBuilt={vi.fn()} onBusyChange={onBusyChange} />)
     const common = dirEntry('common', [
@@ -271,19 +328,16 @@ describe('DefsBuilder', () => {
       dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
     })
     await waitFor(() => expect(onBusyChange).toHaveBeenCalledWith(true))
+    await waitFor(() => expect(wasm.defs_summary).toHaveBeenCalled())
 
-    release(new Uint8Array([1, 2, 3]))
+    release(defsSummaryJson())
     await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false))
   })
 
   it('reports progress while wasm parses the definitions', async () => {
-    let release: (bytes: Uint8Array) => void = () => {}
-    const wasm = {
-      ...api(),
-      build_defs_blob: vi.fn(
-        () => new Promise<Uint8Array>((resolve) => (release = resolve)),
-      ),
-    } as unknown as WasmApi
+    let release: (summary: string) => void = () => {}
+    const wasm = api()
+    wasm.defs_summary = vi.fn(() => new Promise<string>((resolve) => (release = resolve)))
     render(<DefsBuilder api={wasm} onBuilt={vi.fn()} />)
     const common = dirEntry('common', [
       dirEntry('goods', [fileEntry('00_goods.txt', 'grain = { cost = 20 }')]),
@@ -295,8 +349,9 @@ describe('DefsBuilder', () => {
 
     const bar = await screen.findByRole('progressbar', { name: 'Parsing definitions in wasm' })
     expect(bar).not.toHaveAttribute('value')
+    await waitFor(() => expect(wasm.defs_summary).toHaveBeenCalled())
 
-    release(new Uint8Array([1, 2, 3]))
+    release(defsSummaryJson())
     await waitFor(() => expect(screen.queryByRole('progressbar')).not.toBeInTheDocument())
   })
 
