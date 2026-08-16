@@ -26,7 +26,7 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     api = await loadWasm({ moduleUrl, moduleOrPath })
     save = readBytes(repoRoot, 'crates/vic3-load/tests/fixtures/plaintext.txt')
     barren = readBytes(repoRoot, 'crates/vic3-cli/tests/fixtures/barren.txt')
-    defs = readBytes(webRoot, 'public/defs.postcard')
+    defs = readBytes(webRoot, 'fixtures/defs.postcard')
   }, 60_000)
 
   it('parse_save returns tag and date from the plaintext fixture', async () => {

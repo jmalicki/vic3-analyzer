@@ -4,10 +4,9 @@ AGPL-3.0 Victoria 3 save loader and planner. Given a `.v3` and a high-level goal
 
 **CLI first**, then an in-browser UI (`wasm-bindgen` + React). Saves are never uploaded. Past runs and alternative plans live in a **local archive** (CLI: XDG; UI: IndexedDB).
 
-**Live demo:** [https://jmalicki.github.io/vic3-analyzer/](https://jmalicki.github.io/vic3-analyzer/) — drop a plaintext `.v3` (or fixture bytes); the site ships a fixture defs postcard so prices/what-if/plan work without a game install. Binary token maps are not redistributed.
+**Live demo:** [https://jmalicki.github.io/vic3-analyzer/](https://jmalicki.github.io/vic3-analyzer/) — drop a plaintext `.v3` (or fixture bytes) and supply definitions from your own install. The site ships none, so nothing can quietly price a campaign from test fixtures. Binary token maps are not redistributed either.
 
-The hosted definitions are intentionally tiny test fixtures. For all goods in
-a real campaign, build a private blob from your installed game:
+Build a blob from your installed game:
 
 ```text
 cargo run -p vic3-cli -- defs export \
@@ -22,7 +21,8 @@ Alternatively, the web UI can build the blob locally: drag the installed
 `Victoria 3/game/common` folder onto the builder, pick it, or supply a zip of
 it. Dragging is the reliable route, since Chrome refuses to open Steam's install
 location (`~/Library`, `Program Files`) through its folder pickers. The
-Clausewitz files are parsed in wasm and never leave the browser.
+Clausewitz files are parsed in wasm and never leave the browser, and the built
+blob is kept in IndexedDB so a reload does not lose it.
 
 ## Docs
 

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { clearAnalyses, listAnalyses, saveAnalysis } from './archive'
+import { clearStoredDefs } from './defsStore'
 import type { AnalysisRecord } from './types'
 import type { WasmApi } from './wasm'
 
@@ -100,12 +101,13 @@ function mockBundledDefs(ok = true) {
 async function selectSave(user: ReturnType<typeof userEvent.setup>) {
   await user.upload(screen.getByLabelText('Save file'), new File(['save'], 'campaign.v3'))
   await screen.findByText('FRA')
-  await screen.findByText(/Using the bundled demo definitions blob/)
+  await screen.findByText(/Using the local development demo blob/)
 }
 
 describe('prices UI', () => {
   beforeEach(async () => {
     await clearAnalyses()
+    await clearStoredDefs()
     mockBundledDefs()
   })
   afterEach(() => {
@@ -138,7 +140,7 @@ describe('prices UI', () => {
       await screen.findByText(/3 goods, 5 production methods/),
     ).toBeInTheDocument()
     expect(
-      screen.getByText(/Demo definitions contain only a few fixture goods/),
+      screen.getByText(/The local development demo blob defines only a few fixture goods/),
     ).toBeInTheDocument()
   })
 
@@ -159,7 +161,7 @@ describe('prices UI', () => {
 
     expect(await screen.findByText(/53 goods, 412 production methods/)).toBeInTheDocument()
     expect(
-      screen.queryByText(/Demo definitions contain only a few fixture goods/),
+      screen.queryByText(/The local development demo blob defines only a few fixture goods/),
     ).not.toBeInTheDocument()
   })
 
@@ -313,7 +315,7 @@ describe('prices UI', () => {
     expect(defsHelp).toHaveTextContent('postcard-encoded snapshot of goods')
   })
 
-  it('uses bundled defs by default and lets a custom blob override them', async () => {
+  it('uses the dev-only demo blob by default and lets a custom blob override it', async () => {
     const user = userEvent.setup()
     const api = mockApi()
     render(<App wasmApi={api} />)
@@ -328,12 +330,36 @@ describe('prices UI', () => {
     expect(Array.from(defsArg)).toEqual([99, 117, 115, 116, 111, 109]) // "custom"
   })
 
-  it('shows a missing-bundled-defs message when the fixture cannot load', async () => {
+  it('asks for definitions when no demo blob is served', async () => {
     mockBundledDefs(false)
     render(<App wasmApi={mockApi()} />)
+    expect(await screen.findByText(/No definitions loaded/)).toBeInTheDocument()
+    // Outside public/, so a production build has nothing to serve here.
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('fixtures/defs.postcard'))).toBe(true)
+  })
+
+  it('keeps chosen definitions across a reload and can forget them', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+    await user.upload(
+      screen.getByLabelText('Choose definitions blob'),
+      new File(['custom'], 'custom.postcard'),
+    )
+    await screen.findByText(/Using your file: custom\.postcard/)
+
+    cleanup()
+    render(<App wasmApi={mockApi()} />)
     expect(
-      await screen.findByText(/Bundled demo definitions are unavailable/),
+      await screen.findByText(/Using your file: custom\.postcard.*kept from a previous visit/),
     ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Forget these definitions' }))
+    await screen.findByText(/Using the local development demo blob/)
+
+    cleanup()
+    render(<App wasmApi={mockApi()} />)
+    expect(await screen.findByText(/Using the local development demo blob/)).toBeInTheDocument()
   })
 
   it('uses the remembered Chromium picker when available', async () => {
@@ -343,7 +369,7 @@ describe('prices UI', () => {
 
     const user = userEvent.setup()
     render(<App wasmApi={mockApi()} />)
-    await screen.findByText(/Using the bundled demo definitions blob/)
+    await screen.findByText(/Using the local development demo blob/)
     await user.click(screen.getByRole('button', { name: 'Choose save' }))
 
     expect(showOpenFilePicker).toHaveBeenCalledWith(

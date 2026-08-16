@@ -8,6 +8,7 @@ import {
   serializeAnalysis,
 } from './archive'
 import { DefsBuilder } from './DefsBuilder'
+import { clearStoredDefs, loadStoredDefs, storeDefs } from './defsStore'
 import { FieldHelp } from './FieldHelp'
 import { GoalBuilder } from './GoalBuilder'
 import { Modal } from './Modal'
@@ -31,10 +32,16 @@ import type {
 } from './types'
 import { loadWasm, runGaps, type WasmApi } from './wasm'
 
-function bundledDefsUrl(): string {
+/**
+ * Demo definitions exist for local development and tests only. The fixture is
+ * generated outside `public/`, so a production build ships nothing and prices
+ * can only come from definitions the user supplies.
+ */
+function demoDefsUrl(): string | undefined {
+  if (!import.meta.env.DEV) return undefined
   const base = import.meta.env.BASE_URL || '/'
   const prefix = base.endsWith('/') ? base : `${base}/`
-  return `${prefix}defs.postcard`
+  return `${prefix}fixtures/defs.postcard`
 }
 
 interface Props {
@@ -94,9 +101,10 @@ function App({ wasmApi }: Props) {
   const [saveFile, setSaveFile] = useState<File>()
   const [tokensFile, setTokensFile] = useState<File>()
   const [defsFile, setDefsFile] = useState<File>()
-  const [bundledDefsFile, setBundledDefsFile] = useState<File>()
-  const [bundledDefsStatus, setBundledDefsStatus] = useState<'loading' | 'ready' | 'missing'>(
-    'loading',
+  const [defsRestored, setDefsRestored] = useState(false)
+  const [demoDefsFile, setDemoDefsFile] = useState<File>()
+  const [demoDefsStatus, setDemoDefsStatus] = useState<'loading' | 'ready' | 'absent'>(
+    demoDefsUrl() ? 'loading' : 'absent',
   )
   const [summary, setSummary] = useState<SaveSummary>()
   const [defsSummary, setDefsSummary] = useState<DefsSummary>()
@@ -120,7 +128,16 @@ function App({ wasmApi }: Props) {
   const saveInputRef = useRef<HTMLInputElement>(null)
   const savePaths = useMemo(() => victoria3SavePaths(), [])
   const rememberedPicker = canUseRememberedSavePicker()
-  const effectiveDefs = defsFile ?? bundledDefsFile
+  const effectiveDefs = defsFile ?? demoDefsFile
+
+  /** Keep the chosen blob across reloads; nothing else survives a refresh. */
+  const applyDefsFile = (file?: File) => {
+    setDefsFile(file)
+    setDefsRestored(false)
+    void (file ? storeDefs(file) : clearStoredDefs()).catch(() => {
+      setError('Definitions could not be saved in this browser; they last until reload.')
+    })
+  }
 
   useEffect(() => {
     void listAnalyses().then(setRecords)
@@ -135,19 +152,35 @@ function App({ wasmApi }: Props) {
 
   useEffect(() => {
     let cancelled = false
-    setBundledDefsStatus('loading')
-    void fetch(bundledDefsUrl())
+    void loadStoredDefs()
+      .then((file) => {
+        if (!file || cancelled) return
+        setDefsFile(file)
+        setDefsRestored(true)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    const url = demoDefsUrl()
+    if (!url) return
+    let cancelled = false
+    setDemoDefsStatus('loading')
+    void fetch(url)
       .then(async (response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         const buffer = await response.arrayBuffer()
         if (cancelled) return
-        setBundledDefsFile(new File([buffer], 'defs.postcard'))
-        setBundledDefsStatus('ready')
+        setDemoDefsFile(new File([buffer], 'defs.postcard'))
+        setDemoDefsStatus('ready')
       })
       .catch(() => {
         if (!cancelled) {
-          setBundledDefsFile(undefined)
-          setBundledDefsStatus('missing')
+          setDemoDefsFile(undefined)
+          setDemoDefsStatus('absent')
         }
       })
     return () => {
@@ -504,30 +537,39 @@ function App({ wasmApi }: Props) {
                     3 install in the browser.
                   </p>
                   <p>
-                    The demo ships a fixture blob for local experiments. Prefer a blob built for
-                    your save&apos;s patch when analyzing a real campaign. Use the folder or zip
-                    builder below; all extraction happens in your browser.
+                    Build a blob from your own install for the patch your save uses; the folder or
+                    zip builder below does that in your browser, and the result is kept here so a
+                    reload does not lose it. Deployed builds ship no definitions of their own.
                   </p>
                 </FieldHelp>
               </span>
               <input
                 type="file"
                 aria-label="Choose definitions blob"
-                onChange={(e) => setDefsFile(e.target.files?.[0])}
+                onChange={(e) => applyDefsFile(e.target.files?.[0])}
               />
             </label>
             <small>
               {defsFile
-                ? `Using your file: ${defsFile.name}${defsCounts}`
-                : bundledDefsStatus === 'ready'
-                  ? `Using the bundled demo definitions blob${defsCounts}.`
-                  : bundledDefsStatus === 'loading'
-                    ? 'Loading bundled demo definitions…'
-                    : 'Bundled demo definitions are unavailable; choose a postcard blob.'}
+                ? `Using your file: ${defsFile.name}${defsCounts}${
+                    defsRestored ? ' (kept from a previous visit)' : ''
+                  }`
+                : demoDefsStatus === 'ready'
+                  ? `Using the local development demo blob${defsCounts}.`
+                  : demoDefsStatus === 'loading'
+                    ? 'Loading development demo definitions…'
+                    : 'No definitions loaded. Build them from your game files, or choose a defs.postcard you exported earlier.'}
             </small>
-            <button type="button" className="secondary" onClick={() => setBuilderOpen(true)}>
-              Build definitions from game files…
-            </button>
+            <div className="defs-builder-actions">
+              <button type="button" className="secondary" onClick={() => setBuilderOpen(true)}>
+                Build definitions from game files…
+              </button>
+              {defsFile && (
+                <button type="button" className="secondary" onClick={() => applyDefsFile(undefined)}>
+                  Forget these definitions
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </section>
@@ -540,7 +582,7 @@ function App({ wasmApi }: Props) {
         >
           <DefsBuilder
             api={api}
-            onBuilt={setDefsFile}
+            onBuilt={applyDefsFile}
             onBusyChange={setBuilderBusy}
             onDone={() => setBuilderOpen(false)}
           />
@@ -580,7 +622,7 @@ function App({ wasmApi }: Props) {
 
       {gated && (
         <p className="defs-required" role="status">
-          {!hasDefs && bundledDefsStatus === 'loading'
+          {!hasDefs && demoDefsStatus === 'loading'
             ? 'Loading definitions…'
             : `Analysis needs ${missing.join(' and ')}. Add ${
                 missing.length > 1 ? 'them' : 'it'
@@ -609,7 +651,7 @@ function App({ wasmApi }: Props) {
             <p className="demo-warning">
               {defsFile
                 ? `${defsFile.name} only defines ${defsSummary?.goods} goods, so prices below cover just those. Rebuild from the game/common folder itself — picking a subfolder skips common/goods.`
-                : 'Demo definitions contain only a few fixture goods. Choose a definitions blob built from your Victoria 3 install for the full goods list.'}
+                : 'The local development demo blob defines only a few fixture goods. Build definitions from a Victoria 3 install for the full goods list.'}
             </p>
           )}
         </section>

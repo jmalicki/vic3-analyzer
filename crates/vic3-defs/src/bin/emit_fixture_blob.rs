@@ -1,8 +1,10 @@
-//! Emit a postcard defs blob from the in-repo fixture tree for the web demo / Pages.
+//! Emit a postcard defs blob from the in-repo fixture tree for local development
+//! and tests. It stays out of `web/public/` so production builds ship no demo
+//! definitions; a deployed site has none until the user builds their own.
 //!
 //! Usage:
 //! ```text
-//! cargo run -p vic3-defs --bin emit_fixture_blob -- web/public/defs.postcard
+//! cargo run -p vic3-defs --bin emit_fixture_blob -- web/fixtures/defs.postcard
 //! ```
 
 use std::env;

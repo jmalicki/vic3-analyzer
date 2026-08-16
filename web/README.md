@@ -23,10 +23,17 @@ The Vite `base` is `/vic3-analyzer/` so assets resolve on GitHub Pages at
 `https://jmalicki.github.io/vic3-analyzer/`. `loadWasm` joins
 `import.meta.env.BASE_URL` with `wasm/vic3_wasm.js`.
 
-The UI loads `public/defs.postcard` by default, explains token maps / definitions
-via accessible help, and shows the usual Victoria 3 save folder for your OS.
-Chromium can remember the last chosen save folder; other browsers keep the
-standard file input (sites cannot force an arbitrary local path).
+The UI explains token maps / definitions via accessible help and shows the usual
+Victoria 3 save folder for your OS. Chromium can remember the last chosen save
+folder; other browsers keep the standard file input (sites cannot force an
+arbitrary local path).
+
+A deployed build ships no definitions: `npm run build:defs` writes
+`fixtures/defs.postcard` outside `public/`, and the fetch for it is behind
+`import.meta.env.DEV`, so it exists for development and tests only. Definitions
+a user builds or picks are stored in IndexedDB (`defsStore.ts`) and restored on
+the next visit, labelled as such, with a button to forget them — otherwise a
+reload would quietly leave the app with no definitions at all.
 
 Analysis tools stay greyed out until definitions are available, and long reads
 report progress: a determinate bar over the selected file count and an
@@ -46,7 +53,7 @@ never uploaded.
 Because a partial pick produces a blob that silently prices only a few goods,
 `defs_summary` reports the counts inside whichever blob is active. The builder and
 the definitions field both show them, a blob under ten goods is called out as
-demo-sized or incomplete, and swapping the save or definitions clears the
+fixture-sized or incomplete, and swapping the save or definitions clears the
 previous result table so it cannot be mistaken for the new inputs' output. The
 footer reports the package version, git revision, and UTC build time injected by
 Vite.
@@ -59,9 +66,10 @@ Vite.
 The app loads `parse_save`, `prices`, `what_if`, `gaps`, `plan`,
 `what_if_schema`, and `prices_schema`. Those functions return JSON strings.
 
-`npm run build:defs` writes `public/defs.postcard` from the in-repo
-`vic3-defs` fixture tree via `emit_fixture_blob`. The GitHub Pages demo uses
-that blob so analysis works without a Victoria 3 install.
+`npm run build:defs` writes `fixtures/defs.postcard` from the in-repo
+`vic3-defs` fixture tree via `emit_fixture_blob`. It backs the wasm wrapper tests
+and gives `npm run dev` something to solve; it is not part of `dist/`, so the
+GitHub Pages site requires user-supplied definitions.
 
 ## Token maps
 

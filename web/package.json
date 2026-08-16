@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "npm run build:wasm && npm run build:defs && tsc -b && vite build",
     "build:wasm": "wasm-pack build ../crates/vic3-wasm --target web --out-dir ../../web/public/wasm --out-name vic3_wasm && rm -f public/wasm/.gitignore public/wasm/package.json",
-    "build:defs": "cargo run -q -p vic3-defs --bin emit_fixture_blob -- public/defs.postcard",
+    "build:defs": "cargo run -q -p vic3-defs --bin emit_fixture_blob -- fixtures/defs.postcard",
     "lint": "oxlint",
     "test": "vitest run --project unit",
     "test:wasm": "npm run build:wasm && npm run build:defs && vitest run --project wasm",
