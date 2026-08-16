@@ -119,7 +119,15 @@ export interface GapsResult {
 
 export type PlanAction =
   | { QueueTech: { tech: string } }
-  | { WaitForEvent: { event: { TechCompleted: { tech: string } }; days: number } }
+  | { QueueBuildingLevel: { building: string } }
+  | {
+      WaitForEvent: {
+        event:
+          | { TechCompleted: { tech: string } }
+          | { BuildingCompleted: { building: string } }
+        days: number
+      }
+    }
 
 export interface PlanStep {
   day: number

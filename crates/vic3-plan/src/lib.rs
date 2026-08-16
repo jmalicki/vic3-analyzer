@@ -15,8 +15,8 @@ pub use vic3::Vic3Node;
 
 mod result;
 pub use result::{
-    compare, plan, ActionDiff, AnalysisRecord, CompareResult, GapDiff, GapStatus, PlanError,
-    PlanOpts, PlanResult, PlanStep, PriceDelta,
+    compare, plan, plan_with_economy, ActionDiff, AnalysisRecord, CompareResult, GapDiff,
+    GapStatus, PlanError, PlanOpts, PlanResult, PlanStep, PriceDelta,
 };
 
 /// Crate version from Cargo.

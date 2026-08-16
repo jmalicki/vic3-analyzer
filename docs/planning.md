@@ -51,14 +51,15 @@ Snapshot fiscal (`weekly_balance`, `credit_headroom`, `solvent`) and saved-wealt
 atoms are diagnostic-only until a budget/debt or wage transition model exists.
 Army and declared-interest actions require save IR that is not parsed yet.
 
-The first supportable non-tech action is a building-level decision followed by
-a price re-solve, for `good_price` and a modeled GDP. `vic3-prices` defines an
-explicit level delta by preserving the building's staffing ratio and scaling
-absolute saved IO per level, while leaving unrelated employment, wages, and
-trade frozen. Planner wiring still requires compact building deltas in
-`PlanningState`, solver context outside the hash key, goal-relevant producer
-selection, and an explicit construction-time contract. Do not emit construction
-actions until those pieces are present and tested.
+The first non-tech action is a building-level decision followed by a fixed-time
+construction event and price re-solve. `vic3-prices` preserves the building's
+staffing ratio and scales absolute saved IO per level, while leaving unrelated
+employment, wages, and trade frozen. `PlanningState` hashes compact per-type
+level deltas and its single queued building; immutable world/defs/solver inputs
+ride outside the A* key. Successors select only producers/consumers relevant to
+an open `good_price` atom and cap added levels per type, keeping the search
+finite. Construction timing is a model constant, not a claim about Paradox's
+queue.
 
 ## P9a vs P9b
 

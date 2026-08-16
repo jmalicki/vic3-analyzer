@@ -5,19 +5,90 @@
 //! not perform graph search.
 
 use serde::{Deserialize, Serialize};
-use vic3_goals::{gaps, Atom, Goal};
+use std::collections::BTreeSet;
+use vic3_defs::GameDefs;
+use vic3_goals::{gaps, Atom, Goal, Rel};
+use vic3_prices::{solve, SolveOpts, World, ORDER_EPS};
 use vic3_world::PlanningState;
+
+/// Immutable price-solver inputs shared by all nodes in one search.
+#[derive(Debug, Clone)]
+pub struct EconomyContext {
+    pub base_world: World,
+    pub defs: GameDefs,
+    pub solve_opts: SolveOpts,
+}
+
+impl EconomyContext {
+    pub fn new(base_world: World, defs: GameDefs, solve_opts: SolveOpts) -> Self {
+        Self {
+            base_world,
+            defs,
+            solve_opts,
+        }
+    }
+
+    fn world_for(&self, state: &PlanningState) -> World {
+        state
+            .building_level_deltas
+            .iter()
+            .fold(self.base_world.clone(), |world, (building, levels)| {
+                world.with_extra_levels(building, *levels)
+            })
+    }
+
+    fn building_candidates(&self, state: &PlanningState, atoms: &[Atom], cap: u16) -> Vec<String> {
+        let world = self.world_for(state);
+        let mut candidates = BTreeSet::new();
+        for atom in atoms {
+            let Atom::GoodPrice { good, rel, .. } = atom else {
+                continue;
+            };
+            for building in &world.buildings {
+                if state
+                    .building_level_deltas
+                    .get(&building.building)
+                    .copied()
+                    .unwrap_or(0)
+                    >= u32::from(cap)
+                {
+                    continue;
+                }
+                let (inputs, outputs) = building.goods_io(&self.defs);
+                let produces = outputs.get(good).is_some_and(|qty| *qty > ORDER_EPS);
+                let consumes = inputs.get(good).is_some_and(|qty| *qty > ORDER_EPS);
+                let relevant = match rel {
+                    Rel::Le | Rel::Lt => produces,
+                    Rel::Ge | Rel::Gt => consumes,
+                    Rel::Eq => produces || consumes,
+                };
+                if relevant {
+                    candidates.insert(building.building.clone());
+                }
+            }
+        }
+        candidates.into_iter().collect()
+    }
+}
 
 /// Tunable durations used by the compact simulator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SimConfig {
     /// Fixed research duration in the phase-8 model.
     pub research_days: u16,
+    /// Fixed duration for one modeled building-level expansion.
+    pub construction_days: u16,
+    /// Finite search bound for added levels of one building type.
+    pub max_added_levels_per_type: u16,
 }
 
 impl Default for SimConfig {
     fn default() -> Self {
-        Self { research_days: 365 }
+        Self {
+            research_days: 365,
+            construction_days: 180,
+            max_added_levels_per_type: 10,
+        }
     }
 }
 
@@ -26,6 +97,8 @@ impl Default for SimConfig {
 pub enum Event {
     /// The technology currently in the queue completes.
     TechCompleted { tech: String },
+    /// One level of the queued building type completes.
+    BuildingCompleted { building: String },
 }
 
 /// A deterministic state transition.
@@ -33,6 +106,8 @@ pub enum Event {
 pub enum Action {
     /// Put a goal-relevant technology in the empty research queue.
     QueueTech { tech: String },
+    /// Put one goal-relevant building level in the compact construction queue.
+    QueueBuildingLevel { building: String },
     /// Advance directly to an event already in flight.
     WaitForEvent { event: Event, days: u16 },
 }
@@ -49,7 +124,18 @@ pub struct Successor {
 /// Generate successors relevant to the currently unsatisfied atoms of `goal`.
 pub fn successors(state: &PlanningState, goal: &Goal, config: SimConfig) -> Vec<Successor> {
     let open_atoms = gaps(goal, state);
-    successors_for_atoms(state, &open_atoms, config)
+    successors_for_atoms_with_economy(state, &open_atoms, config, None)
+}
+
+/// Generate successors with price-solver context for building decisions.
+pub fn successors_with_economy(
+    state: &PlanningState,
+    goal: &Goal,
+    config: SimConfig,
+    economy: &EconomyContext,
+) -> Vec<Successor> {
+    let open_atoms = gaps(goal, state);
+    successors_for_atoms_with_economy(state, &open_atoms, config, Some(economy))
 }
 
 /// Generate successors from an already-computed list of open goal atoms.
@@ -64,10 +150,19 @@ pub fn successors_for_atoms(
     open_atoms: &[Atom],
     config: SimConfig,
 ) -> Vec<Successor> {
+    successors_for_atoms_with_economy(state, open_atoms, config, None)
+}
+
+fn successors_for_atoms_with_economy(
+    state: &PlanningState,
+    open_atoms: &[Atom],
+    config: SimConfig,
+    economy: Option<&EconomyContext>,
+) -> Vec<Successor> {
     let mut result = Vec::new();
     let mut seen_techs = std::collections::BTreeSet::new();
 
-    if state.queued_tech.is_none() {
+    if state.queued_tech.is_none() && state.queued_building.is_none() {
         for atom in open_atoms {
             let Atom::HasTech(tech) = atom else {
                 continue;
@@ -76,12 +171,27 @@ pub fn successors_for_atoms(
                 continue;
             }
             let action = Action::QueueTech { tech: tech.clone() };
-            if let Some(next) = apply_action(state, &action) {
+            if let Some(next) = apply_action_with_economy(state, &action, economy) {
                 result.push(Successor {
                     action,
                     days: 0,
                     state: next,
                 });
+            }
+        }
+
+        if let Some(economy) = economy {
+            for building in
+                economy.building_candidates(state, open_atoms, config.max_added_levels_per_type)
+            {
+                let action = Action::QueueBuildingLevel { building };
+                if let Some(next) = apply_action_with_economy(state, &action, Some(economy)) {
+                    result.push(Successor {
+                        action,
+                        days: 0,
+                        state: next,
+                    });
+                }
             }
         }
     }
@@ -96,7 +206,22 @@ pub fn successors_for_atoms(
             event: Event::TechCompleted { tech: tech.clone() },
             days,
         };
-        if let Some(next) = apply_action(state, &action) {
+        if let Some(next) = apply_action_with_economy(state, &action, economy) {
+            result.push(Successor {
+                action,
+                days,
+                state: next,
+            });
+        }
+    } else if let (Some(building), Some(economy)) = (state.queued_building.as_ref(), economy) {
+        let days = config.construction_days.max(1);
+        let action = Action::WaitForEvent {
+            event: Event::BuildingCompleted {
+                building: building.clone(),
+            },
+            days,
+        };
+        if let Some(next) = apply_action_with_economy(state, &action, Some(economy)) {
             result.push(Successor {
                 action,
                 days,
@@ -113,13 +238,36 @@ pub fn successors_for_atoms(
 /// The action carries all timing information, so applying it to identical
 /// states always produces identical states (I8).
 pub fn apply_action(state: &PlanningState, action: &Action) -> Option<PlanningState> {
+    apply_action_with_economy(state, action, None)
+}
+
+/// Apply an action with optional price-solver context.
+pub fn apply_action_with_economy(
+    state: &PlanningState,
+    action: &Action,
+    economy: Option<&EconomyContext>,
+) -> Option<PlanningState> {
     let mut next = state.clone();
     match action {
         Action::QueueTech { tech } => {
-            if tech.is_empty() || next.queued_tech.is_some() || next.has_tech(tech) {
+            if tech.is_empty()
+                || next.queued_tech.is_some()
+                || next.queued_building.is_some()
+                || next.has_tech(tech)
+            {
                 return None;
             }
             next.queued_tech = Some(tech.clone());
+        }
+        Action::QueueBuildingLevel { building } => {
+            if building.is_empty()
+                || next.queued_tech.is_some()
+                || next.queued_building.is_some()
+                || economy.is_none()
+            {
+                return None;
+            }
+            next.queued_building = Some(building.clone());
         }
         Action::WaitForEvent {
             event: Event::TechCompleted { tech },
@@ -131,6 +279,27 @@ pub fn apply_action(state: &PlanningState, action: &Action) -> Option<PlanningSt
             next.date = next.date.add_days(i32::from(*days));
             next.queued_tech = None;
             next.techs.insert(tech.clone());
+        }
+        Action::WaitForEvent {
+            event: Event::BuildingCompleted { building },
+            days,
+        } => {
+            let economy = economy?;
+            if *days == 0 || next.queued_building.as_deref() != Some(building.as_str()) {
+                return None;
+            }
+            next.date = next.date.add_days(i32::from(*days));
+            next.queued_building = None;
+            *next
+                .building_level_deltas
+                .entry(building.clone())
+                .or_default() += 1;
+            let prices = solve(&economy.world_for(&next), &economy.defs, economy.solve_opts);
+            next.good_prices = prices
+                .goods
+                .into_iter()
+                .map(|good| (good.id, good.price))
+                .collect();
         }
     }
     Some(next)
@@ -145,7 +314,10 @@ pub fn version() -> &'static str {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::collections::BTreeMap;
+    use vic3_defs::Good;
     use vic3_goals::{compile, evaluate};
+    use vic3_prices::WorldBuilding;
     use vic3_world::{PlanningParts, Vic3Date};
 
     #[test]
@@ -166,7 +338,14 @@ mod tests {
         let goal = compile("research(tech=nitroglycerin)").unwrap();
         let start = state_at(0);
 
-        let decisions = successors(&start, &goal, SimConfig { research_days: 100 });
+        let decisions = successors(
+            &start,
+            &goal,
+            SimConfig {
+                research_days: 100,
+                ..SimConfig::default()
+            },
+        );
         assert_eq!(decisions.len(), 1);
         assert_eq!(decisions[0].days, 0);
         assert!(matches!(
@@ -174,12 +353,115 @@ mod tests {
             Action::QueueTech { ref tech } if tech == "nitroglycerin"
         ));
 
-        let waits = successors(&decisions[0].state, &goal, SimConfig { research_days: 100 });
+        let waits = successors(
+            &decisions[0].state,
+            &goal,
+            SimConfig {
+                research_days: 100,
+                ..SimConfig::default()
+            },
+        );
         assert_eq!(waits.len(), 1);
         assert_eq!(waits[0].days, 100);
         assert_eq!(start.date.days_until(&waits[0].state.date), 100);
         assert!(waits[0].state.queued_tech.is_none());
         assert!(evaluate(&goal, &waits[0].state));
+    }
+
+    #[test]
+    fn building_level_then_wait_reaches_good_price() {
+        let defs = GameDefs {
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        let world = World {
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(1),
+                building: "building_logging_camp".into(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: Vec::new(),
+                saved_inputs: BTreeMap::new(),
+                saved_outputs: BTreeMap::from([("wood".into(), 10.0)]),
+            }],
+            frozen_buy: BTreeMap::from([("wood".into(), 15.0)]),
+            ..World::default()
+        };
+        let solve_opts = SolveOpts::default();
+        let baseline = solve(&world, &defs, solve_opts);
+        let bumped = solve(
+            &world.with_extra_levels("building_logging_camp", 1),
+            &defs,
+            solve_opts,
+        );
+        let initial_price = baseline.goods[0].price;
+        let next_price = bumped.goods[0].price;
+        assert!(next_price < initial_price);
+        let target = (initial_price + next_price) / 2.0;
+        let goal = Goal::Atom(Atom::GoodPrice {
+            good: "wood".into(),
+            rel: Rel::Le,
+            value: target,
+        });
+        let state = PlanningState::from_parts(PlanningParts {
+            good_prices: vec![("wood".into(), initial_price)],
+            ..PlanningParts::default()
+        });
+        let economy = EconomyContext::new(world, defs, solve_opts);
+        let config = SimConfig {
+            construction_days: 30,
+            max_added_levels_per_type: 2,
+            ..SimConfig::default()
+        };
+
+        let decisions = successors_with_economy(&state, &goal, config, &economy);
+        assert!(matches!(
+            decisions.as_slice(),
+            [Successor {
+                action: Action::QueueBuildingLevel { building },
+                days: 0,
+                ..
+            }] if building == "building_logging_camp"
+        ));
+        let repeated_decision =
+            apply_action_with_economy(&state, &decisions[0].action, Some(&economy)).unwrap();
+        assert_eq!(repeated_decision, decisions[0].state);
+        assert_eq!(
+            repeated_decision.fingerprint(),
+            decisions[0].state.fingerprint()
+        );
+        let waits = successors_with_economy(&decisions[0].state, &goal, config, &economy);
+        assert_eq!(waits.len(), 1);
+        assert_eq!(waits[0].days, 30);
+        assert!(matches!(
+            waits[0].action,
+            Action::WaitForEvent {
+                event: Event::BuildingCompleted { .. },
+                days: 30,
+            }
+        ));
+        assert!(evaluate(&goal, &waits[0].state));
+        let repeated_wait =
+            apply_action_with_economy(&decisions[0].state, &waits[0].action, Some(&economy))
+                .unwrap();
+        assert_eq!(repeated_wait, waits[0].state);
+        assert_eq!(repeated_wait.fingerprint(), waits[0].state.fingerprint());
+        assert_eq!(
+            waits[0]
+                .state
+                .building_level_deltas
+                .get("building_logging_camp"),
+            Some(&1)
+        );
     }
 
     #[test]
@@ -221,7 +503,11 @@ mod tests {
             if queue_tech {
                 state.queued_tech = Some("railways".into());
             }
-            let edges = successors(&state, &goal, SimConfig { research_days });
+            let config = SimConfig {
+                research_days,
+                ..SimConfig::default()
+            };
+            let edges = successors(&state, &goal, config);
 
             let wait_count = edges
                 .iter()
@@ -246,7 +532,7 @@ mod tests {
             let idle_edges = successors_for_atoms(
                 &state_at(day_offset),
                 &idle_atoms,
-                SimConfig { research_days },
+                config,
             );
             let has_wait = idle_edges
                 .iter()

@@ -41,6 +41,8 @@ pub struct PlanningParts {
     pub debt_principal: Option<f64>,
     pub credit_limit: Option<f64>,
     pub credit_headroom: Option<f64>,
+    pub building_level_deltas: BTreeMap<String, u32>,
+    pub queued_building: Option<String>,
 }
 
 impl Default for PlanningParts {
@@ -61,6 +63,8 @@ impl Default for PlanningParts {
             debt_principal: None,
             credit_limit: None,
             credit_headroom: None,
+            building_level_deltas: BTreeMap::new(),
+            queued_building: None,
         }
     }
 }
@@ -99,6 +103,10 @@ pub struct PlanningState {
     pub credit_limit: Option<f64>,
     /// Remaining credit (`credit_limit - debt_principal`) when both are known.
     pub credit_headroom: Option<f64>,
+    /// Explicit added levels by building type in this simulated branch.
+    pub building_level_deltas: BTreeMap<String, u32>,
+    /// Building type currently in the compact construction queue.
+    pub queued_building: Option<String>,
 }
 
 impl Default for PlanningState {
@@ -127,6 +135,8 @@ impl PartialEq for PlanningState {
             && f64_option_bits_eq(self.debt_principal, other.debt_principal)
             && f64_option_bits_eq(self.credit_limit, other.credit_limit)
             && f64_option_bits_eq(self.credit_headroom, other.credit_headroom)
+            && self.building_level_deltas == other.building_level_deltas
+            && self.queued_building == other.queued_building
     }
 }
 
@@ -153,6 +163,8 @@ impl Hash for PlanningState {
         hash_f64_option(self.debt_principal, state);
         hash_f64_option(self.credit_limit, state);
         hash_f64_option(self.credit_headroom, state);
+        self.building_level_deltas.hash(state);
+        self.queued_building.hash(state);
     }
 }
 
@@ -236,6 +248,8 @@ impl PlanningState {
             debt_principal: parts.debt_principal,
             credit_limit: parts.credit_limit,
             credit_headroom: parts.credit_headroom,
+            building_level_deltas: parts.building_level_deltas,
+            queued_building: parts.queued_building,
         }
     }
 
@@ -312,6 +326,8 @@ impl PlanningState {
             debt_principal,
             credit_limit,
             credit_headroom,
+            building_level_deltas: BTreeMap::new(),
+            queued_building: None,
         })
     }
 

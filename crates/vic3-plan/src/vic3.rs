@@ -9,7 +9,7 @@ use crate::pathfinding::SearchNode;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use vic3_goals::{evaluate, Atom, Goal};
-use vic3_sim::SimConfig;
+use vic3_sim::{EconomyContext, SimConfig, Successor};
 use vic3_world::PlanningState;
 
 /// Immutable inputs shared by every node in one planning search.
@@ -17,6 +17,7 @@ use vic3_world::PlanningState;
 struct SearchContext {
     goal: Goal,
     config: SimConfig,
+    economy: Option<Arc<EconomyContext>>,
 }
 
 /// Compact key and state handle for Vic3 planning.
@@ -34,7 +35,31 @@ pub struct Vic3Node {
 impl Vic3Node {
     /// Create the root of a planning search.
     pub fn new(state: PlanningState, goal: Goal, config: SimConfig) -> Self {
-        Self::with_context(state, Arc::new(SearchContext { goal, config }))
+        Self::with_context(
+            state,
+            Arc::new(SearchContext {
+                goal,
+                config,
+                economy: None,
+            }),
+        )
+    }
+
+    /// Create a root with immutable price-solver context for building actions.
+    pub fn new_with_economy(
+        state: PlanningState,
+        goal: Goal,
+        config: SimConfig,
+        economy: EconomyContext,
+    ) -> Self {
+        Self::with_context(
+            state,
+            Arc::new(SearchContext {
+                goal,
+                config,
+                economy: Some(Arc::new(economy)),
+            }),
+        )
     }
 
     fn with_context(state: PlanningState, context: Arc<SearchContext>) -> Self {
@@ -63,6 +88,18 @@ impl Vic3Node {
     /// Simulator timing configuration shared by this search.
     pub fn config(&self) -> SimConfig {
         self.context.config
+    }
+
+    pub(crate) fn sim_successors(&self) -> Vec<Successor> {
+        match self.context.economy.as_deref() {
+            Some(economy) => vic3_sim::successors_with_economy(
+                &self.state,
+                &self.context.goal,
+                self.context.config,
+                economy,
+            ),
+            None => vic3_sim::successors(&self.state, &self.context.goal, self.context.config),
+        }
     }
 }
 
@@ -120,7 +157,7 @@ impl SearchNode for Vic3Node {
     type Cost = u32;
 
     fn successors(&self) -> Vec<(Self, Self::Cost)> {
-        vic3_sim::successors(&self.state, &self.context.goal, self.context.config)
+        self.sim_successors()
             .into_iter()
             .map(|successor| {
                 (
@@ -159,7 +196,10 @@ mod tests {
                 ..PlanningParts::default()
             }),
             compile("research(tech=nitroglycerin)").unwrap(),
-            SimConfig { research_days },
+            SimConfig {
+                research_days,
+                ..SimConfig::default()
+            },
         )
     }
 
@@ -207,7 +247,10 @@ mod tests {
         let and = Vic3Node::new(
             PlanningState::default(),
             compile("has_tech(railways) && has_tech(nitroglycerin)").unwrap(),
-            SimConfig { research_days: 40 },
+            SimConfig {
+                research_days: 40,
+                ..SimConfig::default()
+            },
         );
         let (_, and_cost) =
             shortest_path::<_, PairingHeap<_, _>>(&and).expect("two techs are reachable");
@@ -217,7 +260,10 @@ mod tests {
         let or = Vic3Node::new(
             PlanningState::default(),
             compile("has_tech(railways) || has_tech(nitroglycerin)").unwrap(),
-            SimConfig { research_days: 40 },
+            SimConfig {
+                research_days: 40,
+                ..SimConfig::default()
+            },
         );
         let (_, or_cost) =
             shortest_path::<_, PairingHeap<_, _>>(&or).expect("either tech is reachable");
@@ -232,7 +278,10 @@ mod tests {
         let node = Vic3Node::new(
             state,
             compile("research(tech=railways)").unwrap(),
-            SimConfig { research_days: 40 },
+            SimConfig {
+                research_days: 40,
+                ..SimConfig::default()
+            },
         );
         assert_eq!(node.heuristic(), 0);
     }
@@ -263,7 +312,10 @@ mod tests {
             let start = Vic3Node::new(
                 PlanningState::default(),
                 compile(source).unwrap(),
-                SimConfig { research_days },
+                SimConfig {
+                    research_days,
+                    ..SimConfig::default()
+                },
             );
             let (path, cost) = shortest_path::<_, PairingHeap<_, _>>(&start)
                 .expect("research formula is reachable");

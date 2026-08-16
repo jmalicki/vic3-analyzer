@@ -117,7 +117,14 @@ function newId(): string {
 
 function actionLabel(action: PlanAction): string {
   if ('QueueTech' in action) return `Queue technology: ${action.QueueTech.tech}`
-  return `Wait ${action.WaitForEvent.days} days for ${action.WaitForEvent.event.TechCompleted.tech}`
+  if ('QueueBuildingLevel' in action) {
+    return `Queue building level: ${action.QueueBuildingLevel.building}`
+  }
+  const { days, event } = action.WaitForEvent
+  if ('TechCompleted' in event) {
+    return `Wait ${days} days for ${event.TechCompleted.tech}`
+  }
+  return `Wait ${days} days for ${event.BuildingCompleted.building}`
 }
 
 function kindLabel(kind: AnalysisKind): string {

@@ -1425,7 +1425,9 @@ dependencies = [
  "proptest",
  "serde",
  "thiserror",
+ "vic3-defs",
  "vic3-goals",
+ "vic3-prices",
  "vic3-world",
 ]
 

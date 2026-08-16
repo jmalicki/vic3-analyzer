@@ -20,7 +20,7 @@ use vic3_goals::Atom;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save};
 use vic3_plan::PlanOpts;
 use vic3_prices::{solve, what_if as solve_what_if, PricesResult, SolveOpts, WhatIfOpts, World};
-use vic3_sim::SimConfig;
+use vic3_sim::{EconomyContext, SimConfig};
 use vic3_world::PlanningState;
 use vic3save::PdsDate;
 use wasm_bindgen::prelude::*;
@@ -219,10 +219,12 @@ pub fn plan_json(
     let country = country_tag(&save)?;
     let state = PlanningState::from_save(&save, country, &prices)?;
     let goal = vic3_goals::parse(&plan_opts.goal)?;
-    let result = vic3_plan::plan(
+    let economy = EconomyContext::new(world, defs, solve_opts);
+    let result = vic3_plan::plan_with_economy(
         state,
         goal,
         SimConfig::default(),
+        economy,
         plan_opts.max_days,
         prices.residual,
         prices.limitations,
