@@ -66,9 +66,9 @@ Property (I-declare-war): compilation always includes those four conjuncts. Extr
 
 Predicate on modeled current GDP in `PlanningState`: gross solved building
 output value (the sum of non-negative building revenue) in states owned by the
-selected country. It is recomputed after modeled construction, but the
-simulator does not yet choose construction successors specifically for a GDP
-target.
+selected country. It is recomputed after modeled construction. For an increasing
+GDP target, the simulator considers at most the three building types with the
+highest current solved output value per added level.
 
 ## Evaluation
 

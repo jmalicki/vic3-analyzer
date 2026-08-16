@@ -18,8 +18,8 @@ pub use result::{
 };
 pub use solve::{solve, what_if};
 pub use world::{
-    reconstruct_non_pop_orders, World, WorldBuilding, WorldPop, WorldState, WorldStatePop,
-    POP_SCALE,
+    reconstruct_non_pop_orders, World, WorldBuilding, WorldCountry, WorldPop, WorldState,
+    WorldStatePop, POP_SCALE,
 };
 
 /// Solver caveats copied into CLI JSON and the UI.

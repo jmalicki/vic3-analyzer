@@ -5,7 +5,7 @@
 //! not perform graph search.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use vic3_defs::GameDefs;
 use vic3_goals::{gaps, Atom, Goal, Rel};
 use vic3_prices::{solve, PricesResult, SolveOpts, World, ORDER_EPS};
@@ -66,6 +66,51 @@ impl EconomyContext {
                     candidates.insert(building.building.clone());
                 }
             }
+        }
+        if atoms.iter().any(|atom| {
+            matches!(
+                atom,
+                Atom::Gdp {
+                    rel: Rel::Ge | Rel::Gt | Rel::Eq,
+                    ..
+                }
+            )
+        }) {
+            let mut scores = BTreeMap::<String, f64>::new();
+            for building in &world.buildings {
+                if state
+                    .building_level_deltas
+                    .get(&building.building)
+                    .copied()
+                    .unwrap_or(0)
+                    >= u32::from(cap)
+                {
+                    continue;
+                }
+                let (_, outputs) = building.goods_io(&self.defs);
+                let per_level = building.level.max(1.0);
+                let score = outputs
+                    .into_iter()
+                    .map(|(good, quantity)| {
+                        let price = state.price(&good).or_else(|| {
+                            self.defs
+                                .goods
+                                .get(&good)
+                                .map(|definition| definition.base_price)
+                        });
+                        price.unwrap_or(0.0) * quantity.max(0.0) / per_level
+                    })
+                    .sum::<f64>();
+                *scores.entry(building.building.clone()).or_default() += score;
+            }
+            let mut ranked: Vec<_> = scores
+                .into_iter()
+                .filter(|(_, score)| score.is_finite() && *score > 0.0)
+                .collect();
+            ranked.sort_by(|(left_id, left), (right_id, right)| {
+                right.total_cmp(left).then_with(|| left_id.cmp(right_id))
+            });
+            candidates.extend(ranked.into_iter().take(3).map(|(building, _)| building));
         }
         candidates.into_iter().collect()
     }
@@ -348,7 +393,7 @@ mod tests {
     use std::collections::BTreeMap;
     use vic3_defs::Good;
     use vic3_goals::{compile, evaluate};
-    use vic3_prices::WorldBuilding;
+    use vic3_prices::{WorldBuilding, WorldCountry, WorldState};
     use vic3_world::{PlanningParts, Vic3Date};
 
     #[test]
@@ -414,6 +459,22 @@ mod tests {
             ..GameDefs::default()
         };
         let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                laws: Vec::new(),
+                overlord: None,
+                subject_type: None,
+            }],
+            states: vec![WorldState {
+                id: 1,
+                region: None,
+                country: Some(1),
+                market: None,
+                arable_land: None,
+                infrastructure: None,
+                infrastructure_usage: None,
+            }],
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
@@ -437,6 +498,9 @@ mod tests {
         let initial_price = baseline.goods[0].price;
         let next_price = bumped.goods[0].price;
         assert!(next_price < initial_price);
+        let initial_gdp = baseline.buildings[0].revenue;
+        let next_gdp = bumped.buildings[0].revenue;
+        assert!(next_gdp > initial_gdp);
         let target = (initial_price + next_price) / 2.0;
         let goal = Goal::Atom(Atom::GoodPrice {
             good: "wood".into(),
@@ -444,6 +508,8 @@ mod tests {
             value: target,
         });
         let state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            gdp: initial_gdp,
             good_prices: vec![("wood".into(), initial_price)],
             ..PlanningParts::default()
         });
@@ -453,6 +519,19 @@ mod tests {
             max_added_levels_per_type: 2,
             ..SimConfig::default()
         };
+
+        let gdp_goal = Goal::Atom(Atom::Gdp {
+            rel: Rel::Ge,
+            value: (initial_gdp + next_gdp) / 2.0,
+        });
+        let gdp_decisions = successors_with_economy(&state, &gdp_goal, config, &economy);
+        assert!(matches!(
+            gdp_decisions.as_slice(),
+            [Successor {
+                action: Action::QueueBuildingLevel { building },
+                ..
+            }] if building == "building_logging_camp"
+        ));
 
         let decisions = successors_with_economy(&state, &goal, config, &economy);
         assert!(matches!(
@@ -481,6 +560,8 @@ mod tests {
             }
         ));
         assert!(evaluate(&goal, &waits[0].state));
+        assert_eq!(waits[0].state.gdp, next_gdp);
+        assert!(evaluate(&gdp_goal, &waits[0].state));
         let repeated_wait =
             apply_action_with_economy(&decisions[0].state, &waits[0].action, Some(&economy))
                 .unwrap();
@@ -492,6 +573,24 @@ mod tests {
                 .building_level_deltas
                 .get("building_logging_camp"),
             Some(&1)
+        );
+
+        let unreachable_gdp = Goal::Atom(Atom::Gdp {
+            rel: Rel::Ge,
+            value: f64::MAX,
+        });
+        let mut capped = state;
+        for _ in 0..config.max_added_levels_per_type {
+            let queue = successors_with_economy(&capped, &unreachable_gdp, config, &economy);
+            assert_eq!(queue.len(), 1);
+            let complete =
+                successors_with_economy(&queue[0].state, &unreachable_gdp, config, &economy);
+            assert_eq!(complete.len(), 1);
+            capped = complete[0].state.clone();
+        }
+        assert!(
+            successors_with_economy(&capped, &unreachable_gdp, config, &economy).is_empty(),
+            "per-type cap must make an unreachable GDP search finite"
         );
     }
 

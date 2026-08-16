@@ -51,10 +51,11 @@ The current DSL can evaluate war readiness, an army-power target, GDP, credit
 headroom / solvency from saved principal and credit, the latest saved net
 weekly-budget sample, and a population-weighted saved-pop-wealth SoL proxy.
 Missing fiscal or population metrics remain unavailable rather than being
-treated as zero. Research and supported goods-price goals can produce timelines;
-the latter use bounded building-level expansions, fixed modeled construction
-time, and a price re-solve. Military, fiscal, GDP, and saved-wealth goals remain
-readiness diagnostics until their transition models or save IR exist.
+treated as zero. Research, modeled GDP growth, and supported goods-price goals
+can produce timelines; economic goals use bounded building-level expansions,
+fixed modeled construction time, and a price re-solve. Military, fiscal, and
+saved-wealth goals remain readiness diagnostics until their transition models
+or save IR exist.
 
 ## Defs
 
