@@ -16,6 +16,7 @@ const DDPF_RGB: u32 = 0x40;
 /// Widest icon we will decode. Goods icons are small; this bounds the work a
 /// hostile or mistaken file can cause in wasm.
 const MAX_DIMENSION: u32 = 512;
+const MAX_COA_DIMENSION: u32 = 1024;
 
 /// Decodes one compressed block into RGBA rows of the given pitch.
 type BlockDecoder = fn(&[u8], &mut [u8], usize);
@@ -34,12 +35,21 @@ enum Format {
 
 /// Decode the top mip of a DDS image into PNG bytes.
 pub(crate) fn dds_to_png(bytes: &[u8]) -> Option<Vec<u8>> {
+    dds_to_png_with_limit(bytes, MAX_DIMENSION)
+}
+
+/// CoA source art is 768×512, unlike the much smaller goods icons.
+pub(crate) fn coa_dds_to_png(bytes: &[u8]) -> Option<Vec<u8>> {
+    dds_to_png_with_limit(bytes, MAX_COA_DIMENSION)
+}
+
+fn dds_to_png_with_limit(bytes: &[u8], max_dimension: u32) -> Option<Vec<u8>> {
     if bytes.get(..4)? != MAGIC || read_u32(bytes, 4)? as usize != HEADER_LEN {
         return None;
     }
     let height = read_u32(bytes, 4 + 8)?;
     let width = read_u32(bytes, 4 + 12)?;
-    if width == 0 || height == 0 || width > MAX_DIMENSION || height > MAX_DIMENSION {
+    if width == 0 || height == 0 || width > max_dimension || height > max_dimension {
         return None;
     }
 
@@ -276,5 +286,14 @@ mod tests {
         // Header promises 4x4 DXT5 but carries no block data.
         assert!(dds_to_png(&dds(4, 4, four_cc(b"DXT5"), &[])).is_none());
         assert!(dds_to_png(&dds(4, 4, four_cc(b"WXYZ"), &[0u8; 16])).is_none());
+    }
+
+    #[test]
+    fn coa_limit_accepts_768_by_512_without_relaxing_icons() {
+        let data = vec![0u8; (768 / 4) * (512 / 4) * 8];
+        let image = dds(768, 512, four_cc(b"DXT1"), &data);
+        assert!(dds_to_png(&image).is_none());
+        let png = coa_dds_to_png(&image).expect("real CoA dimensions are allowed");
+        assert_eq!(png_dimensions(&png), (768, 512));
     }
 }

@@ -138,3 +138,27 @@ fn in_memory_files_match_filesystem_loader() {
     let memory = load_from_files(files).expect("in-memory fixture tree");
     assert_eq!(memory, load_fixture());
 }
+
+#[test]
+#[ignore = "requires VIC3_GAME pointing at a Victoria 3 install or game directory"]
+fn live_game_renders_representative_flags_without_magenta() {
+    let root = std::env::var_os("VIC3_GAME").expect("set VIC3_GAME");
+    let defs = load_from_path(root).expect("real game definitions should load");
+    for id in ["PRU", "GBR", "FRA"] {
+        let flag = defs
+            .flags
+            .get(id)
+            .unwrap_or_else(|| panic!("{id} should render"));
+        let decoder = png::Decoder::new(std::io::Cursor::new(flag));
+        let mut reader = decoder.read_info().expect("valid PNG");
+        let mut pixels = vec![0; reader.output_buffer_size().expect("buffer size")];
+        let info = reader.next_frame(&mut pixels).expect("PNG pixels");
+        let pixels = &pixels[..info.buffer_size()];
+        assert!(
+            !pixels
+                .chunks_exact(4)
+                .any(|pixel| pixel == [200, 0, 200, 255]),
+            "{id} must not contain the old unknown-color placeholder"
+        );
+    }
+}

@@ -150,6 +150,8 @@ pub fn load_from_files(
             }
         } else if relative.starts_with("common/named_colors/") {
             crate::coa::parse_named_colors(bytes, &mut library.colors);
+        } else if relative.starts_with("common/coat_of_arms/template_lists/") {
+            crate::coa::parse_template_lists(bytes, &mut library.template_lists);
         } else if relative.starts_with("common/coat_of_arms/") {
             crate::coa::parse_coat_of_arms_file(bytes, &mut library.coats);
         } else if relative.starts_with("common/flag_definitions/") {
@@ -231,7 +233,14 @@ fn load_coa_into(defs: &mut GameDefs, data_root: &Path) -> Result<(), DefsError>
             path: path.clone(),
             source,
         })?;
-        crate::coa::parse_coat_of_arms_file(&bytes, &mut library.coats);
+        if path
+            .components()
+            .any(|component| component.as_os_str() == "template_lists")
+        {
+            crate::coa::parse_template_lists(&bytes, &mut library.template_lists);
+        } else {
+            crate::coa::parse_coat_of_arms_file(&bytes, &mut library.coats);
+        }
     }
     for path in txt_files(&data_root.join("common/flag_definitions"))? {
         let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
