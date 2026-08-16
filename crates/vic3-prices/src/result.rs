@@ -80,6 +80,17 @@ pub struct GoodPrice {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CountryInfo {
+    pub id: u32,
+    pub tag: String,
+    pub name: Option<String>,
+    /// Selected coat-of-arms id when a current flag could be determined.
+    pub flag_coa: Option<String>,
+    /// PNG data URL for the selected flag, when the defs blob rendered it.
+    pub flag_data_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateInfo {
     pub id: u32,
     pub region_id: Option<String>,
@@ -131,7 +142,8 @@ pub struct BuildingEconomics {
 pub struct MarketInputs {
     /// Pops whose consumption entered the solve.
     pub pops: usize,
-    /// Save pops dropped for missing `size` or `wealth`.
+    /// Save pops dropped for missing `size_wa`/`size_dn` (or legacy `size`) or
+    /// `wealth`.
     pub skipped_pops: usize,
     /// Buildings whose goods flows entered the solve.
     pub buildings: usize,
@@ -158,6 +170,7 @@ pub struct PricesResult {
     /// Prices currently solve one synthetic economy for the whole save.
     pub scope: String,
     pub goods: Vec<GoodPrice>,
+    pub countries: Vec<CountryInfo>,
     pub states: Vec<StateInfo>,
     pub state_goods: Vec<StateGood>,
     pub buildings: Vec<BuildingEconomics>,

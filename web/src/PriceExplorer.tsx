@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type {
   BuildingEconomics,
+  CountryInfo,
   GoodPrice,
   MarketInputs,
   PricesResult,
@@ -11,6 +12,7 @@ import type {
 type Direction = 'asc' | 'desc'
 type SortState<K extends string> = { key: K; direction: Direction }
 type View = { kind: 'goods' } | { kind: 'good'; id: string } | { kind: 'state'; id: number }
+type FilterMode = 'our_market' | 'domestic' | 'all'
 
 function currentView(): View {
   const path = window.location.hash.replace(/^#\/?/, '').split('/')
@@ -124,6 +126,34 @@ function useSort<K extends string>(initial: K, direction: Direction = 'asc') {
   return [sort, onSort] as const
 }
 
+function ScopeFilter({
+  mode,
+  onChange,
+}: {
+  mode: FilterMode
+  onChange: (mode: FilterMode) => void
+}) {
+  const options: Array<{ mode: FilterMode; label: string }> = [
+    { mode: 'our_market', label: 'Our market' },
+    { mode: 'domestic', label: 'Domestic' },
+    { mode: 'all', label: 'All' },
+  ]
+  return (
+    <div className="scope-filter" role="group" aria-label="Attributed data scope">
+      {options.map((option) => (
+        <button
+          key={option.mode}
+          type="button"
+          aria-pressed={mode === option.mode}
+          onClick={() => onChange(option.mode)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 type GoodSort = 'name' | 'price' | 'delta' | 'buy' | 'sell'
 
 function GoodsTable({ goods, icons }: { goods: GoodPrice[]; icons: Icons }) {
@@ -179,7 +209,49 @@ function GoodsTable({ goods, icons }: { goods: GoodPrice[]; icons: Icons }) {
 type StateSort = 'name' | 'price' | 'delta' | 'buy' | 'sell'
 type StateRow = StateGood & { state?: StateInfo }
 
-function StatesTable({ rows }: { rows: StateRow[] }) {
+function CountryFlag({
+  countryId,
+  playerCountryId,
+  countries,
+}: {
+  countryId?: number
+  playerCountryId?: number
+  countries: CountryInfo[]
+}) {
+  if (playerCountryId == null || countryId == null || countryId === playerCountryId) {
+    return null
+  }
+  const country = countries.find((row) => row.id === countryId)
+  if (!country) return null
+  const title = country.name || country.tag
+  if (country.flag_data_url) {
+    return (
+      <img
+        className="country-flag"
+        src={country.flag_data_url}
+        alt=""
+        title={title}
+        width={28}
+        height={18}
+      />
+    )
+  }
+  return (
+    <span className="country-tag" title={title}>
+      {country.tag}
+    </span>
+  )
+}
+
+function StatesTable({
+  rows,
+  countries,
+  playerCountryId,
+}: {
+  rows: StateRow[]
+  countries: CountryInfo[]
+  playerCountryId?: number
+}) {
   const [sort, onSort] = useSort<StateSort>('name')
   const sorted = useMemo(
     () =>
@@ -206,7 +278,12 @@ function StatesTable({ rows }: { rows: StateRow[] }) {
           {sorted.map((row) => (
             <tr key={row.state_id}>
               <th>
-                <a href={`#/prices/state/${row.state_id}`}>
+                <a className="state-link" href={`#/prices/state/${row.state_id}`}>
+                  <CountryFlag
+                    countryId={row.state?.country_id}
+                    playerCountryId={playerCountryId}
+                    countries={countries}
+                  />
                   {displayId(row.state?.region_id || `State ${row.state_id}`)}
                 </a>
               </th>
@@ -290,7 +367,7 @@ function EmptyMarketWarning({ inputs }: { inputs?: MarketInputs }) {
   if (inputs.pops === 0) {
     causes.push(
       inputs.skipped_pops > 0
-        ? `all ${inputs.skipped_pops.toLocaleString()} pops in the save were missing a size or wealth value`
+        ? `all ${inputs.skipped_pops.toLocaleString()} pops in the save were missing size_wa/size_dn (or legacy size) or wealth`
         : 'the save has no pops',
     )
   }
@@ -314,12 +391,17 @@ export function PriceExplorer({
   result,
   icons = {},
   scenario = false,
+  playerCountryId,
+  playerMarketId,
 }: {
   result: PricesResult
   icons?: Icons
   scenario?: boolean
+  playerCountryId?: number
+  playerMarketId?: number
 }) {
   const [view, setView] = useState<View>(() => currentView())
+  const [filterMode, setFilterMode] = useState<FilterMode>('our_market')
   useEffect(() => {
     const update = () => setView(currentView())
     window.addEventListener('hashchange', update)
@@ -329,12 +411,21 @@ export function PriceExplorer({
   const states = result.states ?? []
   const stateGoods = result.state_goods ?? []
   const buildings = result.buildings ?? []
+  const countries = result.countries ?? []
+  const missingPlayerMarket = filterMode === 'our_market' && playerMarketId == null
+  const effectiveFilterMode: FilterMode = missingPlayerMarket ? 'all' : filterMode
+  const stateIsInScope = (state?: StateInfo) => {
+    if (effectiveFilterMode === 'all') return true
+    if (effectiveFilterMode === 'our_market') return state?.market_id === playerMarketId
+    return state?.country_id === playerCountryId
+  }
 
   if (view.kind === 'good') {
     const good = result.goods.find((row) => row.id === view.id)
     const rows = stateGoods
       .filter((row) => row.good_id === view.id)
       .map((row) => ({ ...row, state: states.find((state) => state.id === row.state_id) }))
+      .filter((row) => stateIsInScope(row.state))
     return (
       <section aria-labelledby="good-state-heading">
         <nav className="breadcrumbs" aria-label="Price detail">
@@ -347,18 +438,28 @@ export function PriceExplorer({
           </h2>
           <span>{rows.length} states</span>
         </div>
+        <ScopeFilter mode={effectiveFilterMode} onChange={setFilterMode} />
+        {missingPlayerMarket && (
+          <p className="model-info">Player market unavailable; showing all states.</p>
+        )}
         <p className="model-info">
-          State buy/sell orders are attributed locally; price is the shared whole-save synthetic
-          market price, not a MAPI local price.
+          The shared price is whole-save synthetic, not a MAPI local price. This filter scopes only
+          the locally attributed state buy/sell orders.
         </p>
-        {rows.length ? <StatesTable rows={rows} /> : <p>No state-attributed orders for this good.</p>}
+        {rows.length ? (
+          <StatesTable rows={rows} countries={countries} playerCountryId={playerCountryId} />
+        ) : (
+          <p>No state-attributed orders for this good.</p>
+        )}
       </section>
     )
   }
 
   if (view.kind === 'state') {
     const state = states.find((row) => row.id === view.id)
-    const rows = buildings.filter((building) => building.state_id === view.id)
+    const rows = stateIsInScope(state)
+      ? buildings.filter((building) => building.state_id === view.id)
+      : []
     const name = displayId(state?.region_id || `State ${view.id}`)
     return (
       <section aria-labelledby="state-buildings-heading">
@@ -369,9 +470,14 @@ export function PriceExplorer({
           <h2 id="state-buildings-heading">{name} buildings</h2>
           <span>{rows.length} buildings</span>
         </div>
+        <ScopeFilter mode={effectiveFilterMode} onChange={setFilterMode} />
+        {missingPlayerMarket && (
+          <p className="model-info">Player market unavailable; showing all states.</p>
+        )}
         <p className="model-info">
           Revenue, costs, profit, and shortages are model estimates from production methods,
-          staffing, and the shared synthetic price — not saved game cashflow fields.
+          staffing, and whole-save synthetic prices — not saved game cashflow fields. This filter
+          scopes buildings only.
         </p>
         {rows.length ? <BuildingsTable buildings={rows} /> : <p>No modeled buildings in this state.</p>}
       </section>

@@ -38,6 +38,7 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
     defs.goods = load_goods(&data_root)?;
     defs.labels = load_labels(&data_root)?;
     attach_icons(&mut defs, load_icons(&data_root)?);
+    load_coa_into(&mut defs, &data_root)?;
     defs.production_methods = load_production_methods(&data_root)?;
     defs.pop_needs = load_pop_needs(&data_root)?;
     defs.buy_packages = load_buy_packages(&data_root)?;
@@ -60,7 +61,10 @@ pub fn load_from_files(
             normalize_defs_path(&path).map(|relative| (relative, PathBuf::from(path), bytes))
         })
         .filter(|(relative, _, _)| {
-            relative.ends_with(".txt") || relative.ends_with(".yml") || relative.ends_with(".dds")
+            relative.ends_with(".txt")
+                || relative.ends_with(".yml")
+                || relative.ends_with(".dds")
+                || relative.ends_with(".tga")
         })
         .collect::<Vec<_>>();
     files.sort_by(|left, right| left.0.cmp(&right.0));
@@ -73,6 +77,8 @@ pub fn load_from_files(
 
     let mut defs = GameDefs::default();
     let mut decoded_icons = BTreeMap::new();
+    let mut library = crate::coa::CoaLibrary::default();
+    let mut coa_textures = BTreeMap::new();
     for (relative, path, bytes) in &files {
         if relative.starts_with("common/defines/") {
             let raw: RawDefinesFile = parse_bytes(path, bytes)?;
@@ -142,8 +148,20 @@ pub fn load_from_files(
                     defs.obsessions.insert(culture, value.obsessions);
                 }
             }
-        } else if is_goods_localization(relative) {
+        } else if relative.starts_with("common/named_colors/") {
+            crate::coa::parse_named_colors(bytes, &mut library.colors);
+        } else if relative.starts_with("common/coat_of_arms/") {
+            crate::coa::parse_coat_of_arms_file(bytes, &mut library.coats);
+        } else if relative.starts_with("common/flag_definitions/") {
+            crate::coa::parse_flag_definitions(bytes, &mut library.flag_defs);
+        } else if is_english_localization(relative) {
             parse_localization(bytes, &mut defs.labels);
+        } else if relative.contains("gfx/coat_of_arms/")
+            && (relative.ends_with(".dds") || relative.ends_with(".tga"))
+        {
+            if let Some(key) = texture_file_key(relative) {
+                coa_textures.insert(key, bytes.clone());
+            }
         } else if relative.ends_with(".dds") {
             if let (Some(stem), Some(png)) = (icon_stem(relative), icons::dds_to_png(bytes)) {
                 decoded_icons.insert(stem, png);
@@ -151,6 +169,8 @@ pub fn load_from_files(
         }
     }
     attach_icons(&mut defs, decoded_icons);
+    crate::coa::render_library(&mut library, &coa_textures);
+    finish_coa(&mut defs, library);
     Ok(defs)
 }
 
@@ -195,6 +215,84 @@ fn attach_icons(defs: &mut GameDefs, decoded: BTreeMap<String, Vec<u8>>) {
         })
         .collect::<Vec<_>>();
     defs.icons.extend(wanted);
+}
+
+fn load_coa_into(defs: &mut GameDefs, data_root: &Path) -> Result<(), DefsError> {
+    let mut library = crate::coa::CoaLibrary::default();
+    for path in txt_files(&data_root.join("common/named_colors"))? {
+        let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        crate::coa::parse_named_colors(&bytes, &mut library.colors);
+    }
+    for path in txt_files(&data_root.join("common/coat_of_arms"))? {
+        let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        crate::coa::parse_coat_of_arms_file(&bytes, &mut library.coats);
+    }
+    for path in txt_files(&data_root.join("common/flag_definitions"))? {
+        let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        crate::coa::parse_flag_definitions(&bytes, &mut library.flag_defs);
+    }
+    let mut textures = BTreeMap::new();
+    for leaf in ["patterns", "colored_emblems", "textured_emblems"] {
+        let dir = data_root.join("gfx/coat_of_arms").join(leaf);
+        for ext in ["dds", "tga"] {
+            for path in files_with_extension(&dir, ext)? {
+                let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+                if let Some(key) = texture_file_key(&path.to_string_lossy()) {
+                    textures.insert(key, bytes);
+                }
+            }
+        }
+    }
+    crate::coa::render_library(&mut library, &textures);
+    finish_coa(defs, library);
+    Ok(())
+}
+
+fn finish_coa(defs: &mut GameDefs, library: crate::coa::CoaLibrary) {
+    defs.flags = library.rendered;
+    defs.flag_defs = library
+        .flag_defs
+        .into_iter()
+        .map(|(tag, flag_defs)| {
+            (
+                tag,
+                flag_defs
+                    .into_iter()
+                    .map(|def| {
+                        let unsupported_trigger =
+                            matches!(&def.trigger, crate::coa::FlagTrigger::Unsupported);
+                        let any_laws = match def.trigger {
+                            crate::coa::FlagTrigger::AnyLaw(laws) => laws,
+                            _ => Vec::new(),
+                        };
+                        crate::FlagDefinition {
+                            coa: def.coa,
+                            priority: def.priority,
+                            any_laws,
+                            unsupported_trigger,
+                        }
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+}
+
+fn texture_file_key(path: &str) -> Option<String> {
+    let name = path.replace('\\', "/").rsplit('/').next()?.to_lowercase();
+    Some(name)
 }
 
 fn normalize_defs_path(path: &str) -> Option<String> {
@@ -262,7 +360,7 @@ fn load_labels(data_root: &Path) -> Result<BTreeMap<String, String>, DefsError> 
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
-        if !is_goods_localization(&relative) {
+        if !is_english_localization(&relative) {
             continue;
         }
         let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
@@ -274,13 +372,14 @@ fn load_labels(data_root: &Path) -> Result<BTreeMap<String, String>, DefsError> 
     Ok(labels)
 }
 
-fn is_goods_localization(path: &str) -> bool {
-    path.starts_with("localization/")
+fn is_english_localization(path: &str) -> bool {
+    let path = path.replace('\\', "/");
+    path.contains("localization/")
         && path.split('/').any(|segment| segment == "english")
-        && path
-            .rsplit('/')
-            .next()
-            .is_some_and(|name| name.starts_with("goods_l_") && name.ends_with(".yml"))
+        && path.rsplit('/').next().is_some_and(|name| {
+            (name.starts_with("goods_l_") || name.starts_with("countries_l_"))
+                && name.ends_with(".yml")
+        })
 }
 
 fn parse_localization(bytes: &[u8], labels: &mut BTreeMap<String, String>) {

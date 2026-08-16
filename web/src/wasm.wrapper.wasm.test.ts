@@ -32,6 +32,8 @@ describe('wasm wrapper (real wasm-pack build)', () => {
   it('parse_save returns tag and date from the plaintext fixture', async () => {
     const summary = JSON.parse(await api.parse_save(save))
     expect(summary.tag).toBe('GER')
+    expect(summary.country_id).toBe(16777216)
+    expect(summary.market_id).toBe(1)
     expect(summary.date).toBe('1836.1.1')
     expect(summary.version).toBe('1.9.0')
     expect(summary.buildings).toContain('building_rye_farm')
@@ -100,7 +102,14 @@ describe('wasm wrapper (real wasm-pack build)', () => {
         }),
       ]),
     )
-    expect(result.goods.find((good: { id: string }) => good.id === 'wood')?.name).toBe('Wood')
+    expect(result.inputs.goods_with_orders).toBeGreaterThan(0)
+    expect(
+      result.goods.some((good: { base: number; price: number }) => good.price !== good.base),
+    ).toBe(true)
+    const wood = result.goods.find((good: { id: string }) => good.id === 'wood')
+    expect(wood?.name).toBe('Wood')
+    expect(wood?.sell).toBe(60)
+    expect(wood?.price).toBeLessThan(wood?.base)
   })
 
   it('what_if returns residual and limitations', async () => {

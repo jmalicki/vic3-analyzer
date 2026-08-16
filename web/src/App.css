@@ -90,6 +90,10 @@ form h2 { margin-top: 0; }
 .schema-field { margin: .8rem 0; }
 fieldset { border: 1px solid #4e5c50; margin: .8rem 0; }
 .result-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.scope-filter { display: inline-flex; margin-top: .5rem; border: 1px solid #4e5c50; border-radius: 2px; }
+.scope-filter button { background: #29362c; color: #e9eadf; border-radius: 0; padding: .45rem .7rem; }
+.scope-filter button + button { border-left: 1px solid #4e5c50; }
+.scope-filter button[aria-pressed="true"] { background: #d7e6a7; color: #172016; }
 .table-scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th, td { border-bottom: 1px solid #37433a; padding: .7rem; text-align: right; }
@@ -137,6 +141,23 @@ section[aria-labelledby] { margin-top: 1rem; }
 .delta-up { color: #e2a06f; }
 .delta-down { color: #8fbf9f; }
 .delta-flat { color: #8a958c; }
+.state-link { align-items: center; display: inline-flex; gap: .4rem; }
+.country-flag {
+  border: 1px solid #4e5c50;
+  flex: 0 0 auto;
+  image-rendering: auto;
+  object-fit: cover;
+}
+.country-tag {
+  background: #243028;
+  border: 1px solid #4e5c50;
+  border-radius: 3px;
+  color: #d7e6a7;
+  font-size: .72rem;
+  font-variant: small-caps;
+  letter-spacing: .04em;
+  padding: .1rem .35rem;
+}
 .model-warning {
   background: #2a2113;
   border: 1px solid #6d5a24;

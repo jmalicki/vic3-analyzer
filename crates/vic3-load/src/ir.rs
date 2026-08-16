@@ -85,6 +85,15 @@ pub struct Country {
     pub infamy: Option<f64>,
     #[serde(default)]
     pub budget: Budget,
+    /// Enacted law type ids when the save records them (`law_autocracy`, …).
+    #[serde(default)]
+    pub laws: Vec<String>,
+    /// Direct overlord country id when this country is a subject.
+    #[serde(default)]
+    pub overlord: Option<u32>,
+    /// Subject type id when present (`puppet`, `dominion`, …).
+    #[serde(default)]
+    pub subject_type: Option<String>,
 }
 
 /// Treasury / credit lines when present on a country.
@@ -138,6 +147,148 @@ pub struct Building {
     /// save uses; a building runs every listed method at once.
     #[serde(default)]
     pub production_methods: Vec<String>,
+    /// Saved input volumes when present. Keys are good script ids (fixtures) or
+    /// the vanilla goods-table index as a decimal string (real saves).
+    #[serde(default)]
+    pub input_goods: BuildingGoods,
+    /// Saved output volumes when present.
+    #[serde(default)]
+    pub output_goods: BuildingGoods,
+}
+
+/// Goods quantities on a building (`input_goods` / `output_goods`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BuildingGoods {
+    pub goods: std::collections::BTreeMap<String, f64>,
+}
+
+impl<'de> Deserialize<'de> for BuildingGoods {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Raw {
+            #[serde(default)]
+            goods: std::collections::BTreeMap<String, GoodQty>,
+        }
+        let raw = Raw::deserialize(deserializer).unwrap_or(Raw {
+            goods: Default::default(),
+        });
+        Ok(Self {
+            goods: raw
+                .goods
+                .into_iter()
+                .map(|(key, qty)| (resolve_good_key(&key), qty.0))
+                .filter(|(_, qty)| *qty != 0.0)
+                .collect(),
+        })
+    }
+}
+
+/// Float or `{ value = … }` (Vic3 1.9+).
+#[derive(Debug, Clone, PartialEq)]
+struct GoodQty(f64);
+
+impl<'de> Deserialize<'de> for GoodQty {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = GoodQty;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a number or { value = … }")
+            }
+            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
+                Ok(GoodQty(v))
+            }
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                Ok(GoodQty(v as f64))
+            }
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(GoodQty(v as f64))
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                v.parse().map(GoodQty).map_err(E::custom)
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut value = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    if key == "value" {
+                        value = Some(map.next_value::<f64>()?);
+                    } else {
+                        let _: serde::de::IgnoredAny = map.next_value()?;
+                    }
+                }
+                Ok(GoodQty(value.unwrap_or(0.0)))
+            }
+        }
+        deserializer.deserialize_any(V)
+    }
+}
+
+/// Vanilla `common/goods` order used as the integer index in real saves.
+const VANILLA_GOODS: &[&str] = &[
+    "ammunition",
+    "small_arms",
+    "artillery",
+    "tanks",
+    "aeroplanes",
+    "manowars",
+    "ironclads",
+    "grain",
+    "fish",
+    "fabric",
+    "wood",
+    "groceries",
+    "clothes",
+    "furniture",
+    "paper",
+    "services",
+    "transportation",
+    "electricity",
+    "clippers",
+    "steamers",
+    "silk",
+    "dye",
+    "sulfur",
+    "coal",
+    "iron",
+    "lead",
+    "hardwood",
+    "rubber",
+    "oil",
+    "engines",
+    "steel",
+    "glass",
+    "fertilizer",
+    "tools",
+    "explosives",
+    "porcelain",
+    "meat",
+    "fruit",
+    "liquor",
+    "wine",
+    "tea",
+    "coffee",
+    "sugar",
+    "tobacco",
+    "opium",
+    "automobiles",
+    "telephones",
+    "radios",
+    "luxury_clothes",
+    "luxury_furniture",
+    "gold",
+    "fine_art",
+];
+
+fn resolve_good_key(key: &str) -> String {
+    if let Ok(index) = key.parse::<usize>() {
+        if let Some(name) = VANILLA_GOODS.get(index) {
+            return (*name).to_string();
+        }
+    }
+    key.to_string()
 }
 
 impl Building {
@@ -162,6 +313,10 @@ pub struct Pop {
     #[serde(default)]
     pub size: Option<f64>,
     #[serde(default)]
+    pub size_wa: Option<f64>,
+    #[serde(default)]
+    pub size_dn: Option<f64>,
+    #[serde(default)]
     pub wealth: Option<i32>,
     #[serde(default)]
     pub culture: Option<String>,
@@ -170,6 +325,21 @@ pub struct Pop {
     /// Frozen wage bill when present; omitted pops keep wealth at the saved integer.
     #[serde(default)]
     pub wages: Option<f64>,
+}
+
+impl Pop {
+    /// Working-adult-equivalent population used to scale demand.
+    ///
+    /// Current saves split pop size into working adults (`size_wa`) and
+    /// dependents (`size_dn`); older saves use the legacy `size` field.
+    pub fn demand_size(&self) -> Option<f64> {
+        if self.size_wa.is_some() || self.size_dn.is_some() {
+            let size = self.size_wa.unwrap_or(0.0) + 0.5 * self.size_dn.unwrap_or(0.0);
+            return (size > 0.0).then_some(size);
+        }
+
+        self.size.filter(|size| *size > 0.0)
+    }
 }
 
 /// A market in `market_manager.database`.
@@ -222,5 +392,31 @@ impl Save {
         self.countries()
             .find(|(_, country)| country.definition == tag)
             .map(|(_, country)| country)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Pop;
+
+    #[test]
+    fn demand_size_weights_dependents() {
+        let pop = Pop {
+            size_wa: Some(8_000.0),
+            size_dn: Some(4_000.0),
+            ..Pop::default()
+        };
+
+        assert_eq!(pop.demand_size(), Some(10_000.0));
+    }
+
+    #[test]
+    fn demand_size_falls_back_to_legacy_size() {
+        let pop = Pop {
+            size: Some(10_000.0),
+            ..Pop::default()
+        };
+
+        assert_eq!(pop.demand_size(), Some(10_000.0));
     }
 }

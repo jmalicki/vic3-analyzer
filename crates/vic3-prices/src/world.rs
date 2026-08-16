@@ -12,17 +12,28 @@ pub const POP_SCALE: f64 = 10_000.0;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct World {
     pub states: Vec<WorldState>,
+    pub countries: Vec<WorldCountry>,
     pub pops: Vec<WorldPop>,
     pub buildings: Vec<WorldBuilding>,
     /// Government / trade / construction buy orders, held fixed during the solve.
     pub frozen_buy: BTreeMap<String, f64>,
     /// Trade (and any other non-building) sell orders, held fixed during the solve.
     pub frozen_sell: BTreeMap<String, f64>,
-    /// Save pops dropped for missing `size` or `wealth`. They consume nothing,
-    /// so a large count here explains a market stuck at base prices.
+    /// Save pops dropped for missing `size_wa`/`size_dn` (or legacy `size`) or
+    /// `wealth`. They consume nothing, so a large count here explains a market
+    /// stuck at base prices.
     pub skipped_pops: usize,
     /// Save buildings dropped for a missing type id.
     pub skipped_buildings: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldCountry {
+    pub id: u32,
+    pub tag: String,
+    pub laws: Vec<String>,
+    pub overlord: Option<u32>,
+    pub subject_type: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,13 +68,17 @@ pub struct WorldBuilding {
     pub staffing: f64,
     /// Active production methods, one per PM group; a building runs them all.
     pub production_methods: Vec<String>,
+    /// Absolute saved input volumes when PM recipes are unavailable.
+    pub saved_inputs: BTreeMap<String, f64>,
+    /// Absolute saved output volumes when PM recipes are unavailable.
+    pub saved_outputs: BTreeMap<String, f64>,
 }
 
-/// Non-pop buy and sell orders: frozen maps plus building PM inputs/outputs.
+/// Non-pop buy and sell orders: frozen maps plus building inputs/outputs.
 ///
-/// Building volumes use `level * staffing` and current PM recipes. They are
-/// held fixed for a given [`World`]; [`crate::what_if`] clones the world and
-/// bumps `level` only.
+/// Prefer production-method recipes scaled by `level * staffing`. When no
+/// known method matches the definitions, fall back to absolute volumes saved
+/// on the building (`input_goods` / `output_goods`).
 pub fn reconstruct_non_pop_orders(
     world: &World,
     defs: &GameDefs,
@@ -71,17 +86,27 @@ pub fn reconstruct_non_pop_orders(
     let mut buy = world.frozen_buy.clone();
     let mut sell = world.frozen_sell.clone();
     for building in &world.buildings {
-        let scale = building.level * building.staffing;
-        if scale == 0.0 {
+        let methods = building.methods(defs);
+        if !methods.is_empty() {
+            let scale = building.level * building.staffing;
+            if scale == 0.0 {
+                continue;
+            }
+            for pm in methods {
+                for (good, qty) in &pm.inputs {
+                    *buy.entry(good.clone()).or_default() += *qty * scale;
+                }
+                for (good, qty) in &pm.outputs {
+                    *sell.entry(good.clone()).or_default() += *qty * scale;
+                }
+            }
             continue;
         }
-        for pm in building.methods(defs) {
-            for (good, qty) in &pm.inputs {
-                *buy.entry(good.clone()).or_default() += *qty * scale;
-            }
-            for (good, qty) in &pm.outputs {
-                *sell.entry(good.clone()).or_default() += *qty * scale;
-            }
+        for (good, qty) in &building.saved_inputs {
+            *buy.entry(good.clone()).or_default() += *qty;
+        }
+        for (good, qty) in &building.saved_outputs {
+            *sell.entry(good.clone()).or_default() += *qty;
         }
     }
     (buy, sell)
@@ -90,9 +115,21 @@ pub fn reconstruct_non_pop_orders(
 impl World {
     /// Frozen market snapshot from save IR.
     ///
-    /// Pops missing `size`/`wealth`, buildings with an empty type id, and trade
-    /// routes missing goods, volume, or export direction are skipped.
+    /// Pops missing `size_wa`/`size_dn` (or legacy `size`) or `wealth`,
+    /// buildings with an empty type id, and trade routes missing goods, volume,
+    /// or export direction are skipped.
     pub fn from_save(save: &Save) -> Self {
+        let countries = save
+            .country_manager
+            .iter_present()
+            .map(|(id, country)| WorldCountry {
+                id,
+                tag: country.definition.clone(),
+                laws: country.laws.clone(),
+                overlord: country.overlord,
+                subject_type: country.subject_type.clone(),
+            })
+            .collect();
         let states = save
             .states
             .iter_present()
@@ -123,6 +160,7 @@ impl World {
         Self {
             skipped_pops: saved_pops - pops.len(),
             skipped_buildings: saved_buildings - buildings.len(),
+            countries,
             states,
             pops,
             buildings,
@@ -148,7 +186,7 @@ impl World {
 
 impl WorldPop {
     fn from_ir(pop: &Pop) -> Option<Self> {
-        let size = pop.size.filter(|s| *s > 0.0)?;
+        let size = pop.demand_size()?;
         let wealth = pop.wealth?;
         let wealth = u8::try_from(wealth.clamp(1, 99)).ok()?;
         Some(Self {
@@ -173,6 +211,8 @@ impl WorldBuilding {
             level: f64::from(building.level.max(0)),
             staffing: building.staffing.max(0.0),
             production_methods: building.active_production_methods(),
+            saved_inputs: building.input_goods.goods.clone(),
+            saved_outputs: building.output_goods.goods.clone(),
         })
     }
 
@@ -184,10 +224,11 @@ impl WorldBuilding {
             .collect()
     }
 
-    /// A building whose methods are all unknown produces and consumes nothing,
-    /// which would otherwise look like a real, balanced market.
+    /// True when the building can place goods orders from PMs or saved IO.
     pub fn has_known_method(&self, defs: &GameDefs) -> bool {
         !self.methods(defs).is_empty()
+            || !self.saved_inputs.is_empty()
+            || !self.saved_outputs.is_empty()
     }
 }
 
@@ -212,7 +253,7 @@ fn apply_trade_route(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vic3_load::{Building, Pop, Save, TradeRoute};
+    use vic3_load::{Building, BuildingGoods, Pop, Save, TradeRoute};
 
     #[test]
     fn from_save_skips_missing_pop_and_building_fields() {
@@ -239,6 +280,16 @@ mod tests {
                 size: Some(10_000.0),
                 wealth: Some(8),
                 culture: Some("north_german".into()),
+                ..Pop::default()
+            }),
+        );
+        save.pops.database.insert(
+            4,
+            Some(Pop {
+                size_wa: Some(10_000.0),
+                size_dn: Some(0.0),
+                wealth: Some(8),
+                culture: Some("weighted_size".into()),
                 ..Pop::default()
             }),
         );
@@ -279,9 +330,14 @@ mod tests {
         );
 
         let world = World::from_save(&save);
-        assert_eq!(world.pops.len(), 1);
-        assert_eq!(world.pops[0].size, 10_000.0);
-        assert_eq!(world.pops[0].wealth, 8);
+        assert_eq!(world.pops.len(), 2);
+        let weighted_pop = world
+            .pops
+            .iter()
+            .find(|pop| pop.culture.as_deref() == Some("weighted_size"))
+            .expect("pop with split size fields");
+        assert_eq!(weighted_pop.size, 10_000.0);
+        assert_eq!(weighted_pop.wealth, 8);
         assert_eq!(world.buildings.len(), 1);
         assert_eq!(world.buildings[0].building, "building_rye_farm");
         assert_eq!(world.buildings[0].level, 2.0);
@@ -320,6 +376,57 @@ mod tests {
     }
 
     #[test]
+    fn saved_building_io_places_orders_when_pm_unknown() {
+        let mut save = Save::default();
+        save.building_manager.database.insert(
+            1,
+            Some(Building {
+                building: "building_logging_camp".into(),
+                level: 2,
+                staffing: 1.0,
+                production_methods: vec!["pm_unknown_modded".into()],
+                output_goods: BuildingGoods {
+                    goods: BTreeMap::from([("wood".into(), 40.0)]),
+                },
+                input_goods: BuildingGoods {
+                    goods: BTreeMap::from([("tools".into(), 2.0)]),
+                },
+                ..Building::default()
+            }),
+        );
+        let defs = GameDefs {
+            price_range: 0.75,
+            goods: BTreeMap::from([
+                (
+                    "wood".into(),
+                    vic3_defs::Good {
+                        id: "wood".into(),
+                        base_price: 20.0,
+                        texture: None,
+                    },
+                ),
+                (
+                    "tools".into(),
+                    vic3_defs::Good {
+                        id: "tools".into(),
+                        base_price: 40.0,
+                        texture: None,
+                    },
+                ),
+            ]),
+            ..GameDefs::default()
+        };
+        let world = World::from_save(&save);
+        let (buy, sell) = reconstruct_non_pop_orders(&world, &defs);
+        assert_eq!(buy.get("tools").copied(), Some(2.0));
+        assert_eq!(sell.get("wood").copied(), Some(40.0));
+        let result = crate::solve(&world, &defs, crate::SolveOpts::default());
+        let wood = result.goods.iter().find(|g| g.id == "wood").expect("wood");
+        assert!(wood.price < wood.base);
+        assert!(result.inputs.goods_with_orders > 0);
+    }
+
+    #[test]
     fn all_active_methods_place_orders() {
         let defs = GameDefs {
             production_methods: BTreeMap::from([
@@ -350,6 +457,8 @@ mod tests {
                 level: 2.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_smithy".into(), "pm_steam".into()],
+                saved_inputs: Default::default(),
+                saved_outputs: Default::default(),
             }],
             ..World::default()
         };

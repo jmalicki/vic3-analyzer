@@ -402,6 +402,8 @@ fn to_js(err: WasmError) -> JsError {
 #[derive(Debug, Serialize)]
 struct SaveSummary {
     tag: Option<String>,
+    country_id: Option<u32>,
+    market_id: Option<u32>,
     date: Option<String>,
     version: String,
     counts: SaveCounts,
@@ -429,9 +431,28 @@ impl From<&Save> for SaveSummary {
                     .next()
                     .map(|(_, country)| country.definition.clone())
             });
+        let country_id = save
+            .previous_played
+            .iter()
+            .find_map(|player| player.idtype)
+            .or_else(|| {
+                tag.as_deref().and_then(|tag| {
+                    save.countries()
+                        .find(|(_, country)| country.definition == tag)
+                        .map(|(id, _)| id)
+                })
+            });
+        let market_id = country_id.and_then(|country_id| {
+            save.states
+                .iter_present()
+                .find(|(_, state)| state.country == Some(country_id) && state.market.is_some())
+                .and_then(|(_, state)| state.market)
+        });
         let date = save.meta_data.game_date.map(|d| d.game_fmt().to_string());
         Self {
             tag,
+            country_id,
+            market_id,
             date,
             version: save.meta_data.version.clone(),
             buildings: save
@@ -503,7 +524,7 @@ mod tests {
         let v: Value = serde_json::from_str(&json).expect("summary json");
         assert_eq!(v["blob_version"], vic3_defs::BLOB_VERSION);
         assert_eq!(v["goods"], 3);
-        assert_eq!(v["labels"], 3);
+        assert_eq!(v["labels"], 4);
         assert_eq!(v["icons"], 1);
         assert!(v["price_range"].as_f64().is_some_and(|range| range > 0.0));
     }
@@ -547,6 +568,8 @@ mod tests {
         let json = parse_save_json(&load_fixture(), None).expect("parse plaintext");
         let v: Value = serde_json::from_str(&json).expect("summary json");
         assert_eq!(v["tag"], "GER");
+        assert_eq!(v["country_id"], 16777216);
+        assert_eq!(v["market_id"], 1);
         assert_eq!(v["date"], "1836.1.1");
         assert_eq!(v["version"], "1.9.0");
         assert_eq!(v["counts"]["countries"], 1);
@@ -556,6 +579,16 @@ mod tests {
         assert_eq!(v["counts"]["markets"], 1);
         assert_eq!(v["counts"]["trade_routes"], 1);
         assert_eq!(v["buildings"][0], "building_rye_farm");
+    }
+
+    #[test]
+    fn save_summary_falls_back_to_country_matching_tag() {
+        let mut save = load_save(&load_fixture(), None).expect("parse plaintext");
+        save.previous_played[0].idtype = None;
+
+        let v = serde_json::to_value(SaveSummary::from(&save)).expect("summary json");
+        assert_eq!(v["country_id"], 16777216);
+        assert_eq!(v["market_id"], 1);
     }
 
     #[test]

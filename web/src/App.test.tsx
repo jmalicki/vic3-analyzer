@@ -60,7 +60,7 @@ function mockApi(): WasmApi {
     defs_icons: vi.fn(() => JSON.stringify({ iron: 'data:image/png;base64,IRONICON' })),
     defs_summary: vi.fn(() =>
       JSON.stringify({
-        blob_version: 3,
+        blob_version: 4,
         goods: 3,
         labels: 3,
         icons: 1,
@@ -73,6 +73,8 @@ function mockApi(): WasmApi {
     parse_save: vi.fn(() =>
       JSON.stringify({
         tag: 'FRA',
+        country_id: 16777216,
+        market_id: 1,
         date: '1840.2.3',
         version: '1.9.0',
         buildings: ['building_rye_farm', 'building_steel_mills'],
@@ -177,7 +179,7 @@ describe('prices UI', () => {
     const api = mockApi()
     api.defs_summary = vi.fn(() =>
       JSON.stringify({
-        blob_version: 3,
+        blob_version: 4,
         goods: 53,
         labels: 53,
         icons: 53,
@@ -397,10 +399,10 @@ describe('prices UI', () => {
     const api = mockApi()
     api.defs_summary = vi.fn((defs) => {
       if (new TextDecoder().decode(defs) === 'OLD-V1-DEFS') {
-        throw new Error('defs blob version 1 is not supported (expected 3)')
+        throw new Error('defs blob version 1 is not supported (expected 4)')
       }
       return JSON.stringify({
-        blob_version: 3,
+        blob_version: 4,
         goods: 3,
         labels: 3,
         icons: 0,
@@ -414,7 +416,7 @@ describe('prices UI', () => {
     render(<App wasmApi={api} />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'defs blob version 1 is not supported (expected 3). Rebuild definitions from your Victoria 3 game folder for this app version.',
+      'defs blob version 1 is not supported (expected 4). Rebuild definitions from your Victoria 3 game folder for this app version.',
     )
     await waitFor(() =>
       expect(screen.queryByText(/ancient-v1\.postcard/)).not.toBeInTheDocument(),

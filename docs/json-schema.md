@@ -52,7 +52,7 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
 ```json
 {
   "type": "object",
-  "required": ["scope", "goods", "states", "state_goods", "buildings", "inputs", "residual", "status", "limitations"],
+  "required": ["scope", "goods", "countries", "states", "state_goods", "buildings", "inputs", "residual", "status", "limitations"],
   "properties": {
     "scope": { "const": "whole_save_synthetic" },
     "goods": {
@@ -67,6 +67,21 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
           "price": { "type": "number" },
           "buy": { "type": "number" },
           "sell": { "type": "number" }
+        }
+      }
+    },
+    "countries": {
+      "type": "array",
+      "description": "Save countries with tag, localized name, and optional current-flag CoA / PNG data URL.",
+      "items": {
+        "type": "object",
+        "required": ["id", "tag"],
+        "properties": {
+          "id": { "type": "integer" },
+          "tag": { "type": "string" },
+          "name": { "type": ["string", "null"] },
+          "flag_coa": { "type": ["string", "null"] },
+          "flag_data_url": { "type": ["string", "null"] }
         }
       }
     },
@@ -92,7 +107,7 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
       ],
       "properties": {
         "pops": { "type": "integer", "description": "Pops whose consumption entered the solve." },
-        "skipped_pops": { "type": "integer", "description": "Save pops dropped for missing size or wealth." },
+        "skipped_pops": { "type": "integer", "description": "Save pops dropped for missing size_wa/size_dn (or legacy size) or wealth." },
         "buildings": { "type": "integer", "description": "Buildings whose goods flows entered the solve." },
         "skipped_buildings": { "type": "integer", "description": "Save buildings dropped for a missing type id." },
         "buildings_without_method": {

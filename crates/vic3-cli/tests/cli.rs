@@ -108,7 +108,25 @@ fn assert_prices_json(value: &Value) {
         !limitations.is_empty(),
         "limitations must be present and non-empty"
     );
-    assert!(value.get("goods").and_then(Value::as_array).is_some());
+    let goods = value
+        .get("goods")
+        .and_then(Value::as_array)
+        .expect("goods array");
+    assert!(
+        value["inputs"]["goods_with_orders"]
+            .as_u64()
+            .is_some_and(|count| count > 0),
+        "fixture should place market orders: {value}"
+    );
+    assert!(
+        goods.iter().any(|good| {
+            good["price"]
+                .as_f64()
+                .zip(good["base"].as_f64())
+                .is_some_and(|(price, base)| price != base)
+        }),
+        "fixture orders should move at least one price from base: {value}"
+    );
     assert!(value.get("status").and_then(Value::as_str).is_some());
 }
 

@@ -53,9 +53,18 @@ export interface MarketInputs {
   goods_with_orders: number
 }
 
+export interface CountryInfo {
+  id: number
+  tag: string
+  name?: string
+  flag_coa?: string
+  flag_data_url?: string
+}
+
 export interface PricesResult {
   scope?: 'whole_save_synthetic'
   goods: GoodPrice[]
+  countries?: CountryInfo[]
   states?: StateInfo[]
   state_goods?: StateGood[]
   buildings?: BuildingEconomics[]
@@ -93,6 +102,8 @@ export type AnalysisResult = PricesResult | GapsResult | PlanResult
 
 export interface SaveSummary {
   tag?: string
+  country_id?: number
+  market_id?: number
   date?: string
   version: string
   buildings?: string[]

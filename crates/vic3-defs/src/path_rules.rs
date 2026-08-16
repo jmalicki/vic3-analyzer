@@ -9,11 +9,15 @@ pub const COMMON_DIRS: &[&str] = &[
     "pop_needs",
     "buy_packages",
     "cultures",
+    "coat_of_arms",
+    "flag_definitions",
+    "named_colors",
 ];
 
-/// The only route into `gfx` we walk: goods icons are small and needed for the
-/// UI, while the rest of that tree is gigabytes of art.
+/// The only route into `gfx` we walk: goods icons and coat-of-arms textures.
 const ICON_DIR: &[&str] = &["gfx", "interface", "icons", "goods_icons"];
+const COA_GFX_DIR: &[&str] = &["gfx", "coat_of_arms"];
+const COA_GFX_LEAFS: &[&str] = &["patterns", "colored_emblems", "textured_emblems"];
 
 const PRUNED_DIRS: &[&str] = &[
     "sound",
@@ -54,7 +58,15 @@ pub fn classify_defs_path(path: &str, is_directory: bool) -> DefsPathClass {
         if segments.contains(&"gfx") {
             let inside_icons =
                 icon_route(&segments).is_some_and(|index| segments.len() > index + ICON_DIR.len());
-            return if inside_icons && name.ends_with(".dds") {
+            let inside_coa = coa_gfx_route(&segments).is_some_and(|index| {
+                segments.len() > index + COA_GFX_DIR.len()
+                    && segments
+                        .get(index + COA_GFX_DIR.len())
+                        .is_some_and(|leaf| COA_GFX_LEAFS.contains(leaf))
+            });
+            let readable = (inside_icons && name.ends_with(".dds"))
+                || (inside_coa && (name.ends_with(".dds") || name.ends_with(".tga")));
+            return if readable {
                 DefsPathClass::Read
             } else {
                 DefsPathClass::Skip
@@ -72,7 +84,7 @@ pub fn classify_defs_path(path: &str, is_directory: bool) -> DefsPathClass {
             .position(|segment| *segment == "localization");
         let supported_label = localization.is_some_and(|index| {
             segments.get(index + 1) == Some(&"english")
-                && name.starts_with("goods_l_")
+                && (name.starts_with("goods_l_") || name.starts_with("countries_l_"))
                 && name.contains("_english")
                 && name.ends_with(".yml")
         });
@@ -84,7 +96,7 @@ pub fn classify_defs_path(path: &str, is_directory: bool) -> DefsPathClass {
     }
 
     if segments.contains(&"gfx") {
-        return if icon_route(&segments).is_some() {
+        return if icon_route(&segments).is_some() || coa_gfx_route(&segments).is_some() {
             DefsPathClass::Descend
         } else {
             DefsPathClass::Prune
@@ -130,6 +142,24 @@ fn icon_route(segments: &[&str]) -> Option<usize> {
         .then_some(index)
 }
 
+fn coa_gfx_route(segments: &[&str]) -> Option<usize> {
+    let index = segments.iter().position(|segment| *segment == "gfx")?;
+    let ok = segments[index..]
+        .iter()
+        .zip(COA_GFX_DIR)
+        .all(|(segment, expected)| segment == expected);
+    if !ok {
+        return None;
+    }
+    // Descend into gfx/coat_of_arms and its leaf folders only.
+    let rest = &segments[index + COA_GFX_DIR.len()..];
+    match rest.first() {
+        None => Some(index),
+        Some(leaf) if COA_GFX_LEAFS.contains(leaf) => Some(index),
+        Some(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,6 +172,17 @@ mod tests {
         );
         assert_eq!(
             classify_defs_path("game/localization/english/goods_l_english.yml", false),
+            DefsPathClass::Read
+        );
+        assert_eq!(
+            classify_defs_path("game/localization/english/countries_l_english.yml", false),
+            DefsPathClass::Read
+        );
+        assert_eq!(
+            classify_defs_path(
+                "game/common/flag_definitions/00_flag_definitions.txt",
+                false
+            ),
             DefsPathClass::Read
         );
         assert_eq!(
@@ -168,6 +209,14 @@ mod tests {
         assert_eq!(
             classify_defs_path("game/gfx/interface/icons/country_icons", true),
             DefsPathClass::Prune
+        );
+        assert_eq!(
+            classify_defs_path("game/gfx/coat_of_arms/patterns", true),
+            DefsPathClass::Descend
+        );
+        assert_eq!(
+            classify_defs_path("game/gfx/coat_of_arms/patterns/pattern_solid.tga", false),
+            DefsPathClass::Read
         );
         // The folder itself is on the route, but it is not a file inside it.
         assert_eq!(

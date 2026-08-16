@@ -78,6 +78,43 @@
       ],
       "type": "object"
     },
+    "CountryInfo": {
+      "properties": {
+        "flag_coa": {
+          "description": "Selected coat-of-arms id when a current flag could be determined.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "flag_data_url": {
+          "description": "PNG data URL for the selected flag, when the defs blob rendered it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tag": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "tag"
+      ],
+      "type": "object"
+    },
     "GoodFlow": {
       "properties": {
         "good_id": {
@@ -171,7 +208,7 @@
           "type": "integer"
         },
         "skipped_pops": {
-          "description": "Save pops dropped for missing `size` or `wealth`.",
+          "description": "Save pops dropped for missing `size_wa`/`size_dn` (or legacy `size`) or\n`wealth`.",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
@@ -290,6 +327,12 @@
       },
       "type": "array"
     },
+    "countries": {
+      "items": {
+        "$ref": "#/$defs/CountryInfo"
+      },
+      "type": "array"
+    },
     "goods": {
       "items": {
         "$ref": "#/$defs/GoodPrice"
@@ -334,6 +377,7 @@
   "required": [
     "scope",
     "goods",
+    "countries",
     "states",
     "state_goods",
     "buildings",

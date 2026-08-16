@@ -11,8 +11,8 @@ use vic3_defs::GameDefs;
 use crate::consumption::consumption;
 use crate::formula::price;
 use crate::result::{
-    BuildingEconomics, GoodFlow, GoodPrice, MarketInputs, PricesResult, SolveOpts, SolveStatus,
-    StateGood, StateInfo,
+    BuildingEconomics, CountryInfo, GoodFlow, GoodPrice, MarketInputs, PricesResult, SolveOpts,
+    SolveStatus, StateGood, StateInfo,
 };
 use crate::world::{reconstruct_non_pop_orders, World};
 use crate::LIMITATIONS;
@@ -125,6 +125,7 @@ fn finished(
     status: SolveStatus,
 ) -> PricesResult {
     let (states, state_goods, buildings) = detail_rows(world, defs, &goods);
+    let countries = country_rows(world, defs);
     let inputs = MarketInputs {
         pops: world.pops.len(),
         skipped_pops: world.skipped_pops,
@@ -143,6 +144,7 @@ fn finished(
     PricesResult {
         scope: "whole_save_synthetic".to_string(),
         goods,
+        countries,
         states,
         state_goods,
         buildings,
@@ -186,12 +188,18 @@ fn detail_rows(
         let scale = building.level * building.staffing;
         let mut input_qty = BTreeMap::<String, f64>::new();
         let mut output_qty = BTreeMap::<String, f64>::new();
-        for method in building.methods(defs) {
-            for (good_id, per_level) in &method.inputs {
-                *input_qty.entry(good_id.clone()).or_default() += per_level * scale;
-            }
-            for (good_id, per_level) in &method.outputs {
-                *output_qty.entry(good_id.clone()).or_default() += per_level * scale;
+        let methods = building.methods(defs);
+        if methods.is_empty() {
+            input_qty.extend(building.saved_inputs.clone());
+            output_qty.extend(building.saved_outputs.clone());
+        } else {
+            for method in methods {
+                for (good_id, per_level) in &method.inputs {
+                    *input_qty.entry(good_id.clone()).or_default() += per_level * scale;
+                }
+                for (good_id, per_level) in &method.outputs {
+                    *output_qty.entry(good_id.clone()).or_default() += per_level * scale;
+                }
             }
         }
         let inputs = priced_flows(input_qty, &prices, building.state, &mut state_buy);
@@ -259,6 +267,57 @@ fn detail_rows(
         })
         .collect();
     (states, state_goods, buildings)
+}
+
+fn country_rows(world: &World, defs: &GameDefs) -> Vec<CountryInfo> {
+    world
+        .countries
+        .iter()
+        .map(|country| {
+            let flag_coa = vic3_defs::select_flag_coa(
+                &defs.flag_defs,
+                &defs.flags,
+                &country.tag,
+                &country.laws,
+            );
+            let flag_data_url = flag_coa.as_ref().and_then(|coa| {
+                defs.flags
+                    .get(coa)
+                    .map(|png| format!("data:image/png;base64,{}", base64_encode(png)))
+            });
+            CountryInfo {
+                id: country.id,
+                tag: country.tag.clone(),
+                name: defs.labels.get(&country.tag).cloned(),
+                flag_coa,
+                flag_data_url,
+            }
+        })
+        .collect()
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let a = chunk[0] as u32;
+        let b = chunk.get(1).copied().unwrap_or(0) as u32;
+        let c = chunk.get(2).copied().unwrap_or(0) as u32;
+        let triple = (a << 16) | (b << 8) | c;
+        out.push(TABLE[((triple >> 18) & 63) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[((triple >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(triple & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 /// Value one side of a building's goods flows, also crediting the quantities to

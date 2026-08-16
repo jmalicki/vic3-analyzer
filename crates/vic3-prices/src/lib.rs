@@ -13,8 +13,8 @@ mod world;
 pub use consumption::consumption;
 pub use formula::{market_ratio, price, ORDER_EPS};
 pub use result::{
-    BuildingEconomics, GoodFlow, GoodPrice, PricesResult, SolveOpts, SolveStatus, StateGood,
-    StateInfo, WhatIfOpts,
+    BuildingEconomics, CountryInfo, GoodFlow, GoodPrice, MarketInputs, PricesResult, SolveOpts,
+    SolveStatus, StateGood, StateInfo, WhatIfOpts,
 };
 pub use solve::{solve, what_if};
 pub use world::{
@@ -242,6 +242,8 @@ mod tests {
                 level: 0.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_simple_forestry".into()],
+                saved_inputs: Default::default(),
+                saved_outputs: Default::default(),
             }],
             frozen_sell: sell,
             ..World::default()
@@ -251,6 +253,40 @@ mod tests {
     #[test]
     fn version_is_semver() {
         assert!(!version().is_empty());
+    }
+
+    #[test]
+    fn fixture_forestry_orders_move_wood_below_base_price() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../vic3-defs/tests/fixtures");
+        let defs = vic3_defs::load_from_path(root).expect("defs fixture");
+        let world = World {
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: None,
+                building: "building_logging_camp".into(),
+                level: 2.0,
+                staffing: 1.0,
+                production_methods: vec!["pm_simple_forestry".into()],
+                saved_inputs: BTreeMap::new(),
+                saved_outputs: BTreeMap::new(),
+            }],
+            ..World::default()
+        };
+
+        let result = solve(&world, &defs, SolveOpts::default());
+        assert!(result.inputs.goods_with_orders > 0);
+        let wood = result
+            .goods
+            .iter()
+            .find(|good| good.id == "wood")
+            .expect("wood price");
+        assert_eq!(wood.sell, 60.0);
+        assert_ne!(wood.price, wood.base);
+        assert!(
+            wood.price < wood.base,
+            "forestry oversupply should lower wood"
+        );
     }
 
     #[test]
@@ -339,6 +375,8 @@ mod tests {
                 level: 2.0,
                 staffing: 0.5,
                 production_methods: vec!["pm_goofy_factory".into()],
+                saved_inputs: Default::default(),
+                saved_outputs: Default::default(),
             }],
             ..World::default()
         };

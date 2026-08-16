@@ -50,6 +50,7 @@ fn plaintext_fixture_loads() {
         .expect("pop");
     assert_eq!(pop.profession.as_deref(), Some("farmers"));
     assert_eq!(pop.size, Some(10000.0));
+    assert_eq!(pop.demand_size(), Some(10000.0));
     assert_eq!(pop.wealth, Some(8));
     assert_eq!(pop.culture.as_deref(), Some("north_german"));
     assert_eq!(pop.state, Some(1));

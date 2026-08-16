@@ -1,0 +1,6 @@
+TST = {
+	flag_definition = {
+		coa = TST
+		priority = 1
+	}
+}

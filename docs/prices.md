@@ -22,9 +22,19 @@ parsed state but repeats the shared whole-save synthetic market price; the UI
 labels that distinction. A future local-price implementation must copy the
 game’s market-access blend from defs rather than inventing one.
 
+Geography filters on by-good / by-state views (`Our market` default, `Domestic`,
+`All`) only hide attributed state/building rows. They do **not** re-solve prices.
+
+Foreign states show the country’s current flag when defs can select and render a
+coat of arms (laws + `flag_definitions`; unsupported triggers are skipped, not
+silently replaced). The flag tooltip is the localized country name when present.
+
 ## Pop consumption
 
 Pops buy from **need packages** by wealth. Substitution uses `min_supply_share` / `max_supply_share` (**I4**). SoL / real income can move requested quantities; that feedback sits inside the equilibrium, not as a frozen demand vector.
+
+Current saves store pop size as `size_wa` / `size_dn` (dependents count as half
+for demand). Fixture/legacy saves may still use a single `size`.
 
 **Wealth 1–99** is relaxed to a continuous variable during NLS, then **rounded** to an integer wealth. This is not ILP.
 
@@ -43,7 +53,8 @@ are not yet projected into the solver.
 A building runs one active production method per PM group, so its orders are the
 sum over every method the save lists for it (`production_methods`, or the
 singular `production_method` a hand-written fixture may use). Methods absent from
-the definitions contribute nothing.
+the definitions contribute nothing; when that happens, saved `input_goods` /
+`output_goods` volumes are used as a fallback buy/sell freeze.
 
 ## Empty markets
 

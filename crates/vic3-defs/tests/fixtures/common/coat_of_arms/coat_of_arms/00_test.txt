@@ -1,0 +1,4 @@
+TST = {
+	pattern = "pattern_solid.tga"
+	color1 = "white"
+}

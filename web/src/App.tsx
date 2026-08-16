@@ -809,6 +809,8 @@ function App({ wasmApi }: Props) {
             result={result}
             icons={goodIcons}
             scenario={activeView === 'what-if'}
+            playerCountryId={summary?.country_id}
+            playerMarketId={summary?.market_id}
           />
           <ModelInfo status={result.status} />
         </>

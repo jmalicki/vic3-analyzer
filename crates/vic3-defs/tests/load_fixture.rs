@@ -87,6 +87,15 @@ fn fixture_obsessions_empty() {
 }
 
 #[test]
+fn fixture_coa_flag_and_country_label() {
+    let defs = load_fixture();
+    assert!(defs.flags.contains_key("TST"), "solid CoA should render");
+    assert_eq!(defs.labels.get("TST").map(String::as_str), Some("Testopia"));
+    let selected = vic3_defs::select_flag_coa(&defs.flag_defs, &defs.flags, "TST", &[]);
+    assert_eq!(selected.as_deref(), Some("TST"));
+}
+
+#[test]
 fn blob_round_trip_from_fixture() {
     let defs = load_fixture();
     let bytes = encode_blob(&defs).expect("encode blob");
@@ -110,7 +119,7 @@ fn in_memory_files_match_filesystem_loader() {
             if path.is_dir() {
                 collect(root, &path, out);
             } else if path.extension().is_some_and(|extension| {
-                extension == "txt" || extension == "yml" || extension == "dds"
+                extension == "txt" || extension == "yml" || extension == "dds" || extension == "tga"
             }) {
                 out.push((
                     path.strip_prefix(root)

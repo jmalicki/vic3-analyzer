@@ -13,6 +13,9 @@
 //! - `common/pop_needs`
 //! - `common/buy_packages`
 //! - `common/cultures` (obsessions; may be empty)
+//! - `common/coat_of_arms`, `common/flag_definitions`, `common/named_colors`
+//! - `gfx/coat_of_arms/{patterns,colored_emblems,textured_emblems}`
+//! - `localization/english/goods_l_*.yml` and `countries_l_*.yml`
 //!
 //! Clausewitz text is parsed with **jomini** (`Deserialize` / `JominiDeserialize`).
 //! This crate does not implement a Clausewitz lexer.
@@ -23,6 +26,7 @@
 //! (postcard) and ship the bytes; the UI calls [`decode_blob`].
 
 mod blob;
+mod coa;
 mod error;
 mod icons;
 mod load;
@@ -31,11 +35,12 @@ mod substitution;
 mod types;
 
 pub use blob::{decode_blob, encode_blob, BLOB_VERSION};
+pub use coa::{select_coa, select_flag_coa};
 pub use error::DefsError;
 pub use load::{load_from_files, load_from_path};
 pub use path_rules::{classify_defs_path, DefsPathClass, COMMON_DIRS};
 pub use substitution::{clamp_supply_share, substitution_shares, substitution_weight};
-pub use types::{BuyPackage, GameDefs, Good, NeedEntry, PopNeed, ProductionMethod};
+pub use types::{BuyPackage, FlagDefinition, GameDefs, Good, NeedEntry, PopNeed, ProductionMethod};
 
 /// Vanilla `NEconomy.PRICE_RANGE` when a defines file does not override it.
 pub const DEFAULT_PRICE_RANGE: f64 = 0.75;

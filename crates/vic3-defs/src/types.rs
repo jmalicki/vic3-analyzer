@@ -19,6 +19,12 @@ pub struct GameDefs {
     /// Good id → PNG icon decoded from the install's DDS textures. Empty when
     /// the icon folder was not part of the selected game files.
     pub icons: BTreeMap<String, Vec<u8>>,
+    /// Coat-of-arms id → rendered PNG flag (small). Empty when CoA assets were
+    /// not part of the selected game files.
+    pub flags: BTreeMap<String, Vec<u8>>,
+    /// Tag → prioritized flag definitions used to pick a current CoA.
+    #[serde(default)]
+    pub flag_defs: BTreeMap<String, Vec<FlagDefinition>>,
     pub production_methods: BTreeMap<String, ProductionMethod>,
     pub pop_needs: BTreeMap<String, PopNeed>,
     /// Wealth level (1–99) → buy package.
@@ -34,6 +40,8 @@ impl Default for GameDefs {
             goods: BTreeMap::new(),
             labels: BTreeMap::new(),
             icons: BTreeMap::new(),
+            flags: BTreeMap::new(),
+            flag_defs: BTreeMap::new(),
             production_methods: BTreeMap::new(),
             pop_needs: BTreeMap::new(),
             buy_packages: BTreeMap::new(),
@@ -47,6 +55,17 @@ impl GameDefs {
     pub fn base_price(&self, good_id: &str) -> Option<f64> {
         self.goods.get(good_id).map(|g| g.base_price)
     }
+}
+
+/// One selectable flag for a country tag (`common/flag_definitions`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FlagDefinition {
+    pub coa: String,
+    pub priority: i32,
+    /// Empty means always eligible. Otherwise the country needs any listed law.
+    pub any_laws: Vec<String>,
+    /// When true this definition is ignored during selection.
+    pub unsupported_trigger: bool,
 }
 
 /// A tradeable (or local) good and its scripted base price (`cost` in `common/goods`).
