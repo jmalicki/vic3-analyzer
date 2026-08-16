@@ -38,6 +38,27 @@ Heuristic `h`: admissible estimate of remaining **days**. **I7:** on tiny constr
 
 Event-wait and decision edges are just `successors()`. Goal/defs ride on the node (or an `Arc` it holds).
 
+Production `Vic3Node` uses the compiled goal as a dependency DAG relaxation.
+Research atoms contribute their fixed remaining duration; AND takes the maximum
+child bound (actions may overlap), OR takes the minimum, and NOT / atoms without
+a proven timing model contribute zero. This keeps A* admissible while avoiding a
+second scheduler. Property tests compare this bound with true remaining costs
+for reachable research formulas.
+
+## Non-tech action readiness
+
+Snapshot fiscal (`weekly_balance`, `credit_headroom`, `solvent`) and saved-wealth
+atoms are diagnostic-only until a budget/debt or wage transition model exists.
+Army and declared-interest actions require save IR that is not parsed yet.
+
+The first supportable non-tech action is a building-level decision followed by
+a price re-solve, for `good_price` and a modeled GDP. Before wiring that into
+`vic3-sim`, `vic3-prices` must define how added levels affect buildings whose
+goods IO comes from absolute saved volumes. The current what-if path leaves
+staffing frozen and saved IO authoritative, so blindly adding levels can produce
+no change on real saves. Do not emit construction actions until that contract
+and construction timing are explicit and tested.
+
 ## P9a vs P9b
 
 - P9a: toy `SearchNode`s, no Vic3, I7 + known shortest path + I8.

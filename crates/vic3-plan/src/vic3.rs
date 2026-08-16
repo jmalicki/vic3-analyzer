@@ -8,7 +8,7 @@
 use crate::pathfinding::SearchNode;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use vic3_goals::{evaluate, Goal};
+use vic3_goals::{evaluate, Atom, Goal};
 use vic3_sim::SimConfig;
 use vic3_world::PlanningState;
 
@@ -80,6 +80,42 @@ impl Hash for Vic3Node {
     }
 }
 
+/// Admissible remaining-days bound from the compiled goal's dependency DAG.
+///
+/// Atomic timing is currently known only for research. AND uses the longest
+/// child (actions may overlap or satisfy multiple atoms), OR uses the cheapest
+/// child, and NOT stays at zero. This is deliberately a relaxation of the real
+/// state graph, not a replacement for A*.
+fn goal_timing_lower_bound(goal: &Goal, state: &PlanningState, config: SimConfig) -> u32 {
+    if evaluate(goal, state) {
+        return 0;
+    }
+
+    match goal {
+        Goal::And(children) => children
+            .iter()
+            .map(|child| goal_timing_lower_bound(child, state, config))
+            .max()
+            .unwrap_or(0),
+        Goal::Or(children) => children
+            .iter()
+            .map(|child| goal_timing_lower_bound(child, state, config))
+            .min()
+            .unwrap_or(0),
+        Goal::Not(_) => 0,
+        Goal::Atom(Atom::HasTech(tech)) => {
+            match state.queued_tech.as_deref() {
+                None => u32::from(config.research_days.max(1)),
+                Some(queued) if queued == tech => u32::from(config.research_days.max(1)),
+                // The compact sim cannot finish an unrelated queued tech for
+                // this goal, so retain the always-admissible zero bound.
+                Some(_) => 0,
+            }
+        }
+        Goal::Atom(_) => 0,
+    }
+}
+
 impl SearchNode for Vic3Node {
     type Cost = u32;
 
@@ -99,9 +135,9 @@ impl SearchNode for Vic3Node {
         evaluate(&self.context.goal, &self.state)
     }
 
-    /// Dijkstra for v1: zero is an admissible remaining-days lower bound.
+    /// Goal-DAG relaxation: exact for one research atom, conservative otherwise.
     fn heuristic(&self) -> Self::Cost {
-        0
+        goal_timing_lower_bound(&self.context.goal, &self.state, self.context.config)
     }
 }
 
@@ -109,6 +145,7 @@ impl SearchNode for Vic3Node {
 mod tests {
     use super::*;
     use crate::pathfinding::{shortest_path, shortest_path_lazy};
+    use proptest::prelude::*;
     use rust_advanced_heaps::pairing::PairingHeap;
     use rust_advanced_heaps::simple_binary::SimpleBinaryHeap;
     use vic3_goals::compile;
@@ -163,10 +200,80 @@ mod tests {
     }
 
     #[test]
+    fn goal_dag_bound_handles_research_and_or_dependencies() {
+        let one = tech_fixture(40);
+        assert_eq!(one.heuristic(), 40);
+
+        let and = Vic3Node::new(
+            PlanningState::default(),
+            compile("has_tech(railways) && has_tech(nitroglycerin)").unwrap(),
+            SimConfig { research_days: 40 },
+        );
+        let (_, and_cost) =
+            shortest_path::<_, PairingHeap<_, _>>(&and).expect("two techs are reachable");
+        assert_eq!(and.heuristic(), 40);
+        assert_eq!(and_cost, 80);
+
+        let or = Vic3Node::new(
+            PlanningState::default(),
+            compile("has_tech(railways) || has_tech(nitroglycerin)").unwrap(),
+            SimConfig { research_days: 40 },
+        );
+        let (_, or_cost) =
+            shortest_path::<_, PairingHeap<_, _>>(&or).expect("either tech is reachable");
+        assert_eq!(or.heuristic(), 40);
+        assert_eq!(or_cost, 40);
+    }
+
+    #[test]
+    fn unrelated_queued_tech_keeps_zero_bound() {
+        let mut state = PlanningState::default();
+        state.queued_tech = Some("unrelated_tech".into());
+        let node = Vic3Node::new(
+            state,
+            compile("research(tech=railways)").unwrap(),
+            SimConfig { research_days: 40 },
+        );
+        assert_eq!(node.heuristic(), 0);
+    }
+
+    #[test]
     fn cloned_state_has_same_compact_identity() {
         let start = tech_fixture(10);
         let rebuilt = Vic3Node::new(start.state().clone(), start.goal().clone(), start.config());
         assert_eq!(start, rebuilt);
         assert_eq!(start.fingerprint(), rebuilt.fingerprint());
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(32))]
+
+        /// I7 on the production goal-DAG relaxation: the estimate never
+        /// exceeds the true remaining cost on reachable research formulas.
+        #[test]
+        fn goal_dag_bound_is_admissible_for_research_formulas(
+            research_days in any::<u16>(),
+            conjunction in any::<bool>(),
+        ) {
+            let source = if conjunction {
+                "has_tech(railways) && has_tech(nitroglycerin)"
+            } else {
+                "has_tech(railways) || has_tech(nitroglycerin)"
+            };
+            let start = Vic3Node::new(
+                PlanningState::default(),
+                compile(source).unwrap(),
+                SimConfig { research_days },
+            );
+            let (path, cost) = shortest_path::<_, PairingHeap<_, _>>(&start)
+                .expect("research formula is reachable");
+            prop_assert!(start.heuristic() <= cost);
+            for node in path {
+                let remaining = shortest_path::<_, PairingHeap<_, _>>(&node)
+                    .expect("node on a solution path remains reachable")
+                    .1;
+                prop_assert!(node.heuristic() <= remaining);
+            }
+        }
     }
 }
