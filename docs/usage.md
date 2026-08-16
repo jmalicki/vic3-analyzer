@@ -40,6 +40,22 @@ Flatten groups (clap in `vic3-cli` only):
 3. What-if uses building types read from the save; timeline and gaps use a guided goal builder, with the DSL retained as an advanced option.
 4. Every run is saved to IndexedDB. Browse past saves, name alternative plans, and compare them (see [`archive.md`](archive.md)).
 
+### Default plans
+
+Timeline and Goal gaps share presets for war readiness, military size, economic
+growth, avoiding default, maximizing revenue, and standard of living. Choosing
+an available preset fills both its goal and archive label; its fields remain
+editable in the goal builder.
+
+The current DSL can evaluate war readiness, an army-power target, GDP, credit
+headroom / solvency from saved principal and credit, the latest saved net
+weekly-budget sample, and a population-weighted saved-pop-wealth SoL proxy.
+Missing fiscal or population metrics remain unavailable rather than being
+treated as zero. Except for research, current timelines may still be
+unreachable because the simulator does not yet emit military, construction, or
+budget actions. Goal gaps are the useful readiness view for those presets in
+the meantime.
+
 ## Defs
 
 The CLI reads a game install. The hosted wasm demo ships a tiny fixture blob,

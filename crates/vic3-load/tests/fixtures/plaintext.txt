@@ -20,6 +20,7 @@ country_manager={
 			budget={
 				gold_reserves=10000
 				credit=500
+				principal=0
 				weekly_income={ 0.0 100.0 }
 			}
 		}

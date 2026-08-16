@@ -293,6 +293,47 @@ describe('prices UI', () => {
     expect(records[0].result).toMatchObject({ day_cost: 365 })
   })
 
+  it('applies a default plan goal and archive label', async () => {
+    const user = userEvent.setup()
+    const api = mockApi()
+    render(<App wasmApi={api} />)
+    await selectSave(user)
+    await user.click(screen.getByRole('button', { name: 'Timeline' }))
+
+    await user.selectOptions(screen.getByLabelText('Plan default plan'), 'economic-growth')
+
+    expect(screen.getByLabelText('Plan label')).toHaveValue('GDP 100 million')
+    expect(screen.getByText('Goal: gdp >= 100000000')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Build timeline' }))
+
+    await waitFor(() =>
+      expect(api.plan).toHaveBeenCalledWith(
+        expect.any(Uint8Array),
+        undefined,
+        expect.any(Uint8Array),
+        '{}',
+        JSON.stringify({
+          goal: 'gdp >= 100000000',
+          max_days: 3650,
+          label: 'GDP 100 million',
+        }),
+      ),
+    )
+  })
+
+  it('offers fiscal and standard-of-living readiness defaults', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+    await user.click(screen.getByRole('button', { name: 'Timeline' }))
+
+    const picker = screen.getByLabelText('Plan default plan')
+    expect(picker).toHaveTextContent('Increase weekly income')
+    expect(picker).toHaveTextContent('Raise standard of living')
+    await user.selectOptions(picker, 'standard-of-living')
+    expect(screen.getByText('Goal: population_weighted_wealth >= 20')).toBeInTheDocument()
+  })
+
   it('compares two mocked archived plan records', async () => {
     const planRecord = (id: string, label: string, dayCost: number): AnalysisRecord => ({
       id,

@@ -248,6 +248,30 @@ fn compile_pred(pred: RawPred) -> Result<Goal, GoalError> {
                 .ok_or_else(|| GoalError::Parse("gdp requires a comparison".into()))?;
             Ok(Goal::Atom(Atom::Gdp { rel, value }))
         }
+        "weekly_balance" => {
+            let (rel, value) = pred
+                .rel
+                .ok_or_else(|| GoalError::Parse("weekly_balance requires a comparison".into()))?;
+            Ok(Goal::Atom(Atom::WeeklyBalance { rel, value }))
+        }
+        "population_weighted_wealth" => {
+            let (rel, value) = pred.rel.ok_or_else(|| {
+                GoalError::Parse("population_weighted_wealth requires a comparison".into())
+            })?;
+            Ok(Goal::Atom(Atom::PopulationWeightedWealth { rel, value }))
+        }
+        "debt_principal" => {
+            let (rel, value) = pred
+                .rel
+                .ok_or_else(|| GoalError::Parse("debt_principal requires a comparison".into()))?;
+            Ok(Goal::Atom(Atom::DebtPrincipal { rel, value }))
+        }
+        "credit_headroom" => {
+            let (rel, value) = pred
+                .rel
+                .ok_or_else(|| GoalError::Parse("credit_headroom requires a comparison".into()))?;
+            Ok(Goal::Atom(Atom::CreditHeadroom { rel, value }))
+        }
         other => Err(GoalError::Parse(format!("unknown predicate `{other}`"))),
     }
 }

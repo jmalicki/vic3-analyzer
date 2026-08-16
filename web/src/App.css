@@ -131,6 +131,8 @@ section[aria-labelledby] { margin-top: 1rem; }
 .guided-form > p { margin: 0; }
 .guided-form label, .goal-builder label { display: grid; gap: .4rem; }
 .guided-form > button { justify-self: start; }
+.plan-template-picker { display: grid; gap: .45rem; }
+.template-description { color: #9ba79d; font-size: .9rem; margin: 0; }
 .goal-builder { display: grid; gap: .9rem; margin: 0; padding: 1rem; }
 .goal-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; }
 .goal-preview { color: #9ba79d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; overflow-wrap: anywhere; }
