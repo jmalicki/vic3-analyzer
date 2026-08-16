@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+//! Normalize substitution shares against indexed sell orders.
 
-use crate::{NeedEntry, PopNeed};
+use crate::{GoodIdx, GoodsVec, NeedEntry, PopNeed};
 
 /// Clamp a market sell-order share to a need entry's substitution caps (I4).
 ///
@@ -18,20 +18,28 @@ pub fn substitution_weight(entry: &NeedEntry, raw_sell_share: f64) -> f64 {
     entry.weight * clamp_supply_share(raw_sell_share, entry)
 }
 
-/// Normalized substitution shares for `need` given per-good sell-order shares.
+/// Normalized substitution shares for `need` given dense sell-order quantities.
 ///
-/// Missing goods are treated as a raw share of `0`. Shares sum to `1` when any
-/// unnormalized weight is positive; otherwise every share is `0`.
-pub fn substitution_shares(
-    need: &PopNeed,
-    sell_shares: &BTreeMap<String, f64>,
-) -> BTreeMap<String, f64> {
-    let weights: Vec<(String, f64)> = need
+/// Per-entry raw share is that good's sell quantity over the need's total sell
+/// among its entries (missing / zero sell → raw share `0`). Shares sum to `1`
+/// when any unnormalized weight is positive; otherwise every returned share is
+/// `0`.
+pub fn substitution_shares(need: &PopNeed, sell_orders: &GoodsVec) -> Vec<(GoodIdx, f64)> {
+    let total_sell: f64 = need
+        .entries
+        .iter()
+        .map(|e| sell_orders[e.good].max(0.0))
+        .sum();
+    let weights: Vec<(GoodIdx, f64)> = need
         .entries
         .iter()
         .map(|entry| {
-            let raw = sell_shares.get(&entry.good).copied().unwrap_or(0.0);
-            (entry.good.clone(), substitution_weight(entry, raw))
+            let raw = if total_sell > 0.0 {
+                sell_orders[entry.good].max(0.0) / total_sell
+            } else {
+                0.0
+            };
+            (entry.good, substitution_weight(entry, raw))
         })
         .collect();
     let total: f64 = weights.iter().map(|(_, w)| *w).sum();
@@ -87,29 +95,26 @@ mod tests {
             })
     }
 
-    fn need_from_rows(rows: &[SynthRow]) -> (PopNeed, BTreeMap<String, f64>) {
+    fn need_from_rows(rows: &[SynthRow]) -> (PopNeed, GoodsVec) {
         let entries = rows
             .iter()
             .enumerate()
             .map(|(i, row)| NeedEntry {
-                good: format!("g{i}"),
+                good: GoodIdx::from_usize(i),
                 weight: row.weight,
                 min_supply_share: row.min,
                 max_supply_share: row.max,
             })
             .collect();
-        let sell_shares = rows
-            .iter()
-            .enumerate()
-            .map(|(i, row)| (format!("g{i}"), row.raw))
-            .collect();
+        // `raw` is treated as a sell quantity; shares are quantity / total.
+        let sell = GoodsVec::from_vec(rows.iter().map(|row| row.raw.max(0.0)).collect());
         (
             PopNeed {
                 id: "synth".into(),
                 default_good: None,
                 entries,
             },
-            sell_shares,
+            sell,
         )
     }
 
@@ -121,23 +126,34 @@ mod tests {
         fn i4_substitution_respects_min_max_supply_share(
             rows in prop::collection::vec(arb_row(), 1..8)
         ) {
-            let (need, sell_shares) = need_from_rows(&rows);
-            for (entry, row) in need.entries.iter().zip(rows.iter()) {
-                let clamped = clamp_supply_share(row.raw, entry);
+            let (need, sell_orders) = need_from_rows(&rows);
+            let total_sell: f64 = sell_orders.as_slice().iter().map(|s| s.max(0.0)).sum();
+            for entry in &need.entries {
+                let raw = if total_sell > 0.0 {
+                    sell_orders[entry.good].max(0.0) / total_sell
+                } else {
+                    0.0
+                };
+                let clamped = clamp_supply_share(raw, entry);
                 prop_assert!(clamped + EPS >= entry.min_supply_share.min(entry.max_supply_share));
                 prop_assert!(clamped - EPS <= entry.min_supply_share.max(entry.max_supply_share));
-                let w = substitution_weight(entry, row.raw);
+                let w = substitution_weight(entry, raw);
                 let expected = entry.weight * clamped;
                 prop_assert!((w - expected).abs() < EPS);
             }
 
-            let shares = substitution_shares(&need, &sell_shares);
-            let share_sum: f64 = shares.values().sum();
+            let shares = substitution_shares(&need, &sell_orders);
+            let share_sum: f64 = shares.iter().map(|(_, s)| *s).sum();
             let weight_sum: f64 = need
                 .entries
                 .iter()
                 .map(|e| {
-                    substitution_weight(e, sell_shares.get(&e.good).copied().unwrap_or(0.0))
+                    let raw = if total_sell > 0.0 {
+                        sell_orders[e.good].max(0.0) / total_sell
+                    } else {
+                        0.0
+                    };
+                    substitution_weight(e, raw)
                 })
                 .sum();
             if weight_sum > 0.0 {
@@ -158,7 +174,7 @@ mod tests {
             let lo = min.min(max);
             let hi = min.max(max);
             let entry = NeedEntry {
-                good: "g".into(),
+                good: GoodIdx::from_usize(0),
                 weight,
                 min_supply_share: lo,
                 max_supply_share: hi,

@@ -1,12 +1,12 @@
 //! Bound-constrained NLS (`basin::Trf`) plus successive-substitution warm start.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 
 use basin::{
     BoxConstraints, CostFunction, DenseMatrix, Executor, Jacobian, Residual, TerminationReason, Trf,
 };
-use vic3_defs::GameDefs;
+use vic3_defs::{GameDefs, GoodIdx, GoodsVec};
 
 use crate::consumption::consumption;
 use crate::formula::price;
@@ -35,15 +35,17 @@ const FD_STEP: f64 = 1e-7;
 /// 3. Employment, wages, and trade volumes are frozen except explicit what-if deltas.
 /// 4. The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.
 pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
-    let goods = market_goods(world, defs);
+    let base_prices: GoodsVec = defs
+        .goods_order
+        .iter()
+        .map(|id| defs.base_price(id).unwrap_or(0.0))
+        .collect();
+    let goods = market_goods(&base_prices);
     if goods.is_empty() {
         return finished(world, defs, Vec::new(), 0.0, SolveStatus::Converged);
     }
 
-    let bases: Vec<f64> = goods
-        .iter()
-        .map(|id| defs.base_price(id).unwrap_or(0.0))
-        .collect();
+    let bases: Vec<f64> = goods.iter().map(|&idx| base_prices[idx]).collect();
     if bases.iter().any(|b| *b <= 0.0) {
         return finished(world, defs, Vec::new(), f64::INFINITY, SolveStatus::Failed);
     }
@@ -56,6 +58,7 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
         defs,
         goods: &goods,
         bases: &bases,
+        base_prices,
         price_range,
         lower: vec![1.0 - price_range; n],
         upper: vec![1.0 + price_range; n],
@@ -196,16 +199,21 @@ fn detail_rows(
     Vec<BuildingEconomics>,
     Vec<StatePop>,
 ) {
-    let prices = goods
-        .iter()
-        .map(|good| (good.id.clone(), good.price))
-        .collect::<BTreeMap<_, _>>();
+    let mut prices = GoodsVec::zeros(defs.goods_order.len());
+    let mut base_prices = GoodsVec::zeros(defs.goods_order.len());
+    for good in goods {
+        if let Some(idx) = defs.index_of(&good.id) {
+            prices[idx] = good.price;
+            base_prices[idx] = good.base;
+        }
+    }
     let rows = goods
         .iter()
-        .map(|good| (good.id.as_str(), good))
+        .filter_map(|good| Some((defs.index_of(&good.id)?, good)))
         .collect::<BTreeMap<_, _>>();
-    let mut state_buy = BTreeMap::<(u32, String), f64>::new();
-    let mut state_sell = BTreeMap::<(u32, String), f64>::new();
+    let frozen_sell = world.frozen_sell.aligned(defs.goods_order.len());
+    let mut state_buy = BTreeMap::<(u32, GoodIdx), f64>::new();
+    let mut state_sell = BTreeMap::<(u32, GoodIdx), f64>::new();
 
     for state in &world.states {
         let pops = world
@@ -214,7 +222,9 @@ fn detail_rows(
             .filter(|pop| pop.state == Some(state.id))
             .cloned()
             .collect::<Vec<_>>();
-        for (good, quantity) in consumption(&pops, &prices, defs, &world.frozen_sell) {
+        for (good, quantity) in
+            consumption(&pops, &prices, &base_prices, defs, &frozen_sell).iter_indexed()
+        {
             *state_buy.entry((state.id, good)).or_default() += quantity;
         }
     }
@@ -222,18 +232,20 @@ fn detail_rows(
     let mut buildings = Vec::new();
     for building in &world.buildings {
         let (input_qty, output_qty) = building.goods_io(defs);
-        let inputs = priced_flows(input_qty, &prices, building.state, &mut state_buy);
-        let outputs = priced_flows(output_qty, &prices, building.state, &mut state_sell);
+        let inputs = priced_flows(input_qty, &prices, defs, building.state, &mut state_buy);
+        let outputs = priced_flows(output_qty, &prices, defs, building.state, &mut state_sell);
         let cost = inputs.iter().map(|flow| flow.value).sum::<f64>();
         let revenue = outputs.iter().map(|flow| flow.value).sum::<f64>();
         let short_inputs = inputs
             .iter()
             .filter(|flow| {
-                rows.get(flow.good_id.as_str()).is_none_or(|row| {
-                    row.sell <= crate::ORDER_EPS
-                        || row.price
-                            >= row.base * (1.0 + defs.price_range.max(0.0)) - crate::ORDER_EPS
-                })
+                defs.index_of(&flow.good_id)
+                    .and_then(|idx| rows.get(&idx).copied())
+                    .is_none_or(|row| {
+                        row.sell <= crate::ORDER_EPS
+                            || row.price
+                                >= row.base * (1.0 + defs.price_range.max(0.0)) - crate::ORDER_EPS
+                    })
             })
             .map(|flow| flow.good_id.clone())
             .collect();
@@ -253,24 +265,17 @@ fn detail_rows(
         });
     }
 
-    let mut keys = world
+    let state_goods = world
         .states
         .iter()
-        .flat_map(|state| goods.iter().map(move |good| (state.id, good.id.clone())))
-        .collect::<BTreeSet<_>>();
-    keys.extend(state_buy.keys().chain(state_sell.keys()).cloned());
-    let state_goods = keys
-        .into_iter()
-        .filter_map(|(state_id, good_id)| {
-            let row = rows.get(good_id.as_str())?;
+        .flat_map(|state| rows.iter().map(move |(&idx, row)| (state.id, idx, *row)))
+        .filter_map(|(state_id, idx, row)| {
+            let good_id = defs.good_by_index(idx)?.to_string();
             Some(StateGood {
                 state_id,
-                good_id: good_id.clone(),
-                buy: state_buy
-                    .get(&(state_id, good_id.clone()))
-                    .copied()
-                    .unwrap_or(0.0),
-                sell: state_sell.get(&(state_id, good_id)).copied().unwrap_or(0.0),
+                good_id,
+                buy: state_buy.get(&(state_id, idx)).copied().unwrap_or(0.0),
+                sell: state_sell.get(&(state_id, idx)).copied().unwrap_or(0.0),
                 price: row.price,
                 base: row.base,
             })
@@ -401,38 +406,33 @@ fn base64_encode(bytes: &[u8]) -> String {
 /// Value one side of a building's goods flows, also crediting the quantities to
 /// the building's state.
 fn priced_flows(
-    quantities: BTreeMap<String, f64>,
-    prices: &BTreeMap<String, f64>,
+    quantities: GoodsVec,
+    prices: &GoodsVec,
+    defs: &GameDefs,
     state: Option<u32>,
-    state_side: &mut BTreeMap<(u32, String), f64>,
+    state_side: &mut BTreeMap<(u32, GoodIdx), f64>,
 ) -> Vec<GoodFlow> {
     quantities
-        .into_iter()
-        .map(|(good_id, quantity)| {
+        .iter_indexed()
+        .filter(|(_, quantity)| quantity.abs() > crate::ORDER_EPS)
+        .filter_map(|(good, quantity)| {
             if let Some(state_id) = state {
-                *state_side.entry((state_id, good_id.clone())).or_default() += quantity;
+                *state_side.entry((state_id, good)).or_default() += quantity;
             }
-            GoodFlow {
-                value: prices.get(&good_id).copied().unwrap_or(0.0) * quantity,
-                good_id,
+            Some(GoodFlow {
+                value: prices[good] * quantity,
+                good_id: defs.good_by_index(good)?.to_string(),
                 quantity,
-            }
+            })
         })
         .collect()
 }
 
-fn market_goods(world: &World, defs: &GameDefs) -> Vec<String> {
-    let mut ids: BTreeSet<String> = defs.goods.keys().cloned().collect();
-    ids.extend(world.frozen_buy.keys().cloned());
-    ids.extend(world.frozen_sell.keys().cloned());
-    for b in &world.buildings {
-        for pm in b.methods(defs) {
-            ids.extend(pm.inputs.keys().cloned());
-            ids.extend(pm.outputs.keys().cloned());
-        }
-    }
-    ids.into_iter()
-        .filter(|id| defs.base_price(id).is_some_and(|b| b > 0.0))
+fn market_goods(base_prices: &GoodsVec) -> Vec<GoodIdx> {
+    base_prices
+        .iter_indexed()
+        .filter(|(_, base)| *base > 0.0)
+        .map(|(idx, _)| idx)
         .collect()
 }
 
@@ -440,34 +440,40 @@ fn market_goods(world: &World, defs: &GameDefs) -> Vec<String> {
 struct PriceResidual<'a> {
     world: &'a World,
     defs: &'a GameDefs,
-    goods: &'a [String],
+    goods: &'a [GoodIdx],
     bases: &'a [f64],
+    base_prices: GoodsVec,
     price_range: f64,
     lower: Vec<f64>,
     upper: Vec<f64>,
-    frozen_buy: BTreeMap<String, f64>,
-    frozen_sell: BTreeMap<String, f64>,
+    frozen_buy: GoodsVec,
+    frozen_sell: GoodsVec,
 }
 
 impl PriceResidual<'_> {
-    fn prices_from_rel(&self, rel: &[f64]) -> BTreeMap<String, f64> {
-        self.goods
-            .iter()
-            .zip(self.bases.iter().zip(rel.iter()))
-            .map(|(id, (base, r))| (id.clone(), *base * *r))
-            .collect()
+    fn prices_from_rel(&self, rel: &[f64]) -> GoodsVec {
+        let mut prices = self.base_prices.clone();
+        for (&good, (&base, &r)) in self.goods.iter().zip(self.bases.iter().zip(rel)) {
+            prices[good] = base * r;
+        }
+        prices
     }
 
     fn formula_rel(&self, rel: &[f64]) -> Vec<f64> {
         let prices = self.prices_from_rel(rel);
-        let pop_buy = consumption(&self.world.pops, &prices, self.defs, &self.frozen_sell);
+        let pop_buy = consumption(
+            &self.world.pops,
+            &prices,
+            &self.base_prices,
+            self.defs,
+            &self.frozen_sell,
+        );
         self.goods
             .iter()
             .zip(self.bases)
-            .map(|(id, base)| {
-                let buy = self.frozen_buy.get(id).copied().unwrap_or(0.0)
-                    + pop_buy.get(id).copied().unwrap_or(0.0);
-                let sell = self.frozen_sell.get(id).copied().unwrap_or(0.0);
+            .map(|(&id, base)| {
+                let buy = self.frozen_buy[id] + pop_buy[id];
+                let sell = self.frozen_sell[id];
                 price(*base, buy, sell, self.price_range) / *base
             })
             .collect()
@@ -499,7 +505,13 @@ impl PriceResidual<'_> {
 
     fn evaluate(&self, rel: &[f64]) -> (Vec<GoodPrice>, f64) {
         let prices = self.prices_from_rel(rel);
-        let pop_buy = consumption(&self.world.pops, &prices, self.defs, &self.frozen_sell);
+        let pop_buy = consumption(
+            &self.world.pops,
+            &prices,
+            &self.base_prices,
+            self.defs,
+            &self.frozen_sell,
+        );
         let residual = self
             .residual_at(rel)
             .iter()
@@ -510,18 +522,18 @@ impl PriceResidual<'_> {
             .goods
             .iter()
             .zip(self.bases.iter().zip(rel.iter()))
-            .map(|(id, (base, rrel))| {
-                let buy = self.frozen_buy.get(id).copied().unwrap_or(0.0)
-                    + pop_buy.get(id).copied().unwrap_or(0.0);
-                let sell = self.frozen_sell.get(id).copied().unwrap_or(0.0);
-                GoodPrice {
-                    id: id.clone(),
-                    name: self.defs.labels.get(id).cloned(),
+            .filter_map(|(&id, (base, rrel))| {
+                let good_id = self.defs.good_by_index(id)?;
+                let buy = self.frozen_buy[id] + pop_buy[id];
+                let sell = self.frozen_sell[id];
+                Some(GoodPrice {
+                    id: good_id.to_string(),
+                    name: self.defs.labels.get(good_id).cloned(),
                     base: *base,
                     price: *base * *rrel,
                     buy,
                     sell,
-                }
+                })
             })
             .collect();
         (rows, residual)

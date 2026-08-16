@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use vic3_defs::{substitution_shares, GameDefs, PopNeed};
+use vic3_defs::{substitution_shares, GameDefs, GoodsVec, PopNeed};
 
 use crate::world::{WorldPop, POP_SCALE};
 
@@ -14,41 +14,43 @@ use crate::world::{WorldPop, POP_SCALE};
 /// [`vic3_defs::substitution_shares`] on each need's sell-order shares.
 pub fn consumption(
     pops: &[WorldPop],
-    prices: &BTreeMap<String, f64>,
+    prices: &GoodsVec,
+    base_prices: &GoodsVec,
     defs: &GameDefs,
-    sell_orders: &BTreeMap<String, f64>,
-) -> BTreeMap<String, f64> {
-    let mut buy = BTreeMap::new();
+    sell_orders: &GoodsVec,
+) -> GoodsVec {
+    let mut buy = GoodsVec::zeros(defs.goods_order.len());
     for pop in pops {
-        add_pop_consumption(&mut buy, pop, prices, defs, sell_orders);
+        add_pop_consumption(&mut buy, pop, prices, base_prices, defs, sell_orders);
     }
     buy
 }
 
 fn add_pop_consumption(
-    buy: &mut BTreeMap<String, f64>,
+    buy: &mut GoodsVec,
     pop: &WorldPop,
-    prices: &BTreeMap<String, f64>,
+    prices: &GoodsVec,
+    base_prices: &GoodsVec,
     defs: &GameDefs,
-    sell_orders: &BTreeMap<String, f64>,
+    sell_orders: &GoodsVec,
 ) {
     if pop.size <= 0.0 {
         return;
     }
-    let wealth = continuous_wealth(pop, prices, defs, sell_orders);
+    let wealth = continuous_wealth(pop, prices, base_prices, defs, sell_orders);
     let needs = package_needs(wealth, defs);
     let scale = pop.size / POP_SCALE;
     for (need_id, package_value) in needs {
         let Some(need) = defs.pop_needs.get(&need_id) else {
             continue;
         };
-        let Some(qty) = need_quantity(need, package_value, scale, defs) else {
+        let Some(qty) = need_quantity(need, package_value, scale, base_prices) else {
             continue;
         };
         if qty == 0.0 {
             continue;
         }
-        let shares = substitution_shares(need, &need_sell_shares(need, sell_orders));
+        let shares = substitution_shares(need, sell_orders);
         apply_need_shares(buy, need, qty, &shares);
     }
 }
@@ -59,20 +61,21 @@ fn add_pop_consumption(
 /// `wealth = saved * base_col / col` with a Laspeyres basket at saved wealth.
 fn continuous_wealth(
     pop: &WorldPop,
-    prices: &BTreeMap<String, f64>,
+    prices: &GoodsVec,
+    base_prices: &GoodsVec,
     defs: &GameDefs,
-    sell_orders: &BTreeMap<String, f64>,
+    sell_orders: &GoodsVec,
 ) -> f64 {
     let saved = f64::from(pop.wealth).clamp(1.0, 99.0);
     if pop.wages <= 0.0 {
         return saved;
     }
-    let basket = basket_quantities(pop.size, saved, defs, sell_orders);
+    let basket = basket_quantities(pop.size, saved, base_prices, defs, sell_orders);
     let mut col = 0.0;
     let mut base_col = 0.0;
-    for (good, qty) in basket {
-        let base = defs.base_price(&good).unwrap_or(0.0);
-        let p = prices.get(&good).copied().unwrap_or(base);
+    for (good, qty) in basket.iter_indexed() {
+        let base = base_prices[good];
+        let p = prices[good];
         col += qty * p;
         base_col += qty * base;
     }
@@ -85,45 +88,45 @@ fn continuous_wealth(
 fn basket_quantities(
     size: f64,
     wealth: f64,
+    base_prices: &GoodsVec,
     defs: &GameDefs,
-    sell_orders: &BTreeMap<String, f64>,
-) -> BTreeMap<String, f64> {
-    let mut buy = BTreeMap::new();
+    sell_orders: &GoodsVec,
+) -> GoodsVec {
+    let mut buy = GoodsVec::zeros(defs.goods_order.len());
     let needs = package_needs(wealth, defs);
     let scale = size / POP_SCALE;
     for (need_id, package_value) in needs {
         let Some(need) = defs.pop_needs.get(&need_id) else {
             continue;
         };
-        let Some(qty) = need_quantity(need, package_value, scale, defs) else {
+        let Some(qty) = need_quantity(need, package_value, scale, base_prices) else {
             continue;
         };
-        let shares = substitution_shares(need, &need_sell_shares(need, sell_orders));
+        let shares = substitution_shares(need, sell_orders);
         apply_need_shares(&mut buy, need, qty, &shares);
     }
     buy
 }
 
 fn apply_need_shares(
-    buy: &mut BTreeMap<String, f64>,
+    buy: &mut GoodsVec,
     need: &PopNeed,
     qty: f64,
-    shares: &BTreeMap<String, f64>,
+    shares: &[(vic3_defs::GoodIdx, f64)],
 ) {
-    let share_sum: f64 = shares.values().sum();
+    let share_sum: f64 = shares.iter().map(|(_, share)| *share).sum();
     if share_sum <= 0.0 {
         if let Some(default) = need
             .default_good
-            .clone()
-            .or_else(|| need.entries.first().map(|e| e.good.clone()))
+            .or_else(|| need.entries.first().map(|e| e.good))
         {
-            *buy.entry(default).or_default() += qty;
+            buy.add(default, qty);
         }
         return;
     }
     for (good, share) in shares {
         if *share > 0.0 {
-            *buy.entry(good.clone()).or_default() += qty * share;
+            buy.add(*good, qty * share);
         }
     }
 }
@@ -172,33 +175,21 @@ fn package_needs(wealth: f64, defs: &GameDefs) -> BTreeMap<String, f64> {
         .collect()
 }
 
-fn need_quantity(need: &PopNeed, package_value: f64, scale: f64, defs: &GameDefs) -> Option<f64> {
+fn need_quantity(
+    need: &PopNeed,
+    package_value: f64,
+    scale: f64,
+    base_prices: &GoodsVec,
+) -> Option<f64> {
     if package_value == 0.0 || scale == 0.0 {
         return Some(0.0);
     }
     let default_id = need
         .default_good
-        .as_deref()
-        .or_else(|| need.entries.first().map(|e| e.good.as_str()))?;
-    let base = defs.base_price(default_id)?;
+        .or_else(|| need.entries.first().map(|e| e.good))?;
+    let base = base_prices[default_id];
     if base <= 0.0 {
         return None;
     }
     Some(package_value / base * scale)
-}
-
-fn need_sell_shares(need: &PopNeed, sell_orders: &BTreeMap<String, f64>) -> BTreeMap<String, f64> {
-    let total: f64 = need
-        .entries
-        .iter()
-        .map(|e| sell_orders.get(&e.good).copied().unwrap_or(0.0).max(0.0))
-        .sum();
-    need.entries
-        .iter()
-        .map(|e| {
-            let s = sell_orders.get(&e.good).copied().unwrap_or(0.0).max(0.0);
-            let share = if total > 0.0 { s / total } else { 0.0 };
-            (e.good.clone(), share)
-        })
-        .collect()
 }

@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use vic3_defs::{decode_blob, encode_blob, load_from_files, load_from_path, DEFAULT_PRICE_RANGE};
+use vic3_defs::{
+    decode_blob, encode_blob, load_from_files, load_from_path, GoodIdx, DEFAULT_PRICE_RANGE,
+};
 
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
@@ -20,7 +22,7 @@ fn fixture_goods_have_known_base_prices() {
     assert_eq!(defs.base_price("coal"), Some(30.0));
     assert_eq!(defs.goods.len(), 3);
     assert_eq!(defs.goods_order, ["grain", "wood", "coal"]);
-    assert_eq!(defs.good_by_index(1), Some("wood"));
+    assert_eq!(defs.good_by_index(GoodIdx::from_usize(1)), Some("wood"));
     assert_eq!(defs.labels.get("grain").map(String::as_str), Some("Grain"));
     assert_eq!(
         defs.goods["grain"].texture.as_deref(),
@@ -40,7 +42,10 @@ fn in_memory_goods_preserve_source_order() {
         source.into_bytes(),
     )])
     .expect("ordered goods");
-    assert_eq!(defs.good_by_index(18), Some("merchant_marine"));
+    assert_eq!(
+        defs.good_by_index(GoodIdx::from_usize(18)),
+        Some("merchant_marine")
+    );
 }
 
 #[test]
@@ -63,11 +68,11 @@ fn fixture_price_range_from_neconomy() {
 fn fixture_need_and_wealth_packages() {
     let defs = load_fixture();
     let need = defs.pop_needs.get("popneed_heating").expect("heating need");
-    assert_eq!(need.default_good.as_deref(), Some("wood"));
+    assert_eq!(need.default_good, defs.index_of("wood"));
     assert_eq!(need.entries.len(), 2);
-    assert_eq!(need.entries[0].good, "wood");
+    assert_eq!(need.entries[0].good, defs.index_of("wood").unwrap());
     assert!((need.entries[0].max_supply_share - 0.5).abs() < f64::EPSILON);
-    assert_eq!(need.entries[1].good, "coal");
+    assert_eq!(need.entries[1].good, defs.index_of("coal").unwrap());
     assert!((need.entries[1].min_supply_share - 0.1).abs() < f64::EPSILON);
 
     assert_eq!(defs.buy_packages.len(), 2);
@@ -84,17 +89,24 @@ fn fixture_need_and_wealth_packages() {
 #[test]
 fn fixture_production_methods_have_goods_io() {
     let defs = load_fixture();
+    let qty = |rows: &[(GoodIdx, f64)], id: &str| {
+        let idx = defs.index_of(id)?;
+        rows.iter()
+            .find_map(|(good, qty)| (*good == idx).then_some(*qty))
+    };
     let forestry = defs
         .production_methods
         .get("pm_simple_forestry")
         .expect("forestry PM");
-    assert_eq!(forestry.outputs.get("wood").copied(), Some(30.0));
-    assert_eq!(forestry.inputs.get("tools").copied(), Some(1.0));
+    assert_eq!(qty(&forestry.outputs, "wood"), Some(30.0));
+    // The fixture's tools input has no matching good definition, so indexed
+    // runtime data drops it rather than carrying an unresolvable string.
+    assert_eq!(qty(&forestry.inputs, "tools"), None);
     let mining = defs
         .production_methods
         .get("pm_simple_mining")
         .expect("mining PM");
-    assert_eq!(mining.outputs.get("coal").copied(), Some(25.0));
+    assert_eq!(qty(&mining.outputs, "coal"), Some(25.0));
 }
 
 #[test]

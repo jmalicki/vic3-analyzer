@@ -30,15 +30,18 @@
 mod blob;
 mod coa;
 mod error;
+mod goods;
 mod icons;
 mod load;
 mod path_rules;
+mod staging;
 mod substitution;
 mod types;
 
 pub use blob::{decode_blob, encode_blob, BLOB_VERSION};
 pub use coa::{select_coa, select_flag_coa};
 pub use error::DefsError;
+pub use goods::{GoodIdx, GoodsVec};
 pub use load::{load_from_files, load_from_path, DefsBuilder};
 pub use path_rules::{classify_defs_path, DefsPathClass, COMMON_DIRS};
 pub use substitution::{clamp_supply_share, substitution_shares, substitution_weight};

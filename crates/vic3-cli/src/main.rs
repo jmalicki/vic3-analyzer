@@ -235,7 +235,7 @@ fn load_inputs(io: &IoArgs) -> Result<(Save, World, GameDefs)> {
         load_path(&io.save, empty_tokens())
     }
     .with_context(|| format!("loading save from {}", io.save.display()))?;
-    let world = World::from_save(&save);
+    let world = World::from_save(&save, &defs);
     Ok((save, world, defs))
 }
 

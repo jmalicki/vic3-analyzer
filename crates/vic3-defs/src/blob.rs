@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{DefsError, GameDefs};
 
 /// Postcard blob format version. Bump when [`GameDefs`] is not backward compatible.
-pub const BLOB_VERSION: u32 = 6;
+pub const BLOB_VERSION: u32 = 7;
 
 #[derive(Serialize, Deserialize)]
 struct DefsBlob {
@@ -44,7 +44,7 @@ pub fn decode_blob(bytes: &[u8]) -> Result<GameDefs, DefsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BuyPackage, Good, NeedEntry, PopNeed, ProductionMethod};
+    use crate::{BuyPackage, Good, GoodIdx, NeedEntry, PopNeed, ProductionMethod};
     use std::collections::BTreeMap;
 
     fn sample_defs() -> GameDefs {
@@ -66,17 +66,13 @@ mod tests {
             },
         );
 
-        let mut inputs = BTreeMap::new();
-        inputs.insert("tools".into(), 1.0);
-        let mut outputs = BTreeMap::new();
-        outputs.insert("wood".into(), 30.0);
         let mut production_methods = BTreeMap::new();
         production_methods.insert(
             "pm_simple_forestry".into(),
             ProductionMethod {
                 id: "pm_simple_forestry".into(),
-                inputs,
-                outputs,
+                inputs: vec![(GoodIdx::from_usize(0), 1.0)],
+                outputs: vec![(GoodIdx::from_usize(1), 30.0)],
             },
         );
 
@@ -85,9 +81,9 @@ mod tests {
             "popneed_heating".into(),
             PopNeed {
                 id: "popneed_heating".into(),
-                default_good: Some("wood".into()),
+                default_good: Some(GoodIdx::from_usize(1)),
                 entries: vec![NeedEntry {
-                    good: "wood".into(),
+                    good: GoodIdx::from_usize(1),
                     weight: 1.0,
                     min_supply_share: 0.0,
                     max_supply_share: 1.0,
@@ -108,7 +104,7 @@ mod tests {
         );
 
         let mut obsessions = BTreeMap::new();
-        obsessions.insert("french".into(), vec!["wine".into()]);
+        obsessions.insert("french".into(), vec![GoodIdx::from_usize(0)]);
 
         GameDefs {
             price_range: 0.75,

@@ -55,8 +55,11 @@ impl EconomyContext {
                     continue;
                 }
                 let (inputs, outputs) = building.goods_io(&self.defs);
-                let produces = outputs.get(good).is_some_and(|qty| *qty > ORDER_EPS);
-                let consumes = inputs.get(good).is_some_and(|qty| *qty > ORDER_EPS);
+                let Some(good_idx) = self.defs.index_of(good) else {
+                    continue;
+                };
+                let produces = outputs[good_idx] > ORDER_EPS;
+                let consumes = inputs[good_idx] > ORDER_EPS;
                 let relevant = match rel {
                     Rel::Le | Rel::Lt => produces,
                     Rel::Ge | Rel::Gt => consumes,
@@ -90,13 +93,13 @@ impl EconomyContext {
                 let (_, outputs) = building.goods_io(&self.defs);
                 let per_level = building.level.max(1.0);
                 let score = outputs
-                    .into_iter()
+                    .iter_indexed()
+                    .filter(|(_, quantity)| *quantity > ORDER_EPS)
                     .map(|(good, quantity)| {
-                        let price = state.price(&good).or_else(|| {
-                            self.defs
-                                .goods
-                                .get(&good)
-                                .map(|definition| definition.base_price)
+                        let price = self.defs.good_by_index(good).and_then(|id| {
+                            state
+                                .price(id)
+                                .or_else(|| self.defs.goods.get(id).map(|g| g.base_price))
                         });
                         price.unwrap_or(0.0) * quantity.max(0.0) / per_level
                     })
@@ -391,7 +394,7 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
     use std::collections::BTreeMap;
-    use vic3_defs::Good;
+    use vic3_defs::{Good, GoodIdx, GoodsVec};
     use vic3_goals::{compile, evaluate};
     use vic3_prices::{WorldBuilding, WorldCountry, WorldState};
     use vic3_world::{PlanningParts, Vic3Date};
@@ -447,6 +450,7 @@ mod tests {
     #[test]
     fn building_level_then_wait_reaches_good_price() {
         let defs = GameDefs {
+            goods_order: vec!["wood".into()],
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
@@ -482,10 +486,10 @@ mod tests {
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
-                saved_inputs: BTreeMap::new(),
-                saved_outputs: BTreeMap::from([("wood".into(), 10.0)]),
+                saved_inputs: Vec::new(),
+                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
             }],
-            frozen_buy: BTreeMap::from([("wood".into(), 15.0)]),
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
             ..World::default()
         };
         let solve_opts = SolveOpts::default();

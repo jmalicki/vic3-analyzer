@@ -1,8 +1,6 @@
 //! Synthetic (and later IR-backed) market: pops, buildings, frozen orders.
 
-use std::collections::BTreeMap;
-
-use vic3_defs::{GameDefs, ProductionMethod};
+use vic3_defs::{GameDefs, GoodIdx, GoodsVec, ProductionMethod};
 use vic3_load::{Building, Pop, Save, TradeRoute};
 
 /// Pop size unit for buy packages (Vic3: package values are per 10k working pops).
@@ -19,9 +17,9 @@ pub struct World {
     pub state_pops: Vec<WorldStatePop>,
     pub buildings: Vec<WorldBuilding>,
     /// Government / trade / construction buy orders, held fixed during the solve.
-    pub frozen_buy: BTreeMap<String, f64>,
+    pub frozen_buy: GoodsVec,
     /// Trade (and any other non-building) sell orders, held fixed during the solve.
-    pub frozen_sell: BTreeMap<String, f64>,
+    pub frozen_sell: GoodsVec,
     /// Save pops dropped for missing household population (or legacy `size`) or
     /// `wealth`. They consume nothing, so a large count here explains a market
     /// stuck at base prices.
@@ -84,10 +82,10 @@ pub struct WorldBuilding {
     pub staffing: f64,
     /// Active production methods, one per PM group; a building runs them all.
     pub production_methods: Vec<String>,
-    /// Absolute saved input volumes, with unresolved raw save keys.
-    pub saved_inputs: BTreeMap<String, f64>,
-    /// Absolute saved output volumes, with unresolved raw save keys.
-    pub saved_outputs: BTreeMap<String, f64>,
+    /// Absolute saved input volumes, resolved once against `goods_order`.
+    pub saved_inputs: Vec<(GoodIdx, f64)>,
+    /// Absolute saved output volumes, resolved once against `goods_order`.
+    pub saved_outputs: Vec<(GoodIdx, f64)>,
 }
 
 /// Non-pop buy and sell orders: frozen maps plus building inputs/outputs.
@@ -95,19 +93,16 @@ pub struct WorldBuilding {
 /// Prefer absolute volumes saved on the building (`input_goods` /
 /// `output_goods`). Fall back to production-method recipes only when the save
 /// has no IO, scaling them by staffed levels.
-pub fn reconstruct_non_pop_orders(
-    world: &World,
-    defs: &GameDefs,
-) -> (BTreeMap<String, f64>, BTreeMap<String, f64>) {
-    let mut buy = world.frozen_buy.clone();
-    let mut sell = world.frozen_sell.clone();
+pub fn reconstruct_non_pop_orders(world: &World, defs: &GameDefs) -> (GoodsVec, GoodsVec) {
+    let mut buy = world.frozen_buy.aligned(defs.goods_order.len());
+    let mut sell = world.frozen_sell.aligned(defs.goods_order.len());
     for building in &world.buildings {
         let (inputs, outputs) = building.goods_io(defs);
-        for (good, qty) in inputs {
-            *buy.entry(good).or_default() += qty;
+        for (good, qty) in inputs.iter_indexed() {
+            buy.add(good, qty);
         }
-        for (good, qty) in outputs {
-            *sell.entry(good).or_default() += qty;
+        for (good, qty) in outputs.iter_indexed() {
+            sell.add(good, qty);
         }
     }
     (buy, sell)
@@ -119,7 +114,7 @@ impl World {
     /// Pops missing household population (or legacy `size`) or `wealth`,
     /// buildings with an empty type id, and trade routes missing goods, volume,
     /// or export direction are skipped.
-    pub fn from_save(save: &Save) -> Self {
+    pub fn from_save(save: &Save, defs: &GameDefs) -> Self {
         let countries = save
             .country_manager
             .iter_present()
@@ -178,12 +173,12 @@ impl World {
         let buildings: Vec<_> = save
             .building_manager
             .iter_present()
-            .filter_map(|(id, building)| WorldBuilding::from_ir(id, building))
+            .filter_map(|(id, building)| WorldBuilding::from_ir(id, building, defs))
             .collect();
-        let mut frozen_buy = BTreeMap::new();
-        let mut frozen_sell = BTreeMap::new();
+        let mut frozen_buy = GoodsVec::zeros(defs.goods_order.len());
+        let mut frozen_sell = GoodsVec::zeros(defs.goods_order.len());
         for (_, route) in save.trade_route_manager.iter_present() {
-            apply_trade_route(route, &mut frozen_buy, &mut frozen_sell);
+            apply_trade_route(route, defs, &mut frozen_buy, &mut frozen_sell);
         }
         Self {
             skipped_pops: saved_pops - pops.len(),
@@ -216,8 +211,9 @@ impl World {
                         b.staffing *= ratio;
                         for quantity in b
                             .saved_inputs
-                            .values_mut()
-                            .chain(b.saved_outputs.values_mut())
+                            .iter_mut()
+                            .map(|(_, quantity)| quantity)
+                            .chain(b.saved_outputs.iter_mut().map(|(_, quantity)| quantity))
                         {
                             *quantity *= ratio;
                         }
@@ -251,7 +247,7 @@ impl WorldPop {
 }
 
 impl WorldBuilding {
-    fn from_ir(id: u32, building: &Building) -> Option<Self> {
+    fn from_ir(id: u32, building: &Building, defs: &GameDefs) -> Option<Self> {
         if building.building.is_empty() {
             return None;
         }
@@ -262,8 +258,8 @@ impl WorldBuilding {
             level: f64::from(building.level.max(0)),
             staffing: building.staffing.max(0.0),
             production_methods: building.active_production_methods(),
-            saved_inputs: building.input_goods.goods.clone(),
-            saved_outputs: building.output_goods.goods.clone(),
+            saved_inputs: resolve_saved_goods(&building.input_goods.goods, defs),
+            saved_outputs: resolve_saved_goods(&building.output_goods.goods, defs),
         })
     }
 
@@ -277,23 +273,28 @@ impl WorldBuilding {
 
     /// Effective building IO. Saved current volumes are authoritative; PM
     /// recipes are used only when both saved sides are absent.
-    pub fn goods_io(&self, defs: &GameDefs) -> (BTreeMap<String, f64>, BTreeMap<String, f64>) {
+    pub fn goods_io(&self, defs: &GameDefs) -> (GoodsVec, GoodsVec) {
         if !self.saved_inputs.is_empty() || !self.saved_outputs.is_empty() {
-            return (
-                resolve_saved_goods(&self.saved_inputs, defs),
-                resolve_saved_goods(&self.saved_outputs, defs),
-            );
+            let mut inputs = GoodsVec::zeros(defs.goods_order.len());
+            let mut outputs = GoodsVec::zeros(defs.goods_order.len());
+            for &(good, qty) in &self.saved_inputs {
+                inputs.add(good, qty);
+            }
+            for &(good, qty) in &self.saved_outputs {
+                outputs.add(good, qty);
+            }
+            return (inputs, outputs);
         }
 
         let scale = self.staffed_levels();
-        let mut inputs = BTreeMap::new();
-        let mut outputs = BTreeMap::new();
+        let mut inputs = GoodsVec::zeros(defs.goods_order.len());
+        let mut outputs = GoodsVec::zeros(defs.goods_order.len());
         for method in self.methods(defs) {
             for (good, qty) in &method.inputs {
-                *inputs.entry(good.clone()).or_default() += *qty * scale;
+                inputs.add(*good, *qty * scale);
             }
             for (good, qty) in &method.outputs {
-                *outputs.entry(good.clone()).or_default() += *qty * scale;
+                outputs.add(*good, *qty * scale);
             }
         }
         (inputs, outputs)
@@ -316,18 +317,26 @@ impl WorldBuilding {
     pub fn has_orders(&self, defs: &GameDefs) -> bool {
         let (inputs, outputs) = self.goods_io(defs);
         inputs
-            .values()
-            .chain(outputs.values())
+            .as_slice()
+            .iter()
+            .chain(outputs.as_slice())
             .any(|quantity| quantity.abs() > crate::ORDER_EPS)
     }
 }
 
-fn resolve_saved_goods(raw: &BTreeMap<String, f64>, defs: &GameDefs) -> BTreeMap<String, f64> {
+fn resolve_saved_goods(
+    raw: &std::collections::BTreeMap<String, f64>,
+    defs: &GameDefs,
+) -> Vec<(GoodIdx, f64)> {
     raw.iter()
         .filter_map(|(key, quantity)| {
             let good = match key.parse::<usize>() {
-                Ok(index) => defs.good_by_index(index)?.to_string(),
-                Err(_) => key.clone(),
+                Ok(index) => {
+                    let idx = GoodIdx::try_from_usize(index)?;
+                    defs.good_by_index(idx)?;
+                    idx
+                }
+                Err(_) => defs.index_of(key)?,
             };
             Some((good, *quantity))
         })
@@ -336,8 +345,9 @@ fn resolve_saved_goods(raw: &BTreeMap<String, f64>, defs: &GameDefs) -> BTreeMap
 
 fn apply_trade_route(
     route: &TradeRoute,
-    frozen_buy: &mut BTreeMap<String, f64>,
-    frozen_sell: &mut BTreeMap<String, f64>,
+    defs: &GameDefs,
+    frozen_buy: &mut GoodsVec,
+    frozen_sell: &mut GoodsVec,
 ) {
     let Some(good) = route.goods.as_ref().filter(|g| !g.is_empty()) else {
         return;
@@ -348,14 +358,38 @@ fn apply_trade_route(
     let Some(export) = route.export else {
         return;
     };
+    let Some(good) = defs.index_of(good) else {
+        return;
+    };
     let dest = if export { frozen_sell } else { frozen_buy };
-    *dest.entry(good.clone()).or_default() += volume.abs();
+    dest.add(good, volume.abs());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use vic3_load::{Building, BuildingGoods, Pop, Save, TradeRoute};
+
+    fn defs_with_goods(ids: &[&str]) -> GameDefs {
+        GameDefs {
+            goods_order: ids.iter().map(|id| (*id).to_string()).collect(),
+            goods: ids
+                .iter()
+                .map(|id| {
+                    (
+                        (*id).to_string(),
+                        vic3_defs::Good {
+                            id: (*id).to_string(),
+                            base_price: 20.0,
+                            texture: None,
+                        },
+                    )
+                })
+                .collect(),
+            ..GameDefs::default()
+        }
+    }
 
     #[test]
     fn from_save_skips_missing_pop_and_building_fields() {
@@ -431,7 +465,8 @@ mod tests {
             }),
         );
 
-        let world = World::from_save(&save);
+        let defs = defs_with_goods(&["grain", "wood"]);
+        let world = World::from_save(&save, &defs);
         assert_eq!(world.pops.len(), 2);
         let weighted_pop = world
             .pops
@@ -444,9 +479,9 @@ mod tests {
         assert_eq!(world.buildings[0].building, "building_rye_farm");
         assert_eq!(world.buildings[0].level, 2.0);
         assert_eq!(world.buildings[0].production_methods, ["pm_simple_farming"]);
-        assert!(world.frozen_buy.is_empty());
-        assert_eq!(world.frozen_sell.get("wood").copied(), Some(10.0));
-        assert!(!world.frozen_sell.contains_key("grain"));
+        assert_eq!(world.frozen_buy.as_slice(), &[0.0, 0.0]);
+        assert_eq!(world.frozen_sell[defs.index_of("wood").unwrap()], 10.0);
+        assert_eq!(world.frozen_sell[defs.index_of("grain").unwrap()], 0.0);
         assert_eq!(world.skipped_pops, 2);
         assert_eq!(world.skipped_buildings, 1);
     }
@@ -470,7 +505,8 @@ mod tests {
             }),
         );
 
-        let world = World::from_save(&save);
+        let defs = defs_with_goods(&[]);
+        let world = World::from_save(&save, &defs);
         assert_eq!(
             world.buildings[0].production_methods,
             ["pm_simple_farming", "pm_no_automation"]
@@ -496,32 +532,11 @@ mod tests {
                 ..Building::default()
             }),
         );
-        let defs = GameDefs {
-            price_range: 0.75,
-            goods: BTreeMap::from([
-                (
-                    "wood".into(),
-                    vic3_defs::Good {
-                        id: "wood".into(),
-                        base_price: 20.0,
-                        texture: None,
-                    },
-                ),
-                (
-                    "tools".into(),
-                    vic3_defs::Good {
-                        id: "tools".into(),
-                        base_price: 40.0,
-                        texture: None,
-                    },
-                ),
-            ]),
-            ..GameDefs::default()
-        };
-        let world = World::from_save(&save);
+        let defs = defs_with_goods(&["wood", "tools"]);
+        let world = World::from_save(&save, &defs);
         let (buy, sell) = reconstruct_non_pop_orders(&world, &defs);
-        assert_eq!(buy.get("tools").copied(), Some(2.0));
-        assert_eq!(sell.get("wood").copied(), Some(40.0));
+        assert_eq!(buy[defs.index_of("tools").unwrap()], 2.0);
+        assert_eq!(sell[defs.index_of("wood").unwrap()], 40.0);
         let result = crate::solve(&world, &defs, crate::SolveOpts::default());
         let wood = result.goods.iter().find(|g| g.id == "wood").expect("wood");
         assert!(wood.price < wood.base);
@@ -530,6 +545,8 @@ mod tests {
 
     #[test]
     fn extra_levels_scale_saved_io_and_staffing_ratio() {
+        let tools = GoodIdx::from_usize(0);
+        let wood = GoodIdx::from_usize(1);
         let world = World {
             buildings: vec![WorldBuilding {
                 id: 1,
@@ -538,8 +555,8 @@ mod tests {
                 level: 2.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_unknown_modded".into()],
-                saved_inputs: BTreeMap::from([("tools".into(), 2.0)]),
-                saved_outputs: BTreeMap::from([("wood".into(), 40.0)]),
+                saved_inputs: vec![(tools, 2.0)],
+                saved_outputs: vec![(wood, 40.0)],
             }],
             ..World::default()
         };
@@ -549,33 +566,31 @@ mod tests {
         assert_eq!(world.buildings[0].staffing, 1.0);
         assert_eq!(bumped.buildings[0].level, 4.0);
         assert_eq!(bumped.buildings[0].staffing, 2.0);
-        assert_eq!(bumped.buildings[0].saved_inputs["tools"], 4.0);
-        assert_eq!(bumped.buildings[0].saved_outputs["wood"], 80.0);
+        assert_eq!(bumped.buildings[0].saved_inputs, [(tools, 4.0)]);
+        assert_eq!(bumped.buildings[0].saved_outputs, [(wood, 80.0)]);
     }
 
     #[test]
     fn all_active_methods_place_orders() {
-        let defs = GameDefs {
-            production_methods: BTreeMap::from([
-                (
-                    "pm_smithy".into(),
-                    ProductionMethod {
-                        id: "pm_smithy".into(),
-                        inputs: BTreeMap::from([("iron".into(), 2.0)]),
-                        outputs: BTreeMap::from([("tools".into(), 3.0)]),
-                    },
-                ),
-                (
-                    "pm_steam".into(),
-                    ProductionMethod {
-                        id: "pm_steam".into(),
-                        inputs: BTreeMap::from([("coal".into(), 5.0), ("iron".into(), 1.0)]),
-                        outputs: BTreeMap::new(),
-                    },
-                ),
-            ]),
-            ..GameDefs::default()
-        };
+        let mut defs = defs_with_goods(&["iron", "tools", "coal"]);
+        defs.production_methods = BTreeMap::from([
+            (
+                "pm_smithy".into(),
+                ProductionMethod {
+                    id: "pm_smithy".into(),
+                    inputs: vec![(GoodIdx::from_usize(0), 2.0)],
+                    outputs: vec![(GoodIdx::from_usize(1), 3.0)],
+                },
+            ),
+            (
+                "pm_steam".into(),
+                ProductionMethod {
+                    id: "pm_steam".into(),
+                    inputs: vec![(GoodIdx::from_usize(2), 5.0), (GoodIdx::from_usize(0), 1.0)],
+                    outputs: Vec::new(),
+                },
+            ),
+        ]);
         let world = World {
             buildings: vec![WorldBuilding {
                 id: 1,
@@ -591,25 +606,22 @@ mod tests {
         };
 
         let (buy, sell) = reconstruct_non_pop_orders(&world, &defs);
-        assert_eq!(buy.get("iron").copied(), Some(6.0));
-        assert_eq!(buy.get("coal").copied(), Some(10.0));
-        assert_eq!(sell.get("tools").copied(), Some(6.0));
+        assert_eq!(buy[defs.index_of("iron").unwrap()], 6.0);
+        assert_eq!(buy[defs.index_of("coal").unwrap()], 10.0);
+        assert_eq!(sell[defs.index_of("tools").unwrap()], 6.0);
     }
 
     #[test]
     fn saved_integer_io_overrides_pm_recipes() {
-        let defs = GameDefs {
-            goods_order: vec!["merchant_marine".into(), "iron".into()],
-            production_methods: BTreeMap::from([(
-                "pm_mine".into(),
-                ProductionMethod {
-                    id: "pm_mine".into(),
-                    inputs: BTreeMap::from([("tools".into(), 10.0)]),
-                    outputs: BTreeMap::from([("iron".into(), 20.0)]),
-                },
-            )]),
-            ..GameDefs::default()
-        };
+        let mut defs = defs_with_goods(&["merchant_marine", "iron"]);
+        defs.production_methods = BTreeMap::from([(
+            "pm_mine".into(),
+            ProductionMethod {
+                id: "pm_mine".into(),
+                inputs: vec![(GoodIdx::from_usize(0), 10.0)],
+                outputs: vec![(GoodIdx::from_usize(1), 20.0)],
+            },
+        )]);
         let world = World {
             buildings: vec![WorldBuilding {
                 id: 1,
@@ -618,16 +630,15 @@ mod tests {
                 level: 10.0,
                 staffing: 5.0,
                 production_methods: vec!["pm_mine".into()],
-                saved_inputs: BTreeMap::from([("0".into(), 32.5)]),
-                saved_outputs: BTreeMap::from([("1".into(), 130.0)]),
+                saved_inputs: vec![(GoodIdx::from_usize(0), 32.5)],
+                saved_outputs: vec![(GoodIdx::from_usize(1), 130.0)],
             }],
             ..World::default()
         };
 
         let (buy, sell) = reconstruct_non_pop_orders(&world, &defs);
-        assert_eq!(buy, BTreeMap::from([("merchant_marine".into(), 32.5)]));
-        assert_eq!(sell, BTreeMap::from([("iron".into(), 130.0)]));
-        assert!(!buy.contains_key("tools"), "saved IO must be primary");
+        assert_eq!(buy.as_slice(), &[32.5, 0.0]);
+        assert_eq!(sell.as_slice(), &[0.0, 130.0]);
     }
 
     #[test]
@@ -635,16 +646,16 @@ mod tests {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../vic3-load/tests/fixtures/plaintext.txt");
         let save = vic3_load::load_path(&path, vic3_load::empty_tokens()).expect("fixture");
-        let world = World::from_save(&save);
+        let defs_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../vic3-defs/tests/fixtures");
+        let defs = vic3_defs::load_from_path(defs_root).expect("defs fixture");
+        let world = World::from_save(&save, &defs);
         assert_eq!(world.pops.len(), 1);
         assert_eq!(world.pops[0].wealth, 8);
         assert_eq!(world.states[0].market, Some(1));
         assert_eq!(world.countries[0].laws, ["law_autocracy"]);
         assert_eq!(world.buildings.len(), 1);
         assert_eq!(world.buildings[0].building, "building_rye_farm");
-        let defs_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../vic3-defs/tests/fixtures");
-        let defs = vic3_defs::load_from_path(defs_root).expect("defs fixture");
         let result = crate::solve(&world, &defs, crate::SolveOpts::default());
         assert!(result.inputs.goods_with_orders > 0);
         assert_eq!(result.inputs.buildings_without_orders, 0);
@@ -665,7 +676,12 @@ mod tests {
             "realistic saved IO should move at least one price"
         );
         assert!(
-            world.frozen_buy.is_empty() && world.frozen_sell.is_empty(),
+            world
+                .frozen_buy
+                .as_slice()
+                .iter()
+                .chain(world.frozen_sell.as_slice())
+                .all(|quantity| quantity.abs() <= crate::ORDER_EPS),
             "fixture trade route has no export direction"
         );
     }
@@ -678,19 +694,25 @@ mod tests {
         let save = vic3_load::load_path(save_path, vic3_load::empty_tokens())
             .expect("live plaintext save");
         let defs = vic3_defs::load_from_path(game_path).expect("live game definitions");
-        assert_eq!(defs.good_by_index(18), Some("merchant_marine"));
-        let world = World::from_save(&save);
+        assert_eq!(
+            defs.good_by_index(GoodIdx::from_usize(18)),
+            Some("merchant_marine")
+        );
+        let world = World::from_save(&save, &defs);
         let (buy, sell) = reconstruct_non_pop_orders(&world, &defs);
-        assert!(!buy.is_empty() || !sell.is_empty());
+        assert!(buy
+            .as_slice()
+            .iter()
+            .chain(sell.as_slice())
+            .any(|quantity| quantity.abs() > crate::ORDER_EPS));
         assert!(!world.buildings.is_empty());
         assert!(
             defs.goods.iter().any(|(id, good)| {
-                let price = crate::formula::price(
-                    good.base_price,
-                    buy.get(id).copied().unwrap_or(0.0),
-                    sell.get(id).copied().unwrap_or(0.0),
-                    defs.price_range,
-                );
+                let Some(idx) = defs.index_of(id) else {
+                    return false;
+                };
+                let price =
+                    crate::formula::price(good.base_price, buy[idx], sell[idx], defs.price_range);
                 (price - good.base_price).abs() > crate::ORDER_EPS
             }),
             "live saved building IO should imply at least one non-base price"

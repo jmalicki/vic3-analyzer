@@ -7,8 +7,10 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use crate::{
-    classify_defs_path, icons, BuildingGroup, BuildingType, BuyPackage, DefsError, DefsPathClass,
-    GameDefs, Good, NeedEntry, PopNeed, ProductionMethod, DEFAULT_PRICE_RANGE,
+    classify_defs_path, icons,
+    staging::{StagingDefs, StagingNeed, StagingNeedEntry, StagingPm},
+    BuildingGroup, BuildingType, BuyPackage, DefsError, DefsPathClass, GameDefs, Good,
+    DEFAULT_PRICE_RANGE,
 };
 
 /// Load definitions from a Victoria 3 install or a fixture tree.
@@ -33,9 +35,9 @@ use crate::{
 /// files override the same id.
 pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
     let data_root = resolve_data_root(root.as_ref())?;
-    let mut defs = GameDefs {
+    let mut defs = StagingDefs {
         price_range: load_price_range(&data_root)?,
-        ..GameDefs::default()
+        ..StagingDefs::default()
     };
     (defs.goods_order, defs.goods) = load_goods(&data_root)?;
     defs.labels = load_labels(&data_root)?;
@@ -47,7 +49,7 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
     defs.pop_needs = load_pop_needs(&data_root)?;
     defs.buy_packages = load_buy_packages(&data_root)?;
     defs.obsessions = load_obsessions(&data_root)?;
-    Ok(defs)
+    defs.resolve()
 }
 
 /// Load definitions from an in-memory set of game files.
@@ -83,7 +85,7 @@ pub struct DefsBuilder {
 
 #[derive(Debug)]
 struct ParsedTexts {
-    defs: GameDefs,
+    defs: StagingDefs,
     library: crate::coa::CoaLibrary,
 }
 
@@ -134,7 +136,7 @@ impl DefsBuilder {
             {
                 return Err(DefsError::NotAGameRoot(PathBuf::from("<selected files>")));
             }
-            let mut defs = GameDefs::default();
+            let mut defs = StagingDefs::default();
             let mut library = crate::coa::CoaLibrary::default();
             for (relative, bytes) in &self.texts {
                 parse_defs_text(relative, bytes, &mut defs, &mut library)?;
@@ -171,7 +173,7 @@ impl DefsBuilder {
         attach_icons(&mut defs, self.icons);
         crate::coa::render_library_scaled(&mut library, &self.coa_textures);
         finish_coa(&mut defs, library);
-        Ok(defs)
+        defs.resolve()
     }
 }
 
@@ -179,7 +181,7 @@ impl DefsBuilder {
 fn parse_defs_text(
     relative: &str,
     bytes: &[u8],
-    defs: &mut GameDefs,
+    defs: &mut StagingDefs,
     library: &mut crate::coa::CoaLibrary,
 ) -> Result<(), DefsError> {
     let path = &PathBuf::from(relative);
@@ -236,7 +238,7 @@ fn parse_defs_text(
                     .entry
                     .into_iter()
                     .filter_map(|entry| {
-                        entry.goods.map(|good| NeedEntry {
+                        entry.goods.map(|good| StagingNeedEntry {
                             good,
                             weight: entry.weight.unwrap_or(1.0),
                             min_supply_share: entry.min_supply_share.unwrap_or(0.0),
@@ -246,7 +248,7 @@ fn parse_defs_text(
                     .collect();
                 defs.pop_needs.insert(
                     id.clone(),
-                    PopNeed {
+                    StagingNeed {
                         id,
                         default_good: need.default,
                         entries,
@@ -313,7 +315,7 @@ fn icon_stem(path: &str) -> Option<String> {
 /// Resolve decoded icons against goods, so the blob is keyed by good id.
 ///
 /// Several goods can share one texture, so icons are copied rather than moved.
-fn attach_icons(defs: &mut GameDefs, decoded: BTreeMap<String, Vec<u8>>) {
+fn attach_icons(defs: &mut StagingDefs, decoded: BTreeMap<String, Vec<u8>>) {
     if decoded.is_empty() {
         return;
     }
@@ -332,7 +334,7 @@ fn attach_icons(defs: &mut GameDefs, decoded: BTreeMap<String, Vec<u8>>) {
     defs.icons.extend(wanted);
 }
 
-fn load_coa_into(defs: &mut GameDefs, data_root: &Path) -> Result<(), DefsError> {
+fn load_coa_into(defs: &mut StagingDefs, data_root: &Path) -> Result<(), DefsError> {
     let mut library = crate::coa::CoaLibrary::default();
     for path in txt_files(&data_root.join("common/named_colors"))? {
         let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
@@ -382,7 +384,7 @@ fn load_coa_into(defs: &mut GameDefs, data_root: &Path) -> Result<(), DefsError>
     Ok(())
 }
 
-fn finish_coa(defs: &mut GameDefs, library: crate::coa::CoaLibrary) {
+fn finish_coa(defs: &mut StagingDefs, library: crate::coa::CoaLibrary) {
     defs.flags = library.rendered;
     defs.flag_defs = library
         .flag_defs
@@ -574,9 +576,7 @@ fn parse_localization(bytes: &[u8], labels: &mut BTreeMap<String, String>) {
     }
 }
 
-fn load_production_methods(
-    data_root: &Path,
-) -> Result<BTreeMap<String, ProductionMethod>, DefsError> {
+fn load_production_methods(data_root: &Path) -> Result<BTreeMap<String, StagingPm>, DefsError> {
     let mut pms = BTreeMap::new();
     for path in txt_files(&data_root.join("common/production_methods"))? {
         for pm in parse_production_methods(&path)? {
@@ -625,7 +625,7 @@ fn load_building_groups(data_root: &Path) -> Result<BTreeMap<String, BuildingGro
     Ok(groups)
 }
 
-fn parse_production_methods(path: &Path) -> Result<Vec<ProductionMethod>, DefsError> {
+fn parse_production_methods(path: &Path) -> Result<Vec<StagingPm>, DefsError> {
     let bytes = std::fs::read(path).map_err(|source| DefsError::Io {
         path: path.to_path_buf(),
         source,
@@ -633,10 +633,7 @@ fn parse_production_methods(path: &Path) -> Result<Vec<ProductionMethod>, DefsEr
     parse_production_methods_bytes(path, &bytes)
 }
 
-fn parse_production_methods_bytes(
-    path: &Path,
-    bytes: &[u8],
-) -> Result<Vec<ProductionMethod>, DefsError> {
+fn parse_production_methods_bytes(path: &Path, bytes: &[u8]) -> Result<Vec<StagingPm>, DefsError> {
     let bytes = strip_bom(bytes);
     if looks_empty(bytes) {
         return Ok(Vec::new());
@@ -654,7 +651,7 @@ fn parse_production_methods_bytes(
         if let Ok(obj) = value.read_object() {
             collect_goods_modifiers(&obj, &mut inputs, &mut outputs);
         }
-        out.push(ProductionMethod {
+        out.push(StagingPm {
             id,
             inputs,
             outputs,
@@ -687,7 +684,7 @@ fn collect_goods_modifiers<E: Encoding + Clone>(
     }
 }
 
-fn load_pop_needs(data_root: &Path) -> Result<BTreeMap<String, PopNeed>, DefsError> {
+fn load_pop_needs(data_root: &Path) -> Result<BTreeMap<String, StagingNeed>, DefsError> {
     let mut needs = BTreeMap::new();
     for path in txt_files(&data_root.join("common/pop_needs"))? {
         let file: BTreeMap<String, RawNeed> = parse_file(&path)?;
@@ -696,7 +693,7 @@ fn load_pop_needs(data_root: &Path) -> Result<BTreeMap<String, PopNeed>, DefsErr
                 .entry
                 .into_iter()
                 .filter_map(|e| {
-                    e.goods.map(|good| NeedEntry {
+                    e.goods.map(|good| StagingNeedEntry {
                         good,
                         weight: e.weight.unwrap_or(1.0),
                         min_supply_share: e.min_supply_share.unwrap_or(0.0),
@@ -706,7 +703,7 @@ fn load_pop_needs(data_root: &Path) -> Result<BTreeMap<String, PopNeed>, DefsErr
                 .collect();
             needs.insert(
                 id.clone(),
-                PopNeed {
+                StagingNeed {
                     id,
                     default_good: raw.default,
                     entries,

@@ -246,7 +246,7 @@ pub fn what_if_json(
     let defs = vic3_defs::decode_blob(defs_blob)?;
     let opts = parse_solve_opts(solve_opts_json)?;
     let delta: WhatIfOpts = serde_json::from_str(what_if_opts_json)?;
-    let world = World::from_save(&save);
+    let world = World::from_save(&save, &defs);
     let result = solve_what_if(&world, &defs, &delta, opts);
     Ok(serde_json::to_string(&result)?)
 }
@@ -263,7 +263,7 @@ pub fn plan_json(
     let defs = vic3_defs::decode_blob(defs_blob)?;
     let solve_opts = parse_solve_opts(solve_opts_json)?;
     let plan_opts: PlanOpts = serde_json::from_str(plan_opts_json)?;
-    let world = World::from_save(&save);
+    let world = World::from_save(&save, &defs);
     let prices = solve(&world, &defs, solve_opts);
     let country = country_tag(&save)?;
     let state = PlanningState::from_save_with_prices(&save, country, &prices)?;
@@ -292,7 +292,7 @@ pub fn gaps_json(
     let save = load_save(save_bytes, tokens_bytes)?;
     let defs = vic3_defs::decode_blob(defs_blob)?;
     let opts = parse_solve_opts(solve_opts_json)?;
-    let world = World::from_save(&save);
+    let world = World::from_save(&save, &defs);
     let prices = solve(&world, &defs, opts);
     let country = country_tag(&save)?;
     let state = PlanningState::from_save_with_prices(&save, country, &prices)?;
@@ -344,7 +344,7 @@ fn run_prices(
     let save = load_save(save_bytes, tokens_bytes)?;
     let defs = vic3_defs::decode_blob(defs_blob)?;
     let opts = parse_solve_opts(solve_opts_json)?;
-    let world = World::from_save(&save);
+    let world = World::from_save(&save, &defs);
     Ok(solve(&world, &defs, opts))
 }
 

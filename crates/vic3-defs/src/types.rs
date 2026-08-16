@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::DEFAULT_PRICE_RANGE;
+use crate::{GoodIdx, DEFAULT_PRICE_RANGE};
 
 /// Parsed Victoria 3 definitions used by the price solver and wasm UI.
 ///
@@ -35,8 +35,8 @@ pub struct GameDefs {
     pub pop_needs: BTreeMap<String, PopNeed>,
     /// Wealth level (1–99) → buy package.
     pub buy_packages: BTreeMap<u8, BuyPackage>,
-    /// Culture id → obsessed good ids. Empty when the tree has no obsessions.
-    pub obsessions: BTreeMap<String, Vec<String>>,
+    /// Culture id → obsessed good indices. Empty when the tree has no obsessions.
+    pub obsessions: BTreeMap<String, Vec<GoodIdx>>,
 }
 
 impl Default for GameDefs {
@@ -60,14 +60,28 @@ impl Default for GameDefs {
 }
 
 impl GameDefs {
+    /// Index of `good_id` in [`Self::goods_order`], if known.
+    pub fn index_of(&self, good_id: &str) -> Option<GoodIdx> {
+        self.goods_order
+            .iter()
+            .position(|id| id == good_id)
+            .map(GoodIdx::from_usize)
+    }
+
     /// Base price for `good_id`, if that good was parsed.
     pub fn base_price(&self, good_id: &str) -> Option<f64> {
         self.goods.get(good_id).map(|g| g.base_price)
     }
 
+    /// Base price for an indexed good.
+    pub fn base_price_idx(&self, idx: GoodIdx) -> Option<f64> {
+        self.good_by_index(idx)
+            .and_then(|id| self.goods.get(id).map(|g| g.base_price))
+    }
+
     /// Good id at the integer index used by saved building IO.
-    pub fn good_by_index(&self, index: usize) -> Option<&str> {
-        self.goods_order.get(index).map(String::as_str)
+    pub fn good_by_index(&self, index: GoodIdx) -> Option<&str> {
+        self.goods_order.get(index.as_usize()).map(String::as_str)
     }
 }
 
@@ -95,8 +109,8 @@ pub struct Good {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProductionMethod {
     pub id: String,
-    pub inputs: BTreeMap<String, f64>,
-    pub outputs: BTreeMap<String, f64>,
+    pub inputs: Vec<(GoodIdx, f64)>,
+    pub outputs: Vec<(GoodIdx, f64)>,
 }
 
 /// A constructable building definition (`common/buildings`).
@@ -122,14 +136,14 @@ pub struct BuildingGroup {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PopNeed {
     pub id: String,
-    pub default_good: Option<String>,
+    pub default_good: Option<GoodIdx>,
     pub entries: Vec<NeedEntry>,
 }
 
 /// One substitutable good inside a [`PopNeed`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NeedEntry {
-    pub good: String,
+    pub good: GoodIdx,
     pub weight: f64,
     pub min_supply_share: f64,
     pub max_supply_share: f64,

@@ -46,11 +46,14 @@ mod tests {
     use std::collections::BTreeMap;
 
     use proptest::prelude::*;
-    use vic3_defs::{BuyPackage, GameDefs, Good, NeedEntry, PopNeed, ProductionMethod};
+    use vic3_defs::{
+        BuyPackage, GameDefs, Good, GoodIdx, GoodsVec, NeedEntry, PopNeed, ProductionMethod,
+    };
 
     fn heating_defs() -> GameDefs {
         let mut defs = GameDefs {
             price_range: 0.75,
+            goods_order: vec!["grain".into(), "wood".into(), "coal".into()],
             ..GameDefs::default()
         };
         defs.goods.insert(
@@ -81,16 +84,16 @@ mod tests {
             "popneed_heating".into(),
             PopNeed {
                 id: "popneed_heating".into(),
-                default_good: Some("wood".into()),
+                default_good: Some(GoodIdx::from_usize(1)),
                 entries: vec![
                     NeedEntry {
-                        good: "wood".into(),
+                        good: GoodIdx::from_usize(1),
                         weight: 1.0,
                         min_supply_share: 0.0,
                         max_supply_share: 0.5,
                     },
                     NeedEntry {
-                        good: "coal".into(),
+                        good: GoodIdx::from_usize(2),
                         weight: 2.0,
                         min_supply_share: 0.1,
                         max_supply_share: 1.0,
@@ -118,8 +121,8 @@ mod tests {
             "pm_simple_forestry".into(),
             ProductionMethod {
                 id: "pm_simple_forestry".into(),
-                inputs: BTreeMap::new(),
-                outputs: BTreeMap::from([("wood".into(), 30.0)]),
+                inputs: Vec::new(),
+                outputs: vec![(GoodIdx::from_usize(1), 30.0)],
             },
         );
         defs
@@ -129,6 +132,7 @@ mod tests {
     fn two_good_defs() -> GameDefs {
         let mut defs = GameDefs {
             price_range: 0.75,
+            goods_order: vec!["grain".into(), "wood".into()],
             ..GameDefs::default()
         };
         defs.goods.insert(
@@ -151,9 +155,9 @@ mod tests {
             "popneed_staple".into(),
             PopNeed {
                 id: "popneed_staple".into(),
-                default_good: Some("grain".into()),
+                default_good: Some(GoodIdx::from_usize(0)),
                 entries: vec![NeedEntry {
-                    good: "grain".into(),
+                    good: GoodIdx::from_usize(0),
                     weight: 1.0,
                     min_supply_share: 0.0,
                     max_supply_share: 1.0,
@@ -164,9 +168,9 @@ mod tests {
             "popneed_heating".into(),
             PopNeed {
                 id: "popneed_heating".into(),
-                default_good: Some("wood".into()),
+                default_good: Some(GoodIdx::from_usize(1)),
                 entries: vec![NeedEntry {
-                    good: "wood".into(),
+                    good: GoodIdx::from_usize(1),
                     weight: 1.0,
                     min_supply_share: 0.0,
                     max_supply_share: 1.0,
@@ -199,8 +203,8 @@ mod tests {
             "pm_simple_forestry".into(),
             ProductionMethod {
                 id: "pm_simple_forestry".into(),
-                inputs: BTreeMap::new(),
-                outputs: BTreeMap::from([("wood".into(), 30.0)]),
+                inputs: Vec::new(),
+                outputs: vec![(GoodIdx::from_usize(1), 30.0)],
             },
         );
         defs
@@ -230,12 +234,18 @@ mod tests {
     /// Two goods (grain/wood), two pops; frozen sell matched to pop buy at base.
     fn balanced_world(defs: &GameDefs) -> World {
         let pops = two_pops();
-        let prices: BTreeMap<String, f64> = defs
-            .goods
+        let prices: GoodsVec = defs
+            .goods_order
             .iter()
-            .map(|(id, g)| (id.clone(), g.base_price))
+            .map(|id| defs.base_price(id).unwrap_or(0.0))
             .collect();
-        let sell = consumption(&pops, &prices, defs, &BTreeMap::new());
+        let sell = consumption(
+            &pops,
+            &prices,
+            &prices,
+            defs,
+            &GoodsVec::zeros(defs.goods_order.len()),
+        );
         World {
             pops,
             buildings: vec![WorldBuilding {
@@ -271,8 +281,8 @@ mod tests {
                 level: 2.0,
                 staffing: 2.0,
                 production_methods: vec!["pm_simple_forestry".into()],
-                saved_inputs: BTreeMap::new(),
-                saved_outputs: BTreeMap::new(),
+                saved_inputs: Vec::new(),
+                saved_outputs: Vec::new(),
             }],
             ..World::default()
         };
@@ -360,8 +370,8 @@ mod tests {
             "pm_goofy_factory".into(),
             ProductionMethod {
                 id: "pm_goofy_factory".into(),
-                inputs: BTreeMap::from([("coal".into(), 2.0)]),
-                outputs: BTreeMap::from([("wood".into(), 3.0)]),
+                inputs: vec![(GoodIdx::from_usize(2), 2.0)],
+                outputs: vec![(GoodIdx::from_usize(1), 3.0)],
             },
         );
         let world = World {
@@ -462,6 +472,9 @@ mod tests {
             size_b in 1_000.0f64..=20_000.0,
         ) {
             let defs = heating_defs();
+            let mut frozen_sell = GoodsVec::zeros(defs.goods_order.len());
+            frozen_sell[GoodIdx::from_usize(1)] = wood_sell;
+            frozen_sell[GoodIdx::from_usize(2)] = coal_sell;
             let world = World {
                 pops: vec![
                     WorldPop {
@@ -481,10 +494,7 @@ mod tests {
                         profession: None,
                     },
                 ],
-                frozen_sell: BTreeMap::from([
-                    ("wood".into(), wood_sell),
-                    ("coal".into(), coal_sell),
-                ]),
+                frozen_sell,
                 ..World::default()
             };
             let opts = SolveOpts::default();
