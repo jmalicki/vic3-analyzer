@@ -35,5 +35,8 @@ const time = (name, run) => {
 time('parse_save', () => wasm.parse_save(save, tokens))
 const { out: pricesJson, ms } = time('prices', () => wasm.prices(save, tokens, defs, '{}'))
 const result = JSON.parse(pricesJson)
-console.log(`prices returned ${result.prices?.length ?? 0} goods, status ${result.status?.kind ?? '?'}`)
-console.log(`total blocking time if run on the main thread: ${ms.toFixed(0)}ms`)
+console.log(
+  `prices returned ${result.goods.length} goods, status ${result.status}, residual ${result.residual}`,
+)
+// The page runs this on a worker, so this is worker time, not a main-thread freeze.
+console.log(`solve occupies one thread for ${ms.toFixed(0)}ms`)
