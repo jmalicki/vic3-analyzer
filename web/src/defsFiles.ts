@@ -3,24 +3,11 @@ export type DefsSourceFile = {
   bytes: Uint8Array
 }
 
-const DEF_DIRS = [
-  'goods',
-  'defines',
-  'production_methods',
-  'pop_needs',
-  'buy_packages',
-  'cultures',
-]
+export type DefsPathClass = 'read' | 'skip' | 'descend' | 'prune'
+export type DefsPathClassifier = (path: string, isDirectory: boolean) => DefsPathClass
 
-export function usefulDefsPath(path: string): boolean {
-  const normalized = path.replaceAll('\\', '/')
-  return (
-    normalized.endsWith('.txt') &&
-    DEF_DIRS.some(
-      (dir) =>
-        normalized.includes(`/common/${dir}/`) || normalized.startsWith(`common/${dir}/`),
-    )
-  )
+export function usefulDefsPath(path: string, classify: DefsPathClassifier): boolean {
+  return classify(path, false) === 'read'
 }
 
 export type DefsDropEntry = {
@@ -49,12 +36,13 @@ export type DefsDropItem = {
  */
 export async function collectDroppedDefsFiles(
   items: Iterable<DefsDropItem>,
+  classify: DefsPathClassifier,
   onFile?: (read: number) => void,
 ): Promise<DefsSourceFile[]> {
   const out: DefsSourceFile[] = []
   for (const item of items) {
     const entry = item.webkitGetAsEntry?.()
-    if (entry) await walkEntry(entry, entry.name, out, onFile)
+    if (entry) await walkEntry(entry, entry.name, out, classify, onFile)
   }
   return out
 }
@@ -63,10 +51,11 @@ async function walkEntry(
   entry: DefsDropEntry,
   path: string,
   out: DefsSourceFile[],
+  classify: DefsPathClassifier,
   onFile?: (read: number) => void,
 ): Promise<void> {
   if (entry.isFile && entry.file) {
-    if (!usefulDefsPath(path)) return
+    if (!usefulDefsPath(path, classify)) return
     const read = entry.file.bind(entry)
     const file = await new Promise<File>((resolve, reject) => read(resolve, reject))
     out.push({ path, bytes: new Uint8Array(await file.arrayBuffer()) })
@@ -74,6 +63,7 @@ async function walkEntry(
     return
   }
   if (!entry.isDirectory || !entry.createReader) return
+  if (classify(path, true) === 'prune') return
   const reader = entry.createReader()
   // readEntries yields a page at a time and signals completion with an empty batch.
   for (;;) {
@@ -82,17 +72,17 @@ async function walkEntry(
     )
     if (batch.length === 0) return
     for (const child of batch) {
-      await walkEntry(child, `${path}/${child.name}`, out, onFile)
+      await walkEntry(child, `${path}/${child.name}`, out, classify, onFile)
     }
   }
 }
 
-export function packDefsFiles(files: DefsSourceFile[]): {
+export function packDefsFiles(files: DefsSourceFile[], classify: DefsPathClassifier): {
   manifestJson: string
   contents: Uint8Array
 } {
   const selected = files
-    .filter((file) => usefulDefsPath(file.path))
+    .filter((file) => usefulDefsPath(file.path, classify))
     .sort((a, b) => a.path.localeCompare(b.path))
   const length = selected.reduce((total, file) => total + file.bytes.length, 0)
   const contents = new Uint8Array(length)

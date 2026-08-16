@@ -17,7 +17,10 @@ price = base * (1 + PRICE_RANGE * clamp(ratio, -1, +1))
 
 Zero orders: define a documented convention in P4 (do not divide by zero); property tests cover it.
 
-MAPI: local prices blend toward the market price using the game’s market-access weights. Exact blend is copied from defs, not invented.
+MAPI is not implemented yet. State drill-down attributes buy/sell orders to the
+parsed state but repeats the shared whole-save synthetic market price; the UI
+labels that distinction. A future local-price implementation must copy the
+game’s market-access blend from defs rather than inventing one.
 
 ## Pop consumption
 
@@ -33,7 +36,14 @@ Until a later phase:
 - wages
 - trade-center volumes (except what-if deltas on buildings/PMs/levels)
 
-Non-pop orders (buildings, government, construction, trade as recorded in the save) are reconstructed from the IR and held fixed while pops adjust.
+Building PM orders and directed trade-route volumes are reconstructed from the
+IR and held fixed while pops adjust. Government and construction goods orders
+are not yet projected into the solver.
+
+The result also carries state metadata, state-attributed orders, and per-building
+model economics. Building revenue/cost/profit are PM quantities ×
+`level × staffing` × solved shared price. They are modeled diagnostics, not
+cashflow fields read from the save.
 
 ## Solver
 

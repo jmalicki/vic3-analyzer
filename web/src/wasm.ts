@@ -1,6 +1,7 @@
 import type { JsonSchema } from './types'
 
 export interface WasmApi {
+  classify_defs_path(path: string, isDirectory: boolean): 'read' | 'skip' | 'descend' | 'prune'
   build_defs_blob(
     manifestJson: string,
     contents: Uint8Array,

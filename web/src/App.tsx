@@ -12,6 +12,7 @@ import { clearStoredDefs, loadStoredDefs, storeDefs } from './defsStore'
 import { FieldHelp } from './FieldHelp'
 import { GoalBuilder } from './GoalBuilder'
 import { Modal } from './Modal'
+import { PriceExplorer } from './PriceExplorer'
 import { ProgressBar } from './ProgressBar'
 import {
   canUseRememberedSavePicker,
@@ -226,13 +227,22 @@ function App({ wasmApi }: Props) {
         const json = await api.defs_summary(defsBytes!)
         if (!cancelled) setDefsSummary(JSON.parse(json) as DefsSummary)
       })
-      .catch(() => {
-        if (!cancelled) setDefsSummary(undefined)
+      .catch((reason: unknown) => {
+        if (cancelled) return
+        setDefsSummary(undefined)
+        if (defsFile) {
+          setDefsFile(undefined)
+          setDefsRestored(false)
+          void clearStoredDefs()
+          setError(
+            `${reason instanceof Error ? reason.message : String(reason)} Rebuild definitions for this app version.`,
+          )
+        }
       })
     return () => {
       cancelled = true
     }
-  }, [api, effectiveDefs])
+  }, [api, defsFile, effectiveDefs])
 
   useEffect(() => {
     const firstBuilding = summary?.buildings?.[0]
@@ -451,7 +461,7 @@ function App({ wasmApi }: Props) {
   // The archive only reads stored records, so it stays usable without inputs.
   const gated = missing.length > 0 && activeView !== 'archive'
   const defsCounts = defsSummary
-    ? ` — ${defsSummary.goods} goods, ${defsSummary.production_methods} production methods`
+    ? ` — format v${defsSummary.blob_version}, ${defsSummary.goods} goods, ${defsSummary.labels} names, ${defsSummary.production_methods} production methods`
     : ''
   // A real install has dozens of goods; a handful means the fixture blob or a
   // folder pick that missed common/goods.
@@ -613,7 +623,10 @@ function App({ wasmApi }: Props) {
             type="button"
             key={view}
             aria-current={activeView === view ? 'page' : undefined}
-            onClick={() => setActiveView(view)}
+            onClick={() => {
+              setActiveView(view)
+              if (view === 'prices') window.location.hash = '/prices'
+            }}
           >
             {label}
           </button>
@@ -792,39 +805,10 @@ function App({ wasmApi }: Props) {
       )}
 
       {(activeView === 'prices' || activeView === 'what-if') && result && (
-        <section aria-labelledby="prices-heading">
-          <div className="result-heading">
-            <h2 id="prices-heading">
-              {activeView === 'what-if' ? 'Scenario prices' : 'Goods prices'}
-            </h2>
-            <span>{result.goods.length} goods</span>
-          </div>
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Good</th>
-                  <th>Base</th>
-                  <th>Price</th>
-                  <th>Buy</th>
-                  <th>Sell</th>
-                </tr>
-              </thead>
-              <tbody>
-                {result.goods.map((good) => (
-                  <tr key={good.id}>
-                    <th>{good.id}</th>
-                    <td>{good.base.toFixed(2)}</td>
-                    <td>{good.price.toFixed(2)}</td>
-                    <td>{good.buy.toFixed(2)}</td>
-                    <td>{good.sell.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <>
+          <PriceExplorer result={result} scenario={activeView === 'what-if'} />
           <ModelInfo status={result.status} />
-        </section>
+        </>
       )}
 
       {activeView === 'timeline' && planResult && (

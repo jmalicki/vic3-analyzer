@@ -17,12 +17,19 @@ cargo run -p vic3-cli -- defs export \
 Upload `defs.postcard` in the web UI. Do not commit or publish it: it is derived
 from Paradox game data.
 
-Alternatively, the web UI can build the blob locally: drag the installed
-`Victoria 3/game/common` folder onto the builder, pick it, or supply a zip of
-it. Dragging is the reliable route, since Chrome refuses to open Steam's install
+Alternatively, the web UI can build the v2 blob locally: drag the installed
+`Victoria 3/game` folder onto the builder (or use `game/common` without localized
+names), pick it, or supply a zip. The SPA prunes heavy trees and reads only
+allowlisted definitions plus English goods localization. Dragging is the
+reliable route, since Chrome refuses to open Steam's install
 location (`~/Library`, `Program Files`) through its folder pickers. The
 Clausewitz files are parsed in wasm and never leave the browser, and the built
 blob is kept in IndexedDB so a reload does not lose it.
+
+Goods results are sortable and link to state-attributed orders, then to
+individual building model revenue, costs, profit, IO, and shortages. Prices are
+currently one shared whole-save synthetic market price; state-local MAPI is not
+yet modeled.
 
 ## Docs
 

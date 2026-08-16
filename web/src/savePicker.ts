@@ -116,14 +116,14 @@ export type GameCommonPathHint = {
   platform: Platform
   /** Short lead-in before the path, e.g. "Usual Steam folder". */
   label: string
-  /** Typical Steam `game/common` path for this platform. */
+  /** Typical Steam `game` path for this platform. */
   local: string
   /** Browser caveat shown under the path. */
   summary: string
 }
 
 /**
- * Return the usual Steam Victoria 3 `game/common` locations for a platform.
+ * Return the usual Steam Victoria 3 `game` locations for a platform.
  *
  * These paths are shown, never fed to a picker API: Chromium's File System
  * Access blocklist marks `~/Library` (macOS) and `Program Files` (Windows) as
@@ -139,8 +139,7 @@ export function victoria3GameCommonPaths(
       return {
         platform,
         label: 'Usual Steam folder',
-        local:
-          'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Victoria 3\\game\\common',
+        local: 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Victoria 3\\game',
         summary:
           'Chrome cannot open that path for you. In the folder dialog, paste the path into the address bar.',
       }
@@ -148,8 +147,7 @@ export function victoria3GameCommonPaths(
       return {
         platform,
         label: 'Usual Steam folder',
-        local:
-          '~/Library/Application Support/Steam/steamapps/common/Victoria 3/game/common',
+        local: '~/Library/Application Support/Steam/steamapps/common/Victoria 3/game',
         summary:
           'Finder hides ~/Library, and Chrome blocks it in the newer folder API. In the folder dialog press Cmd+Shift+G, then paste the path.',
       }
@@ -157,7 +155,7 @@ export function victoria3GameCommonPaths(
       return {
         platform,
         label: 'Usual Steam folder',
-        local: '~/.local/share/Steam/steamapps/common/Victoria 3/game/common',
+        local: '~/.local/share/Steam/steamapps/common/Victoria 3/game',
         summary:
           'Also try ~/.steam/steam/steamapps/…. In the folder dialog press Ctrl+L, then paste the path.',
       }
@@ -165,7 +163,7 @@ export function victoria3GameCommonPaths(
       return {
         platform,
         label: 'Usual Steam folder',
-        local: 'Steam/steamapps/common/Victoria 3/game/common',
+        local: 'Steam/steamapps/common/Victoria 3/game',
         summary: 'Look under your Steam library, then paste the path in the folder dialog.',
       }
   }

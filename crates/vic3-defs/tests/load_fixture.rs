@@ -19,6 +19,11 @@ fn fixture_goods_have_known_base_prices() {
     assert_eq!(defs.base_price("wood"), Some(20.0));
     assert_eq!(defs.base_price("coal"), Some(30.0));
     assert_eq!(defs.goods.len(), 3);
+    assert_eq!(defs.labels.get("grain").map(String::as_str), Some("Grain"));
+    assert_eq!(
+        defs.goods["grain"].texture.as_deref(),
+        Some("gfx/interface/icons/goods_icons/grain.dds")
+    );
 }
 
 #[test]
@@ -95,7 +100,10 @@ fn in_memory_files_match_filesystem_loader() {
             let path = entry.unwrap().path();
             if path.is_dir() {
                 collect(root, &path, out);
-            } else if path.extension().is_some_and(|extension| extension == "txt") {
+            } else if path
+                .extension()
+                .is_some_and(|extension| extension == "txt" || extension == "yml")
+            {
                 out.push((
                     path.strip_prefix(root)
                         .unwrap()

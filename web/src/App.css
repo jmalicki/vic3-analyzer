@@ -94,6 +94,10 @@ fieldset { border: 1px solid #4e5c50; margin: .8rem 0; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th, td { border-bottom: 1px solid #37433a; padding: .7rem; text-align: right; }
 th:first-child { text-align: left; }
+.table-sort { background: transparent; color: inherit; padding: 0; border-radius: 0; }
+.table-sort:hover { text-decoration: underline; }
+.breadcrumbs { display: flex; align-items: center; gap: .55rem; margin-bottom: .75rem; color: #9ba79d; }
+.breadcrumbs a, table a { color: #d7e6a7; }
 .limitations { border-left: 3px solid #c3a65d; margin-top: 1rem; padding-left: 1rem; color: #c8ccc5; }
 .limitations h3 { margin-bottom: .2rem; }
 .archive-list { list-style: none; padding: 0; }

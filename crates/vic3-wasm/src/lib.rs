@@ -13,14 +13,13 @@
 
 mod error;
 mod schema;
-mod world;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use vic3_goals::Atom;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save};
 use vic3_plan::PlanOpts;
-use vic3_prices::{solve, what_if as solve_what_if, PricesResult, SolveOpts, WhatIfOpts};
+use vic3_prices::{solve, what_if as solve_what_if, PricesResult, SolveOpts, WhatIfOpts, World};
 use vic3_sim::SimConfig;
 use vic3_world::PlanningState;
 use vic3save::PdsDate;
@@ -50,6 +49,18 @@ pub fn parse_save(save_bytes: &[u8], tokens_bytes: Option<Vec<u8>>) -> Result<St
 #[wasm_bindgen]
 pub fn build_defs_blob(manifest_json: &str, contents: &[u8]) -> Result<Vec<u8>, JsError> {
     build_defs_blob_bytes(manifest_json, contents).map_err(to_js)
+}
+
+/// Canonical file/directory allowlist used by the browser's local folder walk.
+#[wasm_bindgen]
+pub fn classify_defs_path(path: &str, is_directory: bool) -> String {
+    match vic3_defs::classify_defs_path(path, is_directory) {
+        vic3_defs::DefsPathClass::Read => "read",
+        vic3_defs::DefsPathClass::Skip => "skip",
+        vic3_defs::DefsPathClass::Descend => "descend",
+        vic3_defs::DefsPathClass::Prune => "prune",
+    }
+    .to_string()
 }
 
 /// Report what a definitions blob contains, so a UI can tell a full install
@@ -180,7 +191,7 @@ pub fn what_if_json(
     let defs = vic3_defs::decode_blob(defs_blob)?;
     let opts = parse_solve_opts(solve_opts_json)?;
     let delta: WhatIfOpts = serde_json::from_str(what_if_opts_json)?;
-    let world = world::world_from_save(&save);
+    let world = World::from_save(&save);
     let result = solve_what_if(&world, &defs, &delta, opts);
     Ok(serde_json::to_string(&result)?)
 }
@@ -197,7 +208,7 @@ pub fn plan_json(
     let defs = vic3_defs::decode_blob(defs_blob)?;
     let solve_opts = parse_solve_opts(solve_opts_json)?;
     let plan_opts: PlanOpts = serde_json::from_str(plan_opts_json)?;
-    let world = world::world_from_save(&save);
+    let world = World::from_save(&save);
     let prices = solve(&world, &defs, solve_opts);
     let country = country_tag(&save)?;
     let state = PlanningState::from_save(&save, country, &prices)?;
@@ -224,7 +235,7 @@ pub fn gaps_json(
     let save = load_save(save_bytes, tokens_bytes)?;
     let defs = vic3_defs::decode_blob(defs_blob)?;
     let opts = parse_solve_opts(solve_opts_json)?;
-    let world = world::world_from_save(&save);
+    let world = World::from_save(&save);
     let prices = solve(&world, &defs, opts);
     let country = country_tag(&save)?;
     let state = PlanningState::from_save(&save, country, &prices)?;
@@ -266,7 +277,7 @@ fn run_prices(
     let save = load_save(save_bytes, tokens_bytes)?;
     let defs = vic3_defs::decode_blob(defs_blob)?;
     let opts = parse_solve_opts(solve_opts_json)?;
-    let world = world::world_from_save(&save);
+    let world = World::from_save(&save);
     Ok(solve(&world, &defs, opts))
 }
 
@@ -313,7 +324,9 @@ pub fn build_defs_blob_bytes(manifest_json: &str, contents: &[u8]) -> Result<Vec
 /// Counts carried by a definitions blob.
 #[derive(Debug, Serialize)]
 struct DefsSummary {
+    blob_version: u32,
     goods: usize,
+    labels: usize,
     production_methods: usize,
     pop_needs: usize,
     buy_packages: usize,
@@ -324,7 +337,9 @@ struct DefsSummary {
 pub fn defs_summary_json(defs_blob: &[u8]) -> Result<String, WasmError> {
     let defs = vic3_defs::decode_blob(defs_blob)?;
     Ok(serde_json::to_string(&DefsSummary {
+        blob_version: vic3_defs::BLOB_VERSION,
         goods: defs.goods.len(),
+        labels: defs.labels.len(),
         production_methods: defs.production_methods.len(),
         pop_needs: defs.pop_needs.len(),
         buy_packages: defs.buy_packages.len(),
@@ -448,7 +463,9 @@ mod tests {
     fn defs_summary_counts_blob_contents() {
         let json = defs_summary_json(&defs_blob()).expect("defs summary");
         let v: Value = serde_json::from_str(&json).expect("summary json");
+        assert_eq!(v["blob_version"], 2);
         assert_eq!(v["goods"], 3);
+        assert_eq!(v["labels"], 3);
         assert!(v["price_range"].as_f64().is_some_and(|range| range > 0.0));
     }
 
@@ -463,6 +480,15 @@ mod tests {
     #[test]
     fn version_is_semver() {
         assert!(!version().is_empty());
+    }
+
+    #[test]
+    fn defs_path_classifier_exposes_rust_allowlist() {
+        assert_eq!(
+            classify_defs_path("game/common/goods/00_goods.txt", false),
+            "read"
+        );
+        assert_eq!(classify_defs_path("game/gfx", true), "prune");
     }
 
     #[test]

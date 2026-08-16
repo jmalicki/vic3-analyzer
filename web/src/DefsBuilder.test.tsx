@@ -7,8 +7,20 @@ import {
   collectDroppedDefsFiles,
   packDefsFiles,
   type DefsDropEntry,
+  type DefsPathClassifier,
 } from './defsFiles'
 import type { WasmApi } from './wasm'
+
+const classify: DefsPathClassifier = (path, isDirectory) => {
+  if (isDirectory) return path.endsWith('/gfx') || path === 'gfx' ? 'prune' : 'descend'
+  return path.includes('/common/goods/') ||
+    path.includes('/common/defines/') ||
+    path.startsWith('common/goods/') ||
+    path.startsWith('common/defines/') ||
+    path.includes('/localization/english/goods_l_')
+    ? 'read'
+    : 'skip'
+}
 
 function fileEntry(name: string, contents: string): DefsDropEntry {
   return {
@@ -36,7 +48,9 @@ function dirEntry(name: string, children: DefsDropEntry[]): DefsDropEntry {
 
 function defsSummaryJson(goods = 53): string {
   return JSON.stringify({
+    blob_version: 2,
     goods,
+    labels: goods,
     production_methods: 412,
     pop_needs: 7,
     buy_packages: 5,
@@ -46,6 +60,7 @@ function defsSummaryJson(goods = 53): string {
 
 function api(): WasmApi {
   return {
+    classify_defs_path: vi.fn(classify),
     build_defs_blob: vi.fn(() => new Uint8Array([1, 2, 3])),
     defs_summary: vi.fn(() => defsSummaryJson()),
   } as unknown as WasmApi
@@ -58,11 +73,14 @@ describe('DefsBuilder', () => {
   })
 
   it('packs supported common files with byte offsets', () => {
-    const packed = packDefsFiles([
-      { path: 'game/common/goods/goods.txt', bytes: new Uint8Array([1, 2]) },
-      { path: 'game/common/defines/defines.txt', bytes: new Uint8Array([3]) },
-      { path: 'game/readme.txt', bytes: new Uint8Array([9]) },
-    ])
+    const packed = packDefsFiles(
+      [
+        { path: 'game/common/goods/goods.txt', bytes: new Uint8Array([1, 2]) },
+        { path: 'game/common/defines/defines.txt', bytes: new Uint8Array([3]) },
+        { path: 'game/readme.txt', bytes: new Uint8Array([9]) },
+      ],
+      classify,
+    )
     expect(Array.from(packed.contents)).toEqual([3, 1, 2])
     expect(JSON.parse(packed.manifestJson)).toEqual([
       { path: 'game/common/defines/defines.txt', offset: 0, length: 1 },
@@ -70,10 +88,10 @@ describe('DefsBuilder', () => {
     ])
   })
 
-  it('shows a platform game/common path hint under the picker', () => {
+  it('shows a platform game path hint under the picker', () => {
     render(<DefsBuilder api={api()} onBuilt={vi.fn()} />)
     expect(screen.getByText('Usual Steam folder')).toBeInTheDocument()
-    expect(document.querySelector('.path-hint-path')).toHaveTextContent(/game\/common|game\\common/)
+    expect(document.querySelector('.path-hint-path')).toHaveTextContent(/Victoria 3[\\/]game$/)
     expect(screen.getByText(/Chrome cannot open that path for you|Cmd\+Shift\+G|Ctrl\+L/)).toBeInTheDocument()
   })
 
@@ -104,8 +122,8 @@ describe('DefsBuilder', () => {
     await user.upload(screen.getByLabelText('Victoria 3 definitions folder'), file)
     await waitFor(() => expect(wasm.build_defs_blob).toHaveBeenCalled())
     expect(onBuilt).toHaveBeenCalledWith(expect.objectContaining({ name: 'defs.postcard' }))
-    expect(await screen.findByText(/Built defs.postcard from 1 definition files/)).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('53 goods, 412 production methods')
+    expect(await screen.findByText(/Built defs.postcard format v2 from 1 definition files/)).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('53 goods, 53 localized names, 412 production methods')
   })
 
   it('warns when the built blob has too few goods to be a real install', async () => {
@@ -129,8 +147,33 @@ describe('DefsBuilder', () => {
       dirEntry('art', [fileEntry('ignored.txt', 'x')]),
     ])
 
-    const files = await collectDroppedDefsFiles([{ webkitGetAsEntry: () => common }])
+    const files = await collectDroppedDefsFiles([{ webkitGetAsEntry: () => common }], classify)
     expect(files.map((file) => file.path)).toEqual(['common/goods/00_goods.txt'])
+  })
+
+  it('accepts game root definitions and localization while pruning gfx', async () => {
+    const game = dirEntry('game', [
+      dirEntry('common', [
+        dirEntry('goods', [fileEntry('00_goods.txt', 'grain = { cost = 20 }')]),
+      ]),
+      dirEntry('localization', [
+        dirEntry('english', [fileEntry('goods_l_english.yml', 'grain:0 "Grain"')]),
+      ]),
+      dirEntry('gfx', [
+        dirEntry('interface', [fileEntry('definitely-not-read.txt', 'huge')]),
+      ]),
+    ])
+
+    const wasm = api()
+    const files = await collectDroppedDefsFiles(
+      [{ webkitGetAsEntry: () => game }],
+      wasm.classify_defs_path,
+    )
+    expect(files.map((file) => file.path)).toEqual([
+      'game/common/goods/00_goods.txt',
+      'game/localization/english/goods_l_english.yml',
+    ])
+    expect(wasm.classify_defs_path).toHaveBeenCalledWith('game/gfx', true)
   })
 
   it('builds from a folder dragged onto the drop zone', async () => {
@@ -141,7 +184,7 @@ describe('DefsBuilder', () => {
       dirEntry('goods', [fileEntry('00_goods.txt', 'grain = { cost = 20 }')]),
     ])
 
-    fireEvent.drop(screen.getByLabelText('Drop the game/common folder'), {
+    fireEvent.drop(screen.getByLabelText('Drop the Victoria 3 game folder'), {
       dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
     })
 
@@ -152,11 +195,11 @@ describe('DefsBuilder', () => {
   it('explains an empty drop instead of failing silently', async () => {
     render(<DefsBuilder api={api()} onBuilt={vi.fn()} />)
 
-    fireEvent.drop(screen.getByLabelText('Drop the game/common folder'), {
+    fireEvent.drop(screen.getByLabelText('Drop the Victoria 3 game folder'), {
       dataTransfer: { files: [], items: [] },
     })
 
-    expect(await screen.findByText(/no common\/\*\.txt files/)).toBeInTheDocument()
+    expect(await screen.findByText(/no supported definitions/)).toBeInTheDocument()
   })
 
   it('opens the folder input from the visible button', async () => {
@@ -165,7 +208,7 @@ describe('DefsBuilder', () => {
     const input = screen.getByLabelText('Victoria 3 definitions folder')
     const click = vi.spyOn(input, 'click')
 
-    await user.click(screen.getByRole('button', { name: 'Choose game/common folder' }))
+    await user.click(screen.getByRole('button', { name: 'Choose game or game/common folder' }))
     expect(click).toHaveBeenCalled()
   })
 
@@ -177,7 +220,7 @@ describe('DefsBuilder', () => {
       dirEntry('goods', [fileEntry('00_goods.txt', 'grain = { cost = 20 }')]),
     ])
 
-    fireEvent.drop(screen.getByLabelText('Drop the game/common folder'), {
+    fireEvent.drop(screen.getByLabelText('Drop the Victoria 3 game folder'), {
       dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
     })
 
@@ -191,6 +234,7 @@ describe('DefsBuilder', () => {
 
   it('shows an error when wasm rejects the definition files', async () => {
     const wasm = {
+      ...api(),
       build_defs_blob: vi.fn(() => {
         throw new Error('bad goods file')
       }),
@@ -200,7 +244,7 @@ describe('DefsBuilder', () => {
       dirEntry('goods', [fileEntry('00_goods.txt', 'grain = {')]),
     ])
 
-    fireEvent.drop(screen.getByLabelText('Drop the game/common folder'), {
+    fireEvent.drop(screen.getByLabelText('Drop the Victoria 3 game folder'), {
       dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
     })
 
@@ -212,6 +256,7 @@ describe('DefsBuilder', () => {
   it('reports busy state so the dialog cannot be dismissed mid-build', async () => {
     let release: (bytes: Uint8Array) => void = () => {}
     const wasm = {
+      ...api(),
       build_defs_blob: vi.fn(() => new Promise<Uint8Array>((resolve) => (release = resolve))),
     } as unknown as WasmApi
     const onBusyChange = vi.fn()
@@ -220,7 +265,7 @@ describe('DefsBuilder', () => {
       dirEntry('goods', [fileEntry('00_goods.txt', 'grain = { cost = 20 }')]),
     ])
 
-    fireEvent.drop(screen.getByLabelText('Drop the game/common folder'), {
+    fireEvent.drop(screen.getByLabelText('Drop the Victoria 3 game folder'), {
       dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
     })
     await waitFor(() => expect(onBusyChange).toHaveBeenCalledWith(true))
@@ -232,6 +277,7 @@ describe('DefsBuilder', () => {
   it('reports progress while wasm parses the definitions', async () => {
     let release: (bytes: Uint8Array) => void = () => {}
     const wasm = {
+      ...api(),
       build_defs_blob: vi.fn(
         () => new Promise<Uint8Array>((resolve) => (release = resolve)),
       ),
@@ -241,7 +287,7 @@ describe('DefsBuilder', () => {
       dirEntry('goods', [fileEntry('00_goods.txt', 'grain = { cost = 20 }')]),
     ])
 
-    fireEvent.drop(screen.getByLabelText('Drop the game/common folder'), {
+    fireEvent.drop(screen.getByLabelText('Drop the Victoria 3 game folder'), {
       dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
     })
 
@@ -262,7 +308,7 @@ describe('DefsBuilder', () => {
     render(<DefsBuilder api={api()} onBuilt={vi.fn()} />)
 
     await user.click(screen.getByRole('button', { name: 'Copy path' }))
-    expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/game.common/))
+    expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/Victoria 3[\\/]game$/))
     expect(await screen.findByText(/Path copied/)).toBeInTheDocument()
   })
 

@@ -10,7 +10,10 @@ use vic3_defs::GameDefs;
 
 use crate::consumption::consumption;
 use crate::formula::price;
-use crate::result::{GoodPrice, PricesResult, SolveOpts, SolveStatus};
+use crate::result::{
+    BuildingEconomics, GoodFlow, GoodPrice, PricesResult, SolveOpts, SolveStatus, StateGood,
+    StateInfo,
+};
 use crate::world::{reconstruct_non_pop_orders, World};
 use crate::LIMITATIONS;
 
@@ -34,7 +37,7 @@ const FD_STEP: f64 = 1e-7;
 pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
     let goods = market_goods(world, defs);
     if goods.is_empty() {
-        return finished(Vec::new(), 0.0, SolveStatus::Converged);
+        return finished(world, defs, Vec::new(), 0.0, SolveStatus::Converged);
     }
 
     let bases: Vec<f64> = goods
@@ -42,7 +45,7 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
         .map(|id| defs.base_price(id).unwrap_or(0.0))
         .collect();
     if bases.iter().any(|b| *b <= 0.0) {
-        return finished(Vec::new(), f64::INFINITY, SolveStatus::Failed);
+        return finished(world, defs, Vec::new(), f64::INFINITY, SolveStatus::Failed);
     }
 
     let price_range = defs.price_range.max(0.0);
@@ -100,7 +103,7 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
         SolveStatus::MaxIters
     };
 
-    finished(rows, residual, status)
+    finished(world, defs, rows, residual, status)
 }
 
 /// Apply a building-level delta and re-solve. Employment (`staffing`) stays frozen.
@@ -114,13 +117,150 @@ pub fn what_if(
     solve(&next, defs, opts)
 }
 
-fn finished(goods: Vec<GoodPrice>, residual: f64, status: SolveStatus) -> PricesResult {
+fn finished(
+    world: &World,
+    defs: &GameDefs,
+    goods: Vec<GoodPrice>,
+    residual: f64,
+    status: SolveStatus,
+) -> PricesResult {
+    let (states, state_goods, buildings) = detail_rows(world, defs, &goods);
     PricesResult {
+        scope: "whole_save_synthetic".to_string(),
         goods,
+        states,
+        state_goods,
+        buildings,
         residual,
         status,
         limitations: LIMITATIONS.iter().map(|s| (*s).to_string()).collect(),
     }
+}
+
+fn detail_rows(
+    world: &World,
+    defs: &GameDefs,
+    goods: &[GoodPrice],
+) -> (Vec<StateInfo>, Vec<StateGood>, Vec<BuildingEconomics>) {
+    let prices = goods
+        .iter()
+        .map(|good| (good.id.clone(), good.price))
+        .collect::<BTreeMap<_, _>>();
+    let rows = goods
+        .iter()
+        .map(|good| (good.id.as_str(), good))
+        .collect::<BTreeMap<_, _>>();
+    let mut state_buy = BTreeMap::<(u32, String), f64>::new();
+    let mut state_sell = BTreeMap::<(u32, String), f64>::new();
+
+    for state in &world.states {
+        let pops = world
+            .pops
+            .iter()
+            .filter(|pop| pop.state == Some(state.id))
+            .cloned()
+            .collect::<Vec<_>>();
+        for (good, quantity) in consumption(&pops, &prices, defs, &world.frozen_sell) {
+            *state_buy.entry((state.id, good)).or_default() += quantity;
+        }
+    }
+
+    let mut buildings = Vec::new();
+    for building in &world.buildings {
+        let scale = building.level * building.staffing;
+        let method = defs.production_methods.get(&building.production_method);
+        let mut inputs = Vec::new();
+        let mut outputs = Vec::new();
+        if let Some(method) = method {
+            for (good_id, per_level) in &method.inputs {
+                let quantity = per_level * scale;
+                let value = prices.get(good_id).copied().unwrap_or(0.0) * quantity;
+                inputs.push(GoodFlow {
+                    good_id: good_id.clone(),
+                    quantity,
+                    value,
+                });
+                if let Some(state_id) = building.state {
+                    *state_buy.entry((state_id, good_id.clone())).or_default() += quantity;
+                }
+            }
+            for (good_id, per_level) in &method.outputs {
+                let quantity = per_level * scale;
+                let value = prices.get(good_id).copied().unwrap_or(0.0) * quantity;
+                outputs.push(GoodFlow {
+                    good_id: good_id.clone(),
+                    quantity,
+                    value,
+                });
+                if let Some(state_id) = building.state {
+                    *state_sell.entry((state_id, good_id.clone())).or_default() += quantity;
+                }
+            }
+        }
+        let cost = inputs.iter().map(|flow| flow.value).sum::<f64>();
+        let revenue = outputs.iter().map(|flow| flow.value).sum::<f64>();
+        let short_inputs = inputs
+            .iter()
+            .filter(|flow| {
+                rows.get(flow.good_id.as_str()).is_none_or(|row| {
+                    row.sell <= crate::ORDER_EPS
+                        || row.price
+                            >= row.base * (1.0 + defs.price_range.max(0.0)) - crate::ORDER_EPS
+                })
+            })
+            .map(|flow| flow.good_id.clone())
+            .collect();
+        buildings.push(BuildingEconomics {
+            id: building.id,
+            state_id: building.state,
+            type_id: building.building.clone(),
+            level: building.level,
+            staffing: building.staffing,
+            production_method_id: (!building.production_method.is_empty())
+                .then(|| building.production_method.clone()),
+            inputs,
+            outputs,
+            revenue,
+            cost,
+            profit: revenue - cost,
+            short_inputs,
+        });
+    }
+
+    let mut keys = world
+        .states
+        .iter()
+        .flat_map(|state| goods.iter().map(move |good| (state.id, good.id.clone())))
+        .collect::<BTreeSet<_>>();
+    keys.extend(state_buy.keys().chain(state_sell.keys()).cloned());
+    let state_goods = keys
+        .into_iter()
+        .filter_map(|(state_id, good_id)| {
+            let row = rows.get(good_id.as_str())?;
+            Some(StateGood {
+                state_id,
+                good_id: good_id.clone(),
+                buy: state_buy
+                    .get(&(state_id, good_id.clone()))
+                    .copied()
+                    .unwrap_or(0.0),
+                sell: state_sell.get(&(state_id, good_id)).copied().unwrap_or(0.0),
+                price: row.price,
+                base: row.base,
+            })
+        })
+        .collect();
+    let states = world
+        .states
+        .iter()
+        .map(|state| StateInfo {
+            id: state.id,
+            region_id: state.region.clone(),
+            country_id: state.country,
+            market_id: state.market,
+        })
+        .collect();
+    (states, state_goods, buildings)
 }
 
 fn market_goods(world: &World, defs: &GameDefs) -> Vec<String> {
@@ -218,6 +358,7 @@ impl PriceResidual<'_> {
                 let sell = self.frozen_sell.get(id).copied().unwrap_or(0.0);
                 GoodPrice {
                     id: id.clone(),
+                    name: self.defs.labels.get(id).cloned(),
                     base: *base,
                     price: *base * *rrel,
                     buy,

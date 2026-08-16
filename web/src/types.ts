@@ -1,13 +1,55 @@
 export interface GoodPrice {
   id: string
+  name?: string
   base: number
   price: number
   buy: number
   sell: number
 }
 
+export interface StateInfo {
+  id: number
+  region_id?: string
+  country_id?: number
+  market_id?: number
+}
+
+export interface StateGood {
+  state_id: number
+  good_id: string
+  buy: number
+  sell: number
+  price: number
+  base: number
+}
+
+export interface GoodFlow {
+  good_id: string
+  quantity: number
+  value: number
+}
+
+export interface BuildingEconomics {
+  id: number
+  state_id?: number
+  type_id: string
+  level: number
+  staffing: number
+  production_method_id?: string
+  inputs: GoodFlow[]
+  outputs: GoodFlow[]
+  revenue: number
+  cost: number
+  profit: number
+  short_inputs: string[]
+}
+
 export interface PricesResult {
+  scope?: 'whole_save_synthetic'
   goods: GoodPrice[]
+  states?: StateInfo[]
+  state_goods?: StateGood[]
+  buildings?: BuildingEconomics[]
   residual: number
   status: 'converged' | 'max_iters' | 'failed'
   limitations: string[]
@@ -47,7 +89,9 @@ export interface SaveSummary {
 }
 
 export interface DefsSummary {
+  blob_version: number
   goods: number
+  labels: number
   production_methods: number
   pop_needs: number
   buy_packages: number

@@ -7,8 +7,8 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use crate::{
-    BuyPackage, DefsError, GameDefs, Good, NeedEntry, PopNeed, ProductionMethod,
-    DEFAULT_PRICE_RANGE,
+    classify_defs_path, BuyPackage, DefsError, DefsPathClass, GameDefs, Good, NeedEntry, PopNeed,
+    ProductionMethod, DEFAULT_PRICE_RANGE,
 };
 
 /// Load definitions from a Victoria 3 install or a fixture tree.
@@ -36,6 +36,7 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
         ..GameDefs::default()
     };
     defs.goods = load_goods(&data_root)?;
+    defs.labels = load_labels(&data_root)?;
     defs.production_methods = load_production_methods(&data_root)?;
     defs.pop_needs = load_pop_needs(&data_root)?;
     defs.buy_packages = load_buy_packages(&data_root)?;
@@ -46,17 +47,18 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
 /// Load definitions from an in-memory set of game files.
 ///
 /// Paths may be rooted anywhere, but must contain `common/...` (for example
-/// `game/common/goods/00_goods.txt`). This is the browser counterpart to
-/// [`load_from_path`]; callers can supply files selected from a folder or zip.
+/// `game/common/goods/00_goods.txt`). Goods localization under
+/// `localization/**/goods_l_*.yml` is optional.
 pub fn load_from_files(
     files: impl IntoIterator<Item = (String, Vec<u8>)>,
 ) -> Result<GameDefs, DefsError> {
     let mut files = files
         .into_iter()
+        .filter(|(path, _)| classify_defs_path(path, false) == DefsPathClass::Read)
         .filter_map(|(path, bytes)| {
-            normalize_common_path(&path).map(|relative| (relative, PathBuf::from(path), bytes))
+            normalize_defs_path(&path).map(|relative| (relative, PathBuf::from(path), bytes))
         })
-        .filter(|(relative, _, _)| relative.ends_with(".txt"))
+        .filter(|(relative, _, _)| relative.ends_with(".txt") || relative.ends_with(".yml"))
         .collect::<Vec<_>>();
     files.sort_by(|left, right| left.0.cmp(&right.0));
     if !files
@@ -77,7 +79,14 @@ pub fn load_from_files(
             let raw: BTreeMap<String, RawGood> = parse_bytes(path, bytes)?;
             for (id, good) in raw {
                 if let Some(base_price) = good.base_price() {
-                    defs.goods.insert(id.clone(), Good { id, base_price });
+                    defs.goods.insert(
+                        id.clone(),
+                        Good {
+                            id,
+                            base_price,
+                            texture: good.texture,
+                        },
+                    );
                 }
             }
         } else if relative.starts_with("common/production_methods/") {
@@ -129,18 +138,25 @@ pub fn load_from_files(
                     defs.obsessions.insert(culture, value.obsessions);
                 }
             }
+        } else if is_goods_localization(relative) {
+            parse_localization(bytes, &mut defs.labels);
         }
     }
     Ok(defs)
 }
 
-fn normalize_common_path(path: &str) -> Option<String> {
+fn normalize_defs_path(path: &str) -> Option<String> {
     let path = path.replace('\\', "/");
-    if let Some(rest) = path.strip_prefix("common/") {
-        return Some(format!("common/{rest}"));
+    for root in ["common/", "localization/"] {
+        if let Some(rest) = path.strip_prefix(root) {
+            return Some(format!("{root}{rest}"));
+        }
+        let needle = format!("/{root}");
+        if let Some(index) = path.find(&needle) {
+            return Some(path[index + 1..].to_string());
+        }
     }
-    path.find("/common/")
-        .map(|index| path[index + 1..].to_string())
+    None
 }
 
 fn resolve_data_root(root: &Path) -> Result<PathBuf, DefsError> {
@@ -173,10 +189,68 @@ fn load_goods(data_root: &Path) -> Result<BTreeMap<String, Good>, DefsError> {
             let Some(base_price) = raw.base_price() else {
                 continue;
             };
-            goods.insert(id.clone(), Good { id, base_price });
+            goods.insert(
+                id.clone(),
+                Good {
+                    id,
+                    base_price,
+                    texture: raw.texture,
+                },
+            );
         }
     }
     Ok(goods)
+}
+
+fn load_labels(data_root: &Path) -> Result<BTreeMap<String, String>, DefsError> {
+    let mut labels = BTreeMap::new();
+    for path in files_with_extension(&data_root.join("localization"), "yml")? {
+        let relative = path
+            .strip_prefix(data_root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if !is_goods_localization(&relative) {
+            continue;
+        }
+        let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        parse_localization(&bytes, &mut labels);
+    }
+    Ok(labels)
+}
+
+fn is_goods_localization(path: &str) -> bool {
+    path.starts_with("localization/")
+        && path.split('/').any(|segment| segment == "english")
+        && path
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| name.starts_with("goods_l_") && name.ends_with(".yml"))
+}
+
+fn parse_localization(bytes: &[u8], labels: &mut BTreeMap<String, String>) {
+    let text = String::from_utf8_lossy(strip_bom(bytes));
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.ends_with(':') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        let value = value
+            .trim_start_matches(|ch: char| ch.is_ascii_digit())
+            .trim();
+        let Some(value) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) else {
+            continue;
+        };
+        labels.insert(key.to_string(), value.replace("\\\"", "\""));
+    }
 }
 
 fn load_production_methods(
@@ -322,11 +396,15 @@ fn parse_wealth_key(key: &str) -> Option<u8> {
 }
 
 fn txt_files(dir: &Path) -> Result<Vec<PathBuf>, DefsError> {
+    files_with_extension(dir, "txt")
+}
+
+fn files_with_extension(dir: &Path, extension: &str) -> Result<Vec<PathBuf>, DefsError> {
     if !dir.is_dir() {
         return Ok(Vec::new());
     }
     let mut files = Vec::new();
-    collect_txt(dir, &mut files).map_err(|source| DefsError::Io {
+    collect_files(dir, extension, &mut files).map_err(|source| DefsError::Io {
         path: dir.to_path_buf(),
         source,
     })?;
@@ -334,13 +412,13 @@ fn txt_files(dir: &Path) -> Result<Vec<PathBuf>, DefsError> {
     Ok(files)
 }
 
-fn collect_txt(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
+fn collect_files(dir: &Path, extension: &str, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            collect_txt(&path, files)?;
-        } else if path.extension().is_some_and(|ext| ext == "txt") {
+            collect_files(&path, extension, files)?;
+        } else if path.extension().is_some_and(|ext| ext == extension) {
             files.push(path);
         }
     }
@@ -427,6 +505,7 @@ struct RawNEconomy {
 struct RawGood {
     cost: Option<f64>,
     base_price: Option<f64>,
+    texture: Option<String>,
 }
 
 impl RawGood {

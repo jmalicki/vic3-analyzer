@@ -81,13 +81,15 @@ fn plan_cmd(archive_root: &Path) -> Command {
 }
 
 fn temp_archive() -> PathBuf {
+    static NEXT_TEMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let path = std::env::temp_dir().join(format!(
-        "vic3-cli-archive-{}-{}",
+        "vic3-cli-archive-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        NEXT_TEMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
     ));
     std::fs::create_dir_all(&path).unwrap();
     path

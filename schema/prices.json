@@ -1,5 +1,103 @@
 {
   "$defs": {
+    "BuildingEconomics": {
+      "properties": {
+        "cost": {
+          "format": "double",
+          "type": "number"
+        },
+        "id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/GoodFlow"
+          },
+          "type": "array"
+        },
+        "level": {
+          "format": "double",
+          "type": "number"
+        },
+        "outputs": {
+          "items": {
+            "$ref": "#/$defs/GoodFlow"
+          },
+          "type": "array"
+        },
+        "production_method_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profit": {
+          "format": "double",
+          "type": "number"
+        },
+        "revenue": {
+          "format": "double",
+          "type": "number"
+        },
+        "short_inputs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "staffing": {
+          "format": "double",
+          "type": "number"
+        },
+        "state_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "type_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type_id",
+        "level",
+        "staffing",
+        "inputs",
+        "outputs",
+        "revenue",
+        "cost",
+        "profit",
+        "short_inputs"
+      ],
+      "type": "object"
+    },
+    "GoodFlow": {
+      "properties": {
+        "good_id": {
+          "type": "string"
+        },
+        "quantity": {
+          "format": "double",
+          "type": "number"
+        },
+        "value": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "good_id",
+        "quantity",
+        "value"
+      ],
+      "type": "object"
+    },
     "GoodPrice": {
       "description": "One row of the goods table in [`PricesResult`].",
       "properties": {
@@ -13,6 +111,12 @@
         },
         "id": {
           "type": "string"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "price": {
           "format": "double",
@@ -51,11 +155,90 @@
           "type": "string"
         }
       ]
+    },
+    "StateGood": {
+      "properties": {
+        "base": {
+          "format": "double",
+          "type": "number"
+        },
+        "buy": {
+          "format": "double",
+          "type": "number"
+        },
+        "good_id": {
+          "type": "string"
+        },
+        "price": {
+          "description": "Shared whole-save synthetic price. This is not a MAPI local price.",
+          "format": "double",
+          "type": "number"
+        },
+        "sell": {
+          "format": "double",
+          "type": "number"
+        },
+        "state_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "state_id",
+        "good_id",
+        "buy",
+        "sell",
+        "price",
+        "base"
+      ],
+      "type": "object"
+    },
+    "StateInfo": {
+      "properties": {
+        "country_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "market_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "region_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Price-equilibrium output. `limitations` is always the crate [`crate::LIMITATIONS`].",
   "properties": {
+    "buildings": {
+      "items": {
+        "$ref": "#/$defs/BuildingEconomics"
+      },
+      "type": "array"
+    },
     "goods": {
       "items": {
         "$ref": "#/$defs/GoodPrice"
@@ -73,12 +256,32 @@
       "format": "double",
       "type": "number"
     },
+    "scope": {
+      "description": "Prices currently solve one synthetic economy for the whole save.",
+      "type": "string"
+    },
+    "state_goods": {
+      "items": {
+        "$ref": "#/$defs/StateGood"
+      },
+      "type": "array"
+    },
+    "states": {
+      "items": {
+        "$ref": "#/$defs/StateInfo"
+      },
+      "type": "array"
+    },
     "status": {
       "$ref": "#/$defs/SolveStatus"
     }
   },
   "required": [
+    "scope",
     "goods",
+    "states",
+    "state_goods",
+    "buildings",
     "residual",
     "status",
     "limitations"

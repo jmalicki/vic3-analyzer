@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{DefsError, GameDefs};
 
 /// Postcard blob format version. Bump when [`GameDefs`] is not backward compatible.
-pub const BLOB_VERSION: u32 = 1;
+pub const BLOB_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct DefsBlob {
@@ -48,6 +48,7 @@ mod tests {
             Good {
                 id: "grain".into(),
                 base_price: 20.0,
+                texture: None,
             },
         );
         goods.insert(
@@ -55,6 +56,7 @@ mod tests {
             Good {
                 id: "wood".into(),
                 base_price: 20.0,
+                texture: None,
             },
         );
 
@@ -105,6 +107,7 @@ mod tests {
         GameDefs {
             price_range: 0.75,
             goods,
+            labels: BTreeMap::new(),
             production_methods,
             pop_needs,
             buy_packages,
@@ -118,5 +121,22 @@ mod tests {
         let bytes = encode_blob(&defs).expect("encode");
         let decoded = decode_blob(&bytes).expect("decode");
         assert_eq!(decoded, defs);
+    }
+
+    #[test]
+    fn rejects_previous_blob_version_clearly() {
+        let bytes = postcard::to_stdvec(&DefsBlob {
+            version: 1,
+            defs: sample_defs(),
+        })
+        .expect("encode old version");
+        let error = decode_blob(&bytes).expect_err("v1 must require rebuild");
+        assert!(matches!(
+            error,
+            DefsError::BlobVersion {
+                found: 1,
+                expected: BLOB_VERSION
+            }
+        ));
     }
 }

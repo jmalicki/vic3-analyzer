@@ -11,6 +11,7 @@ import {
   collectDroppedDefsFiles,
   packDefsFiles,
   usefulDefsPath,
+  type DefsPathClassifier,
   type DefsSourceFile,
 } from './defsFiles'
 import { FieldHelp } from './FieldHelp'
@@ -42,10 +43,10 @@ const directoryProps = {
 /** Repaint every 32 files so a 3000-file install does not thrash React. */
 const PROGRESS_STRIDE = 32
 
-async function zippedFiles(file: File): Promise<DefsSourceFile[]> {
+async function zippedFiles(file: File, classify: DefsPathClassifier): Promise<DefsSourceFile[]> {
   const archive = unzipSync(new Uint8Array(await file.arrayBuffer()))
   return Object.entries(archive)
-    .filter(([path]) => usefulDefsPath(path))
+    .filter(([path]) => usefulDefsPath(path, classify))
     .map(([path, bytes]) => ({ path, bytes }))
 }
 
@@ -76,7 +77,9 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
     setStatus(undefined)
     setError(undefined)
     try {
-      const packed = packDefsFiles(files)
+      const classify: DefsPathClassifier = (path, isDirectory) =>
+        api.classify_defs_path(path, isDirectory)
+      const packed = packDefsFiles(files, classify)
       const manifest = JSON.parse(packed.manifestJson) as unknown[]
       if (manifest.length === 0) {
         throw new Error('No supported common/*.txt definition files were found.')
@@ -90,7 +93,7 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
       setBlob(file)
       onBuilt(file)
       setStatus(
-        `Built ${file.name} from ${manifest.length} definition files: ${summary.goods} goods, ${summary.production_methods} production methods. Analysis tools are unlocked.` +
+        `Built ${file.name} format v${summary.blob_version} from ${manifest.length} definition files: ${summary.goods} goods, ${summary.labels} localized names, ${summary.production_methods} production methods. Analysis tools are unlocked.` +
           (summary.goods < 10
             ? ' That is far fewer goods than a full install — common/goods was probably missed, so drag the common folder itself and rebuild.'
             : ''),
@@ -101,8 +104,11 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
   }
 
   const readSelected = async (list: FileList): Promise<DefsSourceFile[]> => {
+    if (!api) throw new Error('The analysis engine is still loading. Try again in a moment.')
+    const classify: DefsPathClassifier = (path, isDirectory) =>
+      api.classify_defs_path(path, isDirectory)
     const chosen = [...list].filter((file) =>
-      usefulDefsPath(file.webkitRelativePath || file.name),
+      usefulDefsPath(file.webkitRelativePath || file.name, classify),
     )
     const label = 'Reading definition files'
     setProgress({ label, done: 0, total: chosen.length })
@@ -123,22 +129,32 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
     event.preventDefault()
     setDragging(false)
     if (busy) return
+    if (!api) {
+      fail(new Error('The analysis engine is still loading. Try again in a moment.'))
+      return
+    }
+    const classify: DefsPathClassifier = (path, isDirectory) =>
+      api.classify_defs_path(path, isDirectory)
     try {
       const zip = [...event.dataTransfer.files].find((file) => file.name.endsWith('.zip'))
       if (zip) {
         setProgress({ label: 'Unpacking zip' })
-        await build(await zippedFiles(zip))
+        await build(await zippedFiles(zip, classify))
         return
       }
       const label = 'Reading dropped files'
       setProgress({ label, done: 0 })
-      const files = await collectDroppedDefsFiles(event.dataTransfer.items ?? [], (read) => {
-        if (read % PROGRESS_STRIDE === 0) setProgress({ label, done: read })
-      })
+      const files = await collectDroppedDefsFiles(
+        event.dataTransfer.items ?? [],
+        classify,
+        (read) => {
+          if (read % PROGRESS_STRIDE === 0) setProgress({ label, done: read })
+        },
+      )
       if (files.length === 0) {
         fail(
           new Error(
-            'That drop had no common/*.txt files. Drag the common folder itself (or game/common).',
+            'That drop had no supported definitions. Drag the Victoria 3 game folder (or game/common).',
           ),
         )
         return
@@ -177,7 +193,8 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
             Saves freeze the market situation — pops, buildings, trade volumes — but not the game
             rules those orders depend on. Base prices (<code>cost</code> in{' '}
             <code>common/goods</code>), production-method recipes, pop needs, and buy packages live
-            under your Victoria 3 install&apos;s <code>game/common</code> tree.
+            under your Victoria 3 install&apos;s <code>game/common</code> tree. Display names live
+            alongside it under <code>game/localization</code>.
           </p>
           <p>
             This builder packs those Clausewitz files into a local <code>defs.postcard</code> blob
@@ -195,12 +212,13 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
         </FieldHelp>
       </div>
       <p>
-        Prices need base costs and recipes from <code>game/common</code>; the save alone does not
-        carry them. Drag that folder here, or pick it (or a zip of it) below.
+        Prices need base costs and recipes from the game install; the save alone does not carry
+        them. Drag the <code>game</code> folder for localized names, or <code>game/common</code> for
+        definitions only. Only the small allowlisted files are read.
       </p>
       <div
         className={dragging ? 'defs-drop dragging' : 'defs-drop'}
-        aria-label="Drop the game/common folder"
+        aria-label="Drop the Victoria 3 game folder"
         onDragOver={(event) => {
           event.preventDefault()
           setDragging(true)
@@ -208,20 +226,20 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
         onDragLeave={() => setDragging(false)}
         onDrop={(event) => void handleDrop(event)}
       >
-        <strong>Drag the <code>common</code> folder from Finder or Explorer</strong>
+        <strong>Drag the <code>game</code> folder from Finder or Explorer</strong>
         <span>
-          Dropping works even where the folder picker is blocked. In Steam: right-click Victoria 3 →
-          Manage → Browse local files.
+          The browser ignores heavy folders such as gfx and sound. Dropping works even where the
+          folder picker is blocked. In Steam: right-click Victoria 3 → Manage → Browse local files.
         </span>
       </div>
       <div className="defs-builder-actions">
         <button
           type="button"
           className="file-button secondary"
-          disabled={busy}
+          disabled={busy || !api}
           onClick={() => folderInputRef.current?.click()}
         >
-          Choose game/common folder
+          Choose game or game/common folder
         </button>
         <input
           {...directoryProps}
@@ -250,7 +268,13 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
               const file = event.target.files?.[0]
               if (file) {
                 setProgress({ label: 'Unpacking zip' })
-                void zippedFiles(file).then(build).catch(fail)
+                if (!api) {
+                  fail(new Error('The analysis engine is still loading. Try again in a moment.'))
+                } else {
+                  const classify: DefsPathClassifier = (path, isDirectory) =>
+                    api.classify_defs_path(path, isDirectory)
+                  void zippedFiles(file, classify).then(build).catch(fail)
+                }
               }
               event.target.value = ''
             }}

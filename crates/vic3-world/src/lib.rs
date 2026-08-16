@@ -275,13 +275,18 @@ mod tests {
 
     fn ammo_prices(price: f64) -> PricesResult {
         PricesResult {
+            scope: "whole_save_synthetic".into(),
             goods: vec![GoodPrice {
                 id: "ammunition".into(),
+                name: None,
                 base: 50.0,
                 price,
                 buy: 1.0,
                 sell: 1.0,
             }],
+            states: Vec::new(),
+            state_goods: Vec::new(),
+            buildings: Vec::new(),
             residual: 0.0,
             status: SolveStatus::Converged,
             limitations: Vec::new(),

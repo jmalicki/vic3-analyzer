@@ -37,6 +37,7 @@ building_manager={
 			state=1
 			level=2
 			staffing=1.0
+			production_method="pm_simple_forestry"
 		}
 		2=none
 	}

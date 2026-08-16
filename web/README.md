@@ -39,8 +39,11 @@ Analysis tools stay greyed out until definitions are available, and long reads
 report progress: a determinate bar over the selected file count and an
 indeterminate bar while wasm parses or solves.
 
-For real campaigns, a modal builder creates `defs.postcard` entirely in-browser from a
-dragged-in `common` folder, a selected folder, or a zip containing it. Dragging
+For real campaigns, a modal builder creates a versioned `defs.postcard`
+entirely in-browser from a dragged-in `game` folder, `common` subset, or zip.
+The walker prunes heavy directories and reads only supported common definitions
+plus English `goods_l_*.yml`; using `common` alone falls back to script ids.
+Dragging
 is the reliable route: Chromium's File System Access blocklist marks `~/Library`
 (macOS) and `Program Files` (Windows) as block-all-children, and native dialogs
 hide those locations, so a dropped folder read through `webkitGetAsEntry` is the
@@ -57,6 +60,12 @@ fixture-sized or incomplete, and swapping the save or definitions clears the
 previous result table so it cannot be mistaken for the new inputs' output. The
 footer reports the package version, git revision, and UTC build time injected by
 Vite.
+
+The goods table sorts by display name, price, and difference from base. Hash
+links drill into state-attributed buy/sell orders and then individual building
+model IO, costs, revenue, profit, and shortages. These rows use one shared
+whole-save synthetic market price; they do not claim MAPI-local prices or
+save-native building cashflow.
 
 ## wasm and definitions
 

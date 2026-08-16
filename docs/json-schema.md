@@ -52,8 +52,9 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
 ```json
 {
   "type": "object",
-  "required": ["goods", "residual", "status", "limitations"],
+  "required": ["scope", "goods", "states", "state_goods", "buildings", "residual", "status", "limitations"],
   "properties": {
+    "scope": { "const": "whole_save_synthetic" },
     "goods": {
       "type": "array",
       "items": {
@@ -61,12 +62,22 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
         "required": ["id", "base", "price", "buy", "sell"],
         "properties": {
           "id": { "type": "string" },
+          "name": { "type": ["string", "null"] },
           "base": { "type": "number" },
           "price": { "type": "number" },
           "buy": { "type": "number" },
           "sell": { "type": "number" }
         }
       }
+    },
+    "states": { "type": "array", "description": "Parsed save state id/region/country/market links." },
+    "state_goods": {
+      "type": "array",
+      "description": "State-attributed buy/sell orders with the shared synthetic market price."
+    },
+    "buildings": {
+      "type": "array",
+      "description": "Per-instance modeled PM inputs/outputs, revenue, cost, profit, and short inputs."
     },
     "residual": { "type": "number" },
     "status": { "enum": ["converged", "max_iters", "failed"] },
@@ -76,6 +87,7 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
 ```
 
 `status = converged` implies `residual < SolveOpts.residual_eps` (I5).
+`state_goods.price` is not a MAPI-local price.
 
 ## AnalysisRecord
 

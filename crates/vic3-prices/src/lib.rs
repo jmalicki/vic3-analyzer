@@ -12,9 +12,14 @@ mod world;
 
 pub use consumption::consumption;
 pub use formula::{market_ratio, price, ORDER_EPS};
-pub use result::{GoodPrice, PricesResult, SolveOpts, SolveStatus, WhatIfOpts};
+pub use result::{
+    BuildingEconomics, GoodFlow, GoodPrice, PricesResult, SolveOpts, SolveStatus, StateGood,
+    StateInfo, WhatIfOpts,
+};
 pub use solve::{solve, what_if};
-pub use world::{reconstruct_non_pop_orders, World, WorldBuilding, WorldPop, POP_SCALE};
+pub use world::{
+    reconstruct_non_pop_orders, World, WorldBuilding, WorldPop, WorldState, POP_SCALE,
+};
 
 /// Solver caveats copied into CLI JSON and the UI.
 ///
@@ -52,6 +57,7 @@ mod tests {
             Good {
                 id: "grain".into(),
                 base_price: 20.0,
+                texture: None,
             },
         );
         defs.goods.insert(
@@ -59,6 +65,7 @@ mod tests {
             Good {
                 id: "wood".into(),
                 base_price: 20.0,
+                texture: None,
             },
         );
         defs.goods.insert(
@@ -66,6 +73,7 @@ mod tests {
             Good {
                 id: "coal".into(),
                 base_price: 30.0,
+                texture: None,
             },
         );
         defs.pop_needs.insert(
@@ -127,6 +135,7 @@ mod tests {
             Good {
                 id: "grain".into(),
                 base_price: 20.0,
+                texture: None,
             },
         );
         defs.goods.insert(
@@ -134,6 +143,7 @@ mod tests {
             Good {
                 id: "wood".into(),
                 base_price: 20.0,
+                texture: None,
             },
         );
         defs.pop_needs.insert(
@@ -198,12 +208,14 @@ mod tests {
     fn two_pops() -> Vec<WorldPop> {
         vec![
             WorldPop {
+                state: None,
                 size: POP_SCALE,
                 wealth: 1,
                 wages: 0.0,
                 culture: None,
             },
             WorldPop {
+                state: None,
                 size: POP_SCALE,
                 wealth: 1,
                 wages: 0.0,
@@ -222,8 +234,11 @@ mod tests {
             .collect();
         let sell = consumption(&pops, &prices, defs, &BTreeMap::new());
         World {
+            states: Vec::new(),
             pops,
             buildings: vec![WorldBuilding {
+                id: 1,
+                state: None,
                 building: "logging_camp".into(),
                 level: 0.0,
                 staffing: 1.0,
@@ -300,6 +315,62 @@ mod tests {
     }
 
     #[test]
+    fn state_and_building_detail_uses_pm_io_and_shared_prices() {
+        let mut defs = heating_defs();
+        defs.labels.insert("wood".into(), "Wood".into());
+        defs.production_methods.insert(
+            "pm_goofy_factory".into(),
+            ProductionMethod {
+                id: "pm_goofy_factory".into(),
+                inputs: BTreeMap::from([("coal".into(), 2.0)]),
+                outputs: BTreeMap::from([("wood".into(), 3.0)]),
+            },
+        );
+        let world = World {
+            states: vec![WorldState {
+                id: 7,
+                region: Some("STATE_TESTOPIA".into()),
+                country: Some(1),
+                market: Some(2),
+            }],
+            buildings: vec![WorldBuilding {
+                id: 9,
+                state: Some(7),
+                building: "building_goofy_factory".into(),
+                level: 2.0,
+                staffing: 0.5,
+                production_method: "pm_goofy_factory".into(),
+            }],
+            ..World::default()
+        };
+        let result = solve(&world, &defs, SolveOpts::default());
+        assert_eq!(result.scope, "whole_save_synthetic");
+        assert_eq!(
+            result.states[0].region_id.as_deref(),
+            Some("STATE_TESTOPIA")
+        );
+        assert_eq!(
+            result
+                .goods
+                .iter()
+                .find(|good| good.id == "wood")
+                .unwrap()
+                .name
+                .as_deref(),
+            Some("Wood")
+        );
+        let building = &result.buildings[0];
+        assert_eq!(building.state_id, Some(7));
+        assert_eq!(building.inputs[0].quantity, 2.0);
+        assert_eq!(building.outputs[0].quantity, 3.0);
+        assert_eq!(building.profit, building.revenue - building.cost);
+        assert!(result
+            .state_goods
+            .iter()
+            .any(|row| row.state_id == 7 && row.good_id == "wood" && row.sell == 3.0));
+    }
+
+    #[test]
     fn what_if_extra_levels_changes_price_employment_frozen() {
         let defs = two_good_defs();
         let world = balanced_world(&defs);
@@ -349,14 +420,17 @@ mod tests {
         ) {
             let defs = heating_defs();
             let world = World {
+                states: Vec::new(),
                 pops: vec![
                     WorldPop {
+                        state: None,
                         size: size_a,
                         wealth: 1,
                         wages: 0.0,
                         culture: None,
                     },
                     WorldPop {
+                        state: None,
                         size: size_b,
                         wealth: 1,
                         wages: 0.0,

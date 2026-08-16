@@ -54,12 +54,30 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     expect(summary.goods).toBe(1)
   })
 
+  it('classifies source paths with the Rust-owned allowlist', () => {
+    expect(api.classify_defs_path('game/common/goods/00_goods.txt', false)).toBe('read')
+    expect(api.classify_defs_path('game/gfx', true)).toBe('prune')
+  })
+
   it('prices returns residual and limitations', async () => {
     const result = JSON.parse(await api.prices(save, undefined, defs, '{}'))
     expect(typeof result.residual).toBe('number')
     expect(Number.isFinite(result.residual)).toBe(true)
     expect(result.limitations.length).toBeGreaterThan(0)
     expect(result.goods.length).toBeGreaterThan(0)
+    expect(result.scope).toBe('whole_save_synthetic')
+    expect(result.states).toEqual(
+      expect.arrayContaining([expect.objectContaining({ region_id: 'STATE_BRANDENBURG' })]),
+    )
+    expect(result.buildings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state_id: 1,
+          production_method_id: 'pm_simple_forestry',
+        }),
+      ]),
+    )
+    expect(result.goods.find((good: { id: string }) => good.id === 'wood')?.name).toBe('Wood')
   })
 
   it('what_if returns residual and limitations', async () => {

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { clearAnalyses, listAnalyses, saveAnalysis } from './archive'
-import { clearStoredDefs } from './defsStore'
+import { clearStoredDefs, storeDefs } from './defsStore'
 import type { AnalysisRecord } from './types'
 import type { WasmApi } from './wasm'
 
@@ -59,10 +59,13 @@ const schema = JSON.stringify({
 
 function mockApi(): WasmApi {
   return {
+    classify_defs_path: vi.fn(() => 'read' as const),
     build_defs_blob: vi.fn(() => new Uint8Array([7, 8, 9])),
     defs_summary: vi.fn(() =>
       JSON.stringify({
+        blob_version: 2,
         goods: 3,
+        labels: 3,
         production_methods: 5,
         pop_needs: 2,
         buy_packages: 1,
@@ -129,7 +132,7 @@ describe('prices UI', () => {
 
     await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
 
-    expect(await screen.findByText('iron')).toBeInTheDocument()
+    expect(await screen.findByText('Iron')).toBeInTheDocument()
     expect(screen.getByText('43.50')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Method and limitations' })).toBeInTheDocument()
     await waitFor(async () => expect(await listAnalyses()).toHaveLength(1))
@@ -142,7 +145,7 @@ describe('prices UI', () => {
     await selectSave(user)
 
     expect(
-      await screen.findByText(/3 goods, 5 production methods/),
+      await screen.findByText(/3 goods, 3 names, 5 production methods/),
     ).toBeInTheDocument()
     expect(
       screen.getByText(/The local development demo blob defines only a few fixture goods/),
@@ -154,7 +157,9 @@ describe('prices UI', () => {
     const api = mockApi()
     api.defs_summary = vi.fn(() =>
       JSON.stringify({
+        blob_version: 2,
         goods: 53,
+        labels: 53,
         production_methods: 412,
         pop_needs: 7,
         buy_packages: 5,
@@ -164,7 +169,7 @@ describe('prices UI', () => {
     render(<App wasmApi={api} />)
     await selectSave(user)
 
-    expect(await screen.findByText(/53 goods, 412 production methods/)).toBeInTheDocument()
+    expect(await screen.findByText(/53 goods, 53 names, 412 production methods/)).toBeInTheDocument()
     expect(
       screen.queryByText(/The local development demo blob defines only a few fixture goods/),
     ).not.toBeInTheDocument()
@@ -175,11 +180,11 @@ describe('prices UI', () => {
     render(<App wasmApi={mockApi()} />)
     await selectSave(user)
     await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
-    expect(await screen.findByText('iron')).toBeInTheDocument()
+    expect(await screen.findByText('Iron')).toBeInTheDocument()
 
     await user.upload(screen.getByLabelText('Choose definitions blob'), STALE_POTATO_DEFS)
 
-    await waitFor(() => expect(screen.queryByText('iron')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText('Iron')).not.toBeInTheDocument())
   })
 
   it('flags a user blob that is missing common/goods', async () => {
@@ -361,6 +366,34 @@ describe('prices UI', () => {
     cleanup()
     render(<App wasmApi={mockApi()} />)
     expect(await screen.findByText(/Using the local development demo blob/)).toBeInTheDocument()
+  })
+
+  it('clears a stored blob when Rust rejects its format version', async () => {
+    await storeDefs(new File(['OLD-V1-DEFS'], 'ancient-v1.postcard'))
+    const api = mockApi()
+    api.defs_summary = vi.fn((defs) => {
+      if (new TextDecoder().decode(defs) === 'OLD-V1-DEFS') {
+        throw new Error('defs blob version 1 is not supported (expected 2)')
+      }
+      return JSON.stringify({
+        blob_version: 2,
+        goods: 3,
+        labels: 3,
+        production_methods: 5,
+        pop_needs: 2,
+        buy_packages: 1,
+        price_range: 0.75,
+      })
+    })
+
+    render(<App wasmApi={api} />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /version 1 is not supported.*Rebuild definitions/,
+    )
+    await waitFor(() =>
+      expect(screen.queryByText(/ancient-v1\.postcard/)).not.toBeInTheDocument(),
+    )
   })
 
   it('uses the remembered Chromium picker when available', async () => {

@@ -11,6 +11,7 @@ pub const POP_SCALE: f64 = 10_000.0;
 /// Market snapshot owned by this crate. Can be filled from `vic3-load` IR later.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct World {
+    pub states: Vec<WorldState>,
     pub pops: Vec<WorldPop>,
     pub buildings: Vec<WorldBuilding>,
     /// Government / trade / construction buy orders, held fixed during the solve.
@@ -19,9 +20,18 @@ pub struct World {
     pub frozen_sell: BTreeMap<String, f64>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldState {
+    pub id: u32,
+    pub region: Option<String>,
+    pub country: Option<u32>,
+    pub market: Option<u32>,
+}
+
 /// A pop whose consumption sits in the price loop.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorldPop {
+    pub state: Option<u32>,
     pub size: f64,
     /// Saved wealth 1–99. Used as the Laspeyres reference basket.
     pub wealth: u8,
@@ -34,6 +44,8 @@ pub struct WorldPop {
 /// (employment = [`Self::staffing`] does not change in [`crate::what_if`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorldBuilding {
+    pub id: u32,
+    pub state: Option<u32>,
     pub building: String,
     pub level: f64,
     /// Employment / throughput fraction. Frozen except that what-if does not touch it.
@@ -76,6 +88,16 @@ impl World {
     /// Pops missing `size`/`wealth`, buildings with an empty type id, and trade
     /// routes missing goods, volume, or export direction are skipped.
     pub fn from_save(save: &Save) -> Self {
+        let states = save
+            .states
+            .iter_present()
+            .map(|(id, state)| WorldState {
+                id,
+                region: state.region.clone(),
+                country: state.country,
+                market: state.market,
+            })
+            .collect();
         let pops = save
             .pops
             .iter_present()
@@ -84,7 +106,7 @@ impl World {
         let buildings = save
             .building_manager
             .iter_present()
-            .filter_map(|(_, building)| WorldBuilding::from_ir(building))
+            .filter_map(|(id, building)| WorldBuilding::from_ir(id, building))
             .collect();
         let mut frozen_buy = BTreeMap::new();
         let mut frozen_sell = BTreeMap::new();
@@ -92,6 +114,7 @@ impl World {
             apply_trade_route(route, &mut frozen_buy, &mut frozen_sell);
         }
         Self {
+            states,
             pops,
             buildings,
             frozen_buy,
@@ -120,6 +143,7 @@ impl WorldPop {
         let wealth = pop.wealth?;
         let wealth = u8::try_from(wealth.clamp(1, 99)).ok()?;
         Some(Self {
+            state: pop.state,
             size,
             wealth,
             wages: pop.wages.filter(|w| *w > 0.0).unwrap_or(0.0),
@@ -129,11 +153,13 @@ impl WorldPop {
 }
 
 impl WorldBuilding {
-    fn from_ir(building: &Building) -> Option<Self> {
+    fn from_ir(id: u32, building: &Building) -> Option<Self> {
         if building.building.is_empty() {
             return None;
         }
         Some(Self {
+            id,
+            state: building.state,
             building: building.building.clone(),
             level: f64::from(building.level.max(0)),
             staffing: building.staffing.max(0.0),

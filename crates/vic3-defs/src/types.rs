@@ -13,6 +13,9 @@ pub struct GameDefs {
     /// `NEconomy.PRICE_RANGE` (typically `0.75`).
     pub price_range: f64,
     pub goods: BTreeMap<String, Good>,
+    /// Localized display labels keyed by script id. Empty when localization
+    /// was not included in the selected game files.
+    pub labels: BTreeMap<String, String>,
     pub production_methods: BTreeMap<String, ProductionMethod>,
     pub pop_needs: BTreeMap<String, PopNeed>,
     /// Wealth level (1–99) → buy package.
@@ -26,6 +29,7 @@ impl Default for GameDefs {
         Self {
             price_range: DEFAULT_PRICE_RANGE,
             goods: BTreeMap::new(),
+            labels: BTreeMap::new(),
             production_methods: BTreeMap::new(),
             pop_needs: BTreeMap::new(),
             buy_packages: BTreeMap::new(),
@@ -46,6 +50,8 @@ impl GameDefs {
 pub struct Good {
     pub id: String,
     pub base_price: f64,
+    /// Game-relative DDS path. The blob does not embed image bytes.
+    pub texture: Option<String>,
 }
 
 /// A production method with goods inputs/outputs scraped from building modifiers.
