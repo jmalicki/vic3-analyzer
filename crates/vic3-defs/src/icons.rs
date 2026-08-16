@@ -33,17 +33,26 @@ enum Format {
     },
 }
 
+/// Top mip of a DDS image as RGBA rows.
+pub(crate) struct Decoded {
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<u8>,
+}
+
 /// Decode the top mip of a DDS image into PNG bytes.
 pub(crate) fn dds_to_png(bytes: &[u8]) -> Option<Vec<u8>> {
-    dds_to_png_with_limit(bytes, MAX_DIMENSION)
+    let image = dds_to_rgba_with_limit(bytes, MAX_DIMENSION)?;
+    encode_png(image.width, image.height, &image.data)
 }
 
-/// CoA source art is 768×512, unlike the much smaller goods icons.
-pub(crate) fn coa_dds_to_png(bytes: &[u8]) -> Option<Vec<u8>> {
-    dds_to_png_with_limit(bytes, MAX_COA_DIMENSION)
+/// CoA source art is 768×512, unlike the much smaller goods icons. Flags are
+/// composited from raw pixels, so this skips the PNG round trip.
+pub(crate) fn coa_dds_to_rgba(bytes: &[u8]) -> Option<Decoded> {
+    dds_to_rgba_with_limit(bytes, MAX_COA_DIMENSION)
 }
 
-fn dds_to_png_with_limit(bytes: &[u8], max_dimension: u32) -> Option<Vec<u8>> {
+fn dds_to_rgba_with_limit(bytes: &[u8], max_dimension: u32) -> Option<Decoded> {
     if bytes.get(..4)? != MAGIC || read_u32(bytes, 4)? as usize != HEADER_LEN {
         return None;
     }
@@ -79,7 +88,11 @@ fn dds_to_png_with_limit(bytes: &[u8], max_dimension: u32) -> Option<Vec<u8>> {
             alpha,
         } => decode_uncompressed(data, width, height, red, green, blue, alpha)?,
     };
-    encode_png(width, height, &rgba)
+    Some(Decoded {
+        width,
+        height,
+        data: rgba,
+    })
 }
 
 fn four_cc_format(four_cc: &[u8]) -> Option<Format> {
@@ -293,7 +306,8 @@ mod tests {
         let data = vec![0u8; (768 / 4) * (512 / 4) * 8];
         let image = dds(768, 512, four_cc(b"DXT1"), &data);
         assert!(dds_to_png(&image).is_none());
-        let png = coa_dds_to_png(&image).expect("real CoA dimensions are allowed");
-        assert_eq!(png_dimensions(&png), (768, 512));
+        let decoded = coa_dds_to_rgba(&image).expect("real CoA dimensions are allowed");
+        assert_eq!((decoded.width, decoded.height), (768, 512));
+        assert_eq!(decoded.data.len(), 768 * 512 * 4);
     }
 }

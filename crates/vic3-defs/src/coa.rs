@@ -688,8 +688,12 @@ fn scale_to_flag(image: &RgbaImage) -> RgbaImage {
 
 fn decode_texture(bytes: &[u8]) -> Option<RgbaImage> {
     if bytes.starts_with(b"DDS ") {
-        let png = icons::coa_dds_to_png(bytes)?;
-        return decode_png(&png);
+        let decoded = icons::coa_dds_to_rgba(bytes)?;
+        return Some(RgbaImage {
+            w: decoded.width,
+            h: decoded.height,
+            data: decoded.data,
+        });
     }
     if bytes.starts_with(b"\x89PNG") {
         return decode_png(bytes);
@@ -806,19 +810,25 @@ fn blit_emblem(
     if dw == 0 || dh == 0 {
         return;
     }
-    let center_x = (FLAG_W as f64 * instance.position[0]).round() as i32;
-    let center_y = (FLAG_H as f64 * instance.position[1]).round() as i32;
-    let ox = center_x - dw as i32 / 2;
-    let oy = center_y - dh as i32 / 2;
-    for y in 0..dh {
-        for x in 0..dw {
-            let dx = ox + x as i32;
-            let dy = oy + y as i32;
-            if dx < 0 || dy < 0 || dx >= FLAG_W as i32 || dy >= FLAG_H as i32 {
-                continue;
-            }
-            let sx = x * img.w / dw;
-            let sy = y * img.h / dh;
+    let center_x = (FLAG_W as f64 * instance.position[0]).round() as i64;
+    let center_y = (FLAG_H as f64 * instance.position[1]).round() as i64;
+    let ox = center_x - dw as i64 / 2;
+    let oy = center_y - dh as i64 / 2;
+    // Vanilla emblems reach scales of 100 and positions far off the flag, so walk
+    // only the part that lands on the canvas rather than clipping per pixel.
+    let x_start = ox.max(0);
+    let x_end = (ox + dw as i64).min(FLAG_W as i64);
+    let y_start = oy.max(0);
+    let y_end = (oy + dh as i64).min(FLAG_H as i64);
+    if x_start >= x_end || y_start >= y_end {
+        return;
+    }
+    for dy in y_start..y_end {
+        let y = (dy - oy) as u64;
+        for dx in x_start..x_end {
+            let x = (dx - ox) as u64;
+            let sx = (x * img.w as u64 / dw as u64) as u32;
+            let sy = (y * img.h as u64 / dh as u64) as u32;
             let si = ((sy * img.w + sx) * 4) as usize;
             let sr = img.data.get(si).copied().unwrap_or(0);
             let sg = img.data.get(si + 1).copied().unwrap_or(0);
@@ -1144,6 +1154,37 @@ TAG = {
         };
         let png = render_coa(&coa, &colors, &BTreeMap::new()).expect("png");
         assert!(png.starts_with(b"\x89PNG"));
+    }
+
+    #[test]
+    fn oversized_emblem_instances_cost_only_the_visible_pixels() {
+        let img = RgbaImage {
+            w: 4,
+            h: 4,
+            data: vec![255u8; 4 * 4 * 4],
+        };
+        let mut canvas = vec![0u8; (FLAG_W * FLAG_H * 4) as usize];
+        // Vanilla CoAs really do carry scale 100 at position 11; iterating that
+        // whole 6400x4200 rect to fill a 64x42 flag took seconds per emblem.
+        let huge = EmblemInstance {
+            position: [1.0, 11.0],
+            scale: [100.0, 100.0],
+        };
+        let start = std::time::Instant::now();
+        blit_emblem(&mut canvas, &img, None, huge);
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(2),
+            "clipping must bound the blit to the canvas"
+        );
+        assert!(canvas.chunks_exact(4).all(|px| px == [255, 255, 255, 255]));
+
+        let offscreen = EmblemInstance {
+            position: [50.0, 50.0],
+            scale: [1.0, 1.0],
+        };
+        let mut untouched = vec![7u8; (FLAG_W * FLAG_H * 4) as usize];
+        blit_emblem(&mut untouched, &img, None, offscreen);
+        assert!(untouched.iter().all(|byte| *byte == 7));
     }
 
     #[test]
