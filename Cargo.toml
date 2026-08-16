@@ -22,9 +22,11 @@ rust-version = "1.85"
 [workspace.dependencies]
 anyhow = "1"
 basin = "1.5"
+bcdec_rs = "0.2"
 chumsky = "0.13"
 clap = { version = "4", features = ["derive", "env"] }
 jomini = { version = "0.35", features = ["envelope"] }
+png = "0.18"
 postcard = { version = "1.1", default-features = false, features = ["use-std"] }
 proptest = "1"
 schemars = "1"

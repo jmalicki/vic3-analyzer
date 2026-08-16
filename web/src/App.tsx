@@ -109,6 +109,7 @@ function App({ wasmApi }: Props) {
   )
   const [summary, setSummary] = useState<SaveSummary>()
   const [defsSummary, setDefsSummary] = useState<DefsSummary>()
+  const [goodIcons, setGoodIcons] = useState<Record<string, string>>({})
   const [result, setResult] = useState<PricesResult>()
   const [gapsResult, setGapsResult] = useState<GapsResult>()
   const [planResult, setPlanResult] = useState<PlanResult>()
@@ -225,11 +226,16 @@ function App({ wasmApi }: Props) {
     void bytes(effectiveDefs)
       .then(async (defsBytes) => {
         const json = await api.defs_summary(defsBytes!)
-        if (!cancelled) setDefsSummary(JSON.parse(json) as DefsSummary)
+        if (cancelled) return
+        setDefsSummary(JSON.parse(json) as DefsSummary)
+        // Icons are optional: a blob built without the gfx folder still prices.
+        const icons = await Promise.resolve(api.defs_icons(defsBytes!)).catch(() => '{}')
+        if (!cancelled) setGoodIcons(JSON.parse(icons) as Record<string, string>)
       })
       .catch((reason: unknown) => {
         if (cancelled) return
         setDefsSummary(undefined)
+        setGoodIcons({})
         if (defsFile) {
           setDefsFile(undefined)
           setDefsRestored(false)
@@ -461,7 +467,7 @@ function App({ wasmApi }: Props) {
   // The archive only reads stored records, so it stays usable without inputs.
   const gated = missing.length > 0 && activeView !== 'archive'
   const defsCounts = defsSummary
-    ? ` — format v${defsSummary.blob_version}, ${defsSummary.goods} goods, ${defsSummary.labels} names, ${defsSummary.production_methods} production methods`
+    ? ` — format v${defsSummary.blob_version}, ${defsSummary.goods} goods, ${defsSummary.labels} names, ${defsSummary.icons} icons, ${defsSummary.production_methods} production methods`
     : ''
   // A real install has dozens of goods; a handful means the fixture blob or a
   // folder pick that missed common/goods.
@@ -798,7 +804,11 @@ function App({ wasmApi }: Props) {
 
       {(activeView === 'prices' || activeView === 'what-if') && result && (
         <>
-          <PriceExplorer result={result} scenario={activeView === 'what-if'} />
+          <PriceExplorer
+            result={result}
+            icons={goodIcons}
+            scenario={activeView === 'what-if'}
+          />
           <ModelInfo status={result.status} />
         </>
       )}

@@ -56,7 +56,15 @@ describe('wasm wrapper (real wasm-pack build)', () => {
 
   it('classifies source paths with the Rust-owned allowlist', () => {
     expect(api.classify_defs_path('game/common/goods/00_goods.txt', false)).toBe('read')
-    expect(api.classify_defs_path('game/gfx', true)).toBe('prune')
+    expect(api.classify_defs_path('game/gfx/models', true)).toBe('prune')
+    expect(api.classify_defs_path('game/gfx/interface/icons/goods_icons/grain.dds', false)).toBe(
+      'read',
+    )
+  })
+
+  it('decodes the fixture DDS icon into a PNG data URL', async () => {
+    const icons = JSON.parse(await api.defs_icons(defs))
+    expect(icons.grain).toMatch(/^data:image\/png;base64,iVBOR/)
   })
 
   it('prices returns residual and limitations', async () => {
@@ -73,7 +81,7 @@ describe('wasm wrapper (real wasm-pack build)', () => {
       expect.arrayContaining([
         expect.objectContaining({
           state_id: 1,
-          production_method_id: 'pm_simple_forestry',
+          production_method_ids: ['pm_simple_forestry'],
         }),
       ]),
     )

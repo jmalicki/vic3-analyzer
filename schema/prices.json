@@ -27,11 +27,11 @@
           },
           "type": "array"
         },
-        "production_method_id": {
-          "type": [
-            "string",
-            "null"
-          ]
+        "production_method_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "profit": {
           "format": "double",
@@ -68,6 +68,7 @@
         "type_id",
         "level",
         "staffing",
+        "production_method_ids",
         "inputs",
         "outputs",
         "revenue",
@@ -133,6 +134,56 @@
         "price",
         "buy",
         "sell"
+      ],
+      "type": "object"
+    },
+    "MarketInputs": {
+      "description": "What the save and definitions actually contributed to the market.\n\nEvery price equals its base price when nothing places an order, and that\nsolve reports `converged` with a zero residual. These counts tell the two\ncases apart: a genuinely balanced market versus a market with no orders in\nit because the save or the definitions did not supply any.",
+      "properties": {
+        "buildings": {
+          "description": "Buildings whose goods flows entered the solve.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "buildings_without_method": {
+          "description": "Buildings whose production methods are all absent from the definitions,\nso they neither consume nor produce.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "goods_with_orders": {
+          "description": "Goods carrying a non-zero buy or sell order. Zero means every price\nbelow is just its base price.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pops": {
+          "description": "Pops whose consumption entered the solve.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "skipped_buildings": {
+          "description": "Save buildings dropped for a missing type id.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "skipped_pops": {
+          "description": "Save pops dropped for missing `size` or `wealth`.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pops",
+        "skipped_pops",
+        "buildings",
+        "skipped_buildings",
+        "buildings_without_method",
+        "goods_with_orders"
       ],
       "type": "object"
     },
@@ -245,6 +296,10 @@
       },
       "type": "array"
     },
+    "inputs": {
+      "$ref": "#/$defs/MarketInputs",
+      "description": "Where the orders behind these prices came from."
+    },
     "limitations": {
       "items": {
         "type": "string"
@@ -282,6 +337,7 @@
     "states",
     "state_goods",
     "buildings",
+    "inputs",
     "residual",
     "status",
     "limitations"

@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { BuildingEconomics, GoodPrice, PricesResult, StateGood, StateInfo } from './types'
+import type {
+  BuildingEconomics,
+  GoodPrice,
+  MarketInputs,
+  PricesResult,
+  StateGood,
+  StateInfo,
+} from './types'
 
 type Direction = 'asc' | 'desc'
 type SortState<K extends string> = { key: K; direction: Direction }
@@ -29,6 +36,43 @@ function displayId(id: string): string {
 
 function goodName(good: GoodPrice): string {
   return good.name || displayId(good.id)
+}
+
+/** Good id → PNG data URL, absent when the blob was built without game icons. */
+type Icons = Record<string, string>
+
+function GoodIcon({ id, icons }: { id: string; icons: Icons }) {
+  const src = icons[id]
+  if (!src) return null
+  return <img className="good-icon" src={src} alt="" width={24} height={24} />
+}
+
+/**
+ * Vic3 moves a price by a fraction of its base, so the percentage is the
+ * comparable figure across goods; the currency amount is the tooltip.
+ */
+function PriceDelta({ price, base }: { price: number; base: number }) {
+  const delta = price - base
+  const percent = base > 0 ? (delta / base) * 100 : 0
+  const amount = `${delta > 0 ? '+' : delta < 0 ? '−' : ''}${Math.abs(delta).toFixed(2)} vs base price ${base.toFixed(2)}`
+  if (Math.abs(percent) < 0.05) {
+    return (
+      <span className="delta delta-flat" title={amount}>
+        at base price
+      </span>
+    )
+  }
+  const up = delta > 0
+  return (
+    <span className={`delta ${up ? 'delta-up' : 'delta-down'}`} title={amount}>
+      <span aria-hidden="true">{up ? '▲' : '▼'}</span>
+      {`${up ? '+' : '−'}${Math.abs(percent).toFixed(1)}%`}
+    </span>
+  )
+}
+
+function percentFromBase(price: number, base: number): number {
+  return base > 0 ? (price - base) / base : 0
 }
 
 function sortRows<T, K extends string>(
@@ -82,13 +126,13 @@ function useSort<K extends string>(initial: K, direction: Direction = 'asc') {
 
 type GoodSort = 'name' | 'price' | 'delta' | 'buy' | 'sell'
 
-function GoodsTable({ goods }: { goods: GoodPrice[] }) {
+function GoodsTable({ goods, icons }: { goods: GoodPrice[]; icons: Icons }) {
   const [sort, onSort] = useSort<GoodSort>('name')
   const sorted = useMemo(
     () =>
       sortRows(goods, sort, (good, key) => {
         if (key === 'name') return goodName(good)
-        if (key === 'delta') return good.price - good.base
+        if (key === 'delta') return percentFromBase(good.price, good.base)
         return good[key]
       }),
     [goods, sort],
@@ -99,9 +143,9 @@ function GoodsTable({ goods }: { goods: GoodPrice[] }) {
         <thead>
           <tr>
             <th><SortButton label="Good" sortKey="name" sort={sort} onSort={onSort} /></th>
-            <th>Base</th>
+            <th>Base price</th>
             <th><SortButton label="Price" sortKey="price" sort={sort} onSort={onSort} /></th>
-            <th><SortButton label="Δ from base" sortKey="delta" sort={sort} onSort={onSort} /></th>
+            <th><SortButton label="% from base price" sortKey="delta" sort={sort} onSort={onSort} /></th>
             <th><SortButton label="Buy" sortKey="buy" sort={sort} onSort={onSort} /></th>
             <th><SortButton label="Sell" sortKey="sell" sort={sort} onSort={onSort} /></th>
           </tr>
@@ -110,13 +154,18 @@ function GoodsTable({ goods }: { goods: GoodPrice[] }) {
           {sorted.map((good) => (
             <tr key={good.id}>
               <th>
-                <a href={`#/prices/good/${encodeURIComponent(good.id)}`} title={good.id}>
+                <a
+                  className="good-link"
+                  href={`#/prices/good/${encodeURIComponent(good.id)}`}
+                  title={good.id}
+                >
+                  <GoodIcon id={good.id} icons={icons} />
                   {goodName(good)}
                 </a>
               </th>
               <td>{good.base.toFixed(2)}</td>
               <td>{good.price.toFixed(2)}</td>
-              <td>{(good.price - good.base).toFixed(2)}</td>
+              <td><PriceDelta price={good.price} base={good.base} /></td>
               <td>{good.buy.toFixed(2)}</td>
               <td>{good.sell.toFixed(2)}</td>
             </tr>
@@ -136,7 +185,7 @@ function StatesTable({ rows }: { rows: StateRow[] }) {
     () =>
       sortRows(rows, sort, (row, key) => {
         if (key === 'name') return displayId(row.state?.region_id || `State ${row.state_id}`)
-        if (key === 'delta') return row.price - row.base
+        if (key === 'delta') return percentFromBase(row.price, row.base)
         return row[key]
       }),
     [rows, sort],
@@ -148,7 +197,7 @@ function StatesTable({ rows }: { rows: StateRow[] }) {
           <tr>
             <th><SortButton label="State" sortKey="name" sort={sort} onSort={onSort} /></th>
             <th><SortButton label="Market price" sortKey="price" sort={sort} onSort={onSort} /></th>
-            <th><SortButton label="Δ from base" sortKey="delta" sort={sort} onSort={onSort} /></th>
+            <th><SortButton label="% from base price" sortKey="delta" sort={sort} onSort={onSort} /></th>
             <th><SortButton label="State buy" sortKey="buy" sort={sort} onSort={onSort} /></th>
             <th><SortButton label="State sell" sortKey="sell" sort={sort} onSort={onSort} /></th>
           </tr>
@@ -162,7 +211,7 @@ function StatesTable({ rows }: { rows: StateRow[] }) {
                 </a>
               </th>
               <td>{row.price.toFixed(2)}</td>
-              <td>{(row.price - row.base).toFixed(2)}</td>
+              <td><PriceDelta price={row.price} base={row.base} /></td>
               <td>{row.buy.toFixed(2)}</td>
               <td>{row.sell.toFixed(2)}</td>
             </tr>
@@ -230,11 +279,44 @@ function BuildingsTable({ buildings }: { buildings: BuildingEconomics[] }) {
   )
 }
 
+/**
+ * A market with no orders prices every good at its base price and still reports
+ * `converged`, which is indistinguishable from a balanced economy unless we say
+ * so. Name the input that came up empty.
+ */
+function EmptyMarketWarning({ inputs }: { inputs?: MarketInputs }) {
+  if (!inputs || inputs.goods_with_orders > 0) return null
+  const causes: string[] = []
+  if (inputs.pops === 0) {
+    causes.push(
+      inputs.skipped_pops > 0
+        ? `all ${inputs.skipped_pops.toLocaleString()} pops in the save were missing a size or wealth value`
+        : 'the save has no pops',
+    )
+  }
+  if (inputs.buildings === 0) {
+    causes.push('no buildings were read from the save')
+  } else if (inputs.buildings_without_method === inputs.buildings) {
+    causes.push(
+      `none of the ${inputs.buildings.toLocaleString()} buildings use a production method your definitions describe`,
+    )
+  }
+  return (
+    <p className="model-warning" role="status">
+      <strong>No buy or sell orders were reconstructed,</strong> so every good below sits exactly at
+      its base price.
+      {causes.length ? ` This is because ${causes.join(', and ')}.` : ''}
+    </p>
+  )
+}
+
 export function PriceExplorer({
   result,
+  icons = {},
   scenario = false,
 }: {
   result: PricesResult
+  icons?: Icons
   scenario?: boolean
 }) {
   const [view, setView] = useState<View>(() => currentView())
@@ -259,7 +341,10 @@ export function PriceExplorer({
           <a href="#/prices">Goods</a><span>›</span><span>{good ? goodName(good) : displayId(view.id)}</span>
         </nav>
         <div className="result-heading">
-          <h2 id="good-state-heading">{good ? goodName(good) : displayId(view.id)} by state</h2>
+          <h2 id="good-state-heading">
+            <GoodIcon id={view.id} icons={icons} />
+            {good ? goodName(good) : displayId(view.id)} by state
+          </h2>
           <span>{rows.length} states</span>
         </div>
         <p className="model-info">
@@ -300,7 +385,8 @@ export function PriceExplorer({
         <span>{result.goods.length} goods</span>
       </div>
       <p className="model-info">Scope: whole-save synthetic market.</p>
-      <GoodsTable goods={result.goods} />
+      <EmptyMarketWarning inputs={result.inputs} />
+      <GoodsTable goods={result.goods} icons={icons} />
     </section>
   )
 }

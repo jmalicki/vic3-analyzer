@@ -40,6 +40,20 @@ Building PM orders and directed trade-route volumes are reconstructed from the
 IR and held fixed while pops adjust. Government and construction goods orders
 are not yet projected into the solver.
 
+A building runs one active production method per PM group, so its orders are the
+sum over every method the save lists for it (`production_methods`, or the
+singular `production_method` a hand-written fixture may use). Methods absent from
+the definitions contribute nothing.
+
+## Empty markets
+
+Nothing in the model forces an order to exist. When the save contributes no pops
+and no recognized production methods, every good prices at exactly its base and
+the solve reports `converged` with a zero residual — the same output a perfectly
+balanced economy gives. `PricesResult.inputs` counts what actually entered the
+solve so the two are distinguishable; `goods_with_orders == 0` means the prices
+below it carry no information.
+
 The result also carries state metadata, state-attributed orders, and per-building
 model economics. Building revenue/cost/profit are PM quantities ×
 `level × staffing` × solved shared price. They are modeled diagnostics, not

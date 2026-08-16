@@ -24,6 +24,7 @@
 
 mod blob;
 mod error;
+mod icons;
 mod load;
 mod path_rules;
 mod substitution;

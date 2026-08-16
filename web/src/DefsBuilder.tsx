@@ -86,7 +86,7 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
       setBuilt(true)
       onBuilt(file)
       setStatus(
-        `Built ${file.name} format v${summary.blob_version} from ${manifest.length} definition files: ${summary.goods} goods, ${summary.labels} localized names, ${summary.production_methods} production methods. Analysis tools are unlocked.` +
+        `Built ${file.name} format v${summary.blob_version} from ${manifest.length} definition files: ${summary.goods} goods, ${summary.labels} localized names, ${summary.icons} icons, ${summary.production_methods} production methods. Analysis tools are unlocked.` +
           (summary.goods < 10
             ? ' That is far fewer goods than a full install — common/goods was probably missed, so drag the common folder itself and rebuild.'
             : ''),

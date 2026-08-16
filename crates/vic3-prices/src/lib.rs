@@ -234,7 +234,6 @@ mod tests {
             .collect();
         let sell = consumption(&pops, &prices, defs, &BTreeMap::new());
         World {
-            states: Vec::new(),
             pops,
             buildings: vec![WorldBuilding {
                 id: 1,
@@ -242,10 +241,10 @@ mod tests {
                 building: "logging_camp".into(),
                 level: 0.0,
                 staffing: 1.0,
-                production_method: "pm_simple_forestry".into(),
+                production_methods: vec!["pm_simple_forestry".into()],
             }],
-            frozen_buy: BTreeMap::new(),
             frozen_sell: sell,
+            ..World::default()
         }
     }
 
@@ -339,7 +338,7 @@ mod tests {
                 building: "building_goofy_factory".into(),
                 level: 2.0,
                 staffing: 0.5,
-                production_method: "pm_goofy_factory".into(),
+                production_methods: vec!["pm_goofy_factory".into()],
             }],
             ..World::default()
         };
@@ -420,7 +419,6 @@ mod tests {
         ) {
             let defs = heating_defs();
             let world = World {
-                states: Vec::new(),
                 pops: vec![
                     WorldPop {
                         state: None,
@@ -437,12 +435,11 @@ mod tests {
                         culture: None,
                     },
                 ],
-                buildings: Vec::new(),
-                frozen_buy: BTreeMap::new(),
                 frozen_sell: BTreeMap::from([
                     ("wood".into(), wood_sell),
                     ("coal".into(), coal_sell),
                 ]),
+                ..World::default()
             };
             let opts = SolveOpts::default();
             let result = solve(&world, &defs, opts);

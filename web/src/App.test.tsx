@@ -57,11 +57,13 @@ function mockApi(): WasmApi {
   return {
     classify_defs_path: vi.fn(() => 'read' as const),
     build_defs_blob: vi.fn(() => new Uint8Array([7, 8, 9])),
+    defs_icons: vi.fn(() => JSON.stringify({ iron: 'data:image/png;base64,IRONICON' })),
     defs_summary: vi.fn(() =>
       JSON.stringify({
-        blob_version: 2,
+        blob_version: 3,
         goods: 3,
         labels: 3,
+        icons: 1,
         production_methods: 5,
         pop_needs: 2,
         buy_packages: 1,
@@ -145,13 +147,25 @@ describe('prices UI', () => {
     expect(api.prices).toHaveBeenCalled()
   })
 
+  it('shows the game icon for a priced good', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+
+    await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
+    await screen.findByText('Iron')
+
+    const icon = container.querySelector('img.good-icon')
+    expect(icon).toHaveAttribute('src', 'data:image/png;base64,IRONICON')
+  })
+
   it('reports what the active definitions blob contains', async () => {
     const user = userEvent.setup()
     render(<App wasmApi={mockApi()} />)
     await selectSave(user)
 
     expect(
-      await screen.findByText(/3 goods, 3 names, 5 production methods/),
+      await screen.findByText(/3 goods, 3 names, 1 icons, 5 production methods/),
     ).toBeInTheDocument()
     expect(
       screen.getByText(/The local development demo blob defines only a few fixture goods/),
@@ -163,9 +177,10 @@ describe('prices UI', () => {
     const api = mockApi()
     api.defs_summary = vi.fn(() =>
       JSON.stringify({
-        blob_version: 2,
+        blob_version: 3,
         goods: 53,
         labels: 53,
+        icons: 53,
         production_methods: 412,
         pop_needs: 7,
         buy_packages: 5,
@@ -175,7 +190,9 @@ describe('prices UI', () => {
     render(<App wasmApi={api} />)
     await selectSave(user)
 
-    expect(await screen.findByText(/53 goods, 53 names, 412 production methods/)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/53 goods, 53 names, 53 icons, 412 production methods/),
+    ).toBeInTheDocument()
     expect(
       screen.queryByText(/The local development demo blob defines only a few fixture goods/),
     ).not.toBeInTheDocument()
@@ -380,12 +397,13 @@ describe('prices UI', () => {
     const api = mockApi()
     api.defs_summary = vi.fn((defs) => {
       if (new TextDecoder().decode(defs) === 'OLD-V1-DEFS') {
-        throw new Error('defs blob version 1 is not supported (expected 2)')
+        throw new Error('defs blob version 1 is not supported (expected 3)')
       }
       return JSON.stringify({
-        blob_version: 2,
+        blob_version: 3,
         goods: 3,
         labels: 3,
+        icons: 0,
         production_methods: 5,
         pop_needs: 2,
         buy_packages: 1,

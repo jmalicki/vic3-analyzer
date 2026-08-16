@@ -8,8 +8,13 @@ AGPL-3.0 Victoria 3 save loader and planner. Given a `.v3` and a high-level goal
 
 The browser builds and stores definitions locally when you choose or drag your
 installed `Victoria 3/game` folder. It prunes heavy trees and reads only
-allowlisted definitions plus English goods localization. Selecting a local
-folder does not upload it or use network bandwidth.
+allowlisted definitions, English goods localization, and the goods icons under
+`gfx/interface/icons/goods_icons`. Selecting a local folder does not upload it
+or use network bandwidth.
+
+Icons ship as DDS, which browsers cannot draw, so the loader decodes the top mip
+(BC1/BC2/BC3/BC7 or uncompressed 32-bit) and stores PNG bytes in the blob.
+Anything it cannot decode is skipped: goods then render by name alone.
 
 For CLI use, build a blob directly from your installed game:
 
@@ -26,7 +31,8 @@ location (`~/Library`, `Program Files`) through its folder pickers. The
 Clausewitz files are parsed in wasm and never leave the browser, and the built
 blob is kept in IndexedDB so a reload does not lose it.
 
-Goods results are sortable and link to state-attributed orders, then to
+Goods results are sortable, show the game's icon and localized name, and link to
+state-attributed orders, then to
 individual building model revenue, costs, profit, IO, and shortages. Prices are
 currently one shared whole-save synthetic market price; state-local MAPI is not
 yet modeled.

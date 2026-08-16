@@ -40,6 +40,7 @@ fn plaintext_fixture_loads() {
         .expect("rye farm");
     assert_eq!(farm.level, 2);
     assert_eq!(farm.state, Some(1));
+    assert_eq!(farm.active_production_methods(), ["pm_simple_forestry"]);
 
     let pop = save
         .pops
@@ -72,6 +73,31 @@ fn plaintext_fixture_loads() {
     assert_eq!(
         order.building.as_deref(),
         Some("building_construction_sector")
+    );
+}
+
+/// Real saves list the active method of every PM group under the plural key.
+/// Reading only the singular key leaves buildings with no goods flows at all,
+/// which silently flattens every price to its base.
+#[test]
+fn plural_production_methods_are_read() {
+    let text = std::fs::read_to_string(fixture("plaintext.txt"))
+        .unwrap()
+        .replace(
+            "production_method=\"pm_simple_forestry\"",
+            "production_methods={ \"pm_simple_forestry\" \"pm_no_automation\" }",
+        );
+    let save = load_slice(text.as_bytes(), empty_tokens()).expect("plural PM save");
+
+    let farm = save
+        .building_manager
+        .iter_present()
+        .find(|(_, b)| b.building == "building_rye_farm")
+        .map(|(_, b)| b)
+        .expect("rye farm");
+    assert_eq!(
+        farm.active_production_methods(),
+        ["pm_simple_forestry", "pm_no_automation"]
     );
 }
 

@@ -15,7 +15,7 @@ mod error;
 mod schema;
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use vic3_goals::Atom;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save};
 use vic3_plan::PlanOpts;
@@ -68,6 +68,12 @@ pub fn classify_defs_path(path: &str, is_directory: bool) -> String {
 #[wasm_bindgen]
 pub fn defs_summary(defs_blob: &[u8]) -> Result<String, JsError> {
     defs_summary_json(defs_blob).map_err(to_js)
+}
+
+/// Goods icons as PNG data URLs keyed by good id, ready for an `img` tag.
+#[wasm_bindgen]
+pub fn defs_icons(defs_blob: &[u8]) -> Result<String, JsError> {
+    defs_icons_json(defs_blob).map_err(to_js)
 }
 
 /// Solve market prices. `defs_blob` is a postcard blob from [`vic3_defs::encode_blob`].
@@ -327,6 +333,7 @@ struct DefsSummary {
     blob_version: u32,
     goods: usize,
     labels: usize,
+    icons: usize,
     production_methods: usize,
     pop_needs: usize,
     buy_packages: usize,
@@ -340,11 +347,42 @@ pub fn defs_summary_json(defs_blob: &[u8]) -> Result<String, WasmError> {
         blob_version: vic3_defs::BLOB_VERSION,
         goods: defs.goods.len(),
         labels: defs.labels.len(),
+        icons: defs.icons.len(),
         production_methods: defs.production_methods.len(),
         pop_needs: defs.pop_needs.len(),
         buy_packages: defs.buy_packages.len(),
         price_range: defs.price_range,
     })?)
+}
+
+/// Native/test entry for [`defs_icons`].
+pub fn defs_icons_json(defs_blob: &[u8]) -> Result<String, WasmError> {
+    let defs = vic3_defs::decode_blob(defs_blob)?;
+    let urls = defs
+        .icons
+        .iter()
+        .map(|(id, png)| (id, format!("data:image/png;base64,{}", base64(png))))
+        .collect::<BTreeMap<_, _>>();
+    Ok(serde_json::to_string(&urls)?)
+}
+
+/// Standard base64, used only to hand PNG bytes to an `img` element.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let triple = chunk
+            .iter()
+            .chain(std::iter::repeat(&0))
+            .take(3)
+            .fold(0u32, |packed, byte| packed << 8 | u32::from(*byte));
+        let digit = |shift: u32| ALPHABET[(triple >> shift & 63) as usize] as char;
+        out.push(digit(18));
+        out.push(digit(12));
+        out.push(if chunk.len() > 1 { digit(6) } else { '=' });
+        out.push(if chunk.len() > 2 { digit(0) } else { '=' });
+    }
+    out
 }
 
 fn load_save(save_bytes: &[u8], tokens_bytes: Option<&[u8]>) -> Result<Save, WasmError> {
@@ -463,10 +501,19 @@ mod tests {
     fn defs_summary_counts_blob_contents() {
         let json = defs_summary_json(&defs_blob()).expect("defs summary");
         let v: Value = serde_json::from_str(&json).expect("summary json");
-        assert_eq!(v["blob_version"], 2);
+        assert_eq!(v["blob_version"], vic3_defs::BLOB_VERSION);
         assert_eq!(v["goods"], 3);
         assert_eq!(v["labels"], 3);
+        assert_eq!(v["icons"], 1);
         assert!(v["price_range"].as_f64().is_some_and(|range| range > 0.0));
+    }
+
+    #[test]
+    fn defs_icons_are_png_data_urls_keyed_by_good() {
+        let json = defs_icons_json(&defs_blob()).expect("defs icons");
+        let v: Value = serde_json::from_str(&json).expect("icons json");
+        let grain = v["grain"].as_str().expect("grain icon");
+        assert!(grain.starts_with("data:image/png;base64,iVBOR"), "{grain}");
     }
 
     fn schema_properties(schema_json: &str) -> serde_json::Map<String, Value> {
@@ -488,7 +535,11 @@ mod tests {
             classify_defs_path("game/common/goods/00_goods.txt", false),
             "read"
         );
-        assert_eq!(classify_defs_path("game/gfx", true), "prune");
+        assert_eq!(
+            classify_defs_path("game/gfx/interface/icons/goods_icons/grain.dds", false),
+            "read"
+        );
+        assert_eq!(classify_defs_path("game/gfx/models", true), "prune");
     }
 
     #[test]

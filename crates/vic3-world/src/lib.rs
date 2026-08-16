@@ -287,6 +287,7 @@ mod tests {
             states: Vec::new(),
             state_goods: Vec::new(),
             buildings: Vec::new(),
+            inputs: Default::default(),
             residual: 0.0,
             status: SolveStatus::Converged,
             limitations: Vec::new(),

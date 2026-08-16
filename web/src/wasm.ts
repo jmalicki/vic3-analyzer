@@ -7,6 +7,8 @@ export interface WasmApi {
     contents: Uint8Array,
   ): Uint8Array | Promise<Uint8Array>
   defs_summary(defs: Uint8Array): string | Promise<string>
+  /** JSON map of good id to a PNG data URL. */
+  defs_icons(defs: Uint8Array): string | Promise<string>
   parse_save(save: Uint8Array, tokens?: Uint8Array): string | Promise<string>
   prices(
     save: Uint8Array,

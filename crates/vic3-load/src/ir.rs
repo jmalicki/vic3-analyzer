@@ -131,9 +131,27 @@ pub struct Building {
     pub level: i32,
     #[serde(default)]
     pub staffing: f64,
-    /// Active production method when the save records a single id.
+    /// Active production method when a save records a single id.
     #[serde(default)]
     pub production_method: Option<String>,
+    /// Active production methods, one per PM group. This is the shape a real
+    /// save uses; a building runs every listed method at once.
+    #[serde(default)]
+    pub production_methods: Vec<String>,
+}
+
+impl Building {
+    /// Every active production method, whichever field the save used.
+    pub fn active_production_methods(&self) -> Vec<String> {
+        let mut out = self.production_methods.clone();
+        if let Some(single) = self.production_method.clone() {
+            if !out.contains(&single) {
+                out.push(single);
+            }
+        }
+        out.retain(|id| !id.is_empty());
+        out
+    }
 }
 
 /// A pop in `pops.database`.

@@ -112,13 +112,44 @@ pub struct BuildingEconomics {
     pub type_id: String,
     pub level: f64,
     pub staffing: f64,
-    pub production_method_id: Option<String>,
+    pub production_method_ids: Vec<String>,
     pub inputs: Vec<GoodFlow>,
     pub outputs: Vec<GoodFlow>,
     pub revenue: f64,
     pub cost: f64,
     pub profit: f64,
     pub short_inputs: Vec<String>,
+}
+
+/// What the save and definitions actually contributed to the market.
+///
+/// Every price equals its base price when nothing places an order, and that
+/// solve reports `converged` with a zero residual. These counts tell the two
+/// cases apart: a genuinely balanced market versus a market with no orders in
+/// it because the save or the definitions did not supply any.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct MarketInputs {
+    /// Pops whose consumption entered the solve.
+    pub pops: usize,
+    /// Save pops dropped for missing `size` or `wealth`.
+    pub skipped_pops: usize,
+    /// Buildings whose goods flows entered the solve.
+    pub buildings: usize,
+    /// Save buildings dropped for a missing type id.
+    pub skipped_buildings: usize,
+    /// Buildings whose production methods are all absent from the definitions,
+    /// so they neither consume nor produce.
+    pub buildings_without_method: usize,
+    /// Goods carrying a non-zero buy or sell order. Zero means every price
+    /// below is just its base price.
+    pub goods_with_orders: usize,
+}
+
+impl MarketInputs {
+    /// Whether the solve had any order to price at all.
+    pub fn is_empty_market(&self) -> bool {
+        self.goods_with_orders == 0
+    }
 }
 
 /// Price-equilibrium output. `limitations` is always the crate [`crate::LIMITATIONS`].
@@ -130,6 +161,8 @@ pub struct PricesResult {
     pub states: Vec<StateInfo>,
     pub state_goods: Vec<StateGood>,
     pub buildings: Vec<BuildingEconomics>,
+    /// Where the orders behind these prices came from.
+    pub inputs: MarketInputs,
     /// `‖r − r_formula(orders(r))‖₂`. Always present (I5).
     pub residual: f64,
     pub status: SolveStatus,

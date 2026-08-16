@@ -47,9 +47,10 @@ function dirEntry(name: string, children: DefsDropEntry[]): DefsDropEntry {
 
 function defsSummaryJson(goods = 53): string {
   return JSON.stringify({
-    blob_version: 2,
+    blob_version: 3,
     goods,
     labels: goods,
+    icons: goods,
     production_methods: 412,
     pop_needs: 7,
     buy_packages: 5,
@@ -121,8 +122,10 @@ describe('DefsBuilder', () => {
     await user.upload(screen.getByLabelText('Victoria 3 definitions folder'), file)
     await waitFor(() => expect(wasm.build_defs_blob).toHaveBeenCalled())
     expect(onBuilt).toHaveBeenCalledWith(expect.objectContaining({ name: 'defs.postcard' }))
-    expect(await screen.findByText(/Built defs.postcard format v2 from 1 definition files/)).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('53 goods, 53 localized names, 412 production methods')
+    expect(await screen.findByText(/Built defs.postcard format v3 from 1 definition files/)).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '53 goods, 53 localized names, 53 icons, 412 production methods',
+    )
   })
 
   it('warns when the built blob has too few goods to be a real install', async () => {

@@ -505,6 +505,17 @@ fn print_table(result: &PricesResult) -> Result<()> {
         "residual {}  status {}",
         result.residual, result.status
     )?;
+    if result.inputs.is_empty_market() {
+        writeln!(
+            io::stderr(),
+            "warning: no buy or sell orders were reconstructed, so every price above is its base price \
+             (pops used: {}, skipped: {}; buildings used: {}, without a known production method: {})",
+            result.inputs.pops,
+            result.inputs.skipped_pops,
+            result.inputs.buildings,
+            result.inputs.buildings_without_method,
+        )?;
+    }
     Ok(())
 }
 

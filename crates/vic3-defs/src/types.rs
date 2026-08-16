@@ -16,6 +16,9 @@ pub struct GameDefs {
     /// Localized display labels keyed by script id. Empty when localization
     /// was not included in the selected game files.
     pub labels: BTreeMap<String, String>,
+    /// Good id → PNG icon decoded from the install's DDS textures. Empty when
+    /// the icon folder was not part of the selected game files.
+    pub icons: BTreeMap<String, Vec<u8>>,
     pub production_methods: BTreeMap<String, ProductionMethod>,
     pub pop_needs: BTreeMap<String, PopNeed>,
     /// Wealth level (1–99) → buy package.
@@ -30,6 +33,7 @@ impl Default for GameDefs {
             price_range: DEFAULT_PRICE_RANGE,
             goods: BTreeMap::new(),
             labels: BTreeMap::new(),
+            icons: BTreeMap::new(),
             production_methods: BTreeMap::new(),
             pop_needs: BTreeMap::new(),
             buy_packages: BTreeMap::new(),

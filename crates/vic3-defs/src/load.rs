@@ -7,8 +7,8 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use crate::{
-    classify_defs_path, BuyPackage, DefsError, DefsPathClass, GameDefs, Good, NeedEntry, PopNeed,
-    ProductionMethod, DEFAULT_PRICE_RANGE,
+    classify_defs_path, icons, BuyPackage, DefsError, DefsPathClass, GameDefs, Good, NeedEntry,
+    PopNeed, ProductionMethod, DEFAULT_PRICE_RANGE,
 };
 
 /// Load definitions from a Victoria 3 install or a fixture tree.
@@ -37,6 +37,7 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
     };
     defs.goods = load_goods(&data_root)?;
     defs.labels = load_labels(&data_root)?;
+    attach_icons(&mut defs, load_icons(&data_root)?);
     defs.production_methods = load_production_methods(&data_root)?;
     defs.pop_needs = load_pop_needs(&data_root)?;
     defs.buy_packages = load_buy_packages(&data_root)?;
@@ -58,7 +59,9 @@ pub fn load_from_files(
         .filter_map(|(path, bytes)| {
             normalize_defs_path(&path).map(|relative| (relative, PathBuf::from(path), bytes))
         })
-        .filter(|(relative, _, _)| relative.ends_with(".txt") || relative.ends_with(".yml"))
+        .filter(|(relative, _, _)| {
+            relative.ends_with(".txt") || relative.ends_with(".yml") || relative.ends_with(".dds")
+        })
         .collect::<Vec<_>>();
     files.sort_by(|left, right| left.0.cmp(&right.0));
     if !files
@@ -69,6 +72,7 @@ pub fn load_from_files(
     }
 
     let mut defs = GameDefs::default();
+    let mut decoded_icons = BTreeMap::new();
     for (relative, path, bytes) in &files {
         if relative.starts_with("common/defines/") {
             let raw: RawDefinesFile = parse_bytes(path, bytes)?;
@@ -140,14 +144,62 @@ pub fn load_from_files(
             }
         } else if is_goods_localization(relative) {
             parse_localization(bytes, &mut defs.labels);
+        } else if relative.ends_with(".dds") {
+            if let (Some(stem), Some(png)) = (icon_stem(relative), icons::dds_to_png(bytes)) {
+                decoded_icons.insert(stem, png);
+            }
         }
     }
+    attach_icons(&mut defs, decoded_icons);
     Ok(defs)
+}
+
+fn load_icons(data_root: &Path) -> Result<BTreeMap<String, Vec<u8>>, DefsError> {
+    let mut icons = BTreeMap::new();
+    for path in files_with_extension(&data_root.join("gfx/interface/icons/goods_icons"), "dds")? {
+        let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        if let (Some(stem), Some(png)) = (icon_stem(&name), icons::dds_to_png(&bytes)) {
+            icons.insert(stem, png);
+        }
+    }
+    Ok(icons)
+}
+
+/// Key icons by texture file stem, which is how `common/goods` refers to them.
+fn icon_stem(path: &str) -> Option<String> {
+    let name = path.replace('\\', "/").rsplit('/').next()?.to_lowercase();
+    Some(name.strip_suffix(".dds").unwrap_or(&name).to_string())
+}
+
+/// Resolve decoded icons against goods, so the blob is keyed by good id.
+///
+/// Several goods can share one texture, so icons are copied rather than moved.
+fn attach_icons(defs: &mut GameDefs, decoded: BTreeMap<String, Vec<u8>>) {
+    if decoded.is_empty() {
+        return;
+    }
+    let wanted = defs
+        .goods
+        .values()
+        .filter_map(|good| {
+            let stem = good
+                .texture
+                .as_deref()
+                .and_then(icon_stem)
+                .unwrap_or_else(|| good.id.to_lowercase());
+            Some((good.id.clone(), decoded.get(&stem)?.clone()))
+        })
+        .collect::<Vec<_>>();
+    defs.icons.extend(wanted);
 }
 
 fn normalize_defs_path(path: &str) -> Option<String> {
     let path = path.replace('\\', "/");
-    for root in ["common/", "localization/"] {
+    for root in ["common/", "localization/", "gfx/"] {
         if let Some(rest) = path.strip_prefix(root) {
             return Some(format!("{root}{rest}"));
         }

@@ -52,7 +52,7 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
 ```json
 {
   "type": "object",
-  "required": ["scope", "goods", "states", "state_goods", "buildings", "residual", "status", "limitations"],
+  "required": ["scope", "goods", "states", "state_goods", "buildings", "inputs", "residual", "status", "limitations"],
   "properties": {
     "scope": { "const": "whole_save_synthetic" },
     "goods": {
@@ -79,6 +79,32 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
       "type": "array",
       "description": "Per-instance modeled PM inputs/outputs, revenue, cost, profit, and short inputs."
     },
+    "inputs": {
+      "type": "object",
+      "description": "What the save and definitions contributed to the market.",
+      "required": [
+        "pops",
+        "skipped_pops",
+        "buildings",
+        "skipped_buildings",
+        "buildings_without_method",
+        "goods_with_orders"
+      ],
+      "properties": {
+        "pops": { "type": "integer", "description": "Pops whose consumption entered the solve." },
+        "skipped_pops": { "type": "integer", "description": "Save pops dropped for missing size or wealth." },
+        "buildings": { "type": "integer", "description": "Buildings whose goods flows entered the solve." },
+        "skipped_buildings": { "type": "integer", "description": "Save buildings dropped for a missing type id." },
+        "buildings_without_method": {
+          "type": "integer",
+          "description": "Buildings whose production methods are all absent from the definitions."
+        },
+        "goods_with_orders": {
+          "type": "integer",
+          "description": "Goods carrying a non-zero order. Zero means every price is just its base price."
+        }
+      }
+    },
     "residual": { "type": "number" },
     "status": { "enum": ["converged", "max_iters", "failed"] },
     "limitations": { "type": "array", "items": { "type": "string" } }
@@ -88,6 +114,10 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
 
 `status = converged` implies `residual < SolveOpts.residual_eps` (I5).
 `state_goods.price` is not a MAPI-local price.
+
+A market with no orders prices every good at its base price and still converges
+with a zero residual, so `inputs.goods_with_orders == 0` is the only way to tell
+an empty market from a balanced one.
 
 ## AnalysisRecord
 

@@ -27,6 +27,15 @@ fn fixture_goods_have_known_base_prices() {
 }
 
 #[test]
+fn fixture_goods_icons_are_decoded_to_png() {
+    let defs = load_fixture();
+    let grain = defs.icons.get("grain").expect("grain has a DDS icon");
+    assert_eq!(&grain[1..4], b"PNG");
+    // Only goods whose texture resolves get an icon.
+    assert_eq!(defs.icons.len(), 1);
+}
+
+#[test]
 fn fixture_price_range_from_neconomy() {
     let defs = load_fixture();
     assert!((defs.price_range - DEFAULT_PRICE_RANGE).abs() < f64::EPSILON);
@@ -100,10 +109,9 @@ fn in_memory_files_match_filesystem_loader() {
             let path = entry.unwrap().path();
             if path.is_dir() {
                 collect(root, &path, out);
-            } else if path
-                .extension()
-                .is_some_and(|extension| extension == "txt" || extension == "yml")
-            {
+            } else if path.extension().is_some_and(|extension| {
+                extension == "txt" || extension == "yml" || extension == "dds"
+            }) {
                 out.push((
                     path.strip_prefix(root)
                         .unwrap()

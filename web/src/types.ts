@@ -35,7 +35,7 @@ export interface BuildingEconomics {
   type_id: string
   level: number
   staffing: number
-  production_method_id?: string
+  production_method_ids?: string[]
   inputs: GoodFlow[]
   outputs: GoodFlow[]
   revenue: number
@@ -44,12 +44,22 @@ export interface BuildingEconomics {
   short_inputs: string[]
 }
 
+export interface MarketInputs {
+  pops: number
+  skipped_pops: number
+  buildings: number
+  skipped_buildings: number
+  buildings_without_method: number
+  goods_with_orders: number
+}
+
 export interface PricesResult {
   scope?: 'whole_save_synthetic'
   goods: GoodPrice[]
   states?: StateInfo[]
   state_goods?: StateGood[]
   buildings?: BuildingEconomics[]
+  inputs?: MarketInputs
   residual: number
   status: 'converged' | 'max_iters' | 'failed'
   limitations: string[]
@@ -92,6 +102,7 @@ export interface DefsSummary {
   blob_version: number
   goods: number
   labels: number
+  icons: number
   production_methods: number
   pop_needs: number
   buy_packages: number

@@ -11,8 +11,8 @@ use vic3_defs::GameDefs;
 use crate::consumption::consumption;
 use crate::formula::price;
 use crate::result::{
-    BuildingEconomics, GoodFlow, GoodPrice, PricesResult, SolveOpts, SolveStatus, StateGood,
-    StateInfo,
+    BuildingEconomics, GoodFlow, GoodPrice, MarketInputs, PricesResult, SolveOpts, SolveStatus,
+    StateGood, StateInfo,
 };
 use crate::world::{reconstruct_non_pop_orders, World};
 use crate::LIMITATIONS;
@@ -125,12 +125,28 @@ fn finished(
     status: SolveStatus,
 ) -> PricesResult {
     let (states, state_goods, buildings) = detail_rows(world, defs, &goods);
+    let inputs = MarketInputs {
+        pops: world.pops.len(),
+        skipped_pops: world.skipped_pops,
+        buildings: world.buildings.len(),
+        skipped_buildings: world.skipped_buildings,
+        buildings_without_method: world
+            .buildings
+            .iter()
+            .filter(|building| !building.has_known_method(defs))
+            .count(),
+        goods_with_orders: goods
+            .iter()
+            .filter(|good| good.buy > crate::ORDER_EPS || good.sell > crate::ORDER_EPS)
+            .count(),
+    };
     PricesResult {
         scope: "whole_save_synthetic".to_string(),
         goods,
         states,
         state_goods,
         buildings,
+        inputs,
         residual,
         status,
         limitations: LIMITATIONS.iter().map(|s| (*s).to_string()).collect(),
@@ -168,35 +184,18 @@ fn detail_rows(
     let mut buildings = Vec::new();
     for building in &world.buildings {
         let scale = building.level * building.staffing;
-        let method = defs.production_methods.get(&building.production_method);
-        let mut inputs = Vec::new();
-        let mut outputs = Vec::new();
-        if let Some(method) = method {
+        let mut input_qty = BTreeMap::<String, f64>::new();
+        let mut output_qty = BTreeMap::<String, f64>::new();
+        for method in building.methods(defs) {
             for (good_id, per_level) in &method.inputs {
-                let quantity = per_level * scale;
-                let value = prices.get(good_id).copied().unwrap_or(0.0) * quantity;
-                inputs.push(GoodFlow {
-                    good_id: good_id.clone(),
-                    quantity,
-                    value,
-                });
-                if let Some(state_id) = building.state {
-                    *state_buy.entry((state_id, good_id.clone())).or_default() += quantity;
-                }
+                *input_qty.entry(good_id.clone()).or_default() += per_level * scale;
             }
             for (good_id, per_level) in &method.outputs {
-                let quantity = per_level * scale;
-                let value = prices.get(good_id).copied().unwrap_or(0.0) * quantity;
-                outputs.push(GoodFlow {
-                    good_id: good_id.clone(),
-                    quantity,
-                    value,
-                });
-                if let Some(state_id) = building.state {
-                    *state_sell.entry((state_id, good_id.clone())).or_default() += quantity;
-                }
+                *output_qty.entry(good_id.clone()).or_default() += per_level * scale;
             }
         }
+        let inputs = priced_flows(input_qty, &prices, building.state, &mut state_buy);
+        let outputs = priced_flows(output_qty, &prices, building.state, &mut state_sell);
         let cost = inputs.iter().map(|flow| flow.value).sum::<f64>();
         let revenue = outputs.iter().map(|flow| flow.value).sum::<f64>();
         let short_inputs = inputs
@@ -216,8 +215,7 @@ fn detail_rows(
             type_id: building.building.clone(),
             level: building.level,
             staffing: building.staffing,
-            production_method_id: (!building.production_method.is_empty())
-                .then(|| building.production_method.clone()),
+            production_method_ids: building.production_methods.clone(),
             inputs,
             outputs,
             revenue,
@@ -263,12 +261,35 @@ fn detail_rows(
     (states, state_goods, buildings)
 }
 
+/// Value one side of a building's goods flows, also crediting the quantities to
+/// the building's state.
+fn priced_flows(
+    quantities: BTreeMap<String, f64>,
+    prices: &BTreeMap<String, f64>,
+    state: Option<u32>,
+    state_side: &mut BTreeMap<(u32, String), f64>,
+) -> Vec<GoodFlow> {
+    quantities
+        .into_iter()
+        .map(|(good_id, quantity)| {
+            if let Some(state_id) = state {
+                *state_side.entry((state_id, good_id.clone())).or_default() += quantity;
+            }
+            GoodFlow {
+                value: prices.get(&good_id).copied().unwrap_or(0.0) * quantity,
+                good_id,
+                quantity,
+            }
+        })
+        .collect()
+}
+
 fn market_goods(world: &World, defs: &GameDefs) -> Vec<String> {
     let mut ids: BTreeSet<String> = defs.goods.keys().cloned().collect();
     ids.extend(world.frozen_buy.keys().cloned());
     ids.extend(world.frozen_sell.keys().cloned());
     for b in &world.buildings {
-        if let Some(pm) = defs.production_methods.get(&b.production_method) {
+        for pm in b.methods(defs) {
             ids.extend(pm.inputs.keys().cloned());
             ids.extend(pm.outputs.keys().cloned());
         }

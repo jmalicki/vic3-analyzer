@@ -11,8 +11,11 @@ pub const COMMON_DIRS: &[&str] = &[
     "cultures",
 ];
 
+/// The only route into `gfx` we walk: goods icons are small and needed for the
+/// UI, while the rest of that tree is gigabytes of art.
+const ICON_DIR: &[&str] = &["gfx", "interface", "icons", "goods_icons"];
+
 const PRUNED_DIRS: &[&str] = &[
-    "gfx",
     "sound",
     "music",
     "map_data",
@@ -48,6 +51,15 @@ pub fn classify_defs_path(path: &str, is_directory: bool) -> DefsPathClass {
     let name = segments.last().copied().unwrap_or_default();
 
     if !is_directory {
+        if segments.contains(&"gfx") {
+            let inside_icons =
+                icon_route(&segments).is_some_and(|index| segments.len() > index + ICON_DIR.len());
+            return if inside_icons && name.ends_with(".dds") {
+                DefsPathClass::Read
+            } else {
+                DefsPathClass::Skip
+            };
+        }
         let common = segments.iter().position(|segment| *segment == "common");
         let supported_common = common.is_some_and(|index| {
             segments
@@ -71,6 +83,13 @@ pub fn classify_defs_path(path: &str, is_directory: bool) -> DefsPathClass {
         };
     }
 
+    if segments.contains(&"gfx") {
+        return if icon_route(&segments).is_some() {
+            DefsPathClass::Descend
+        } else {
+            DefsPathClass::Prune
+        };
+    }
     if PRUNED_DIRS.contains(&name) {
         return DefsPathClass::Prune;
     }
@@ -100,6 +119,17 @@ pub fn classify_defs_path(path: &str, is_directory: bool) -> DefsPathClass {
     DefsPathClass::Descend
 }
 
+/// Index of the `gfx` segment, but only while the path still leads to the
+/// goods icons. Any other branch of `gfx` returns `None` so it can be pruned.
+fn icon_route(segments: &[&str]) -> Option<usize> {
+    let index = segments.iter().position(|segment| *segment == "gfx")?;
+    segments[index..]
+        .iter()
+        .zip(ICON_DIR)
+        .all(|(segment, expected)| segment == expected)
+        .then_some(index)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,8 +151,34 @@ mod tests {
     }
 
     #[test]
+    fn walks_gfx_only_as_far_as_the_goods_icons() {
+        assert_eq!(classify_defs_path("game/gfx", true), DefsPathClass::Descend);
+        assert_eq!(
+            classify_defs_path("game/gfx/interface/icons/goods_icons", true),
+            DefsPathClass::Descend
+        );
+        assert_eq!(
+            classify_defs_path("game/gfx/interface/icons/goods_icons/grain.dds", false),
+            DefsPathClass::Read
+        );
+        assert_eq!(
+            classify_defs_path("game/gfx/models", true),
+            DefsPathClass::Prune
+        );
+        assert_eq!(
+            classify_defs_path("game/gfx/interface/icons/country_icons", true),
+            DefsPathClass::Prune
+        );
+        // The folder itself is on the route, but it is not a file inside it.
+        assert_eq!(
+            classify_defs_path("game/gfx/interface/icons/goods_icons", false),
+            DefsPathClass::Skip
+        );
+    }
+
+    #[test]
     fn prunes_large_or_unrelated_subtrees() {
-        assert_eq!(classify_defs_path("game/gfx", true), DefsPathClass::Prune);
+        assert_eq!(classify_defs_path("game/sound", true), DefsPathClass::Prune);
         assert_eq!(
             classify_defs_path("game/common/laws", true),
             DefsPathClass::Prune

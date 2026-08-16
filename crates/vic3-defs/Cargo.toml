@@ -10,7 +10,9 @@ description = "Victoria 3 game definitions (goods, needs, PMs)"
 workspace = true
 
 [dependencies]
+bcdec_rs.workspace = true
 jomini.workspace = true
+png.workspace = true
 postcard.workspace = true
 serde.workspace = true
 thiserror.workspace = true
