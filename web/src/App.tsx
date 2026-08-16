@@ -32,7 +32,8 @@ import type {
   PricesResult,
   SaveSummary,
 } from './types'
-import { loadWasm, runGaps, type WasmApi } from './wasm'
+import { runGaps, type WasmApi } from './wasm'
+import { loadWasmApi } from './wasmClient'
 
 /**
  * Demo definitions exist for local development and tests only. The fixture is
@@ -196,7 +197,7 @@ function App({ wasmApi }: Props) {
 
   useEffect(() => {
     void listAnalyses().then(setRecords)
-    void Promise.resolve(wasmApi ?? loadWasm())
+    void Promise.resolve(wasmApi ?? loadWasmApi())
       .then((loaded) => {
         setApi(loaded)
       })
