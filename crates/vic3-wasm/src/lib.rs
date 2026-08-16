@@ -217,7 +217,7 @@ pub fn plan_json(
     let world = World::from_save(&save);
     let prices = solve(&world, &defs, solve_opts);
     let country = country_tag(&save)?;
-    let state = PlanningState::from_save(&save, country, &prices)?;
+    let state = PlanningState::from_save_with_prices(&save, country, &prices)?;
     let goal = vic3_goals::parse(&plan_opts.goal)?;
     let economy = EconomyContext::new(world, defs, solve_opts);
     let result = vic3_plan::plan_with_economy(
@@ -246,7 +246,7 @@ pub fn gaps_json(
     let world = World::from_save(&save);
     let prices = solve(&world, &defs, opts);
     let country = country_tag(&save)?;
-    let state = PlanningState::from_save(&save, country, &prices)?;
+    let state = PlanningState::from_save_with_prices(&save, country, &prices)?;
     let goal = vic3_goals::parse(goal)?;
     let result = GapsResult {
         satisfied: vic3_goals::evaluate(&goal, &state),

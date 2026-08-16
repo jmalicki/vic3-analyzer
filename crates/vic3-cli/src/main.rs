@@ -271,7 +271,7 @@ fn run_gaps(cmd: GapsCli) -> Result<()> {
                 .map(|(_, country)| country.definition.as_str())
         })
         .context("save has no playable country")?;
-    let state = PlanningState::from_save(&save, country_tag, &prices)?;
+    let state = PlanningState::from_save_with_prices(&save, country_tag, &prices)?;
     let goal = vic3_goals::parse(&cmd.goal)?;
     let result = GapsResult {
         satisfied: vic3_goals::evaluate(&goal, &state),
@@ -300,7 +300,7 @@ fn run_plan(cmd: PlanCli) -> Result<()> {
     let solve_opts: SolveOpts = cmd.solve.into();
     let prices = solve(&world, &defs, solve_opts);
     let country = country_tag(&save)?;
-    let state = PlanningState::from_save(&save, country, &prices)?;
+    let state = PlanningState::from_save_with_prices(&save, country, &prices)?;
     let goal = vic3_goals::parse(&cmd.goal)?;
     let economy = EconomyContext::new(world, defs, solve_opts);
     let result = vic3_plan::plan_with_economy(

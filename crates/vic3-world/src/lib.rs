@@ -331,6 +331,41 @@ impl PlanningState {
         })
     }
 
+    /// Project from a full price result, including modeled GDP.
+    ///
+    /// GDP is gross building output value (`revenue`) in states owned by the
+    /// selected country under the same solved prices.
+    pub fn from_save_with_prices(
+        save: &Save,
+        country_tag: &str,
+        prices: &PricesResult,
+    ) -> Result<Self, WorldError> {
+        let (country_id, country) = save
+            .countries()
+            .find(|(_, country)| country.definition == country_tag)
+            .ok_or_else(|| WorldError::UnknownCountry(country_tag.to_string()))?;
+        let mut owned_states: BTreeSet<u32> = save
+            .states
+            .iter_present()
+            .filter_map(|(id, state)| (state.country == Some(country_id)).then_some(id))
+            .collect();
+        if owned_states.is_empty() {
+            owned_states.extend(country.states.iter().copied());
+        }
+        let mut state = Self::from_save(save, country_tag, prices)?;
+        state.gdp = prices
+            .buildings
+            .iter()
+            .filter(|building| {
+                building
+                    .state_id
+                    .is_some_and(|state_id| owned_states.contains(&state_id))
+            })
+            .map(|building| building.revenue.max(0.0))
+            .sum();
+        Ok(state)
+    }
+
     /// I8 fingerprint: identical state ⇒ identical `u64`.
     pub fn fingerprint(&self) -> u64 {
         let mut hasher = std::hash::DefaultHasher::new();
@@ -364,7 +399,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use vic3_load::{Budget, Country, Manager, Meta, Pop, Save, State};
-    use vic3_prices::{GoodPrice, PricesResult, SolveStatus};
+    use vic3_prices::{BuildingEconomics, GoodPrice, PricesResult, SolveStatus};
 
     fn ger_save(treasury: f64) -> Save {
         ger_budget_save(
@@ -571,6 +606,44 @@ mod tests {
 
         let state = PlanningState::from_save(&save, "GER", BTreeMap::new()).unwrap();
         assert_eq!(state.population_weighted_wealth, Some(17.5));
+    }
+
+    #[test]
+    fn from_save_with_prices_models_gdp_from_owned_building_revenue() {
+        let mut save = ger_save(10_000.0);
+        save.states.database.insert(
+            10,
+            Some(State {
+                country: Some(1),
+                ..State::default()
+            }),
+        );
+        save.states.database.insert(
+            20,
+            Some(State {
+                country: Some(2),
+                ..State::default()
+            }),
+        );
+        let mut prices = ammo_prices(40.0);
+        let building = |id, state_id, revenue| BuildingEconomics {
+            id,
+            state_id: Some(state_id),
+            type_id: "building_factory".into(),
+            level: 1.0,
+            staffing: 1.0,
+            production_method_ids: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            revenue,
+            cost: 0.0,
+            profit: revenue,
+            short_inputs: Vec::new(),
+        };
+        prices.buildings = vec![building(1, 10, 125.0), building(2, 20, 900.0)];
+
+        let state = PlanningState::from_save_with_prices(&save, "GER", &prices).unwrap();
+        assert_eq!(state.gdp, 125.0);
     }
 
     #[test]

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use vic3_defs::GameDefs;
 use vic3_goals::{gaps, Atom, Goal, Rel};
-use vic3_prices::{solve, SolveOpts, World, ORDER_EPS};
+use vic3_prices::{solve, PricesResult, SolveOpts, World, ORDER_EPS};
 use vic3_world::PlanningState;
 
 /// Immutable price-solver inputs shared by all nodes in one search.
@@ -68,6 +68,36 @@ impl EconomyContext {
             }
         }
         candidates.into_iter().collect()
+    }
+
+    fn modeled_gdp(&self, state: &PlanningState, prices: &PricesResult) -> f64 {
+        let Some(country_id) = self
+            .base_world
+            .countries
+            .iter()
+            .find(|country| country.tag == state.country)
+            .map(|country| country.id)
+        else {
+            return 0.0;
+        };
+        let owned_states: BTreeSet<u32> = self
+            .base_world
+            .states
+            .iter()
+            .filter_map(|world_state| {
+                (world_state.country == Some(country_id)).then_some(world_state.id)
+            })
+            .collect();
+        prices
+            .buildings
+            .iter()
+            .filter(|building| {
+                building
+                    .state_id
+                    .is_some_and(|state_id| owned_states.contains(&state_id))
+            })
+            .map(|building| building.revenue.max(0.0))
+            .sum()
     }
 }
 
@@ -295,6 +325,7 @@ pub fn apply_action_with_economy(
                 .entry(building.clone())
                 .or_default() += 1;
             let prices = solve(&economy.world_for(&next), &economy.defs, economy.solve_opts);
+            next.gdp = economy.modeled_gdp(&next, &prices);
             next.good_prices = prices
                 .goods
                 .into_iter()

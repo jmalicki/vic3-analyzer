@@ -64,7 +64,11 @@ Property (I-declare-war): compilation always includes those four conjuncts. Extr
 
 ## Compilation: `gdp`
 
-Predicate on the country’s GDP series / current GDP in `PlanningState`, after prices.
+Predicate on modeled current GDP in `PlanningState`: gross solved building
+output value (the sum of non-negative building revenue) in states owned by the
+selected country. It is recomputed after modeled construction, but the
+simulator does not yet choose construction successors specifically for a GDP
+target.
 
 ## Evaluation
 
