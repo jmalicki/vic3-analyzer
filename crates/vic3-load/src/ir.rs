@@ -112,8 +112,12 @@ pub struct Budget {
     pub gold: Option<f64>,
     #[serde(default)]
     pub money: Option<f64>,
+    /// Credit limit when present.
     #[serde(default)]
     pub credit: Option<f64>,
+    /// Outstanding debt principal when present.
+    #[serde(default)]
+    pub principal: Option<f64>,
     #[serde(default)]
     pub weekly_income: Vec<f64>,
 }
@@ -122,6 +126,26 @@ impl Budget {
     /// Best-effort cash on hand (`gold_reserves`, then `gold`, then `money`).
     pub fn treasury(&self) -> Option<f64> {
         self.gold_reserves.or(self.gold).or(self.money)
+    }
+
+    /// Remaining credit before the limit, when both principal and credit exist.
+    pub fn credit_headroom(&self) -> Option<f64> {
+        match (self.principal, self.credit) {
+            (Some(principal), Some(credit)) if principal.is_finite() && credit.is_finite() => {
+                Some(credit - principal)
+            }
+            _ => None,
+        }
+    }
+
+    /// Known remaining credit before exhaustion (`principal < credit`).
+    ///
+    /// Missing principal or credit leaves solvency unknown, so this returns
+    /// `false` rather than guessing from treasury sign.
+    pub fn is_solvent(&self) -> bool {
+        self.credit_headroom()
+            .map(|headroom| headroom > 0.0)
+            .unwrap_or(false)
     }
 }
 
@@ -412,7 +436,7 @@ impl Save {
 
 #[cfg(test)]
 mod tests {
-    use super::Pop;
+    use super::{Budget, Pop};
 
     #[test]
     fn demand_size_uses_total_household_population() {
@@ -433,5 +457,33 @@ mod tests {
         };
 
         assert_eq!(pop.demand_size(), Some(10_000.0));
+    }
+
+    #[test]
+    fn credit_headroom_requires_known_principal_and_limit() {
+        let solvent = Budget {
+            credit: Some(500.0),
+            principal: Some(100.0),
+            ..Budget::default()
+        };
+        assert_eq!(solvent.credit_headroom(), Some(400.0));
+        assert!(solvent.is_solvent());
+
+        let exhausted = Budget {
+            credit: Some(500.0),
+            principal: Some(500.0),
+            gold_reserves: Some(10_000.0),
+            ..Budget::default()
+        };
+        assert_eq!(exhausted.credit_headroom(), Some(0.0));
+        assert!(!exhausted.is_solvent());
+
+        let unknown = Budget {
+            gold_reserves: Some(10_000.0),
+            credit: Some(500.0),
+            ..Budget::default()
+        };
+        assert_eq!(unknown.credit_headroom(), None);
+        assert!(!unknown.is_solvent());
     }
 }

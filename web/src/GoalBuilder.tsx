@@ -7,14 +7,15 @@ interface Props {
   value: string
   onChange: (goal: string) => void
   idPrefix: string
+  initialKind?: GoalKind
 }
 
 function cleanId(value: string): string {
   return value.trim().replaceAll(' ', '_')
 }
 
-export function GoalBuilder({ goods, value, onChange, idPrefix }: Props) {
-  const [kind, setKind] = useState<GoalKind>('research')
+export function GoalBuilder({ goods, value, onChange, idPrefix, initialKind = 'research' }: Props) {
+  const [kind, setKind] = useState<GoalKind>(initialKind)
   const [technology, setTechnology] = useState('nitroglycerin')
   const [gdp, setGdp] = useState(100_000_000)
   const [good, setGood] = useState(goods[0] ?? 'grain')

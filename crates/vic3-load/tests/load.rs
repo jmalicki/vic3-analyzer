@@ -25,6 +25,10 @@ fn plaintext_fixture_loads() {
     assert_eq!(ger.infamy, Some(12.5));
     assert_eq!(ger.budget.treasury(), Some(10000.0));
     assert_eq!(ger.budget.credit, Some(500.0));
+    assert_eq!(ger.budget.principal, Some(0.0));
+    assert_eq!(ger.budget.weekly_income, vec![0.0, 100.0]);
+    assert_eq!(ger.budget.credit_headroom(), Some(500.0));
+    assert!(ger.budget.is_solvent());
     assert_eq!(ger.market, Some(1));
 
     let state = save.states.database.get(&1).and_then(|s| s.as_ref());

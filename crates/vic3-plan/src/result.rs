@@ -5,7 +5,7 @@ use rust_advanced_heaps::pairing::PairingHeap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use vic3_goals::Goal;
-use vic3_sim::{Action, SimConfig};
+use vic3_sim::{Action, EconomyContext, SimConfig};
 use vic3_world::PlanningState;
 
 /// Shared planner options used by CLI and wasm.
@@ -259,6 +259,29 @@ pub fn plan(
     limitations: Vec<String>,
 ) -> Result<PlanResult, PlanError> {
     let root = Vic3Node::new(state, goal, config);
+    plan_from_root(root, max_days, residual, limitations)
+}
+
+/// Run shortest-path search with immutable economy context for building actions.
+pub fn plan_with_economy(
+    state: PlanningState,
+    goal: Goal,
+    config: SimConfig,
+    economy: EconomyContext,
+    max_days: u32,
+    residual: f64,
+    limitations: Vec<String>,
+) -> Result<PlanResult, PlanError> {
+    let root = Vic3Node::new_with_economy(state, goal, config, economy);
+    plan_from_root(root, max_days, residual, limitations)
+}
+
+fn plan_from_root(
+    root: Vic3Node,
+    max_days: u32,
+    residual: f64,
+    limitations: Vec<String>,
+) -> Result<PlanResult, PlanError> {
     let (path, day_cost) =
         shortest_path::<_, PairingHeap<_, _>>(&root).ok_or(PlanError::Unreachable)?;
     if day_cost > max_days {
@@ -273,7 +296,8 @@ pub fn plan(
     for pair in path.windows(2) {
         let from = &pair[0];
         let to = &pair[1];
-        let edge = vic3_sim::successors(from.state(), from.goal(), from.config())
+        let edge = from
+            .sim_successors()
             .into_iter()
             .find(|edge| edge.state.fingerprint() == to.fingerprint())
             .ok_or(PlanError::UnknownTransition)?;

@@ -18,8 +18,8 @@ pub use result::{
 };
 pub use solve::{solve, what_if};
 pub use world::{
-    reconstruct_non_pop_orders, World, WorldBuilding, WorldPop, WorldState, WorldStatePop,
-    POP_SCALE,
+    reconstruct_non_pop_orders, World, WorldBuilding, WorldCountry, WorldPop, WorldState,
+    WorldStatePop, POP_SCALE,
 };
 
 /// Solver caveats copied into CLI JSON and the UI.
@@ -414,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn what_if_extra_levels_changes_price_employment_frozen() {
+    fn what_if_extra_levels_changes_price_with_source_world_unchanged() {
         let defs = two_good_defs();
         let world = balanced_world(&defs);
         let staffing_before: Vec<f64> = world.buildings.iter().map(|b| b.staffing).collect();

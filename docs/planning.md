@@ -38,6 +38,32 @@ Heuristic `h`: admissible estimate of remaining **days**. **I7:** on tiny constr
 
 Event-wait and decision edges are just `successors()`. Goal/defs ride on the node (or an `Arc` it holds).
 
+Production `Vic3Node` uses the compiled goal as a dependency DAG relaxation.
+Research atoms contribute their fixed research duration whenever the technology
+is missing, independent of which tech (if any) is queued; AND takes the maximum
+child bound (actions may overlap), OR takes the minimum, and NOT / atoms without
+a proven timing model contribute zero. Keeping the bound stable across zero-day
+queue edges preserves A* consistency when closed nodes are not reopened.
+Property tests compare this bound with true remaining costs for reachable
+research formulas.
+
+## Non-tech action readiness
+
+Snapshot fiscal (`weekly_balance`, `credit_headroom`, `solvent`) and saved-wealth
+atoms are diagnostic-only until a budget/debt or wage transition model exists.
+Army and declared-interest actions require save IR that is not parsed yet.
+
+The first non-tech action is a building-level decision followed by a fixed-time
+construction event and price re-solve. `vic3-prices` preserves the building's
+staffing ratio and scales absolute saved IO per level, while leaving unrelated
+employment, wages, and trade frozen. `PlanningState` hashes compact per-type
+level deltas and its single queued building; immutable world/defs/solver inputs
+ride outside the A* key. Successors select only producers/consumers relevant to
+an open `good_price` atom; increasing GDP goals consider the three highest
+current output-value building types. Added levels are capped per type, keeping
+the search finite. Construction timing is a model constant, not a claim about
+Paradox's queue.
+
 ## P9a vs P9b
 
 - P9a: toy `SearchNode`s, no Vic3, I7 + known shortest path + I8.

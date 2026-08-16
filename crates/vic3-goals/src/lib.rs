@@ -82,6 +82,10 @@ pub enum Atom {
     Solvent,
     InterestIn { kind: InterestKind, id: String },
     Gdp { rel: Rel, value: f64 },
+    WeeklyBalance { rel: Rel, value: f64 },
+    PopulationWeightedWealth { rel: Rel, value: f64 },
+    DebtPrincipal { rel: Rel, value: f64 },
+    CreditHeadroom { rel: Rel, value: f64 },
 }
 
 impl Atom {
@@ -116,6 +120,22 @@ impl Atom {
             Atom::Solvent => state.solvent,
             Atom::InterestIn { id, .. } => state.has_interest(id),
             Atom::Gdp { rel, value } => rel.holds(state.gdp, *value),
+            Atom::WeeklyBalance { rel, value } => state
+                .weekly_balance
+                .map(|balance| rel.holds(balance, *value))
+                .unwrap_or(false),
+            Atom::PopulationWeightedWealth { rel, value } => state
+                .population_weighted_wealth
+                .map(|wealth| rel.holds(wealth, *value))
+                .unwrap_or(false),
+            Atom::DebtPrincipal { rel, value } => state
+                .debt_principal
+                .map(|principal| rel.holds(principal, *value))
+                .unwrap_or(false),
+            Atom::CreditHeadroom { rel, value } => state
+                .credit_headroom
+                .map(|headroom| rel.holds(headroom, *value))
+                .unwrap_or(false),
         }
     }
 }
@@ -312,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn research_and_gdp_compile() {
+    fn research_and_numeric_metrics_compile() {
         let tech = parse("has_tech(nitroglycerin)").unwrap();
         assert!(matches!(tech, Goal::Atom(Atom::HasTech(t)) if t == "nitroglycerin"));
         let gdp = parse("gdp >= 50e6").unwrap();
@@ -322,6 +342,34 @@ mod tests {
                 rel: Rel::Ge,
                 value,
             }) if value == 50e6
+        ));
+        assert!(matches!(
+            parse("weekly_balance >= 100").unwrap(),
+            Goal::Atom(Atom::WeeklyBalance {
+                rel: Rel::Ge,
+                value: 100.0,
+            })
+        ));
+        assert!(matches!(
+            parse("population_weighted_wealth >= 20").unwrap(),
+            Goal::Atom(Atom::PopulationWeightedWealth {
+                rel: Rel::Ge,
+                value: 20.0,
+            })
+        ));
+        assert!(matches!(
+            parse("credit_headroom > 0").unwrap(),
+            Goal::Atom(Atom::CreditHeadroom {
+                rel: Rel::Gt,
+                value: 0.0,
+            })
+        ));
+        assert!(matches!(
+            parse("debt_principal <= 200").unwrap(),
+            Goal::Atom(Atom::DebtPrincipal {
+                rel: Rel::Le,
+                value: 200.0,
+            })
         ));
     }
 
@@ -335,6 +383,11 @@ mod tests {
             army_power_projection: 150.0,
             interest: vec!["alsace".into()],
             gdp: 60e6,
+            weekly_balance: Some(125.0),
+            population_weighted_wealth: Some(22.0),
+            debt_principal: Some(0.0),
+            credit_limit: Some(500.0),
+            credit_headroom: Some(500.0),
             ..PlanningParts::default()
         })
     }
@@ -348,6 +401,13 @@ mod tests {
         let research = parse("research(tech=nitroglycerin)").unwrap();
         assert!(evaluate(&research, &state));
         assert!(evaluate(&parse("gdp >= 50e6").unwrap(), &state));
+        assert!(evaluate(&parse("weekly_balance >= 100").unwrap(), &state));
+        assert!(evaluate(
+            &parse("population_weighted_wealth >= 20").unwrap(),
+            &state
+        ));
+        assert!(evaluate(&parse("credit_headroom > 0").unwrap(), &state));
+        assert!(evaluate(&parse("debt_principal <= 0").unwrap(), &state));
         assert!(evaluate(
             &parse("good_price(ammunition) <= 40 && solvent").unwrap(),
             &state
@@ -373,6 +433,11 @@ mod tests {
         let tech_gaps = gaps(&research, &state);
         assert_eq!(tech_gaps.len(), 1);
         assert!(tech_gaps[0].is_has_tech("nitroglycerin"));
+        assert!(!evaluate(
+            &parse("population_weighted_wealth >= 0").unwrap(),
+            &state
+        ));
+        assert!(!evaluate(&parse("credit_headroom > 0").unwrap(), &state));
     }
 
     #[test]

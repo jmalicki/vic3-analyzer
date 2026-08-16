@@ -36,6 +36,13 @@ pub struct PlanningParts {
     pub interest: Vec<String>,
     pub queued_tech: Option<String>,
     pub gdp: f64,
+    pub weekly_balance: Option<f64>,
+    pub population_weighted_wealth: Option<f64>,
+    pub debt_principal: Option<f64>,
+    pub credit_limit: Option<f64>,
+    pub credit_headroom: Option<f64>,
+    pub building_level_deltas: BTreeMap<String, u32>,
+    pub queued_building: Option<String>,
 }
 
 impl Default for PlanningParts {
@@ -51,6 +58,13 @@ impl Default for PlanningParts {
             interest: Vec::new(),
             queued_tech: None,
             gdp: 0.0,
+            weekly_balance: None,
+            population_weighted_wealth: None,
+            debt_principal: None,
+            credit_limit: None,
+            credit_headroom: None,
+            building_level_deltas: BTreeMap::new(),
+            queued_building: None,
         }
     }
 }
@@ -68,7 +82,7 @@ pub struct PlanningState {
     pub techs: BTreeSet<String>,
     /// Market prices after the last solve (good id → price).
     pub good_prices: BTreeMap<String, f64>,
-    /// Can pay the army without an immediate default (frozen wages/employment).
+    /// Known remaining credit before exhaustion (`principal < credit`).
     pub solvent: bool,
     pub treasury: f64,
     /// Army power projection. Default `0` when the save does not expose it.
@@ -79,6 +93,20 @@ pub struct PlanningState {
     pub queued_tech: Option<String>,
     /// Current GDP after prices (model series, not Paradox’s binary).
     pub gdp: f64,
+    /// Most recent finite saved net weekly-budget sample.
+    pub weekly_balance: Option<f64>,
+    /// Population-weighted saved pop wealth, exposed as an SoL proxy.
+    pub population_weighted_wealth: Option<f64>,
+    /// Outstanding debt principal when present on the save budget.
+    pub debt_principal: Option<f64>,
+    /// Credit limit when present on the save budget.
+    pub credit_limit: Option<f64>,
+    /// Remaining credit (`credit_limit - debt_principal`) when both are known.
+    pub credit_headroom: Option<f64>,
+    /// Explicit added levels by building type in this simulated branch.
+    pub building_level_deltas: BTreeMap<String, u32>,
+    /// Building type currently in the compact construction queue.
+    pub queued_building: Option<String>,
 }
 
 impl Default for PlanningState {
@@ -99,6 +127,16 @@ impl PartialEq for PlanningState {
             && self.interest == other.interest
             && self.queued_tech == other.queued_tech
             && f64_bits_eq(self.gdp, other.gdp)
+            && f64_option_bits_eq(self.weekly_balance, other.weekly_balance)
+            && f64_option_bits_eq(
+                self.population_weighted_wealth,
+                other.population_weighted_wealth,
+            )
+            && f64_option_bits_eq(self.debt_principal, other.debt_principal)
+            && f64_option_bits_eq(self.credit_limit, other.credit_limit)
+            && f64_option_bits_eq(self.credit_headroom, other.credit_headroom)
+            && self.building_level_deltas == other.building_level_deltas
+            && self.queued_building == other.queued_building
     }
 }
 
@@ -120,11 +158,33 @@ impl Hash for PlanningState {
         self.interest.hash(state);
         self.queued_tech.hash(state);
         self.gdp.to_bits().hash(state);
+        hash_f64_option(self.weekly_balance, state);
+        hash_f64_option(self.population_weighted_wealth, state);
+        hash_f64_option(self.debt_principal, state);
+        hash_f64_option(self.credit_limit, state);
+        hash_f64_option(self.credit_headroom, state);
+        self.building_level_deltas.hash(state);
+        self.queued_building.hash(state);
     }
 }
 
 fn f64_bits_eq(a: f64, b: f64) -> bool {
     a.to_bits() == b.to_bits()
+}
+
+fn f64_option_bits_eq(a: Option<f64>, b: Option<f64>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => f64_bits_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+fn hash_f64_option<H: Hasher>(value: Option<f64>, state: &mut H) {
+    value.is_some().hash(state);
+    if let Some(value) = value {
+        value.to_bits().hash(state);
+    }
 }
 
 fn f64_map_eq(a: &BTreeMap<String, f64>, b: &BTreeMap<String, f64>) -> bool {
@@ -183,35 +243,127 @@ impl PlanningState {
             interest: parts.interest.into_iter().collect(),
             queued_tech: parts.queued_tech,
             gdp: parts.gdp,
+            weekly_balance: parts.weekly_balance,
+            population_weighted_wealth: parts.population_weighted_wealth,
+            debt_principal: parts.debt_principal,
+            credit_limit: parts.credit_limit,
+            credit_headroom: parts.credit_headroom,
+            building_level_deltas: parts.building_level_deltas,
+            queued_building: parts.queued_building,
         }
     }
 
     /// Project the player country and last price solve into a planning node.
     ///
     /// Techs, interest, army power, queued tech, and GDP are not on the current
-    /// save IR: they default to empty / `0` / `None`. Fill them with
-    /// [`Self::from_parts`] in tests.
+    /// save IR: they default to empty / `0` / `None`. Weekly balance is the last
+    /// saved sample; population-weighted wealth is computed from pops in states
+    /// owned by this country. Solvency requires known principal and credit.
+    /// Missing metrics remain `None`.
     pub fn from_save(
         save: &Save,
         country_tag: &str,
         prices: impl IntoPriceMap,
     ) -> Result<Self, WorldError> {
-        let country = save
-            .country_by_tag(country_tag)
+        let (country_id, country) = save
+            .countries()
+            .find(|(_, country)| country.definition == country_tag)
             .ok_or_else(|| WorldError::UnknownCountry(country_tag.to_string()))?;
         let treasury = country.budget.treasury().unwrap_or(0.0);
+        let weekly_balance = country
+            .budget
+            .weekly_income
+            .last()
+            .copied()
+            .filter(|value| value.is_finite());
+        let debt_principal = country.budget.principal.filter(|value| value.is_finite());
+        let credit_limit = country.budget.credit.filter(|value| value.is_finite());
+        let credit_headroom = country.budget.credit_headroom();
+        let mut owned_states: BTreeSet<u32> = save
+            .states
+            .iter_present()
+            .filter_map(|(id, state)| (state.country == Some(country_id)).then_some(id))
+            .collect();
+        if owned_states.is_empty() {
+            owned_states.extend(country.states.iter().copied());
+        }
+        let (weighted_sol, population) = save
+            .pops
+            .iter_present()
+            .filter_map(|(_, pop)| {
+                let state = pop.state?;
+                if !owned_states.contains(&state) {
+                    return None;
+                }
+                let size = pop.demand_size()?;
+                let wealth = f64::from(pop.wealth?);
+                Some((wealth * size, size))
+            })
+            .fold(
+                (0.0, 0.0),
+                |(wealth, population), (next_wealth, next_population)| {
+                    (wealth + next_wealth, population + next_population)
+                },
+            );
+        let population_weighted_wealth = if population > 0.0 {
+            Some(weighted_sol / population)
+        } else {
+            None
+        };
         Ok(Self {
             date: save.meta_data.game_date.unwrap_or_else(default_date),
             country: country.definition.clone(),
             techs: BTreeSet::new(),
             good_prices: prices.into_price_map(),
-            solvent: treasury > 0.0,
+            solvent: country.budget.is_solvent(),
             treasury,
             army_power_projection: 0.0,
             interest: BTreeSet::new(),
             queued_tech: None,
             gdp: 0.0,
+            weekly_balance,
+            population_weighted_wealth,
+            debt_principal,
+            credit_limit,
+            credit_headroom,
+            building_level_deltas: BTreeMap::new(),
+            queued_building: None,
         })
+    }
+
+    /// Project from a full price result, including modeled GDP.
+    ///
+    /// GDP is gross building output value (`revenue`) in states owned by the
+    /// selected country under the same solved prices.
+    pub fn from_save_with_prices(
+        save: &Save,
+        country_tag: &str,
+        prices: &PricesResult,
+    ) -> Result<Self, WorldError> {
+        let (country_id, country) = save
+            .countries()
+            .find(|(_, country)| country.definition == country_tag)
+            .ok_or_else(|| WorldError::UnknownCountry(country_tag.to_string()))?;
+        let mut owned_states: BTreeSet<u32> = save
+            .states
+            .iter_present()
+            .filter_map(|(id, state)| (state.country == Some(country_id)).then_some(id))
+            .collect();
+        if owned_states.is_empty() {
+            owned_states.extend(country.states.iter().copied());
+        }
+        let mut state = Self::from_save(save, country_tag, prices)?;
+        state.gdp = prices
+            .buildings
+            .iter()
+            .filter(|building| {
+                building
+                    .state_id
+                    .is_some_and(|state_id| owned_states.contains(&state_id))
+            })
+            .map(|building| building.revenue.max(0.0))
+            .sum();
+        Ok(state)
     }
 
     /// I8 fingerprint: identical state ⇒ identical `u64`.
@@ -246,18 +398,31 @@ pub fn version() -> &'static str {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
-    use vic3_load::{Budget, Country, Manager, Meta, Save};
-    use vic3_prices::{GoodPrice, PricesResult, SolveStatus};
+    use vic3_load::{Budget, Country, Manager, Meta, Pop, Save, State};
+    use vic3_prices::{BuildingEconomics, GoodPrice, PricesResult, SolveStatus};
 
     fn ger_save(treasury: f64) -> Save {
+        ger_budget_save(
+            treasury,
+            Budget {
+                gold_reserves: Some(treasury),
+                credit: Some(500.0),
+                principal: Some(0.0),
+                weekly_income: vec![50.0, 100.0],
+                ..Budget::default()
+            },
+        )
+    }
+
+    fn ger_budget_save(treasury: f64, budget: Budget) -> Save {
         let mut countries = Manager::<Country>::default();
         countries.database.insert(
             1,
             Some(Country {
                 definition: "GER".into(),
                 budget: Budget {
-                    gold_reserves: Some(treasury),
-                    ..Budget::default()
+                    gold_reserves: budget.gold_reserves.or(Some(treasury)),
+                    ..budget
                 },
                 ..Country::default()
             }),
@@ -335,6 +500,10 @@ mod tests {
         assert_eq!(state.date, Vic3Date::from_ymdh(1850, 6, 1, 0));
         assert_eq!(state.treasury, 10_000.0);
         assert!(state.solvent);
+        assert_eq!(state.weekly_balance, Some(100.0));
+        assert_eq!(state.debt_principal, Some(0.0));
+        assert_eq!(state.credit_limit, Some(500.0));
+        assert_eq!(state.credit_headroom, Some(500.0));
         assert_eq!(state.price("ammunition"), Some(40.0));
         assert_eq!(state.army_power_projection, 0.0);
         assert!(state.techs.is_empty());
@@ -343,14 +512,151 @@ mod tests {
     }
 
     #[test]
+    fn from_save_solvent_uses_credit_headroom_not_treasury_sign() {
+        let indebted = ger_budget_save(
+            -50.0,
+            Budget {
+                gold_reserves: Some(-50.0),
+                credit: Some(1_000.0),
+                principal: Some(200.0),
+                weekly_income: vec![10.0],
+                ..Budget::default()
+            },
+        );
+        let indebted_state = PlanningState::from_save(&indebted, "GER", BTreeMap::new()).unwrap();
+        assert!(indebted_state.solvent);
+        assert_eq!(indebted_state.credit_headroom, Some(800.0));
+
+        let exhausted = ger_budget_save(
+            1_000.0,
+            Budget {
+                gold_reserves: Some(1_000.0),
+                credit: Some(500.0),
+                principal: Some(500.0),
+                ..Budget::default()
+            },
+        );
+        let exhausted_state = PlanningState::from_save(&exhausted, "GER", BTreeMap::new()).unwrap();
+        assert!(!exhausted_state.solvent);
+        assert_eq!(exhausted_state.credit_headroom, Some(0.0));
+
+        let unknown = ger_budget_save(
+            1_000.0,
+            Budget {
+                gold_reserves: Some(1_000.0),
+                ..Budget::default()
+            },
+        );
+        let unknown_state = PlanningState::from_save(&unknown, "GER", BTreeMap::new()).unwrap();
+        assert!(!unknown_state.solvent);
+        assert_eq!(unknown_state.credit_headroom, None);
+    }
+
+    #[test]
+    fn from_save_population_weights_wealth_for_owned_states() {
+        let mut save = ger_save(10_000.0);
+        save.country_manager
+            .database
+            .get_mut(&1)
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .states = vec![20];
+        save.states.database.insert(
+            10,
+            Some(State {
+                country: Some(1),
+                ..State::default()
+            }),
+        );
+        save.states.database.insert(
+            20,
+            Some(State {
+                country: Some(2),
+                ..State::default()
+            }),
+        );
+        save.pops.database.insert(
+            1,
+            Some(Pop {
+                size: Some(1_000.0),
+                wealth: Some(10),
+                state: Some(10),
+                ..Pop::default()
+            }),
+        );
+        save.pops.database.insert(
+            2,
+            Some(Pop {
+                size: Some(3_000.0),
+                wealth: Some(20),
+                state: Some(10),
+                ..Pop::default()
+            }),
+        );
+        save.pops.database.insert(
+            3,
+            Some(Pop {
+                size: Some(10_000.0),
+                wealth: Some(99),
+                state: Some(20),
+                ..Pop::default()
+            }),
+        );
+
+        let state = PlanningState::from_save(&save, "GER", BTreeMap::new()).unwrap();
+        assert_eq!(state.population_weighted_wealth, Some(17.5));
+    }
+
+    #[test]
+    fn from_save_with_prices_models_gdp_from_owned_building_revenue() {
+        let mut save = ger_save(10_000.0);
+        save.states.database.insert(
+            10,
+            Some(State {
+                country: Some(1),
+                ..State::default()
+            }),
+        );
+        save.states.database.insert(
+            20,
+            Some(State {
+                country: Some(2),
+                ..State::default()
+            }),
+        );
+        let mut prices = ammo_prices(40.0);
+        let building = |id, state_id, revenue| BuildingEconomics {
+            id,
+            state_id: Some(state_id),
+            type_id: "building_factory".into(),
+            level: 1.0,
+            staffing: 1.0,
+            production_method_ids: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            revenue,
+            cost: 0.0,
+            profit: revenue,
+            short_inputs: Vec::new(),
+        };
+        prices.buildings = vec![building(1, 10, 125.0), building(2, 20, 900.0)];
+
+        let state = PlanningState::from_save_with_prices(&save, "GER", &prices).unwrap();
+        assert_eq!(state.gdp, 125.0);
+    }
+
+    #[test]
     fn from_save_accepts_price_map() {
         let save = ger_save(-50.0);
         let mut prices = BTreeMap::new();
         prices.insert("grain".into(), 20.0);
         let state = PlanningState::from_save(&save, "GER", prices).unwrap();
-        assert!(!state.solvent);
+        assert!(state.solvent);
         assert_eq!(state.treasury, -50.0);
+        assert_eq!(state.credit_headroom, Some(500.0));
         assert_eq!(state.price("grain"), Some(20.0));
+        assert_eq!(state.population_weighted_wealth, None);
     }
 
     #[test]

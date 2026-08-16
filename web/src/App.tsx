@@ -12,6 +12,7 @@ import { clearStoredDefs, loadStoredDefs, storeDefs } from './defsStore'
 import { FieldHelp } from './FieldHelp'
 import { GoalBuilder } from './GoalBuilder'
 import { Modal } from './Modal'
+import { PLAN_TEMPLATES, planTemplate } from './planTemplates'
 import { PriceExplorer } from './PriceExplorer'
 import { ProgressBar } from './ProgressBar'
 import {
@@ -66,6 +67,41 @@ function ModelInfo({ status }: { status?: PricesResult['status'] }) {
   )
 }
 
+interface PlanTemplatePickerProps {
+  idPrefix: string
+  value: string
+  onChange: (id: string) => void
+}
+
+function PlanTemplatePicker({ idPrefix, value, onChange }: PlanTemplatePickerProps) {
+  const selected = planTemplate(value)
+  return (
+    <div className="plan-template-picker">
+      <label>
+        Default plan
+        <select
+          aria-label={`${idPrefix} default plan`}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          <option value="">Custom goal</option>
+          {PLAN_TEMPLATES.map((template) => (
+            <option key={template.id} value={template.id} disabled={!template.goal}>
+              {template.title}{template.goal ? '' : ' (coming soon)'}
+            </option>
+          ))}
+        </select>
+      </label>
+      {selected && (
+        <p className="template-description">
+          {selected.description}
+          {!selected.goal && ' This preset cannot be run yet.'}
+        </p>
+      )}
+    </div>
+  )
+}
+
 async function bytes(file?: File): Promise<Uint8Array | undefined> {
   return file ? new Uint8Array(await file.arrayBuffer()) : undefined
 }
@@ -81,7 +117,14 @@ function newId(): string {
 
 function actionLabel(action: PlanAction): string {
   if ('QueueTech' in action) return `Queue technology: ${action.QueueTech.tech}`
-  return `Wait ${action.WaitForEvent.days} days for ${action.WaitForEvent.event.TechCompleted.tech}`
+  if ('QueueBuildingLevel' in action) {
+    return `Queue building level: ${action.QueueBuildingLevel.building}`
+  }
+  const { days, event } = action.WaitForEvent
+  if ('TechCompleted' in event) {
+    return `Wait ${days} days for ${event.TechCompleted.tech}`
+  }
+  return `Wait ${days} days for ${event.BuildingCompleted.building}`
 }
 
 function kindLabel(kind: AnalysisKind): string {
@@ -115,6 +158,7 @@ function App({ wasmApi }: Props) {
   const [planResult, setPlanResult] = useState<PlanResult>()
   const [goal, setGoal] = useState('research(tech=nitroglycerin)')
   const [label, setLabel] = useState('')
+  const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [whatIfOpts, setWhatIfOpts] = useState<Record<string, unknown>>({
     building: '',
     extra_levels: 1,
@@ -131,6 +175,15 @@ function App({ wasmApi }: Props) {
   const savePaths = useMemo(() => victoria3SavePaths(), [])
   const rememberedPicker = canUseRememberedSavePicker()
   const effectiveDefs = defsFile ?? demoDefsFile
+  const selectedTemplate = planTemplate(selectedTemplateId)
+
+  const applyPlanTemplate = (id: string) => {
+    setSelectedTemplateId(id)
+    const template = planTemplate(id)
+    if (!template?.goal) return
+    setGoal(template.goal)
+    setLabel(template.label)
+  }
 
   /** Keep the chosen blob across reloads; nothing else survives a refresh. */
   const applyDefsFile = (file?: File) => {
@@ -739,11 +792,18 @@ function App({ wasmApi }: Props) {
           <form className="guided-form" onSubmit={submitPlan}>
             <p className="eyebrow">PLANNING</p>
             <h2 id="timeline-tool-heading">Plan timeline</h2>
+            <PlanTemplatePicker
+              idPrefix="Plan"
+              value={selectedTemplateId}
+              onChange={applyPlanTemplate}
+            />
             <GoalBuilder
+              key={`plan-${selectedTemplateId}`}
               idPrefix="Plan"
               goods={result?.goods.map((good) => good.id) ?? []}
               value={goal}
               onChange={setGoal}
+              initialKind={selectedTemplate?.goalKind}
             />
             <label>
               Plan label (optional)
@@ -769,11 +829,18 @@ function App({ wasmApi }: Props) {
           <form className="guided-form" onSubmit={(event) => void submitGaps(event)}>
             <p className="eyebrow">READINESS</p>
             <h2 id="gaps-form-heading">Goal gaps</h2>
+            <PlanTemplatePicker
+              idPrefix="Gaps"
+              value={selectedTemplateId}
+              onChange={applyPlanTemplate}
+            />
             <GoalBuilder
+              key={`gaps-${selectedTemplateId}`}
               idPrefix="Gaps"
               goods={result?.goods.map((good) => good.id) ?? []}
               value={goal}
               onChange={setGoal}
+              initialKind={selectedTemplate?.goalKind}
             />
             <button disabled={!ready || busy || !goal.trim()} type="submit">
               Check readiness
