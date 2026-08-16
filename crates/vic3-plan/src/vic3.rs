@@ -121,13 +121,13 @@ impl Hash for Vic3Node {
 ///
 /// Atomic timing is currently known only for research. AND uses the longest
 /// child (actions may overlap or satisfy multiple atoms), OR uses the cheapest
-/// child, and NOT stays at zero. This is deliberately a relaxation of the real
-/// state graph, not a replacement for A*.
+/// child, and NOT stays at zero. Missing technologies always contribute the
+/// fixed research duration, even when an unrelated tech is queued: returning
+/// zero there would drop the estimate over a zero-day queue edge and break
+/// consistency for closed-node A*. This is deliberately a relaxation of the
+/// real state graph, not a replacement for A*.
 fn goal_timing_lower_bound(goal: &Goal, state: &PlanningState, config: SimConfig) -> u32 {
-    if evaluate(goal, state) {
-        return 0;
-    }
-
+    let research_days = u32::from(config.research_days.max(1));
     match goal {
         Goal::And(children) => children
             .iter()
@@ -141,12 +141,10 @@ fn goal_timing_lower_bound(goal: &Goal, state: &PlanningState, config: SimConfig
             .unwrap_or(0),
         Goal::Not(_) => 0,
         Goal::Atom(Atom::HasTech(tech)) => {
-            match state.queued_tech.as_deref() {
-                None => u32::from(config.research_days.max(1)),
-                Some(queued) if queued == tech => u32::from(config.research_days.max(1)),
-                // The compact sim cannot finish an unrelated queued tech for
-                // this goal, so retain the always-admissible zero bound.
-                Some(_) => 0,
+            if state.has_tech(tech) {
+                0
+            } else {
+                research_days
             }
         }
         Goal::Atom(_) => 0,
@@ -272,18 +270,47 @@ mod tests {
     }
 
     #[test]
-    fn unrelated_queued_tech_keeps_zero_bound() {
-        let mut state = PlanningState::default();
-        state.queued_tech = Some("unrelated_tech".into());
-        let node = Vic3Node::new(
-            state,
-            compile("research(tech=railways)").unwrap(),
+    fn missing_tech_bound_ignores_queue_identity() {
+        let config = SimConfig {
+            research_days: 40,
+            ..SimConfig::default()
+        };
+        let goal = compile("research(tech=railways)").unwrap();
+
+        let idle = Vic3Node::new(PlanningState::default(), goal.clone(), config);
+        assert_eq!(idle.heuristic(), 40);
+
+        let mut matching = PlanningState::default();
+        matching.queued_tech = Some("railways".into());
+        assert_eq!(
+            Vic3Node::new(matching, goal.clone(), config).heuristic(),
+            40
+        );
+
+        let mut unrelated = PlanningState::default();
+        unrelated.queued_tech = Some("unrelated_tech".into());
+        assert_eq!(Vic3Node::new(unrelated, goal, config).heuristic(), 40);
+    }
+
+    #[test]
+    fn zero_day_queue_edge_preserves_heuristic() {
+        let start = Vic3Node::new(
+            PlanningState::default(),
+            compile("has_tech(railways) || has_tech(nitroglycerin)").unwrap(),
             SimConfig {
                 research_days: 40,
                 ..SimConfig::default()
             },
         );
-        assert_eq!(node.heuristic(), 0);
+        assert_eq!(start.heuristic(), 40);
+        for (successor, days) in start.successors() {
+            assert_eq!(days, 0);
+            assert_eq!(
+                successor.heuristic(),
+                start.heuristic(),
+                "zero-day decisions must not change the research bound"
+            );
+        }
     }
 
     #[test]

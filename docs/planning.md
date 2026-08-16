@@ -39,11 +39,13 @@ Heuristic `h`: admissible estimate of remaining **days**. **I7:** on tiny constr
 Event-wait and decision edges are just `successors()`. Goal/defs ride on the node (or an `Arc` it holds).
 
 Production `Vic3Node` uses the compiled goal as a dependency DAG relaxation.
-Research atoms contribute their fixed remaining duration; AND takes the maximum
+Research atoms contribute their fixed research duration whenever the technology
+is missing, independent of which tech (if any) is queued; AND takes the maximum
 child bound (actions may overlap), OR takes the minimum, and NOT / atoms without
-a proven timing model contribute zero. This keeps A* admissible while avoiding a
-second scheduler. Property tests compare this bound with true remaining costs
-for reachable research formulas.
+a proven timing model contribute zero. Keeping the bound stable across zero-day
+queue edges preserves A* consistency when closed nodes are not reopened.
+Property tests compare this bound with true remaining costs for reachable
+research formulas.
 
 ## Non-tech action readiness
 
