@@ -1,0 +1,8 @@
+building_rye_farm = {
+    building_group = bg_agriculture
+    city_type = farm
+}
+building_government_administration = {
+    building_group = bg_government
+    city_type = city
+}

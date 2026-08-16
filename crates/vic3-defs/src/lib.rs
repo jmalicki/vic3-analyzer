@@ -10,6 +10,8 @@
 //! - `common/goods`
 //! - `common/defines` (`NEconomy.PRICE_RANGE`)
 //! - `common/production_methods`
+//! - `common/buildings`
+//! - `common/building_groups`
 //! - `common/pop_needs`
 //! - `common/buy_packages`
 //! - `common/cultures` (obsessions; may be empty)
@@ -40,7 +42,10 @@ pub use error::DefsError;
 pub use load::{load_from_files, load_from_path};
 pub use path_rules::{classify_defs_path, DefsPathClass, COMMON_DIRS};
 pub use substitution::{clamp_supply_share, substitution_shares, substitution_weight};
-pub use types::{BuyPackage, FlagDefinition, GameDefs, Good, NeedEntry, PopNeed, ProductionMethod};
+pub use types::{
+    BuildingGroup, BuildingType, BuyPackage, FlagDefinition, GameDefs, Good, NeedEntry, PopNeed,
+    ProductionMethod,
+};
 
 /// Vanilla `NEconomy.PRICE_RANGE` when a defines file does not override it.
 pub const DEFAULT_PRICE_RANGE: f64 = 0.75;

@@ -22,8 +22,9 @@ parsed state but repeats the shared whole-save synthetic market price; the UI
 labels that distinction. A future local-price implementation must copy the
 game’s market-access blend from defs rather than inventing one.
 
-Geography filters on by-good / by-state views (`Our market` default, `Domestic`,
-`All`) only hide attributed state/building rows. They do **not** re-solve prices.
+Geography filters (`Our market` default, `Domestic`, `All`) appear only on the
+goods-by-state list and hide attributed state rows. They do **not** re-solve
+prices. A single-state page is never geography-filtered.
 
 Foreign states show the country’s current flag when defs can select and render a
 coat of arms (laws + `flag_definitions`; unsupported triggers are skipped, not
@@ -67,10 +68,14 @@ balanced economy gives. `PricesResult.inputs` counts what actually entered the
 solve so the two are distinguishable; `goods_with_orders == 0` means the prices
 below it carry no information.
 
-The result also carries state metadata, state-attributed orders, and per-building
-model economics. Building revenue/cost/profit use saved current IO when present,
-otherwise PM quantities × staffed levels, valued at the solved shared price.
-They are modeled diagnostics, not cashflow fields read from the save.
+The result also carries state metadata (including arable land and infrastructure),
+state pops, building type/group definitions, state-attributed orders, and
+per-building model economics. The state page groups buildings from those defs,
+shows remaining rural capacity and broadly available default placeholders, and
+does not claim complete construction eligibility. Building revenue/cost/profit
+use saved current IO when present, otherwise PM quantities × staffed levels,
+valued at the solved shared price. They are modeled diagnostics, not cashflow
+fields read from the save.
 
 ## Solver
 

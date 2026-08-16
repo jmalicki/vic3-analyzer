@@ -78,6 +78,80 @@
       ],
       "type": "object"
     },
+    "BuildingGroupInfo": {
+      "properties": {
+        "always_possible": {
+          "type": "boolean"
+        },
+        "category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "default_building": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "land_usage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_group": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "always_possible"
+      ],
+      "type": "object"
+    },
+    "BuildingTypeInfo": {
+      "properties": {
+        "city_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "group_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "CountryInfo": {
       "properties": {
         "flag_coa": {
@@ -291,6 +365,13 @@
     },
     "StateInfo": {
       "properties": {
+        "arable_land": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "country_id": {
           "format": "uint32",
           "minimum": 0,
@@ -303,6 +384,20 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        },
+        "infrastructure": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "infrastructure_usage": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "market_id": {
           "format": "uint32",
@@ -317,10 +412,67 @@
             "string",
             "null"
           ]
+        },
+        "region_name": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "id"
+      ],
+      "type": "object"
+    },
+    "StatePop": {
+      "properties": {
+        "culture_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "culture_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "demand_size": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "profession_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profession_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "wealth": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "state_id"
       ],
       "type": "object"
     }
@@ -328,6 +480,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Price-equilibrium output. `limitations` is always the crate [`crate::LIMITATIONS`].",
   "properties": {
+    "building_groups": {
+      "items": {
+        "$ref": "#/$defs/BuildingGroupInfo"
+      },
+      "type": "array"
+    },
+    "building_types": {
+      "items": {
+        "$ref": "#/$defs/BuildingTypeInfo"
+      },
+      "type": "array"
+    },
     "buildings": {
       "items": {
         "$ref": "#/$defs/BuildingEconomics"
@@ -371,6 +535,12 @@
       },
       "type": "array"
     },
+    "state_pops": {
+      "items": {
+        "$ref": "#/$defs/StatePop"
+      },
+      "type": "array"
+    },
     "states": {
       "items": {
         "$ref": "#/$defs/StateInfo"
@@ -388,6 +558,9 @@
     "states",
     "state_goods",
     "buildings",
+    "building_types",
+    "building_groups",
+    "state_pops",
     "inputs",
     "residual",
     "status",

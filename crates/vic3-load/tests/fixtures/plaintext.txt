@@ -30,6 +30,9 @@ states={
 		1={
 			region="STATE_BRANDENBURG"
 			country=16777216
+			arable_land=45
+			infrastructure=32.5
+			infrastructure_usage=21
 		}
 	}
 }

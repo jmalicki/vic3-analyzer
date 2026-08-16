@@ -11,8 +11,8 @@ use vic3_defs::GameDefs;
 use crate::consumption::consumption;
 use crate::formula::price;
 use crate::result::{
-    BuildingEconomics, CountryInfo, GoodFlow, GoodPrice, MarketInputs, PricesResult, SolveOpts,
-    SolveStatus, StateGood, StateInfo,
+    BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, GoodFlow, GoodPrice,
+    MarketInputs, PricesResult, SolveOpts, SolveStatus, StateGood, StateInfo, StatePop,
 };
 use crate::world::{reconstruct_non_pop_orders, World};
 use crate::LIMITATIONS;
@@ -124,8 +124,31 @@ fn finished(
     residual: f64,
     status: SolveStatus,
 ) -> PricesResult {
-    let (states, state_goods, buildings) = detail_rows(world, defs, &goods);
+    let (states, state_goods, buildings, state_pops) = detail_rows(world, defs, &goods);
     let countries = country_rows(world, defs);
+    let building_types = defs
+        .buildings
+        .values()
+        .map(|building| BuildingTypeInfo {
+            id: building.id.clone(),
+            name: defs.labels.get(&building.id).cloned(),
+            group_id: building.group.clone(),
+            city_type: building.city_type.clone(),
+        })
+        .collect();
+    let building_groups = defs
+        .building_groups
+        .values()
+        .map(|group| BuildingGroupInfo {
+            id: group.id.clone(),
+            name: defs.labels.get(&group.id).cloned(),
+            category: group.category.clone(),
+            land_usage: group.land_usage.clone(),
+            always_possible: group.always_possible,
+            default_building: group.default_building.clone(),
+            parent_group: group.parent_group.clone(),
+        })
+        .collect();
     let inputs = MarketInputs {
         pops: world.pops.len(),
         skipped_pops: world.skipped_pops,
@@ -153,6 +176,9 @@ fn finished(
         states,
         state_goods,
         buildings,
+        building_types,
+        building_groups,
+        state_pops,
         inputs,
         residual,
         status,
@@ -164,7 +190,12 @@ fn detail_rows(
     world: &World,
     defs: &GameDefs,
     goods: &[GoodPrice],
-) -> (Vec<StateInfo>, Vec<StateGood>, Vec<BuildingEconomics>) {
+) -> (
+    Vec<StateInfo>,
+    Vec<StateGood>,
+    Vec<BuildingEconomics>,
+    Vec<StatePop>,
+) {
     let prices = goods
         .iter()
         .map(|good| (good.id.clone(), good.price))
@@ -251,11 +282,69 @@ fn detail_rows(
         .map(|state| StateInfo {
             id: state.id,
             region_id: state.region.clone(),
+            region_name: state
+                .region
+                .as_ref()
+                .and_then(|id| defs.labels.get(id))
+                .cloned(),
             country_id: state.country,
             market_id: state.market,
+            arable_land: state.arable_land,
+            infrastructure: state.infrastructure,
+            infrastructure_usage: state.infrastructure_usage,
         })
         .collect();
-    (states, state_goods, buildings)
+    let state_pops = if world.state_pops.is_empty() {
+        world
+            .pops
+            .iter()
+            .filter_map(|pop| {
+                Some(state_pop_row(
+                    pop.state?,
+                    pop.profession.as_ref(),
+                    Some(pop.size),
+                    Some(i32::from(pop.wealth)),
+                    pop.culture.as_ref(),
+                    defs,
+                ))
+            })
+            .collect()
+    } else {
+        world
+            .state_pops
+            .iter()
+            .filter_map(|pop| {
+                Some(state_pop_row(
+                    pop.state?,
+                    pop.profession.as_ref(),
+                    pop.demand_size,
+                    pop.wealth,
+                    pop.culture.as_ref(),
+                    defs,
+                ))
+            })
+            .collect()
+    };
+    (states, state_goods, buildings, state_pops)
+}
+
+fn state_pop_row(
+    state_id: u32,
+    profession: Option<&String>,
+    demand_size: Option<f64>,
+    wealth: Option<i32>,
+    culture: Option<&String>,
+    defs: &GameDefs,
+) -> StatePop {
+    StatePop {
+        state_id,
+        profession_id: profession.cloned(),
+        profession_name: profession.and_then(|id| defs.labels.get(id)).cloned(),
+        demand_size,
+        wealth,
+        culture_id: culture.cloned(),
+        culture_name: culture.and_then(|id| defs.labels.get(id)).cloned(),
+    }
 }
 
 fn country_rows(world: &World, defs: &GameDefs) -> Vec<CountryInfo> {

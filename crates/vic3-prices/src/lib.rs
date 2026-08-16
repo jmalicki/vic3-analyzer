@@ -13,12 +13,13 @@ mod world;
 pub use consumption::consumption;
 pub use formula::{market_ratio, price, ORDER_EPS};
 pub use result::{
-    BuildingEconomics, CountryInfo, GoodFlow, GoodPrice, MarketInputs, PricesResult, SolveOpts,
-    SolveStatus, StateGood, StateInfo, WhatIfOpts,
+    BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, GoodFlow, GoodPrice,
+    MarketInputs, PricesResult, SolveOpts, SolveStatus, StateGood, StateInfo, StatePop, WhatIfOpts,
 };
 pub use solve::{solve, what_if};
 pub use world::{
-    reconstruct_non_pop_orders, World, WorldBuilding, WorldPop, WorldState, POP_SCALE,
+    reconstruct_non_pop_orders, World, WorldBuilding, WorldPop, WorldState, WorldStatePop,
+    POP_SCALE,
 };
 
 /// Solver caveats copied into CLI JSON and the UI.
@@ -213,6 +214,7 @@ mod tests {
                 wealth: 1,
                 wages: 0.0,
                 culture: None,
+                profession: None,
             },
             WorldPop {
                 state: None,
@@ -220,6 +222,7 @@ mod tests {
                 wealth: 1,
                 wages: 0.0,
                 culture: None,
+                profession: None,
             },
         ]
     }
@@ -367,6 +370,9 @@ mod tests {
                 region: Some("STATE_TESTOPIA".into()),
                 country: Some(1),
                 market: Some(2),
+                arable_land: None,
+                infrastructure: None,
+                infrastructure_usage: None,
             }],
             buildings: vec![WorldBuilding {
                 id: 9,
@@ -464,6 +470,7 @@ mod tests {
                         wealth: 1,
                         wages: 0.0,
                         culture: None,
+                        profession: None,
                     },
                     WorldPop {
                         state: None,
@@ -471,6 +478,7 @@ mod tests {
                         wealth: 1,
                         wages: 0.0,
                         culture: None,
+                        profession: None,
                     },
                 ],
                 frozen_sell: BTreeMap::from([

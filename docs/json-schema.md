@@ -52,7 +52,7 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
 ```json
 {
   "type": "object",
-  "required": ["scope", "goods", "countries", "states", "state_goods", "buildings", "inputs", "residual", "status", "limitations"],
+  "required": ["scope", "goods", "countries", "states", "state_goods", "buildings", "building_types", "building_groups", "state_pops", "inputs", "residual", "status", "limitations"],
   "properties": {
     "scope": { "const": "whole_save_synthetic" },
     "goods": {
@@ -85,7 +85,7 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
         }
       }
     },
-    "states": { "type": "array", "description": "Parsed save state id/region/country/market links." },
+    "states": { "type": "array", "description": "Parsed save state identity, owner/market links, arable land, and infrastructure." },
     "state_goods": {
       "type": "array",
       "description": "State-attributed buy/sell orders with the shared synthetic market price."
@@ -93,6 +93,18 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
     "buildings": {
       "type": "array",
       "description": "Per-instance modeled PM inputs/outputs, revenue, cost, profit, and short inputs."
+    },
+    "building_types": {
+      "type": "array",
+      "description": "Localized building ids with group and optional city type."
+    },
+    "building_groups": {
+      "type": "array",
+      "description": "Vic3 group category, land usage, parent, and broadly available default-building metadata."
+    },
+    "state_pops": {
+      "type": "array",
+      "description": "Every parsed state pop with profession, household demand size, wealth, and culture."
     },
     "inputs": {
       "type": "object",

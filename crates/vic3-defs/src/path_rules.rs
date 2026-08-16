@@ -6,6 +6,8 @@ pub const COMMON_DIRS: &[&str] = &[
     "goods",
     "defines",
     "production_methods",
+    "buildings",
+    "building_groups",
     "pop_needs",
     "buy_packages",
     "cultures",
@@ -18,6 +20,15 @@ pub const COMMON_DIRS: &[&str] = &[
 const ICON_DIR: &[&str] = &["gfx", "interface", "icons", "goods_icons"];
 const COA_GFX_DIR: &[&str] = &["gfx", "coat_of_arms"];
 const COA_GFX_LEAFS: &[&str] = &["patterns", "colored_emblems", "textured_emblems"];
+const LOCALIZATION_PREFIXES: &[&str] = &[
+    "goods_l_",
+    "countries_l_",
+    "buildings_l_",
+    "building_groups_l_",
+    "pop_types_l_",
+    "cultures_l_",
+    "state_regions_l_",
+];
 
 const PRUNED_DIRS: &[&str] = &[
     "sound",
@@ -84,7 +95,9 @@ pub fn classify_defs_path(path: &str, is_directory: bool) -> DefsPathClass {
             .position(|segment| *segment == "localization");
         let supported_label = localization.is_some_and(|index| {
             segments.get(index + 1) == Some(&"english")
-                && (name.starts_with("goods_l_") || name.starts_with("countries_l_"))
+                && LOCALIZATION_PREFIXES
+                    .iter()
+                    .any(|prefix| name.starts_with(prefix))
                 && name.contains("_english")
                 && name.ends_with(".yml")
         });
@@ -183,6 +196,14 @@ mod tests {
                 "game/common/flag_definitions/00_flag_definitions.txt",
                 false
             ),
+            DefsPathClass::Read
+        );
+        assert_eq!(
+            classify_defs_path("game/common/buildings/00_buildings.txt", false),
+            DefsPathClass::Read
+        );
+        assert_eq!(
+            classify_defs_path("game/common/building_groups/00_building_groups.txt", false),
             DefsPathClass::Read
         );
         assert_eq!(

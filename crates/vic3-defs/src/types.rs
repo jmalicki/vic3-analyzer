@@ -28,6 +28,10 @@ pub struct GameDefs {
     #[serde(default)]
     pub flag_defs: BTreeMap<String, Vec<FlagDefinition>>,
     pub production_methods: BTreeMap<String, ProductionMethod>,
+    /// Building type id → state-panel metadata.
+    pub buildings: BTreeMap<String, BuildingType>,
+    /// Building group id → grouping and slot-capacity metadata.
+    pub building_groups: BTreeMap<String, BuildingGroup>,
     pub pop_needs: BTreeMap<String, PopNeed>,
     /// Wealth level (1–99) → buy package.
     pub buy_packages: BTreeMap<u8, BuyPackage>,
@@ -46,6 +50,8 @@ impl Default for GameDefs {
             flags: BTreeMap::new(),
             flag_defs: BTreeMap::new(),
             production_methods: BTreeMap::new(),
+            buildings: BTreeMap::new(),
+            building_groups: BTreeMap::new(),
             pop_needs: BTreeMap::new(),
             buy_packages: BTreeMap::new(),
             obsessions: BTreeMap::new(),
@@ -91,6 +97,25 @@ pub struct ProductionMethod {
     pub id: String,
     pub inputs: BTreeMap<String, f64>,
     pub outputs: BTreeMap<String, f64>,
+}
+
+/// A constructable building definition (`common/buildings`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BuildingType {
+    pub id: String,
+    pub group: Option<String>,
+    pub city_type: Option<String>,
+}
+
+/// A Vic3 building group (`common/building_groups`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BuildingGroup {
+    pub id: String,
+    pub category: Option<String>,
+    pub land_usage: Option<String>,
+    pub always_possible: bool,
+    pub default_building: Option<String>,
+    pub parent_group: Option<String>,
 }
 
 /// A pop need category (`common/pop_needs`) and its substitution table.

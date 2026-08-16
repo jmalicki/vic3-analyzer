@@ -134,6 +134,12 @@ pub struct State {
     pub country: Option<u32>,
     #[serde(default)]
     pub market: Option<u32>,
+    #[serde(default)]
+    pub arable_land: Option<f64>,
+    #[serde(default)]
+    pub infrastructure: Option<f64>,
+    #[serde(default)]
+    pub infrastructure_usage: Option<f64>,
 }
 
 /// A building in `building_manager.database`.

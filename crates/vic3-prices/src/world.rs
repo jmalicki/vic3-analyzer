@@ -14,6 +14,9 @@ pub struct World {
     pub states: Vec<WorldState>,
     pub countries: Vec<WorldCountry>,
     pub pops: Vec<WorldPop>,
+    /// All save pops retained for state detail, including rows that could not
+    /// enter the consumption model.
+    pub state_pops: Vec<WorldStatePop>,
     pub buildings: Vec<WorldBuilding>,
     /// Government / trade / construction buy orders, held fixed during the solve.
     pub frozen_buy: BTreeMap<String, f64>,
@@ -42,6 +45,9 @@ pub struct WorldState {
     pub region: Option<String>,
     pub country: Option<u32>,
     pub market: Option<u32>,
+    pub arable_land: Option<f64>,
+    pub infrastructure: Option<f64>,
+    pub infrastructure_usage: Option<f64>,
 }
 
 /// A pop whose consumption sits in the price loop.
@@ -54,6 +60,16 @@ pub struct WorldPop {
     /// Frozen wage bill. When `≤ 0`, wealth stays at [`Self::wealth`].
     pub wages: f64,
     pub culture: Option<String>,
+    pub profession: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldStatePop {
+    pub state: Option<u32>,
+    pub demand_size: Option<f64>,
+    pub wealth: Option<i32>,
+    pub culture: Option<String>,
+    pub profession: Option<String>,
 }
 
 /// A building whose goods IO is reconstructed from defs PMs and then frozen
@@ -136,9 +152,23 @@ impl World {
                             .and_then(|country| country.market)
                     })
                     .or(state.market),
+                arable_land: state.arable_land,
+                infrastructure: state.infrastructure,
+                infrastructure_usage: state.infrastructure_usage,
             })
             .collect();
         let saved_pops = save.pops.iter_present().count();
+        let state_pops = save
+            .pops
+            .iter_present()
+            .map(|(_, pop)| WorldStatePop {
+                state: pop.state,
+                demand_size: pop.demand_size(),
+                wealth: pop.wealth,
+                culture: pop.culture.clone(),
+                profession: pop.profession.clone(),
+            })
+            .collect();
         let pops: Vec<_> = save
             .pops
             .iter_present()
@@ -161,6 +191,7 @@ impl World {
             countries,
             states,
             pops,
+            state_pops,
             buildings,
             frozen_buy,
             frozen_sell,
@@ -193,6 +224,7 @@ impl WorldPop {
             wealth,
             wages: pop.wages.filter(|w| *w > 0.0).unwrap_or(0.0),
             culture: pop.culture.clone(),
+            profession: pop.profession.clone(),
         })
     }
 }
@@ -571,6 +603,14 @@ mod tests {
         assert!(result.inputs.goods_with_orders > 0);
         assert_eq!(result.inputs.buildings_without_orders, 0);
         assert!(!result.buildings.is_empty());
+        assert_eq!(result.states[0].arable_land, Some(45.0));
+        assert_eq!(result.states[0].infrastructure, Some(32.5));
+        assert_eq!(result.state_pops.len(), 1);
+        assert_eq!(
+            result.state_pops[0].profession_id.as_deref(),
+            Some("farmers")
+        );
+        assert_eq!(result.state_pops[0].demand_size, Some(10_000.0));
         assert!(
             result
                 .goods

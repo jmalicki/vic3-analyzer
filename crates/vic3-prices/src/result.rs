@@ -94,8 +94,42 @@ pub struct CountryInfo {
 pub struct StateInfo {
     pub id: u32,
     pub region_id: Option<String>,
+    pub region_name: Option<String>,
     pub country_id: Option<u32>,
     pub market_id: Option<u32>,
+    pub arable_land: Option<f64>,
+    pub infrastructure: Option<f64>,
+    pub infrastructure_usage: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StatePop {
+    pub state_id: u32,
+    pub profession_id: Option<String>,
+    pub profession_name: Option<String>,
+    pub demand_size: Option<f64>,
+    pub wealth: Option<i32>,
+    pub culture_id: Option<String>,
+    pub culture_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BuildingTypeInfo {
+    pub id: String,
+    pub name: Option<String>,
+    pub group_id: Option<String>,
+    pub city_type: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BuildingGroupInfo {
+    pub id: String,
+    pub name: Option<String>,
+    pub category: Option<String>,
+    pub land_usage: Option<String>,
+    pub always_possible: bool,
+    pub default_building: Option<String>,
+    pub parent_group: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -176,6 +210,9 @@ pub struct PricesResult {
     pub states: Vec<StateInfo>,
     pub state_goods: Vec<StateGood>,
     pub buildings: Vec<BuildingEconomics>,
+    pub building_types: Vec<BuildingTypeInfo>,
+    pub building_groups: Vec<BuildingGroupInfo>,
+    pub state_pops: Vec<StatePop>,
     /// Where the orders behind these prices came from.
     pub inputs: MarketInputs,
     /// `‖r − r_formula(orders(r))‖₂`. Always present (I5).

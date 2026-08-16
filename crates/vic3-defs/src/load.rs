@@ -7,8 +7,8 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use crate::{
-    classify_defs_path, icons, BuyPackage, DefsError, DefsPathClass, GameDefs, Good, NeedEntry,
-    PopNeed, ProductionMethod, DEFAULT_PRICE_RANGE,
+    classify_defs_path, icons, BuildingGroup, BuildingType, BuyPackage, DefsError, DefsPathClass,
+    GameDefs, Good, NeedEntry, PopNeed, ProductionMethod, DEFAULT_PRICE_RANGE,
 };
 
 /// Load definitions from a Victoria 3 install or a fixture tree.
@@ -23,6 +23,8 @@ use crate::{
 /// - `common/goods` — good id → `cost` (base price); `base_price` is also accepted
 /// - `common/defines` — `NEconomy.PRICE_RANGE` (also `NDefines.NEconomy` or top-level)
 /// - `common/production_methods` — PM ids plus `goods_input_*` / `goods_output_*`
+/// - `common/buildings` — building type → group / city type
+/// - `common/building_groups` — category, land usage, and default building
 /// - `common/pop_needs` — need substitution tables (`entry` / min & max supply share)
 /// - `common/buy_packages` — `wealth_N` packages
 /// - `common/cultures` — optional `obsessions = { good_id ... }` (empty is fine)
@@ -40,6 +42,8 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
     attach_icons(&mut defs, load_icons(&data_root)?);
     load_coa_into(&mut defs, &data_root)?;
     defs.production_methods = load_production_methods(&data_root)?;
+    defs.buildings = load_buildings(&data_root)?;
+    defs.building_groups = load_building_groups(&data_root)?;
     defs.pop_needs = load_pop_needs(&data_root)?;
     defs.buy_packages = load_buy_packages(&data_root)?;
     defs.obsessions = load_obsessions(&data_root)?;
@@ -97,6 +101,34 @@ pub fn load_from_files(
             for method in parse_production_methods_bytes(path, bytes)? {
                 defs.production_methods.insert(method.id.clone(), method);
             }
+        } else if relative.starts_with("common/buildings/") {
+            let raw: BTreeMap<String, RawBuilding> = parse_bytes(path, bytes)?;
+            defs.buildings.extend(raw.into_iter().map(|(id, building)| {
+                (
+                    id.clone(),
+                    BuildingType {
+                        id,
+                        group: building.building_group,
+                        city_type: building.city_type,
+                    },
+                )
+            }));
+        } else if relative.starts_with("common/building_groups/") {
+            let raw: BTreeMap<String, RawBuildingGroup> = parse_bytes(path, bytes)?;
+            defs.building_groups
+                .extend(raw.into_iter().map(|(id, group)| {
+                    (
+                        id.clone(),
+                        BuildingGroup {
+                            id,
+                            category: group.category,
+                            land_usage: group.land_usage,
+                            always_possible: group.always_possible,
+                            default_building: group.default_building,
+                            parent_group: group.parent_group,
+                        },
+                    )
+                }));
         } else if relative.starts_with("common/pop_needs/") {
             let raw: BTreeMap<String, RawNeed> = parse_bytes(path, bytes)?;
             for (id, need) in raw {
@@ -409,7 +441,17 @@ fn is_english_localization(path: &str) -> bool {
     path.contains("localization/")
         && path.split('/').any(|segment| segment == "english")
         && path.rsplit('/').next().is_some_and(|name| {
-            (name.starts_with("goods_l_") || name.starts_with("countries_l_"))
+            [
+                "goods_l_",
+                "countries_l_",
+                "buildings_l_",
+                "building_groups_l_",
+                "pop_types_l_",
+                "cultures_l_",
+                "state_regions_l_",
+            ]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
                 && name.ends_with(".yml")
         })
 }
@@ -446,6 +488,45 @@ fn load_production_methods(
         }
     }
     Ok(pms)
+}
+
+fn load_buildings(data_root: &Path) -> Result<BTreeMap<String, BuildingType>, DefsError> {
+    let mut buildings = BTreeMap::new();
+    for path in txt_files(&data_root.join("common/buildings"))? {
+        let file: BTreeMap<String, RawBuilding> = parse_file(&path)?;
+        buildings.extend(file.into_iter().map(|(id, raw)| {
+            (
+                id.clone(),
+                BuildingType {
+                    id,
+                    group: raw.building_group,
+                    city_type: raw.city_type,
+                },
+            )
+        }));
+    }
+    Ok(buildings)
+}
+
+fn load_building_groups(data_root: &Path) -> Result<BTreeMap<String, BuildingGroup>, DefsError> {
+    let mut groups = BTreeMap::new();
+    for path in txt_files(&data_root.join("common/building_groups"))? {
+        let file: BTreeMap<String, RawBuildingGroup> = parse_file(&path)?;
+        groups.extend(file.into_iter().map(|(id, raw)| {
+            (
+                id.clone(),
+                BuildingGroup {
+                    id,
+                    category: raw.category,
+                    land_usage: raw.land_usage,
+                    always_possible: raw.always_possible,
+                    default_building: raw.default_building,
+                    parent_group: raw.parent_group,
+                },
+            )
+        }));
+    }
+    Ok(groups)
 }
 
 fn parse_production_methods(path: &Path) -> Result<Vec<ProductionMethod>, DefsError> {
@@ -689,6 +770,22 @@ struct RawGood {
     cost: Option<f64>,
     base_price: Option<f64>,
     texture: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawBuilding {
+    building_group: Option<String>,
+    city_type: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawBuildingGroup {
+    category: Option<String>,
+    land_usage: Option<String>,
+    #[serde(default)]
+    always_possible: bool,
+    default_building: Option<String>,
+    parent_group: Option<String>,
 }
 
 impl RawGood {
