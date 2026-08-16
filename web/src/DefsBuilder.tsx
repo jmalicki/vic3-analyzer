@@ -1,4 +1,3 @@
-import { unzipSync } from 'fflate'
 import {
   useEffect,
   useMemo,
@@ -43,17 +42,10 @@ const directoryProps = {
 /** Repaint every 32 files so a 3000-file install does not thrash React. */
 const PROGRESS_STRIDE = 32
 
-async function zippedFiles(file: File, classify: DefsPathClassifier): Promise<DefsSourceFile[]> {
-  const archive = unzipSync(new Uint8Array(await file.arrayBuffer()))
-  return Object.entries(archive)
-    .filter(([path]) => usefulDefsPath(path, classify))
-    .map(([path, bytes]) => ({ path, bytes }))
-}
-
 export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
   const [status, setStatus] = useState<string>()
   const [error, setError] = useState<string>()
-  const [blob, setBlob] = useState<File>()
+  const [built, setBuilt] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [progress, setProgress] = useState<Progress>()
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -74,6 +66,7 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
       return
     }
     setProgress({ label: 'Parsing definitions in wasm' })
+    setBuilt(false)
     setStatus(undefined)
     setError(undefined)
     try {
@@ -90,7 +83,7 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
       })
       const summary = JSON.parse(await api.defs_summary(bytes)) as DefsSummary
       setProgress(undefined)
-      setBlob(file)
+      setBuilt(true)
       onBuilt(file)
       setStatus(
         `Built ${file.name} format v${summary.blob_version} from ${manifest.length} definition files: ${summary.goods} goods, ${summary.labels} localized names, ${summary.production_methods} production methods. Analysis tools are unlocked.` +
@@ -136,12 +129,6 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
     const classify: DefsPathClassifier = (path, isDirectory) =>
       api.classify_defs_path(path, isDirectory)
     try {
-      const zip = [...event.dataTransfer.files].find((file) => file.name.endsWith('.zip'))
-      if (zip) {
-        setProgress({ label: 'Unpacking zip' })
-        await build(await zippedFiles(zip, classify))
-        return
-      }
       const label = 'Reading dropped files'
       setProgress({ label, done: 0 })
       const files = await collectDroppedDefsFiles(
@@ -174,16 +161,6 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
     }
   }
 
-  const download = () => {
-    if (!blob) return
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = blob.name
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
   return (
     <div className="defs-builder">
       <div className="field-label-row">
@@ -205,9 +182,9 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
             Chrome blocks Steam&apos;s install location in its folder APIs (<code>~/Library</code> on
             macOS, <code>Program Files</code> on Windows), and it will not open a path for you.
             <strong> Dragging the folder in is not restricted</strong>, so that is the reliable route;
-            a zip of <code>common</code> works too. If you do use the dialog, paste the copied path
-            with <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> (macOS) or <kbd>Ctrl</kbd>+<kbd>L</kbd>{' '}
-            (Linux).
+            selecting it is entirely local and uses no upload bandwidth. If you use the dialog,
+            paste the copied path with <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> (macOS) or{' '}
+            <kbd>Ctrl</kbd>+<kbd>L</kbd> (Linux).
           </p>
         </FieldHelp>
       </div>
@@ -258,33 +235,6 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
             event.target.value = ''
           }}
         />
-        <label className="file-button secondary">
-          Choose definitions zip
-          <input
-            type="file"
-            accept=".zip,application/zip"
-            aria-label="Victoria 3 definitions zip"
-            onChange={(event) => {
-              const file = event.target.files?.[0]
-              if (file) {
-                setProgress({ label: 'Unpacking zip' })
-                if (!api) {
-                  fail(new Error('The analysis engine is still loading. Try again in a moment.'))
-                } else {
-                  const classify: DefsPathClassifier = (path, isDirectory) =>
-                    api.classify_defs_path(path, isDirectory)
-                  void zippedFiles(file, classify).then(build).catch(fail)
-                }
-              }
-              event.target.value = ''
-            }}
-          />
-        </label>
-        {blob && (
-          <button type="button" className="secondary" onClick={download}>
-            Download defs.postcard
-          </button>
-        )}
       </div>
       <p className="path-hint">{commonPaths.label}</p>
       <code className="path-hint-path">{commonPaths.local}</code>
@@ -303,7 +253,7 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
         </p>
       )}
       {status && <small role="status">{status}</small>}
-      {blob && !busy && (
+      {built && !busy && (
         <div className="defs-builder-actions">
           <button type="button" onClick={() => onDone?.()}>
             OK

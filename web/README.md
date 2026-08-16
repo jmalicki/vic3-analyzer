@@ -40,7 +40,8 @@ report progress: a determinate bar over the selected file count and an
 indeterminate bar while wasm parses or solves.
 
 For real campaigns, a modal builder creates a versioned `defs.postcard`
-entirely in-browser from a dragged-in `game` folder, `common` subset, or zip.
+entirely in-browser from a dragged-in or locally selected `game` folder (or
+`common` subset). Selecting files does not upload them or use network bandwidth.
 The walker prunes heavy directories and reads only supported common definitions
 plus English `goods_l_*.yml`; using `common` alone falls back to script ids.
 Dragging

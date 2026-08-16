@@ -537,28 +537,20 @@ function App({ wasmApi }: Props) {
             </label>
           </div>
           <div className="field-with-help">
-            <label>
-              <span className="field-label-row">
-                Definitions blob
-                <FieldHelp label="About definitions">
-                  <p>
-                    Definitions are a postcard-encoded snapshot of goods, needs, and production
-                    methods for a game patch. Analysis uses that blob instead of reading a Victoria
-                    3 install in the browser.
-                  </p>
-                  <p>
-                    Build a blob from your own install for the patch your save uses; the folder or
-                    zip builder below does that in your browser, and the result is kept here so a
-                    reload does not lose it. Deployed builds ship no definitions of their own.
-                  </p>
-                </FieldHelp>
-              </span>
-              <input
-                type="file"
-                aria-label="Choose definitions blob"
-                onChange={(e) => applyDefsFile(e.target.files?.[0])}
-              />
-            </label>
+            <span className="field-label-row">
+              Game definitions
+              <FieldHelp label="About definitions">
+                <p>
+                  Definitions are a postcard-encoded snapshot of goods, needs, and production
+                  methods for a game patch. Build them locally from the Victoria 3 game folder.
+                </p>
+                <p>
+                  The selected files never leave your browser. The result is kept locally so a
+                  reload does not require choosing the folder again. Deployed builds ship no
+                  definitions of their own.
+                </p>
+              </FieldHelp>
+            </span>
             <small>
               {defsFile
                 ? `Using your file: ${defsFile.name}${defsCounts}${
@@ -568,7 +560,7 @@ function App({ wasmApi }: Props) {
                   ? `Using the local development demo blob${defsCounts}.`
                   : demoDefsStatus === 'loading'
                     ? 'Loading development demo definitions…'
-                    : 'No definitions loaded. Build them from your game files, or choose a defs.postcard you exported earlier.'}
+                    : 'No definitions loaded. Build them from your local Victoria 3 game folder.'}
             </small>
             <div className="defs-builder-actions">
               <button type="button" className="secondary" onClick={() => setBuilderOpen(true)}>

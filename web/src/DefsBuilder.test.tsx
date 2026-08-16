@@ -1,6 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { zipSync } from 'fflate'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DefsBuilder } from './DefsBuilder'
 import {
@@ -312,20 +311,4 @@ describe('DefsBuilder', () => {
     expect(await screen.findByText(/Path copied/)).toBeInTheDocument()
   })
 
-  it('builds from a definitions zip', async () => {
-    const user = userEvent.setup()
-    const wasm = api()
-    render(<DefsBuilder api={wasm} onBuilt={vi.fn()} />)
-    const zip = zipSync({
-      'game/common/goods/goods.txt': new TextEncoder().encode('grain = { cost = 20 }'),
-    })
-
-    await user.upload(
-      screen.getByLabelText('Victoria 3 definitions zip'),
-      new File([zip.slice().buffer as ArrayBuffer], 'definitions.zip', {
-        type: 'application/zip',
-      }),
-    )
-    await waitFor(() => expect(wasm.build_defs_blob).toHaveBeenCalled())
-  })
 })

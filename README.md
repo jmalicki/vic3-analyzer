@@ -6,7 +6,12 @@ AGPL-3.0 Victoria 3 save loader and planner. Given a `.v3` and a high-level goal
 
 **Live demo:** [https://jmalicki.github.io/vic3-analyzer/](https://jmalicki.github.io/vic3-analyzer/) — drop a plaintext `.v3` (or fixture bytes) and supply definitions from your own install. The site ships none, so nothing can quietly price a campaign from test fixtures. Binary token maps are not redistributed either.
 
-Build a blob from your installed game:
+The browser builds and stores definitions locally when you choose or drag your
+installed `Victoria 3/game` folder. It prunes heavy trees and reads only
+allowlisted definitions plus English goods localization. Selecting a local
+folder does not upload it or use network bandwidth.
+
+For CLI use, build a blob directly from your installed game:
 
 ```text
 cargo run -p vic3-cli -- defs export \
@@ -14,14 +19,9 @@ cargo run -p vic3-cli -- defs export \
   --out defs.postcard
 ```
 
-Upload `defs.postcard` in the web UI. Do not commit or publish it: it is derived
-from Paradox game data.
+Do not commit or publish `defs.postcard`: it is derived from Paradox game data.
 
-Alternatively, the web UI can build the v2 blob locally: drag the installed
-`Victoria 3/game` folder onto the builder (or use `game/common` without localized
-names), pick it, or supply a zip. The SPA prunes heavy trees and reads only
-allowlisted definitions plus English goods localization. Dragging is the
-reliable route, since Chrome refuses to open Steam's install
+Dragging the game folder is the reliable browser route, since Chrome refuses to open Steam's install
 location (`~/Library`, `Program Files`) through its folder pickers. The
 Clausewitz files are parsed in wasm and never leave the browser, and the built
 blob is kept in IndexedDB so a reload does not lose it.
