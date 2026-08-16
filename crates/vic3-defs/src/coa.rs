@@ -15,6 +15,9 @@ const FLAG_H: u32 = 42;
 pub struct CoaLibrary {
     pub colors: BTreeMap<String, [u8; 4]>,
     pub coats: BTreeMap<String, CoatOfArms>,
+    /// Template-list id → concrete CoA ids. Only unambiguous lists are
+    /// resolved; randomized lists deliberately remain unavailable.
+    pub template_lists: BTreeMap<String, Vec<String>>,
     /// `tag` → prioritized flag definitions (coa id + optional law trigger).
     pub flag_defs: BTreeMap<String, Vec<FlagDef>>,
     /// Rendered CoA id → PNG bytes.
@@ -27,14 +30,34 @@ pub struct CoatOfArms {
     pub color1: Option<String>,
     pub color2: Option<String>,
     pub color3: Option<String>,
+    pub color4: Option<String>,
     pub emblems: Vec<Emblem>,
+    pub parents: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Emblem {
     pub texture: String,
     pub color1: Option<String>,
+    pub color2: Option<String>,
+    pub color3: Option<String>,
     pub colored: bool,
+    pub instances: Vec<EmblemInstance>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EmblemInstance {
+    pub position: [f64; 2],
+    pub scale: [f64; 2],
+}
+
+impl Default for EmblemInstance {
+    fn default() -> Self {
+        Self {
+            position: [0.5, 0.5],
+            scale: [1.0, 1.0],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -79,7 +102,8 @@ pub fn select_flag_coa(
                         .any(|have| have == law || have.ends_with(law.as_str()))
                 })
             };
-            if ok && best.is_none_or(|b| def.priority >= b.priority) {
+            if ok && flags.contains_key(&def.coa) && best.is_none_or(|b| def.priority >= b.priority)
+            {
                 best = Some(def);
             }
         }
@@ -132,135 +156,206 @@ pub fn select_coa(library: &CoaLibrary, tag: &str, laws: &[String]) -> Option<St
 
 pub fn parse_named_colors(bytes: &[u8], into: &mut BTreeMap<String, [u8; 4]>) {
     let text = String::from_utf8_lossy(bytes);
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with('@') {
-            continue;
-        }
-        // name = rgb { r g b } or hsv / hsv360
-        let Some((name, rest)) = line.split_once('=') else {
-            continue;
+    for entry in entries(&text) {
+        let color_entries = if entry.key == "colors" {
+            entries(&entry.value)
+        } else {
+            vec![entry]
         };
-        let name = name.trim().to_string();
-        let rest = rest.trim();
-        if let Some(rgb) = parse_rgb(rest) {
-            into.insert(name, rgb);
+        for color in color_entries {
+            if let Some(rgba) = parse_color(&color.value) {
+                into.insert(color.key, rgba);
+            }
         }
     }
 }
 
-fn parse_rgb(rest: &str) -> Option<[u8; 4]> {
-    let rest = rest.trim();
-    if let Some(inner) = rest.strip_prefix("rgb") {
-        let inner = inner
-            .trim()
+fn parse_color(raw: &str) -> Option<[u8; 4]> {
+    let raw = raw.trim();
+    let lower = raw.to_ascii_lowercase();
+    if let Some(hex) = lower
+        .strip_prefix("hex")
+        .map(str::trim)
+        .or_else(|| lower.strip_prefix('#'))
+    {
+        let hex = unquote(hex)
             .trim_start_matches('{')
             .trim_end_matches('}')
-            .trim();
-        let parts: Vec<f64> = inner
-            .split_whitespace()
-            .filter_map(|p| p.parse().ok())
-            .collect();
-        if parts.len() >= 3 {
-            return Some([
-                parts[0].clamp(0.0, 255.0) as u8,
-                parts[1].clamp(0.0, 255.0) as u8,
-                parts[2].clamp(0.0, 255.0) as u8,
-                255,
-            ]);
+            .trim()
+            .trim_start_matches('#');
+        if hex.len() == 6 || hex.len() == 8 {
+            let value = u32::from_str_radix(hex, 16).ok()?;
+            return Some(if hex.len() == 8 {
+                [
+                    (value >> 24) as u8,
+                    (value >> 16) as u8,
+                    (value >> 8) as u8,
+                    value as u8,
+                ]
+            } else {
+                [(value >> 16) as u8, (value >> 8) as u8, value as u8, 255]
+            });
         }
     }
-    None
+    let (mode, values) = if let Some(rest) = lower.strip_prefix("hsv360") {
+        ("hsv360", numbers(rest))
+    } else if let Some(rest) = lower.strip_prefix("hsv") {
+        ("hsv", numbers(rest))
+    } else if let Some(rest) = lower.strip_prefix("rgb") {
+        ("rgb", numbers(rest))
+    } else {
+        ("rgb", numbers(&lower))
+    };
+    let [a, b, c, ..] = values.as_slice() else {
+        return None;
+    };
+    match mode {
+        "hsv360" => Some(hsv_to_rgba(*a / 360.0, *b / 100.0, *c / 100.0)),
+        "hsv" => Some(hsv_to_rgba(*a, *b, *c)),
+        _ => {
+            let scale = if [*a, *b, *c].iter().all(|value| *value <= 1.0) {
+                255.0
+            } else {
+                1.0
+            };
+            Some([
+                (a * scale).clamp(0.0, 255.0).round() as u8,
+                (b * scale).clamp(0.0, 255.0).round() as u8,
+                (c * scale).clamp(0.0, 255.0).round() as u8,
+                255,
+            ])
+        }
+    }
+}
+
+fn hsv_to_rgba(hue: f64, saturation: f64, value: f64) -> [u8; 4] {
+    let h = hue.rem_euclid(1.0) * 6.0;
+    let s = saturation.clamp(0.0, 1.0);
+    let v = value.clamp(0.0, 1.0);
+    let chroma = v * s;
+    let x = chroma * (1.0 - (h.rem_euclid(2.0) - 1.0).abs());
+    let (r, g, b) = match h as u8 {
+        0 => (chroma, x, 0.0),
+        1 => (x, chroma, 0.0),
+        2 => (0.0, chroma, x),
+        3 => (0.0, x, chroma),
+        4 => (x, 0.0, chroma),
+        _ => (chroma, 0.0, x),
+    };
+    let m = v - chroma;
+    [
+        ((r + m) * 255.0).round() as u8,
+        ((g + m) * 255.0).round() as u8,
+        ((b + m) * 255.0).round() as u8,
+        255,
+    ]
 }
 
 /// Parse one coat-of-arms definitions file into `coats`.
 pub fn parse_coat_of_arms_file(bytes: &[u8], coats: &mut BTreeMap<String, CoatOfArms>) {
     let text = String::from_utf8_lossy(bytes);
-    let mut id = String::new();
-    let mut current = CoatOfArms::default();
-    let mut depth = 0i32;
-    let mut in_emblem = false;
-    let mut emblem_colored = false;
-    let mut emblem = Emblem {
-        texture: String::new(),
-        color1: None,
-        colored: false,
-    };
-
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with('@') {
-            continue;
-        }
-        if depth == 0 {
-            if let Some((name, rest)) = line.split_once('=') {
-                if rest.trim().starts_with('{') {
-                    id = name.trim().to_string();
-                    current = CoatOfArms::default();
-                    depth = 1;
-                    continue;
-                }
-            }
-        }
-        if line.contains('{') {
-            depth += line.matches('{').count() as i32;
-        }
-        if line.starts_with("colored_emblem") {
-            in_emblem = true;
-            emblem_colored = true;
-            emblem = Emblem {
-                texture: String::new(),
-                color1: None,
-                colored: true,
-            };
-        } else if line.starts_with("textured_emblem") {
-            in_emblem = true;
-            emblem_colored = false;
-            emblem = Emblem {
-                texture: String::new(),
-                color1: None,
-                colored: false,
-            };
-        } else if in_emblem {
-            if let Some(tex) = line.strip_prefix("texture") {
-                let tex = tex.trim().trim_start_matches('=').trim().trim_matches('"');
-                emblem.texture = tex.to_string();
-                emblem.colored = emblem_colored;
-            } else if let Some(c) = line.strip_prefix("color1") {
-                let c = c.trim().trim_start_matches('=').trim().trim_matches('"');
-                emblem.color1 = Some(c.to_string());
-            }
-        } else if depth == 1 {
-            if let Some(rest) = line.strip_prefix("pattern") {
-                let v = rest.trim().trim_start_matches('=').trim().trim_matches('"');
-                current.pattern = Some(v.to_string());
-            } else if let Some(rest) = line.strip_prefix("color1") {
-                let v = rest.trim().trim_start_matches('=').trim().trim_matches('"');
-                current.color1 = Some(v.to_string());
-            } else if let Some(rest) = line.strip_prefix("color2") {
-                let v = rest.trim().trim_start_matches('=').trim().trim_matches('"');
-                current.color2 = Some(v.to_string());
-            } else if let Some(rest) = line.strip_prefix("color3") {
-                let v = rest.trim().trim_start_matches('=').trim().trim_matches('"');
-                current.color3 = Some(v.to_string());
-            }
-        }
-        if line.contains('}') {
-            let closes = line.matches('}').count() as i32;
-            if in_emblem && closes > 0 {
-                if !emblem.texture.is_empty() {
-                    current.emblems.push(emblem.clone());
-                }
-                in_emblem = false;
-            }
-            depth -= closes;
-            if depth <= 0 && !id.is_empty() {
-                coats.insert(id.clone(), current.clone());
-                id.clear();
-                depth = 0;
+    for entry in entries(&text) {
+        let definitions = if entry.key == "template" {
+            entries(&entry.value)
+        } else {
+            vec![entry]
+        };
+        for definition in definitions {
+            if let Some(coa) = parse_coa_body(&definition.value) {
+                coats.insert(definition.key, coa);
             }
         }
     }
+}
+
+pub fn parse_template_lists(bytes: &[u8], into: &mut BTreeMap<String, Vec<String>>) {
+    let text = String::from_utf8_lossy(bytes);
+    for root in entries(&text) {
+        if !root.key.ends_with("_lists") {
+            continue;
+        }
+        for list in entries(&root.value) {
+            let candidates = entries(&list.value)
+                .into_iter()
+                .filter(|entry| entry.key.parse::<u32>().is_ok())
+                .map(|entry| unquote(&entry.value).to_string())
+                .collect::<Vec<_>>();
+            if !candidates.is_empty() {
+                into.entry(list.key).or_default().extend(candidates);
+            }
+        }
+    }
+}
+
+fn parse_coa_body(body: &str) -> Option<CoatOfArms> {
+    let mut coa = CoatOfArms::default();
+    for entry in entries(body) {
+        match entry.key.as_str() {
+            "pattern" => coa.pattern = scalar_value(&entry.value),
+            "color1" => coa.color1 = scalar_value(&entry.value),
+            "color2" => coa.color2 = scalar_value(&entry.value),
+            "color3" => coa.color3 = scalar_value(&entry.value),
+            "color4" => coa.color4 = scalar_value(&entry.value),
+            "colored_emblem" | "textured_emblem" => {
+                if let Some(emblem) = parse_emblem(&entry.value, entry.key == "colored_emblem") {
+                    coa.emblems.push(emblem);
+                }
+            }
+            "sub" => {
+                if let Some(parent) = entries(&entry.value)
+                    .into_iter()
+                    .find(|field| field.key == "parent")
+                    .and_then(|field| scalar_value(&field.value))
+                {
+                    coa.parents.push(parent);
+                }
+            }
+            _ => {}
+        }
+    }
+    (coa.pattern.is_some() || !coa.emblems.is_empty() || !coa.parents.is_empty()).then_some(coa)
+}
+
+fn parse_emblem(body: &str, colored: bool) -> Option<Emblem> {
+    let mut emblem = Emblem {
+        texture: String::new(),
+        color1: None,
+        color2: None,
+        color3: None,
+        colored,
+        instances: Vec::new(),
+    };
+    for entry in entries(body) {
+        match entry.key.as_str() {
+            "texture" => emblem.texture = scalar_value(&entry.value)?,
+            "color1" => emblem.color1 = scalar_value(&entry.value),
+            "color2" => emblem.color2 = scalar_value(&entry.value),
+            "color3" => emblem.color3 = scalar_value(&entry.value),
+            "instance" => emblem.instances.push(parse_instance(&entry.value)),
+            _ => {}
+        }
+    }
+    (!emblem.texture.is_empty()).then_some(emblem)
+}
+
+fn parse_instance(body: &str) -> EmblemInstance {
+    let mut instance = EmblemInstance::default();
+    for entry in entries(body) {
+        match entry.key.as_str() {
+            "position" | "offset" => {
+                if let Some(value) = pair(&entry.value) {
+                    instance.position = value;
+                }
+            }
+            "scale" => {
+                if let Some(value) = pair(&entry.value) {
+                    instance.scale = value;
+                }
+            }
+            _ => {}
+        }
+    }
+    instance
 }
 
 /// Parse flag_definitions files.
@@ -397,51 +492,167 @@ pub fn render_library(
     library: &mut CoaLibrary,
     textures: &BTreeMap<String, Vec<u8>>, // filename stem/name → RGBA via dds or raw
 ) {
+    resolve_parents(&mut library.coats);
+    resolve_template_lists(library);
+    let used_textures = library
+        .coats
+        .values()
+        .flat_map(|coat| {
+            coat.pattern
+                .iter()
+                .chain(coat.emblems.iter().map(|emblem| &emblem.texture))
+        })
+        .map(|texture| texture_key(texture))
+        .collect::<std::collections::BTreeSet<_>>();
+    let decoded = used_textures
+        .into_iter()
+        .filter_map(|key| {
+            let image = decode_texture(textures.get(&key)?)?;
+            Some((key, scale_to_flag(&image)))
+        })
+        .collect::<BTreeMap<_, _>>();
     let coats = library.coats.clone();
     for (id, coa) in coats {
-        if let Some(png) = render_coa(&coa, &library.colors, textures) {
+        if let Some(png) = render_coa(&coa, &library.colors, &decoded) {
             library.rendered.insert(id, png);
         }
     }
 }
 
-fn resolve_color(colors: &BTreeMap<String, [u8; 4]>, name: Option<&String>) -> [u8; 4] {
-    name.and_then(|n| colors.get(n).copied())
-        .unwrap_or([200, 0, 200, 255])
+fn resolve_parents(coats: &mut BTreeMap<String, CoatOfArms>) {
+    let source = coats.clone();
+    let ids = source.keys().cloned().collect::<Vec<_>>();
+    for id in ids {
+        let mut visiting = Vec::new();
+        if let Some(resolved) = resolve_parent(&id, &source, &mut visiting) {
+            coats.insert(id, resolved);
+        }
+    }
+}
+
+fn resolve_parent(
+    id: &str,
+    coats: &BTreeMap<String, CoatOfArms>,
+    visiting: &mut Vec<String>,
+) -> Option<CoatOfArms> {
+    if visiting.iter().any(|item| item == id) {
+        return None;
+    }
+    let mut coat = coats.get(id)?.clone();
+    visiting.push(id.to_string());
+    let parents = std::mem::take(&mut coat.parents);
+    for parent_id in parents {
+        let parent = resolve_parent(&parent_id, coats, visiting)?;
+        if coat.pattern.is_none() {
+            coat.pattern = parent.pattern;
+        }
+        if coat.color1.is_none() {
+            coat.color1 = parent.color1;
+        }
+        if coat.color2.is_none() {
+            coat.color2 = parent.color2;
+        }
+        if coat.color3.is_none() {
+            coat.color3 = parent.color3;
+        }
+        if coat.color4.is_none() {
+            coat.color4 = parent.color4;
+        }
+        let mut inherited = parent.emblems;
+        inherited.append(&mut coat.emblems);
+        coat.emblems = inherited;
+    }
+    visiting.pop();
+    Some(coat)
+}
+
+fn resolve_template_lists(library: &mut CoaLibrary) {
+    for (list, candidates) in library.template_lists.clone() {
+        let unique = candidates
+            .into_iter()
+            .filter(|candidate| library.coats.contains_key(candidate))
+            .collect::<std::collections::BTreeSet<_>>();
+        if unique.len() == 1 {
+            let target = unique.into_iter().next().expect("one candidate");
+            if let Some(coat) = library.coats.get(&target).cloned() {
+                library.coats.insert(list, coat);
+            }
+        }
+    }
+}
+
+fn resolve_color(
+    colors: &BTreeMap<String, [u8; 4]>,
+    coa: &CoatOfArms,
+    name: Option<&String>,
+) -> Option<[u8; 4]> {
+    let name = name?;
+    let referenced = match name.as_str() {
+        "color1" => coa.color1.as_ref(),
+        "color2" => coa.color2.as_ref(),
+        "color3" => coa.color3.as_ref(),
+        "color4" => coa.color4.as_ref(),
+        _ => None,
+    };
+    if let Some(referenced) = referenced {
+        if referenced == name {
+            return None;
+        }
+        return resolve_color(colors, coa, Some(referenced));
+    }
+    colors.get(name).copied().or_else(|| parse_color(name))
 }
 
 fn render_coa(
     coa: &CoatOfArms,
     colors: &BTreeMap<String, [u8; 4]>,
-    textures: &BTreeMap<String, Vec<u8>>,
+    textures: &BTreeMap<String, RgbaImage>,
 ) -> Option<Vec<u8>> {
-    let fill = resolve_color(colors, coa.color1.as_ref());
+    let fill = resolve_color(colors, coa, coa.color1.as_ref())?;
     let mut rgba = vec![0u8; (FLAG_W * FLAG_H * 4) as usize];
     for px in rgba.chunks_exact_mut(4) {
         px.copy_from_slice(&fill);
     }
 
-    // If we have a pattern texture, recolor by R channel → color1 (solid patterns).
     if let Some(pattern) = &coa.pattern {
         let key = texture_key(pattern);
-        if let Some(tex) = textures.get(&key) {
-            if let Some(img) = decode_texture(tex) {
-                blit_recolor(&mut rgba, &img, resolve_color(colors, coa.color1.as_ref()));
-            }
+        if let Some(img) = textures.get(&key) {
+            let pattern_colors = [
+                resolve_color(colors, coa, coa.color1.as_ref())?,
+                resolve_color(colors, coa, coa.color2.as_ref()).unwrap_or(fill),
+                resolve_color(colors, coa, coa.color3.as_ref()).unwrap_or(fill),
+                resolve_color(colors, coa, coa.color4.as_ref()).unwrap_or(fill),
+            ];
+            recolor_pattern(&mut rgba, img, pattern_colors);
+        } else if key != "pattern_solid.tga" {
+            return None;
         }
     }
 
     for emblem in &coa.emblems {
         let key = texture_key(&emblem.texture);
-        if let Some(tex) = textures.get(&key) {
-            if let Some(img) = decode_texture(tex) {
-                let tint = if emblem.colored {
-                    resolve_color(colors, emblem.color1.as_ref().or(coa.color1.as_ref()))
-                } else {
-                    [255, 255, 255, 255]
-                };
-                blit_centered(&mut rgba, &img, tint, emblem.colored);
-            }
+        let Some(img) = textures.get(&key) else {
+            continue;
+        };
+        let emblem_colors = if emblem.colored {
+            Some([
+                resolve_color(colors, coa, emblem.color1.as_ref().or(coa.color1.as_ref()))?,
+                resolve_color(colors, coa, emblem.color2.as_ref().or(coa.color2.as_ref()))
+                    .unwrap_or(fill),
+                resolve_color(colors, coa, emblem.color3.as_ref().or(coa.color3.as_ref()))
+                    .unwrap_or(fill),
+            ])
+        } else {
+            None
+        };
+        let default_instance = [EmblemInstance::default()];
+        let instances = if emblem.instances.is_empty() {
+            &default_instance[..]
+        } else {
+            &emblem.instances
+        };
+        for instance in instances {
+            blit_emblem(&mut rgba, img, emblem_colors, *instance);
         }
     }
 
@@ -458,9 +669,26 @@ struct RgbaImage {
     data: Vec<u8>,
 }
 
+fn scale_to_flag(image: &RgbaImage) -> RgbaImage {
+    let mut data = Vec::with_capacity((FLAG_W * FLAG_H * 4) as usize);
+    for y in 0..FLAG_H {
+        for x in 0..FLAG_W {
+            let source_x = x * image.w / FLAG_W;
+            let source_y = y * image.h / FLAG_H;
+            let index = ((source_y * image.w + source_x) * 4) as usize;
+            data.extend_from_slice(&image.data[index..index + 4]);
+        }
+    }
+    RgbaImage {
+        w: FLAG_W,
+        h: FLAG_H,
+        data,
+    }
+}
+
 fn decode_texture(bytes: &[u8]) -> Option<RgbaImage> {
     if bytes.starts_with(b"DDS ") {
-        let png = icons::dds_to_png(bytes)?;
+        let png = icons::coa_dds_to_png(bytes)?;
         return decode_png(&png);
     }
     if bytes.starts_with(b"\x89PNG") {
@@ -537,33 +765,58 @@ fn decode_tga(bytes: &[u8]) -> Option<RgbaImage> {
     Some(RgbaImage { w, h, data })
 }
 
-fn blit_recolor(canvas: &mut [u8], img: &RgbaImage, color: [u8; 4]) {
+fn recolor_pattern(canvas: &mut [u8], img: &RgbaImage, colors: [[u8; 4]; 4]) {
     for y in 0..FLAG_H {
         for x in 0..FLAG_W {
             let sx = x * img.w / FLAG_W;
             let sy = y * img.h / FLAG_H;
             let si = ((sy * img.w + sx) * 4) as usize;
-            let r = img.data.get(si).copied().unwrap_or(0) as f64 / 255.0;
-            let a = img.data.get(si + 3).copied().unwrap_or(255);
-            let di = ((y * FLAG_W + x) * 4) as usize;
-            if a == 0 {
+            let masks = [
+                img.data.get(si).copied().unwrap_or(0) as f64 / 255.0,
+                img.data.get(si + 1).copied().unwrap_or(0) as f64 / 255.0,
+                img.data.get(si + 2).copied().unwrap_or(0) as f64 / 255.0,
+                img.data.get(si + 3).copied().unwrap_or(0) as f64 / 255.0,
+            ];
+            let total = masks.iter().sum::<f64>();
+            if total <= f64::EPSILON {
                 continue;
             }
-            canvas[di] = (color[0] as f64 * r) as u8;
-            canvas[di + 1] = (color[1] as f64 * r) as u8;
-            canvas[di + 2] = (color[2] as f64 * r) as u8;
+            let di = ((y * FLAG_W + x) * 4) as usize;
+            for channel in 0..3 {
+                canvas[di + channel] = colors
+                    .iter()
+                    .zip(masks)
+                    .map(|(color, mask)| color[channel] as f64 * mask / total)
+                    .sum::<f64>()
+                    .round() as u8;
+            }
             canvas[di + 3] = 255;
         }
     }
 }
 
-fn blit_centered(canvas: &mut [u8], img: &RgbaImage, tint: [u8; 4], recolor: bool) {
-    let dw = FLAG_W * 3 / 4;
-    let dh = FLAG_H * 3 / 4;
-    let ox = (FLAG_W - dw) / 2;
-    let oy = (FLAG_H - dh) / 2;
+fn blit_emblem(
+    canvas: &mut [u8],
+    img: &RgbaImage,
+    colors: Option<[[u8; 4]; 3]>,
+    instance: EmblemInstance,
+) {
+    let dw = (FLAG_W as f64 * instance.scale[0].abs()).round() as u32;
+    let dh = (FLAG_H as f64 * instance.scale[1].abs()).round() as u32;
+    if dw == 0 || dh == 0 {
+        return;
+    }
+    let center_x = (FLAG_W as f64 * instance.position[0]).round() as i32;
+    let center_y = (FLAG_H as f64 * instance.position[1]).round() as i32;
+    let ox = center_x - dw as i32 / 2;
+    let oy = center_y - dh as i32 / 2;
     for y in 0..dh {
         for x in 0..dw {
+            let dx = ox + x as i32;
+            let dy = oy + y as i32;
+            if dx < 0 || dy < 0 || dx >= FLAG_W as i32 || dy >= FLAG_H as i32 {
+                continue;
+            }
             let sx = x * img.w / dw;
             let sy = y * img.h / dh;
             let si = ((sy * img.w + sx) * 4) as usize;
@@ -571,24 +824,35 @@ fn blit_centered(canvas: &mut [u8], img: &RgbaImage, tint: [u8; 4], recolor: boo
             let sg = img.data.get(si + 1).copied().unwrap_or(0);
             let sb = img.data.get(si + 2).copied().unwrap_or(0);
             let sa = img.data.get(si + 3).copied().unwrap_or(0);
-            if sa < 8 {
+            let (rgb, alpha) = if let Some(colors) = colors {
+                let masks = [sr as f64 / 255.0, sg as f64 / 255.0, sb as f64 / 255.0];
+                let coverage = masks.iter().copied().fold(0.0, f64::max);
+                if coverage <= f64::EPSILON {
+                    continue;
+                }
+                let total = masks.iter().sum::<f64>().max(f64::EPSILON);
+                let mut rgb = [0u8; 3];
+                for channel in 0..3 {
+                    rgb[channel] = colors
+                        .iter()
+                        .zip(masks)
+                        .map(|(color, mask)| color[channel] as f64 * mask / total)
+                        .sum::<f64>()
+                        .round() as u8;
+                }
+                (rgb, coverage * (sa as f64 / 255.0))
+            } else {
+                ([sr, sg, sb], sa as f64 / 255.0)
+            };
+            if alpha <= f64::EPSILON {
                 continue;
             }
-            let (r, g, b) = if recolor {
-                let w = sr as f64 / 255.0;
-                (
-                    (tint[0] as f64 * w) as u8,
-                    (tint[1] as f64 * w) as u8,
-                    (tint[2] as f64 * w) as u8,
-                )
-            } else {
-                (sr, sg, sb)
-            };
-            let di = (((oy + y) * FLAG_W + (ox + x)) * 4) as usize;
-            let alpha = sa as f64 / 255.0;
-            canvas[di] = ((r as f64 * alpha) + canvas[di] as f64 * (1.0 - alpha)) as u8;
-            canvas[di + 1] = ((g as f64 * alpha) + canvas[di + 1] as f64 * (1.0 - alpha)) as u8;
-            canvas[di + 2] = ((b as f64 * alpha) + canvas[di + 2] as f64 * (1.0 - alpha)) as u8;
+            let di = (((dy as u32) * FLAG_W + dx as u32) * 4) as usize;
+            canvas[di] = ((rgb[0] as f64 * alpha) + canvas[di] as f64 * (1.0 - alpha)) as u8;
+            canvas[di + 1] =
+                ((rgb[1] as f64 * alpha) + canvas[di + 1] as f64 * (1.0 - alpha)) as u8;
+            canvas[di + 2] =
+                ((rgb[2] as f64 * alpha) + canvas[di + 2] as f64 * (1.0 - alpha)) as u8;
             canvas[di + 3] = 255;
         }
     }
@@ -603,6 +867,179 @@ fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
     writer.write_image_data(rgba).ok()?;
     drop(writer);
     Some(out)
+}
+
+#[derive(Debug)]
+struct Entry {
+    key: String,
+    value: String,
+}
+
+/// Parse direct `key = value` entries while preserving duplicate keys. This is
+/// intentionally a small object reader, not a general Clausewitz evaluator:
+/// scripted expressions remain opaque and therefore cannot become fake flags.
+fn entries(object: &str) -> Vec<Entry> {
+    let bytes = object.as_bytes();
+    let mut out = Vec::new();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        skip_space_and_comments(bytes, &mut cursor);
+        if cursor >= bytes.len() || bytes[cursor] == b'}' {
+            cursor += usize::from(cursor < bytes.len());
+            continue;
+        }
+        let key_start = cursor;
+        while cursor < bytes.len()
+            && !bytes[cursor].is_ascii_whitespace()
+            && !matches!(bytes[cursor], b'=' | b'{' | b'}')
+        {
+            cursor += 1;
+        }
+        let key = object[key_start..cursor].trim();
+        skip_inline_space(bytes, &mut cursor);
+        if key.is_empty() || cursor >= bytes.len() || bytes[cursor] != b'=' {
+            while cursor < bytes.len() && bytes[cursor] != b'\n' {
+                cursor += 1;
+            }
+            continue;
+        }
+        cursor += 1;
+        skip_inline_space(bytes, &mut cursor);
+        let value_start = cursor;
+        let value = if cursor < bytes.len() && bytes[cursor] == b'{' {
+            balanced_value(object, &mut cursor)
+        } else {
+            let prefix_start = cursor;
+            if cursor < bytes.len() && bytes[cursor] == b'"' {
+                consume_quoted(bytes, &mut cursor);
+            } else {
+                while cursor < bytes.len()
+                    && !bytes[cursor].is_ascii_whitespace()
+                    && !matches!(bytes[cursor], b'{' | b'}')
+                {
+                    cursor += 1;
+                }
+            }
+            let prefix_end = cursor;
+            skip_inline_space(bytes, &mut cursor);
+            if cursor < bytes.len() && bytes[cursor] == b'{' {
+                let block = balanced_value(object, &mut cursor);
+                format!("{} {{ {} }}", &object[prefix_start..prefix_end], block)
+            } else {
+                cursor = value_start;
+                let mut quoted = false;
+                while cursor < bytes.len() {
+                    match bytes[cursor] {
+                        b'"' => {
+                            quoted = !quoted;
+                            cursor += 1;
+                        }
+                        b'\n' if !quoted => break,
+                        b'#' if !quoted => break,
+                        b'}' if !quoted => break,
+                        _ => cursor += 1,
+                    }
+                }
+                object[value_start..cursor].trim().to_string()
+            }
+        };
+        if !key.starts_with('@') && !value.is_empty() {
+            out.push(Entry {
+                key: key.to_string(),
+                value,
+            });
+        }
+    }
+    out
+}
+
+fn balanced_value(object: &str, cursor: &mut usize) -> String {
+    let bytes = object.as_bytes();
+    let open = *cursor;
+    let mut depth = 0u32;
+    let mut quoted = false;
+    while *cursor < bytes.len() {
+        match bytes[*cursor] {
+            b'"' => quoted = !quoted,
+            b'#' if !quoted => {
+                while *cursor < bytes.len() && bytes[*cursor] != b'\n' {
+                    *cursor += 1;
+                }
+                continue;
+            }
+            b'{' if !quoted => depth += 1,
+            b'}' if !quoted => {
+                depth -= 1;
+                if depth == 0 {
+                    let value = object[open + 1..*cursor].to_string();
+                    *cursor += 1;
+                    return value;
+                }
+            }
+            _ => {}
+        }
+        *cursor += 1;
+    }
+    String::new()
+}
+
+fn skip_space_and_comments(bytes: &[u8], cursor: &mut usize) {
+    loop {
+        while *cursor < bytes.len() && bytes[*cursor].is_ascii_whitespace() {
+            *cursor += 1;
+        }
+        if *cursor < bytes.len() && bytes[*cursor] == b'#' {
+            while *cursor < bytes.len() && bytes[*cursor] != b'\n' {
+                *cursor += 1;
+            }
+        } else {
+            break;
+        }
+    }
+}
+
+fn skip_inline_space(bytes: &[u8], cursor: &mut usize) {
+    while *cursor < bytes.len() && matches!(bytes[*cursor], b' ' | b'\t' | b'\r') {
+        *cursor += 1;
+    }
+}
+
+fn consume_quoted(bytes: &[u8], cursor: &mut usize) {
+    *cursor += 1;
+    while *cursor < bytes.len() {
+        if bytes[*cursor] == b'"' && bytes.get((*cursor).saturating_sub(1)) != Some(&b'\\') {
+            *cursor += 1;
+            break;
+        }
+        *cursor += 1;
+    }
+}
+
+fn scalar_value(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.starts_with("list") || raw.starts_with('{') {
+        return None;
+    }
+    let value = unquote(raw).trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+fn unquote(raw: &str) -> &str {
+    raw.strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(raw)
+}
+
+fn numbers(raw: &str) -> Vec<f64> {
+    raw.split(|ch: char| !ch.is_ascii_digit() && !matches!(ch, '.' | '-' | '+' | 'e' | 'E'))
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| part.parse().ok())
+        .collect()
+}
+
+fn pair(raw: &str) -> Option<[f64; 2]> {
+    let values = numbers(raw);
+    Some([*values.first()?, *values.get(1)?])
 }
 
 #[cfg(test)]
@@ -707,5 +1144,107 @@ TAG = {
         };
         let png = render_coa(&coa, &colors, &BTreeMap::new()).expect("png");
         assert!(png.starts_with(b"\x89PNG"));
+    }
+
+    #[test]
+    fn parses_hsv360_normalized_rgb_and_bare_rgb() {
+        let mut colors = BTreeMap::new();
+        parse_named_colors(
+            br#"
+colors = {
+    red = hsv360 { 0 100 100 }
+    green = hsv { 0.333333 1 1 }
+    normalized = rgb { 1 0.5 0 }
+    byte = { 32 112 165 }
+    hexed = hex { 112233 }
+}
+"#,
+            &mut colors,
+        );
+        assert_eq!(colors["red"], [255, 0, 0, 255]);
+        assert!(colors["green"][1] >= 254);
+        assert_eq!(colors["normalized"], [255, 128, 0, 255]);
+        assert_eq!(colors["byte"], [32, 112, 165, 255]);
+        assert_eq!(colors["hexed"], [0x11, 0x22, 0x33, 255]);
+    }
+
+    #[test]
+    fn nested_instances_keep_emblem_colors_and_geometry() {
+        let mut coats = BTreeMap::new();
+        parse_coat_of_arms_file(
+            br#"
+PRU = {
+    pattern = "pattern_solid.tga"
+    color1 = "white"
+    colored_emblem = {
+        texture = "ce_eagle_prussia.dds"
+        instance = { scale = { 1.0 0.8 } position = { 0.5 0.4 } }
+        instance = { position = { 0.25 0.75 } scale = { 0.2 0.3 } }
+        color1 = "black"
+        color2 = "yellow"
+        color3 = "pearl"
+    }
+}
+"#,
+            &mut coats,
+        );
+        let emblem = &coats["PRU"].emblems[0];
+        assert_eq!(emblem.color1.as_deref(), Some("black"));
+        assert_eq!(emblem.color2.as_deref(), Some("yellow"));
+        assert_eq!(emblem.color3.as_deref(), Some("pearl"));
+        assert_eq!(emblem.instances.len(), 2);
+        assert_eq!(emblem.instances[1].position, [0.25, 0.75]);
+        assert_eq!(emblem.instances[1].scale, [0.2, 0.3]);
+    }
+
+    #[test]
+    fn resolves_parent_and_unambiguous_template_list_cycle_safely() {
+        let mut library = CoaLibrary::default();
+        library.colors.insert("blue".into(), [0, 0, 255, 255]);
+        library.coats.insert(
+            "base".into(),
+            CoatOfArms {
+                pattern: Some("pattern_solid.tga".into()),
+                color1: Some("blue".into()),
+                ..CoatOfArms::default()
+            },
+        );
+        library.coats.insert(
+            "GBR".into(),
+            CoatOfArms {
+                parents: vec!["base".into()],
+                ..CoatOfArms::default()
+            },
+        );
+        library
+            .template_lists
+            .insert("single".into(), vec!["base".into()]);
+        library.coats.insert(
+            "cycle_a".into(),
+            CoatOfArms {
+                parents: vec!["cycle_b".into()],
+                ..CoatOfArms::default()
+            },
+        );
+        library.coats.insert(
+            "cycle_b".into(),
+            CoatOfArms {
+                parents: vec!["cycle_a".into()],
+                ..CoatOfArms::default()
+            },
+        );
+        render_library(&mut library, &BTreeMap::new());
+        assert!(library.rendered.contains_key("GBR"));
+        assert!(library.rendered.contains_key("single"));
+        assert!(!library.rendered.contains_key("cycle_a"));
+    }
+
+    #[test]
+    fn unknown_color_is_unrenderable_not_magenta() {
+        let coa = CoatOfArms {
+            color1: Some("not_a_color".into()),
+            ..CoatOfArms::default()
+        };
+        assert!(render_coa(&coa, &BTreeMap::new(), &BTreeMap::new()).is_none());
     }
 }
