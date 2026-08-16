@@ -98,6 +98,26 @@ fn fixture_production_methods_have_goods_io() {
 }
 
 #[test]
+fn fixture_buildings_have_state_panel_metadata() {
+    let defs = load_fixture();
+    let farm = &defs.buildings["building_rye_farm"];
+    assert_eq!(farm.group.as_deref(), Some("bg_agriculture"));
+    assert_eq!(farm.city_type.as_deref(), Some("farm"));
+    let agriculture = &defs.building_groups["bg_agriculture"];
+    assert_eq!(agriculture.category.as_deref(), Some("rural"));
+    assert_eq!(agriculture.land_usage.as_deref(), Some("rural"));
+    assert!(agriculture.always_possible);
+    assert_eq!(
+        agriculture.default_building.as_deref(),
+        Some("building_rye_farm")
+    );
+    assert_eq!(
+        defs.labels.get("building_rye_farm").map(String::as_str),
+        Some("Rye Farms")
+    );
+}
+
+#[test]
 fn fixture_obsessions_empty() {
     let defs = load_fixture();
     assert!(defs.obsessions.is_empty());

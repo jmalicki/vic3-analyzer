@@ -32,6 +32,9 @@ fn plaintext_fixture_loads() {
         state.and_then(|s| s.region.as_deref()),
         Some("STATE_BRANDENBURG")
     );
+    assert_eq!(state.and_then(|s| s.arable_land), Some(45.0));
+    assert_eq!(state.and_then(|s| s.infrastructure), Some(32.5));
+    assert_eq!(state.and_then(|s| s.infrastructure_usage), Some(21.0));
 
     let farm = save
         .building_manager

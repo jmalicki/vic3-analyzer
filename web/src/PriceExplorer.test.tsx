@@ -12,7 +12,15 @@ const result: PricesResult = {
   ],
   states: [
     { id: 2, region_id: 'STATE_ZEBRA', market_id: 1 },
-    { id: 1, region_id: 'STATE_ALPACA', market_id: 1 },
+    {
+      id: 1,
+      region_id: 'STATE_ALPACA',
+      region_name: 'Alpaca',
+      market_id: 1,
+      arable_land: 10,
+      infrastructure: 22,
+      infrastructure_usage: 17,
+    },
   ],
   state_goods: [
     { state_id: 2, good_id: 'zany_tools', base: 40, price: 50, buy: 8, sell: 1 },
@@ -24,7 +32,7 @@ const result: PricesResult = {
       state_id: 1,
       type_id: 'building_silly_hammer_factory',
       level: 3,
-      staffing: 0.8,
+      staffing: 2.4,
       production_method_ids: ['pm_goofy_hammers'],
       inputs: [{ good_id: 'iron', quantity: 2, value: 80 }],
       outputs: [{ good_id: 'zany_tools', quantity: 3, value: 150 }],
@@ -32,6 +40,36 @@ const result: PricesResult = {
       cost: 80,
       profit: 70,
       short_inputs: ['iron'],
+    },
+  ],
+  building_types: [
+    {
+      id: 'building_silly_hammer_factory',
+      name: 'Silly Hammer Factory',
+      group_id: 'bg_manufacturing',
+    },
+    { id: 'building_rye_farm', name: 'Rye Farms', group_id: 'bg_agriculture' },
+  ],
+  building_groups: [
+    { id: 'bg_manufacturing', name: 'Manufacturing', category: 'urban', always_possible: false },
+    {
+      id: 'bg_agriculture',
+      name: 'Agriculture',
+      category: 'rural',
+      land_usage: 'rural',
+      always_possible: true,
+      default_building: 'building_rye_farm',
+    },
+  ],
+  state_pops: [
+    {
+      state_id: 1,
+      profession_id: 'machinists',
+      profession_name: 'Machinists',
+      demand_size: 12000,
+      wealth: 14,
+      culture_id: 'north_german',
+      culture_name: 'North German',
     },
   ],
   residual: 0,
@@ -144,7 +182,7 @@ describe('PriceExplorer', () => {
     expect(within(body).getAllByRole('row')[0]).toHaveTextContent('Cheap')
   })
 
-  it('links a good to sortable state orders, then a state to building economics', async () => {
+  it('links a good to the state Buildings and Pops page', async () => {
     const user = userEvent.setup()
     render(<PriceExplorer result={result} />)
 
@@ -154,12 +192,16 @@ describe('PriceExplorer', () => {
     expect(screen.getByRole('button', { name: 'Sort by State' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('link', { name: 'Alpaca' }))
-    expect(
-      await screen.findByRole('heading', { name: 'Alpaca buildings' }),
-    ).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Alpaca' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Buildings' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Pops' })).toBeInTheDocument()
     expect(screen.getByText('Silly Hammer Factory')).toBeInTheDocument()
     expect(screen.getByText('70.00')).toBeInTheDocument()
-    expect(screen.getByText('Iron')).toBeInTheDocument()
+    expect(screen.getByText(/Iron 2\.0/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Pops' }))
+    expect(screen.getByText('Machinists')).toBeInTheDocument()
+    expect(screen.getByText('North German')).toBeInTheDocument()
   })
 
   it('defaults to our market and hides states in foreign markets', () => {
@@ -178,7 +220,7 @@ describe('PriceExplorer', () => {
     expect(screen.queryByRole('link', { name: 'Yak' })).not.toBeInTheDocument()
   })
 
-  it('switches between domestic and market scope for states and buildings', async () => {
+  it('switches list scope and keeps state pages unfiltered', async () => {
     const user = userEvent.setup()
     window.location.hash = '#/prices/good/zany_tools'
     render(
@@ -192,9 +234,30 @@ describe('PriceExplorer', () => {
 
     await user.click(screen.getByRole('link', { name: 'Zebra' }))
     expect(await screen.findByText('Zebra Mill')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Our market' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Domestic' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'All' })).not.toBeInTheDocument()
+  })
+
+  it('shows remaining arable land as honest rural capacity', () => {
+    window.location.hash = '#/prices/state/1'
+    render(<PriceExplorer result={result} />)
+
+    expect(screen.getByText('10 empty rural slots')).toBeInTheDocument()
+    expect(screen.getByText('Rye Farms')).toBeInTheDocument()
+    expect(screen.getByText(/constructable placeholder/)).toBeInTheDocument()
+  })
+
+  it('can return to Our market when playerMarketId is present', async () => {
+    const user = userEvent.setup()
+    window.location.hash = '#/prices/good/zany_tools'
+    render(<PriceExplorer result={scopedResult} playerCountryId={10} playerMarketId={1} />)
+
+    await user.click(screen.getByRole('button', { name: 'Domestic' }))
     await user.click(screen.getByRole('button', { name: 'Our market' }))
-    expect(screen.queryByText('Zebra Mill')).not.toBeInTheDocument()
-    expect(screen.getByText('No modeled buildings in this state.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Our market' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('link', { name: 'Badger' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Zebra' })).not.toBeInTheDocument()
   })
 
   it('shows every state in all scope', async () => {

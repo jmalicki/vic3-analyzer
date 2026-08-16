@@ -168,6 +168,53 @@ section[aria-labelledby] { margin-top: 1rem; }
   margin-top: 1rem;
   padding: .7rem .85rem;
 }
+.state-header { align-items: center; display: flex; gap: 1.5rem; justify-content: space-between; }
+.state-owner { align-items: center; display: flex; gap: .75rem; }
+.state-owner .country-flag { height: 30px; width: 46px; }
+.state-owner h2 { margin: 0; }
+.state-owner span { color: #9ba79d; }
+.state-capacity { display: flex; gap: 1.5rem; margin: 0; text-align: right; }
+.state-capacity div { display: grid; gap: .15rem; }
+.state-capacity dt { color: #9ba79d; font-size: .75rem; text-transform: uppercase; }
+.state-capacity dd { font-variant-numeric: tabular-nums; margin: 0; }
+.state-tabs { border-bottom: 1px solid #4e5c50; display: flex; gap: .25rem; margin-top: 1.25rem; }
+.state-tabs button { background: transparent; border-radius: 0; color: #c8ccc5; }
+.state-tabs button[aria-selected="true"] {
+  border-bottom: 3px solid #d7e6a7;
+  color: #f4f5eb;
+}
+.state-building-groups { display: grid; gap: 1rem; }
+.state-building-group[aria-labelledby] { background: transparent; border: 0; margin: 0; padding: 0; }
+.state-building-group h3 {
+  border-bottom: 1px solid #4e5c50;
+  color: #b9c78c;
+  font-family: Georgia, serif;
+  font-weight: 400;
+  margin-bottom: .5rem;
+  padding-bottom: .35rem;
+}
+.state-building-list { display: grid; gap: .5rem; }
+.state-building-card {
+  background: #141b16;
+  border: 1px solid #37433a;
+  display: grid;
+  gap: .65rem;
+  padding: .75rem .85rem;
+}
+.state-building-title, .state-building-card.empty-slot {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+.state-building-title > div, .state-building-card.empty-slot > div { display: grid; gap: .15rem; }
+.state-building-title span, .state-building-card.empty-slot span { color: #9ba79d; font-size: .8rem; }
+.state-building-title b, .state-building-card.empty-slot b { font-variant-numeric: tabular-nums; }
+.state-building-card.empty-slot { border-style: dashed; color: #c8ccc5; }
+.state-building-stats { display: grid; gap: .4rem; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+.state-building-stats div { display: grid; grid-template-columns: 8rem 1fr; gap: .5rem; }
+.state-building-stats dt { color: #9ba79d; }
+.state-building-stats dd { margin: 0; overflow-wrap: anywhere; }
 .defs-builder { border-top: 1px solid #37433a; display: grid; gap: .65rem; padding-top: 1rem; }
 .defs-builder p { color: #9ba79d; font-size: .88rem; line-height: 1.4; margin: 0; }
 .defs-builder code { color: #d7e6a7; }
@@ -228,6 +275,10 @@ section[aria-labelledby] { margin-top: 1rem; }
   .inputs, .actions { grid-template-columns: 1fr; }
   .tool-heading { align-items: flex-start; flex-direction: column; }
   .goal-row { grid-template-columns: 1fr; }
+  .state-header, .state-capacity { align-items: flex-start; flex-direction: column; }
+  .state-capacity { gap: .75rem; text-align: left; }
+  .state-building-stats { grid-template-columns: 1fr; }
+  .state-building-card.empty-slot { align-items: flex-start; flex-direction: column; }
   .site-footer { align-items: flex-start; flex-direction: column; gap: .35rem; }
   .archive-list li { grid-template-columns: 1fr; gap: .5rem; }
 }

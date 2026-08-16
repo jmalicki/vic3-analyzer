@@ -10,8 +10,39 @@ export interface GoodPrice {
 export interface StateInfo {
   id: number
   region_id?: string
+  region_name?: string
   country_id?: number
   market_id?: number
+  arable_land?: number
+  infrastructure?: number
+  infrastructure_usage?: number
+}
+
+export interface StatePop {
+  state_id: number
+  profession_id?: string
+  profession_name?: string
+  demand_size?: number
+  wealth?: number
+  culture_id?: string
+  culture_name?: string
+}
+
+export interface BuildingTypeInfo {
+  id: string
+  name?: string
+  group_id?: string
+  city_type?: string
+}
+
+export interface BuildingGroupInfo {
+  id: string
+  name?: string
+  category?: string
+  land_usage?: string
+  always_possible: boolean
+  default_building?: string
+  parent_group?: string
 }
 
 export interface StateGood {
@@ -69,6 +100,9 @@ export interface PricesResult {
   states?: StateInfo[]
   state_goods?: StateGood[]
   buildings?: BuildingEconomics[]
+  building_types?: BuildingTypeInfo[]
+  building_groups?: BuildingGroupInfo[]
+  state_pops?: StatePop[]
   inputs?: MarketInputs
   residual: number
   status: 'converged' | 'max_iters' | 'failed'

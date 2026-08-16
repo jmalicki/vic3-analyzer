@@ -47,7 +47,7 @@ function dirEntry(name: string, children: DefsDropEntry[]): DefsDropEntry {
 
 function defsSummaryJson(goods = 53): string {
   return JSON.stringify({
-    blob_version: 5,
+    blob_version: 6,
     goods,
     labels: goods,
     icons: goods,
@@ -122,7 +122,7 @@ describe('DefsBuilder', () => {
     await user.upload(screen.getByLabelText('Victoria 3 definitions folder'), file)
     await waitFor(() => expect(wasm.build_defs_blob).toHaveBeenCalled())
     expect(onBuilt).toHaveBeenCalledWith(expect.objectContaining({ name: 'defs.postcard' }))
-    expect(await screen.findByText(/Built defs.postcard format v5 from 1 definition files/)).toBeInTheDocument()
+    expect(await screen.findByText(/Built defs.postcard format v6 from 1 definition files/)).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent(
       '53 goods, 53 localized names, 53 icons, 412 production methods',
     )

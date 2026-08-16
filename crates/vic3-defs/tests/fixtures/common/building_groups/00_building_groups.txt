@@ -1,0 +1,11 @@
+bg_agriculture = {
+    category = rural
+    land_usage = rural
+    always_possible = yes
+    default_building = building_rye_farm
+}
+bg_government = {
+    category = development
+    always_possible = yes
+    default_building = building_government_administration
+}

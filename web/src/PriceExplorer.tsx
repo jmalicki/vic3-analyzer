@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import type {
   BuildingEconomics,
+  BuildingGroupInfo,
+  BuildingTypeInfo,
   CountryInfo,
   GoodPrice,
   MarketInputs,
   PricesResult,
   StateGood,
   StateInfo,
+  StatePop,
 } from './types'
 
 type Direction = 'asc' | 'desc'
@@ -213,12 +216,14 @@ function CountryFlag({
   countryId,
   playerCountryId,
   countries,
+  showPlayer = false,
 }: {
   countryId?: number
   playerCountryId?: number
   countries: CountryInfo[]
+  showPlayer?: boolean
 }) {
-  if (playerCountryId == null || countryId == null || countryId === playerCountryId) {
+  if (countryId == null || (!showPlayer && (playerCountryId == null || countryId === playerCountryId))) {
     return null
   }
   const country = countries.find((row) => row.id === countryId)
@@ -299,59 +304,177 @@ function StatesTable({
   )
 }
 
-type BuildingSort = 'name' | 'level' | 'staffing' | 'revenue' | 'cost' | 'profit' | 'shortages'
+const STATE_CATEGORIES = ['urban', 'rural', 'development', 'military', 'infrastructure', 'other']
 
-function BuildingsTable({ buildings }: { buildings: BuildingEconomics[] }) {
-  const [sort, onSort] = useSort<BuildingSort>('profit', 'desc')
+function inheritedGroupValue(
+  group: BuildingGroupInfo | undefined,
+  groups: Map<string, BuildingGroupInfo>,
+  key: 'category' | 'land_usage',
+): string | undefined {
+  const seen = new Set<string>()
+  let current = group
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id)
+    if (current[key]) return current[key]
+    current = current.parent_group ? groups.get(current.parent_group) : undefined
+  }
+  return undefined
+}
+
+function flowText(building: BuildingEconomics, side: 'inputs' | 'outputs'): string {
+  return building[side]
+    .map((flow) => `${displayId(flow.good_id)} ${flow.quantity.toFixed(1)} (${flow.value.toFixed(2)})`)
+    .join(', ') || '—'
+}
+
+type StateBuildingRow =
+  | { kind: 'building'; building: BuildingEconomics; type?: BuildingTypeInfo; group?: BuildingGroupInfo }
+  | { kind: 'empty-rural'; capacity: number }
+  | { kind: 'constructable'; type: BuildingTypeInfo; group: BuildingGroupInfo }
+
+function StateBuildings({
+  state,
+  buildings,
+  buildingTypes,
+  buildingGroups,
+}: {
+  state?: StateInfo
+  buildings: BuildingEconomics[]
+  buildingTypes: BuildingTypeInfo[]
+  buildingGroups: BuildingGroupInfo[]
+}) {
+  const types = new Map(buildingTypes.map((building) => [building.id, building]))
+  const groups = new Map(buildingGroups.map((group) => [group.id, group]))
+  const rows = new Map<string, StateBuildingRow[]>()
+  const add = (category: string | undefined, row: StateBuildingRow) => {
+    const normalized = category && STATE_CATEGORIES.includes(category.toLowerCase())
+      ? category.toLowerCase()
+      : 'other'
+    rows.set(normalized, [...(rows.get(normalized) ?? []), row])
+  }
+
+  for (const building of buildings) {
+    const type = types.get(building.type_id)
+    const group = type?.group_id ? groups.get(type.group_id) : undefined
+    add(inheritedGroupValue(group, groups, 'category'), { kind: 'building', building, type, group })
+  }
+
+  const ruralLevels = buildings.reduce((total, building) => {
+    const type = types.get(building.type_id)
+    const group = type?.group_id ? groups.get(type.group_id) : undefined
+    return inheritedGroupValue(group, groups, 'land_usage') === 'rural'
+      ? total + building.level
+      : total
+  }, 0)
+  const emptyRural = Math.max(0, (state?.arable_land ?? 0) - ruralLevels)
+  if (emptyRural > 0) add('rural', { kind: 'empty-rural', capacity: emptyRural })
+
+  for (const group of buildingGroups) {
+    if (!group.always_possible || !group.default_building) continue
+    const hasGroup = buildings.some((building) => types.get(building.type_id)?.group_id === group.id)
+    const type = types.get(group.default_building)
+    if (!hasGroup && type) {
+      add(inheritedGroupValue(group, groups, 'category'), { kind: 'constructable', type, group })
+    }
+  }
+
+  if (![...rows.values()].some((categoryRows) => categoryRows.length)) {
+    return <p>No buildings or known capacity in this state.</p>
+  }
+
+  return (
+    <div className="state-building-groups">
+      {STATE_CATEGORIES.filter((category) => rows.has(category)).map((category) => (
+        <section className="state-building-group" aria-labelledby={`building-group-${category}`} key={category}>
+          <h3 id={`building-group-${category}`}>{displayId(category)}</h3>
+          <div className="state-building-list">
+            {rows.get(category)!.map((row, index) => {
+              if (row.kind === 'empty-rural') {
+                return (
+                  <article className="state-building-card empty-slot" key="empty-rural">
+                    <div><strong>Empty rural land</strong><span>Available capacity</span></div>
+                    <b>{row.capacity.toLocaleString()} empty rural slots</b>
+                  </article>
+                )
+              }
+              if (row.kind === 'constructable') {
+                return (
+                  <article className="state-building-card empty-slot" key={`empty-${row.group.id}`}>
+                    <div>
+                      <strong>{row.type.name || displayId(row.type.id)}</strong>
+                      <span>{row.group.name || displayId(row.group.id)}</span>
+                    </div>
+                    <b>0 levels · constructable placeholder</b>
+                  </article>
+                )
+              }
+              const { building, type, group } = row
+              const employment = building.level > 0
+                ? Math.max(0, Math.min(1, building.staffing / building.level))
+                : 0
+              return (
+                <article className="state-building-card" key={`${building.id}-${index}`}>
+                  <div className="state-building-title">
+                    <div>
+                      <strong>{type?.name || displayId(building.type_id)}</strong>
+                      <span>{group?.name || (group ? displayId(group.id) : 'Other')}</span>
+                    </div>
+                    <b>{building.level.toLocaleString()} levels</b>
+                  </div>
+                  <dl className="state-building-stats">
+                    <div><dt>Employment</dt><dd>{(employment * 100).toFixed(0)}%</dd></div>
+                    <div><dt>Model profit</dt><dd>{building.profit.toFixed(2)}</dd></div>
+                    <div><dt>Inputs</dt><dd>{flowText(building, 'inputs')}</dd></div>
+                    <div><dt>Outputs</dt><dd>{flowText(building, 'outputs')}</dd></div>
+                    <div>
+                      <dt>Production methods</dt>
+                      <dd>{(building.production_method_ids ?? []).map(displayId).join(', ') || '—'}</dd>
+                    </div>
+                  </dl>
+                </article>
+              )
+            })}
+          </div>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+type PopSort = 'profession' | 'size' | 'wealth' | 'culture'
+
+function StatePops({ pops }: { pops: StatePop[] }) {
+  const [sort, onSort] = useSort<PopSort>('size', 'desc')
   const sorted = useMemo(
-    () =>
-      sortRows(buildings, sort, (building, key) => {
-        if (key === 'name') return displayId(building.type_id)
-        if (key === 'shortages') return building.short_inputs.length
-        return building[key]
-      }),
-    [buildings, sort],
+    () => sortRows(pops, sort, (pop, key) => {
+      if (key === 'profession') return pop.profession_name || displayId(pop.profession_id || 'unknown')
+      if (key === 'culture') return pop.culture_name || displayId(pop.culture_id || 'unknown')
+      if (key === 'size') return pop.demand_size ?? 0
+      return pop.wealth ?? 0
+    }),
+    [pops, sort],
   )
   return (
     <div className="table-scroll">
       <table>
-        <thead>
-          <tr>
-            <th><SortButton label="Building" sortKey="name" sort={sort} onSort={onSort} /></th>
-            <th><SortButton label="Levels" sortKey="level" sort={sort} onSort={onSort} /></th>
-            <th><SortButton label="Staffing" sortKey="staffing" sort={sort} onSort={onSort} /></th>
-            <th><SortButton label="Revenue" sortKey="revenue" sort={sort} onSort={onSort} /></th>
-            <th><SortButton label="Input cost" sortKey="cost" sort={sort} onSort={onSort} /></th>
-            <th><SortButton label="Model profit" sortKey="profit" sort={sort} onSort={onSort} /></th>
-            <th>Inputs</th>
-            <th>Outputs</th>
-            <th><SortButton label="Shortages" sortKey="shortages" sort={sort} onSort={onSort} /></th>
-          </tr>
-        </thead>
+        <thead><tr>
+          <th><SortButton label="Profession" sortKey="profession" sort={sort} onSort={onSort} /></th>
+          <th><SortButton label="Demand size" sortKey="size" sort={sort} onSort={onSort} /></th>
+          <th><SortButton label="Wealth" sortKey="wealth" sort={sort} onSort={onSort} /></th>
+          <th><SortButton label="Culture" sortKey="culture" sort={sort} onSort={onSort} /></th>
+        </tr></thead>
         <tbody>
-          {sorted.map((building) => (
-            <tr key={building.id}>
-              <th title={building.type_id}>{displayId(building.type_id)}</th>
-              <td>{building.level.toFixed(0)}</td>
-              <td>{(building.staffing * 100).toFixed(0)}%</td>
-              <td>{building.revenue.toFixed(2)}</td>
-              <td>{building.cost.toFixed(2)}</td>
-              <td>{building.profit.toFixed(2)}</td>
-              <td>
-                {building.inputs
-                  .map((flow) => `${displayId(flow.good_id)} ${flow.quantity.toFixed(1)} (${flow.value.toFixed(2)})`)
-                  .join(', ') || '—'}
-              </td>
-              <td>
-                {building.outputs
-                  .map((flow) => `${displayId(flow.good_id)} ${flow.quantity.toFixed(1)} (${flow.value.toFixed(2)})`)
-                  .join(', ') || '—'}
-              </td>
-              <td>{building.short_inputs.map(displayId).join(', ') || '—'}</td>
+          {sorted.map((pop, index) => (
+            <tr key={`${pop.profession_id}-${pop.culture_id}-${index}`}>
+              <th>{pop.profession_name || displayId(pop.profession_id || 'unknown')}</th>
+              <td>{pop.demand_size?.toLocaleString() ?? '—'}</td>
+              <td>{pop.wealth ?? '—'}</td>
+              <td>{pop.culture_name || displayId(pop.culture_id || 'unknown')}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      {!pops.length && <p>No pops in this state.</p>}
     </div>
   )
 }
@@ -402,8 +525,13 @@ export function PriceExplorer({
 }) {
   const [view, setView] = useState<View>(() => currentView())
   const [filterMode, setFilterMode] = useState<FilterMode>('our_market')
+  const [stateTab, setStateTab] = useState<'buildings' | 'pops'>('buildings')
   useEffect(() => {
-    const update = () => setView(currentView())
+    const update = () => {
+      const next = currentView()
+      setView(next)
+      if (next.kind === 'state') setStateTab('buildings')
+    }
     window.addEventListener('hashchange', update)
     return () => window.removeEventListener('hashchange', update)
   }, [])
@@ -411,6 +539,9 @@ export function PriceExplorer({
   const states = result.states ?? []
   const stateGoods = result.state_goods ?? []
   const buildings = result.buildings ?? []
+  const buildingTypes = result.building_types ?? []
+  const buildingGroups = result.building_groups ?? []
+  const statePops = result.state_pops ?? []
   const countries = result.countries ?? []
   const missingPlayerMarket = filterMode === 'our_market' && playerMarketId == null
   const effectiveFilterMode: FilterMode = missingPlayerMarket ? 'all' : filterMode
@@ -457,29 +588,79 @@ export function PriceExplorer({
 
   if (view.kind === 'state') {
     const state = states.find((row) => row.id === view.id)
-    const rows = stateIsInScope(state)
-      ? buildings.filter((building) => building.state_id === view.id)
-      : []
-    const name = displayId(state?.region_id || `State ${view.id}`)
+    const rows = buildings.filter((building) => building.state_id === view.id)
+    const pops = statePops.filter((pop) => pop.state_id === view.id)
+    const name = state?.region_name || displayId(state?.region_id || `State ${view.id}`)
+    const owner = countries.find((country) => country.id === state?.country_id)
     return (
-      <section aria-labelledby="state-buildings-heading">
+      <section aria-labelledby="state-heading" className="state-panel">
         <nav className="breadcrumbs" aria-label="Price detail">
           <a href="#/prices">Goods</a><span>›</span><span>{name}</span>
         </nav>
-        <div className="result-heading">
-          <h2 id="state-buildings-heading">{name} buildings</h2>
-          <span>{rows.length} buildings</span>
+        <div className="state-header">
+          <div className="state-owner">
+            <CountryFlag
+              countryId={state?.country_id}
+              playerCountryId={playerCountryId}
+              countries={countries}
+              showPlayer
+            />
+            <div>
+              <h2 id="state-heading">{name}</h2>
+              <span>{owner?.name || owner?.tag || 'Owner unavailable'}</span>
+            </div>
+          </div>
+          <dl className="state-capacity">
+            <div><dt>Arable land</dt><dd>{state?.arable_land?.toLocaleString() ?? '—'}</dd></div>
+            {state?.infrastructure != null && (
+              <div>
+                <dt>Infrastructure</dt>
+                <dd>
+                  {state.infrastructure.toLocaleString()}
+                  {state.infrastructure_usage != null
+                    ? ` (${state.infrastructure_usage.toLocaleString()} used)`
+                    : ''}
+                </dd>
+              </div>
+            )}
+          </dl>
         </div>
-        <ScopeFilter mode={effectiveFilterMode} onChange={setFilterMode} />
-        {missingPlayerMarket && (
-          <p className="model-info">Player market unavailable; showing all states.</p>
+        <div className="state-tabs" role="tablist" aria-label="State details">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={stateTab === 'buildings'}
+            onClick={() => setStateTab('buildings')}
+          >
+            Buildings
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={stateTab === 'pops'}
+            onClick={() => setStateTab('pops')}
+          >
+            Pops
+          </button>
+        </div>
+        {stateTab === 'buildings' ? (
+          <div role="tabpanel" aria-label="Buildings">
+            <p className="model-info">
+              Profit and goods flows are estimates at whole-save synthetic prices. Empty rows show
+              saved rural capacity or broadly available defaults, not full construction eligibility.
+            </p>
+            <StateBuildings
+              state={state}
+              buildings={rows}
+              buildingTypes={buildingTypes}
+              buildingGroups={buildingGroups}
+            />
+          </div>
+        ) : (
+          <div role="tabpanel" aria-label="Pops">
+            <StatePops pops={pops} />
+          </div>
         )}
-        <p className="model-info">
-          Revenue, costs, profit, and shortages are model estimates from production methods,
-          staffing, and whole-save synthetic prices — not saved game cashflow fields. This filter
-          scopes buildings only.
-        </p>
-        {rows.length ? <BuildingsTable buildings={rows} /> : <p>No modeled buildings in this state.</p>}
       </section>
     )
   }
