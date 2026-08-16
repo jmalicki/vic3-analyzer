@@ -51,6 +51,41 @@ pub fn build_defs_blob(manifest_json: &str, contents: &[u8]) -> Result<Vec<u8>, 
     build_defs_blob_bytes(manifest_json, contents).map_err(to_js)
 }
 
+/// Streaming counterpart to [`build_defs_blob`].
+///
+/// A full install carries over 400 MB of coat-of-arms art. Handing that to
+/// wasm in one array costs the tab roughly a gigabyte and freezes it; feeding
+/// batches lets the page read, submit, and release a few files at a time.
+#[wasm_bindgen]
+#[derive(Default)]
+pub struct DefsBlobBuilder {
+    inner: vic3_defs::DefsBuilder,
+}
+
+#[wasm_bindgen]
+impl DefsBlobBuilder {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> DefsBlobBuilder {
+        DefsBlobBuilder::default()
+    }
+
+    /// Absorb one batch, in the same manifest form [`build_defs_blob`] takes.
+    #[wasm_bindgen(js_name = addBatch)]
+    pub fn add_batch(&mut self, manifest_json: &str, contents: &[u8]) -> Result<(), JsError> {
+        let files = manifest_files(manifest_json, contents).map_err(to_js)?;
+        self.inner.add_files(files);
+        Ok(())
+    }
+
+    /// Encode everything absorbed so far. The builder is empty afterwards.
+    pub fn finish(&mut self) -> Result<Vec<u8>, JsError> {
+        let defs = std::mem::take(&mut self.inner)
+            .finish()
+            .map_err(|error| to_js(WasmError::from(error)))?;
+        vic3_defs::encode_blob(&defs).map_err(|error| to_js(WasmError::from(error)))
+    }
+}
+
 /// Canonical file/directory allowlist used by the browser's local folder walk.
 #[wasm_bindgen]
 pub fn classify_defs_path(path: &str, is_directory: bool) -> String {
@@ -314,10 +349,13 @@ struct DefsFileEntry {
     length: usize,
 }
 
-/// Native/test entry for [`build_defs_blob`].
-pub fn build_defs_blob_bytes(manifest_json: &str, contents: &[u8]) -> Result<Vec<u8>, WasmError> {
+/// Resolve a `{path, offset, length}` manifest against its payload.
+fn manifest_files(
+    manifest_json: &str,
+    contents: &[u8],
+) -> Result<Vec<(String, Vec<u8>)>, WasmError> {
     let manifest: Vec<DefsFileEntry> = serde_json::from_str(manifest_json)?;
-    let files = manifest
+    manifest
         .into_iter()
         .map(|entry| {
             let end = entry.offset.checked_add(entry.length).ok_or_else(|| {
@@ -334,8 +372,12 @@ pub fn build_defs_blob_bytes(manifest_json: &str, contents: &[u8]) -> Result<Vec
             })?;
             Ok((entry.path, bytes.to_vec()))
         })
-        .collect::<Result<Vec<_>, WasmError>>()?;
-    let defs = vic3_defs::load_from_files(files)?;
+        .collect()
+}
+
+/// Native/test entry for [`build_defs_blob`].
+pub fn build_defs_blob_bytes(manifest_json: &str, contents: &[u8]) -> Result<Vec<u8>, WasmError> {
+    let defs = vic3_defs::load_from_files(manifest_files(manifest_json, contents)?)?;
     Ok(vic3_defs::encode_blob(&defs)?)
 }
 

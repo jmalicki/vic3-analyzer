@@ -280,15 +280,19 @@ mod tests {
         let idle = Vic3Node::new(PlanningState::default(), goal.clone(), config);
         assert_eq!(idle.heuristic(), 40);
 
-        let mut matching = PlanningState::default();
-        matching.queued_tech = Some("railways".into());
+        let matching = PlanningState {
+            queued_tech: Some("railways".into()),
+            ..PlanningState::default()
+        };
         assert_eq!(
             Vic3Node::new(matching, goal.clone(), config).heuristic(),
             40
         );
 
-        let mut unrelated = PlanningState::default();
-        unrelated.queued_tech = Some("unrelated_tech".into());
+        let unrelated = PlanningState {
+            queued_tech: Some("unrelated_tech".into()),
+            ..PlanningState::default()
+        };
         assert_eq!(Vic3Node::new(unrelated, goal, config).heuristic(), 40);
     }
 

@@ -177,6 +177,43 @@ fn in_memory_files_match_filesystem_loader() {
 }
 
 #[test]
+fn one_file_at_a_time_matches_a_single_batch() {
+    fn collect(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(String, Vec<u8>)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect(root, &path, out);
+            } else if path.extension().is_some_and(|extension| {
+                extension == "txt" || extension == "yml" || extension == "dds" || extension == "tga"
+            }) {
+                out.push((
+                    path.strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string(),
+                    std::fs::read(path).unwrap(),
+                ));
+            }
+        }
+    }
+
+    let root = fixture_root();
+    let mut files = Vec::new();
+    collect(&root, &root, &mut files);
+    // The browser submits batches as it reads them, so arrival order must not
+    // change the result the way a single sorted pass would.
+    files.reverse();
+    let mut builder = vic3_defs::DefsBuilder::new();
+    for file in files.clone() {
+        builder.add_files([file]);
+    }
+    assert_eq!(builder.finish().expect("streamed fixture tree"), {
+        files.reverse();
+        load_from_files(files).expect("in-memory fixture tree")
+    });
+}
+
+#[test]
 #[ignore = "requires VIC3_GAME pointing at a Victoria 3 install or game directory"]
 fn live_game_renders_representative_flags_without_magenta() {
     let root = std::env::var_os("VIC3_GAME").expect("set VIC3_GAME");

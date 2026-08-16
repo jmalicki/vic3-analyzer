@@ -58,32 +58,91 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
 pub fn load_from_files(
     files: impl IntoIterator<Item = (String, Vec<u8>)>,
 ) -> Result<GameDefs, DefsError> {
-    let mut files = files
-        .into_iter()
-        .filter(|(path, _)| classify_defs_path(path, false) == DefsPathClass::Read)
-        .filter_map(|(path, bytes)| {
-            normalize_defs_path(&path).map(|relative| (relative, PathBuf::from(path), bytes))
-        })
-        .filter(|(relative, _, _)| {
-            relative.ends_with(".txt")
-                || relative.ends_with(".yml")
-                || relative.ends_with(".dds")
-                || relative.ends_with(".tga")
-        })
-        .collect::<Vec<_>>();
-    files.sort_by(|left, right| left.0.cmp(&right.0));
-    if !files
-        .iter()
-        .any(|(path, _, _)| path.starts_with("common/goods/"))
-    {
-        return Err(DefsError::NotAGameRoot(PathBuf::from("<selected files>")));
+    let mut builder = DefsBuilder::default();
+    builder.add_files(files);
+    builder.finish()
+}
+
+/// Incremental counterpart to [`load_from_files`].
+///
+/// A full install offers over 400 MB of coat-of-arms art, which a browser tab
+/// cannot buffer in one array and hand to wasm. Feeding it in batches keeps
+/// only the current batch alive: textures are decoded and reduced to flag size
+/// on arrival, so what the builder retains is a few megabytes of thumbnails.
+#[derive(Debug, Default)]
+pub struct DefsBuilder {
+    /// Clausewitz and localization sources, parsed together at the end so a
+    /// later file still overrides an earlier one by sorted path.
+    texts: Vec<(String, Vec<u8>)>,
+    coa_textures: BTreeMap<String, crate::coa::RgbaImage>,
+    icons: BTreeMap<String, Vec<u8>>,
+}
+
+impl DefsBuilder {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    let mut defs = GameDefs::default();
-    let mut decoded_icons = BTreeMap::new();
-    let mut library = crate::coa::CoaLibrary::default();
-    let mut coa_textures = BTreeMap::new();
-    for (relative, path, bytes) in &files {
+    /// Absorb one batch. Unsupported paths are dropped, as they are on the
+    /// one-shot path, so the allowlist stays the trust boundary.
+    pub fn add_files(&mut self, files: impl IntoIterator<Item = (String, Vec<u8>)>) {
+        for (path, bytes) in files {
+            if classify_defs_path(&path, false) != DefsPathClass::Read {
+                continue;
+            }
+            let Some(relative) = normalize_defs_path(&path) else {
+                continue;
+            };
+            if relative.ends_with(".txt") || relative.ends_with(".yml") {
+                self.texts.push((relative, bytes));
+            } else if relative.contains("gfx/coat_of_arms/")
+                && (relative.ends_with(".dds") || relative.ends_with(".tga"))
+            {
+                if let (Some(key), Some(image)) = (
+                    texture_file_key(&relative),
+                    crate::coa::decode_flag_texture(&bytes),
+                ) {
+                    self.coa_textures.insert(key, image);
+                }
+            } else if relative.ends_with(".dds") {
+                if let (Some(stem), Some(png)) = (icon_stem(&relative), icons::dds_to_png(&bytes)) {
+                    self.icons.insert(stem, png);
+                }
+            }
+        }
+    }
+
+    pub fn finish(self) -> Result<GameDefs, DefsError> {
+        let mut texts = self.texts;
+        texts.sort_by(|left, right| left.0.cmp(&right.0));
+        if !texts
+            .iter()
+            .any(|(path, _)| path.starts_with("common/goods/"))
+        {
+            return Err(DefsError::NotAGameRoot(PathBuf::from("<selected files>")));
+        }
+
+        let mut defs = GameDefs::default();
+        let mut library = crate::coa::CoaLibrary::default();
+        for (relative, bytes) in &texts {
+            parse_defs_text(relative, bytes, &mut defs, &mut library)?;
+        }
+        attach_icons(&mut defs, self.icons);
+        crate::coa::render_library_scaled(&mut library, &self.coa_textures);
+        finish_coa(&mut defs, library);
+        Ok(defs)
+    }
+}
+
+/// Fold one Clausewitz or localization file into the definitions under build.
+fn parse_defs_text(
+    relative: &str,
+    bytes: &[u8],
+    defs: &mut GameDefs,
+    library: &mut crate::coa::CoaLibrary,
+) -> Result<(), DefsError> {
+    let path = &PathBuf::from(relative);
+    {
         if relative.starts_with("common/defines/") {
             let raw: RawDefinesFile = parse_bytes(path, bytes)?;
             if let Some(value) = raw.price_range() {
@@ -184,22 +243,9 @@ pub fn load_from_files(
             crate::coa::parse_flag_definitions(bytes, &mut library.flag_defs);
         } else if is_english_localization(relative) {
             parse_localization(bytes, &mut defs.labels);
-        } else if relative.contains("gfx/coat_of_arms/")
-            && (relative.ends_with(".dds") || relative.ends_with(".tga"))
-        {
-            if let Some(key) = texture_file_key(relative) {
-                coa_textures.insert(key, bytes.clone());
-            }
-        } else if relative.ends_with(".dds") {
-            if let (Some(stem), Some(png)) = (icon_stem(relative), icons::dds_to_png(bytes)) {
-                decoded_icons.insert(stem, png);
-            }
         }
     }
-    attach_icons(&mut defs, decoded_icons);
-    crate::coa::render_library(&mut library, &coa_textures);
-    finish_coa(&mut defs, library);
-    Ok(defs)
+    Ok(())
 }
 
 fn load_icons(data_root: &Path) -> Result<BTreeMap<String, Vec<u8>>, DefsError> {

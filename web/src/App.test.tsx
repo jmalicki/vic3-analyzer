@@ -56,6 +56,12 @@ const schema = JSON.stringify({
 function mockApi(): WasmApi {
   return {
     classify_defs_path: vi.fn(() => 'read' as const),
+    DefsBlobBuilder: class {
+      addBatch() {}
+      finish() {
+        return new Uint8Array([7, 8, 9])
+      }
+    },
     build_defs_blob: vi.fn(() => new Uint8Array([7, 8, 9])),
     defs_icons: vi.fn(() => JSON.stringify({ iron: 'data:image/png;base64,IRONICON' })),
     defs_summary: vi.fn(() =>
@@ -390,7 +396,12 @@ describe('prices UI', () => {
   it('uses definitions built locally instead of the dev-only demo blob', async () => {
     const user = userEvent.setup()
     const api = mockApi()
-    api.build_defs_blob = vi.fn(() => new TextEncoder().encode('MOCKY-NOT-A-REAL-BLOB'))
+    api.DefsBlobBuilder = class {
+      addBatch() {}
+      finish() {
+        return new TextEncoder().encode('MOCKY-NOT-A-REAL-BLOB')
+      }
+    }
     render(<App wasmApi={api} />)
     await selectSave(user)
 

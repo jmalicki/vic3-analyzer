@@ -56,6 +56,47 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     expect(summary.goods).toBe(1)
   })
 
+  it('streams batches into the same blob a single call produces', async () => {
+    const sources = [
+      { path: 'game/common/goods/00_goods.txt', text: 'grain = { cost = 20 }' },
+      { path: 'game/common/goods/01_goods.txt', text: 'wood = { cost = 30 }' },
+      { path: 'game/localization/english/goods_l_english.yml', text: 'grain:0 "Grain"' },
+    ]
+    const pack = (files: typeof sources) => {
+      const encoded = files.map((file) => ({
+        path: file.path,
+        bytes: new TextEncoder().encode(file.text),
+      }))
+      const contents = new Uint8Array(
+        encoded.reduce((total, file) => total + file.bytes.length, 0),
+      )
+      let offset = 0
+      const manifest = encoded.map((file) => {
+        contents.set(file.bytes, offset)
+        const entry = { path: file.path, offset, length: file.bytes.length }
+        offset += file.bytes.length
+        return entry
+      })
+      return { manifestJson: JSON.stringify(manifest), contents }
+    }
+
+    const builder = new api.DefsBlobBuilder()
+    // One file per batch, the way a browser hands over what it has just read.
+    for (const source of sources) {
+      const batch = pack([source])
+      builder.addBatch(batch.manifestJson, batch.contents)
+    }
+    const streamed = builder.finish()
+
+    const whole = pack(sources)
+    const oneShot = await api.build_defs_blob(whole.manifestJson, whole.contents)
+    expect(Array.from(streamed)).toEqual(Array.from(oneShot))
+
+    const summary = JSON.parse(await api.defs_summary(streamed))
+    expect(summary.goods).toBe(2)
+    expect(summary.labels).toBe(1)
+  })
+
   it('classifies source paths with the Rust-owned allowlist', () => {
     expect(api.classify_defs_path('game/common/goods/00_goods.txt', false)).toBe('read')
     expect(api.classify_defs_path('game/gfx/models', true)).toBe('prune')
