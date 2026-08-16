@@ -58,6 +58,9 @@ function mockApi(): WasmApi {
     classify_defs_path: vi.fn(() => 'read' as const),
     DefsBlobBuilder: class {
       addBatch() {}
+      neededGfxNames() {
+        return '[]'
+      }
       finish() {
         return new Uint8Array([7, 8, 9])
       }
@@ -398,6 +401,9 @@ describe('prices UI', () => {
     const api = mockApi()
     api.DefsBlobBuilder = class {
       addBatch() {}
+      neededGfxNames() {
+        return '[]'
+      }
       finish() {
         return new TextEncoder().encode('MOCKY-NOT-A-REAL-BLOB')
       }

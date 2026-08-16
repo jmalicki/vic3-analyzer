@@ -7,10 +7,13 @@ import {
   type InputHTMLAttributes,
 } from 'react'
 import {
-  DEFS_BATCH_SIZE,
+  enumerateDroppedDefsFiles,
+  isGfxDefsPath,
+  neededGfxFile,
   packDefsFiles,
-  streamDroppedDefsFiles,
-  usefulDefsPath,
+  selectedDefsFiles,
+  streamDefsFiles,
+  type DefsFileSource,
   type DefsPathClassifier,
   type DefsSourceFile,
 } from './defsFiles'
@@ -72,21 +75,15 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
    * progress bar actually repaint.
    */
   const build = async (
-    pump: (
-      submit: (batch: DefsSourceFile[]) => Promise<void>,
-      /** Call once the file count is known, to make the bar determinate. */
-      setTotal: (total: number) => void,
-    ) => Promise<void>,
+    locate: () => Promise<DefsFileSource[]>,
     label: string,
     emptyMessage: string,
-    knownTotal?: number,
   ) => {
     if (!api) {
       fail(new Error('The analysis engine is still loading. Try again in a moment.'))
       return
     }
-    let total = knownTotal
-    setProgress({ label, done: 0, total })
+    setProgress({ label })
     setBuilt(false)
     setStatus(undefined)
     setError(undefined)
@@ -95,23 +92,33 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
     const builder = new api.DefsBlobBuilder()
     let accepted = 0
     try {
-      await pump(
-        async (batch) => {
-          const packed = packDefsFiles(batch, classify)
-          const manifest = JSON.parse(packed.manifestJson) as unknown[]
-          if (manifest.length > 0) {
-            builder.addBatch(packed.manifestJson, packed.contents)
-            accepted += manifest.length
-          }
-          setProgress({ label, done: accepted, total })
-          await yieldToBrowser()
-        },
-        (counted) => {
-          total = counted
-          setProgress({ label, done: accepted, total })
-        },
-      )
+      const sources = await locate()
+      let total = sources.length
+      setProgress({ label, done: 0, total })
+      const submit = async (batch: DefsSourceFile[]) => {
+        const packed = packDefsFiles(batch, classify)
+        const manifest = JSON.parse(packed.manifestJson) as unknown[]
+        if (manifest.length > 0) {
+          builder.addBatch(packed.manifestJson, packed.contents)
+          accepted += manifest.length
+        }
+        setProgress({ label, done: accepted, total })
+        await yieldToBrowser()
+      }
+
+      // Definitions first: they name the art worth reading, and a full install
+      // ships hundreds of emblems and icons that nothing points at.
+      const text = sources.filter((source) => !isGfxDefsPath(source.path))
+      const read = await streamDefsFiles(text, submit)
       if (accepted === 0) throw new Error(emptyMessage)
+
+      const needed = new Set(JSON.parse(builder.neededGfxNames()) as string[])
+      const art = sources.filter(
+        (source) => isGfxDefsPath(source.path) && neededGfxFile(source.path, needed),
+      )
+      total = text.length + art.length
+      setProgress({ label, done: accepted, total })
+      await streamDefsFiles(art, submit, { alreadyRead: read })
       setProgress({ label: 'Parsing definitions in wasm' })
       // finish() blocks the thread, so let the new label paint first.
       await yieldToBrowser()
@@ -143,28 +150,10 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
     }
     const classify: DefsPathClassifier = (path, isDirectory) =>
       api.classify_defs_path(path, isDirectory)
-    const chosen = [...list].filter((file) =>
-      usefulDefsPath(file.webkitRelativePath || file.name, classify),
-    )
     void build(
-      async (submit) => {
-        let batch: DefsSourceFile[] = []
-        for (const file of chosen) {
-          batch.push({
-            path: file.webkitRelativePath || file.name,
-            bytes: new Uint8Array(await file.arrayBuffer()),
-          })
-          if (batch.length >= DEFS_BATCH_SIZE) {
-            const full = batch
-            batch = []
-            await submit(full)
-          }
-        }
-        if (batch.length > 0) await submit(batch)
-      },
+      async () => selectedDefsFiles(list, classify),
       'Reading definition files',
       'No supported common/*.txt definition files were found.',
-      chosen.length,
     )
   }
 
@@ -180,11 +169,7 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
       api.classify_defs_path(path, isDirectory)
     const items = [...(event.dataTransfer.items ?? [])]
     await build(
-      async (submit, setTotal) => {
-        await streamDroppedDefsFiles(items, classify, (batch) => submit(batch), {
-          onTotal: setTotal,
-        })
-      },
+      () => enumerateDroppedDefsFiles(items, classify),
       'Reading dropped files',
       'That drop had no supported definitions. Drag the Victoria 3 game folder itself.',
     )

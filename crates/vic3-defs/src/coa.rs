@@ -4,7 +4,7 @@
 //! This renders a small PNG from `pattern` + `color1` and optional centered
 //! colored/textured emblems so foreign states can show a recognizable flag.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::icons;
 
@@ -494,19 +494,10 @@ pub fn render_library(
 ) {
     resolve_parents(&mut library.coats);
     resolve_template_lists(library);
-    let used_textures = library
-        .coats
-        .values()
-        .flat_map(|coat| {
-            coat.pattern
-                .iter()
-                .chain(coat.emblems.iter().map(|emblem| &emblem.texture))
-        })
-        .map(|texture| texture_key(texture))
-        .collect::<std::collections::BTreeSet<_>>();
-    let decoded = used_textures
+    let decoded = library
+        .needed_texture_names()
         .into_iter()
-        .filter_map(|key| Some((key.clone(), decode_flag_texture(textures.get(&key)?)?)))
+        .filter_map(|key: String| Some((key.clone(), decode_flag_texture(textures.get(&key)?)?)))
         .collect::<BTreeMap<_, _>>();
     render_resolved(library, &decoded);
 }
@@ -527,6 +518,25 @@ fn render_resolved(library: &mut CoaLibrary, textures: &BTreeMap<String, RgbaIma
         if let Some(png) = render_coa(&coa, &library.colors, textures) {
             library.rendered.insert(id, png);
         }
+    }
+}
+
+impl CoaLibrary {
+    /// Texture file names every coat could ask for.
+    ///
+    /// Parent and template-list resolution only copy emblems between coats
+    /// already present, so the union taken before resolving is a superset of
+    /// what rendering will look up.
+    pub fn needed_texture_names(&self) -> BTreeSet<String> {
+        self.coats
+            .values()
+            .flat_map(|coat| {
+                coat.pattern
+                    .iter()
+                    .chain(coat.emblems.iter().map(|emblem| &emblem.texture))
+            })
+            .map(|texture| texture_key(texture))
+            .collect()
     }
 }
 

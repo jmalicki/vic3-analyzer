@@ -77,6 +77,20 @@ impl DefsBlobBuilder {
         Ok(())
     }
 
+    /// JSON array of the lowercase `gfx` file names the definitions reference.
+    ///
+    /// Call after the text files are in: the browser can then skip reading the
+    /// art nothing points at, which is roughly a third of the emblems and most
+    /// of the goods icons.
+    #[wasm_bindgen(js_name = neededGfxNames)]
+    pub fn needed_gfx_names(&mut self) -> Result<String, JsError> {
+        let names = self
+            .inner
+            .needed_gfx_names()
+            .map_err(|error| to_js(WasmError::from(error)))?;
+        serde_json::to_string(&names).map_err(|error| to_js(WasmError::from(error)))
+    }
+
     /// Encode everything absorbed so far. The builder is empty afterwards.
     pub fn finish(&mut self) -> Result<Vec<u8>, JsError> {
         let defs = std::mem::take(&mut self.inner)

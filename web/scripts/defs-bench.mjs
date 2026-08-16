@@ -66,8 +66,11 @@ const streamStart = performance.now()
 const builder = new wasmModule.DefsBlobBuilder()
 let peakBatchBytes = 0
 let longestBlockMs = 0
-for (let start = 0; start < files.length; start += batchSize) {
-  const batch = files.slice(start, start + batchSize)
+
+// Text first, then only the art the definitions actually name.
+const isGfx = (file) => file.path.includes('/gfx/')
+const text = files.filter((file) => !isGfx(file))
+const submit = (batch) => {
   const bytes = batch.reduce((sum, file) => sum + file.size, 0)
   peakBatchBytes = Math.max(peakBatchBytes, bytes)
   const contents = new Uint8Array(bytes)
@@ -82,6 +85,26 @@ for (let start = 0; start < files.length; start += batchSize) {
   builder.addBatch(JSON.stringify(manifest), contents)
   longestBlockMs = Math.max(longestBlockMs, performance.now() - blockStart)
 }
+for (let start = 0; start < text.length; start += batchSize) {
+  submit(text.slice(start, start + batchSize))
+}
+const needed = new Set(JSON.parse(builder.neededGfxNames()))
+const wanted = files.filter((file) => {
+  if (!isGfx(file)) return false
+  const name = file.path.split('/').pop().toLowerCase()
+  return needed.has(name) || needed.has(name.replace(/\.[^.]+$/, ''))
+})
+const skipped = files.length - text.length - wanted.length
+const skippedBytes = files
+  .filter((file) => isGfx(file) && !wanted.includes(file))
+  .reduce((sum, file) => sum + file.size, 0)
+console.log(
+  `skipped ${skipped} unreferenced gfx files (${mb(skippedBytes)} MB never read)`,
+)
+for (let start = 0; start < wanted.length; start += batchSize) {
+  submit(wanted.slice(start, start + batchSize))
+}
+
 const finishStart = performance.now()
 const blob = builder.finish()
 const finishMs = performance.now() - finishStart

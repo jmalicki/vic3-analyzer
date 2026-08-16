@@ -6,6 +6,8 @@ import type { JsonSchema } from './types'
  */
 export interface DefsBlobBuilder {
   addBatch(manifestJson: string, contents: Uint8Array): void
+  /** JSON array of lowercase gfx file names the added definitions reference. */
+  neededGfxNames(): string
   finish(): Uint8Array
   free?(): void
 }

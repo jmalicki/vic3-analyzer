@@ -4,12 +4,11 @@ import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { DefsBuilder } from './DefsBuilder'
 import {
   DEFS_BATCH_SIZE,
+  enumerateDroppedDefsFiles,
   packDefsFiles,
-  streamDroppedDefsFiles,
   type DefsDropEntry,
   type DefsDropItem,
   type DefsPathClassifier,
-  type DefsSourceFile,
 } from './defsFiles'
 import type { WasmApi } from './wasm'
 
@@ -87,18 +86,24 @@ function defsSummaryJson(goods = 53): string {
 type BuilderSpy = {
   batches: { manifestJson: string; contents: Uint8Array }[]
   finish: Mock<() => Uint8Array>
+  /** Art the fake wasm claims to reference; everything else must go unread. */
+  neededGfxNames: string[]
 }
 
 function api(builder?: Partial<BuilderSpy>): WasmApi & { builder: BuilderSpy } {
   const spy: BuilderSpy = {
     batches: [],
     finish: builder?.finish ?? vi.fn(() => new Uint8Array([1, 2, 3])),
+    neededGfxNames: builder?.neededGfxNames ?? [],
   }
   const wasm = {
     classify_defs_path: vi.fn(classify),
     DefsBlobBuilder: class {
       addBatch(manifestJson: string, contents: Uint8Array) {
         spy.batches.push({ manifestJson, contents })
+      }
+      neededGfxNames() {
+        return JSON.stringify(spy.neededGfxNames)
       }
       finish() {
         return spy.finish()
@@ -109,16 +114,13 @@ function api(builder?: Partial<BuilderSpy>): WasmApi & { builder: BuilderSpy } {
   return Object.assign(wasm, { builder: spy })
 }
 
-/** Drain the streaming walk into one array, for tests about which files it picks. */
+/** Drain the walk into one array, for tests about which files it picks. */
 async function walkedPaths(
   items: DefsDropItem[],
   classify: DefsPathClassifier,
 ): Promise<string[]> {
-  const seen: DefsSourceFile[] = []
-  await streamDroppedDefsFiles(items, classify, async (batch) => {
-    seen.push(...batch)
-  })
-  return seen.map((file) => file.path)
+  const sources = await enumerateDroppedDefsFiles(items, classify)
+  return sources.map((source) => source.path)
 }
 
 /** Files the component actually handed to wasm, across every batch. */
@@ -307,6 +309,46 @@ describe('DefsBuilder', () => {
 
     expect(await screen.findByText('Reading definition files: 0 / 3')).toBeInTheDocument()
     expect(screen.getByRole('progressbar')).toHaveAttribute('max', '3')
+  })
+
+  it('never reads art the definitions do not reference', async () => {
+    // A real install ships hundreds of unused emblems; reading them was most
+    // of the wait, so the unused one here must stay untouched.
+    const artClassify: DefsPathClassifier = (path, isDirectory) =>
+      isDirectory ? 'descend' : path.endsWith('.txt') || path.endsWith('.dds') ? 'read' : 'skip'
+    const wasm = api({ neededGfxNames: ['used.dds'] })
+    wasm.classify_defs_path = vi.fn(artClassify)
+    render(<DefsBuilder api={wasm} onBuilt={vi.fn()} />)
+
+    const reads: string[] = []
+    const trackedFile = (name: string): DefsDropEntry => ({
+      isFile: true,
+      isDirectory: false,
+      name,
+      file: (resolve: (file: File) => void) => {
+        reads.push(name)
+        resolve(new File(['x'], name))
+      },
+    })
+    const game = dirEntry('game', [
+      dirEntry('common', [dirEntry('goods', [fileEntry('00_goods.txt', 'grain = { cost = 20 }')])]),
+      dirEntry('gfx', [
+        dirEntry('coat_of_arms', [
+          dirEntry('colored_emblems', [trackedFile('used.dds'), trackedFile('unused.dds')]),
+        ]),
+      ]),
+    ])
+
+    fireEvent.drop(screen.getByLabelText('Drop the Victoria 3 game folder'), {
+      dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => game }] },
+    })
+
+    await waitFor(() => expect(wasm.builder.finish).toHaveBeenCalled())
+    expect(reads).toEqual(['used.dds'])
+    expect(submittedPaths(wasm.builder)).toEqual([
+      'game/common/goods/00_goods.txt',
+      'game/gfx/coat_of_arms/colored_emblems/used.dds',
+    ])
   })
 
   it('explains an empty drop instead of failing silently', async () => {

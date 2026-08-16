@@ -30,48 +30,97 @@ export type DefsDropItem = {
 /** Receives one batch of files; resolves once the batch may be released. */
 export type DefsBatchSink = (batch: DefsSourceFile[], read: number) => Promise<void>
 
+/** A file located but not yet read. */
+export type DefsFileSource = {
+  path: string
+  read: () => Promise<Uint8Array>
+}
+
 /**
- * Read dropped folders through the entries API, in small batches.
+ * Locate the useful files in dropped folders, without reading any of them.
  *
  * Dragging from the file manager is the one route Chromium does not restrict by
  * path, so it reaches a Steam install under `~/Library` or `Program Files` that
  * `showDirectoryPicker` refuses outright.
  *
- * A full install offers more than 400 MB of coat-of-arms art. Retaining all of
- * it — then copying it again into wasm — is what wedges the tab, so files are
- * released as soon as the sink has taken them.
+ * Listing directories is cheap next to pulling bytes, so doing it first buys
+ * both an honest total and the chance to drop files nothing references.
  */
-export async function streamDroppedDefsFiles(
+export async function enumerateDroppedDefsFiles(
   items: Iterable<DefsDropItem>,
   classify: DefsPathClassifier,
-  sink: DefsBatchSink,
-  options: {
-    batchSize?: number
-    /** Reports the file count once the tree has been enumerated. */
-    onTotal?: (total: number) => void
-  } = {},
-): Promise<number> {
-  const { batchSize = DEFS_BATCH_SIZE, onTotal } = options
-  // Enumerate before reading: directory listing is cheap next to pulling
-  // bytes, and knowing the count up front makes the progress bar honest.
+): Promise<DefsFileSource[]> {
   const found: { entry: DefsDropEntry; path: string }[] = []
   for (const item of items) {
     const entry = item.webkitGetAsEntry?.()
     if (entry) await collectEntries(entry, entry.name, classify, found)
   }
-  onTotal?.(found.length)
+  return found.map(({ entry, path }) => ({
+    path,
+    read: async () => new Uint8Array(await (await readEntryFile(entry)).arrayBuffer()),
+  }))
+}
 
-  let read = 0
-  for (let start = 0; start < found.length; start += batchSize) {
-    const batch: DefsSourceFile[] = []
-    for (const { entry, path } of found.slice(start, start + batchSize)) {
-      const file = await readEntryFile(entry)
-      batch.push({ path, bytes: new Uint8Array(await file.arrayBuffer()) })
-    }
+/** The useful files from a folder-picker selection. */
+export function selectedDefsFiles(
+  list: Iterable<File>,
+  classify: DefsPathClassifier,
+): DefsFileSource[] {
+  return [...list]
+    .filter((file) => usefulDefsPath(file.webkitRelativePath || file.name, classify))
+    .map((file) => ({
+      path: file.webkitRelativePath || file.name,
+      read: async () => new Uint8Array(await file.arrayBuffer()),
+    }))
+}
+
+/**
+ * Read sources in batches, handing each to `sink` before reading the next.
+ *
+ * A full install offers more than 400 MB of coat-of-arms art. Retaining all of
+ * it — then copying it again into wasm — is what wedges the tab, so files are
+ * released as soon as the sink has taken them. Within a batch the reads run
+ * together, because each one is mostly waiting on the browser's file thread.
+ */
+export async function streamDefsFiles(
+  sources: DefsFileSource[],
+  sink: DefsBatchSink,
+  options: { batchSize?: number; alreadyRead?: number } = {},
+): Promise<number> {
+  const { batchSize = DEFS_BATCH_SIZE } = options
+  let read = options.alreadyRead ?? 0
+  for (let start = 0; start < sources.length; start += batchSize) {
+    const batch = await Promise.all(
+      sources.slice(start, start + batchSize).map(async (source) => ({
+        path: source.path,
+        bytes: await source.read(),
+      })),
+    )
     read += batch.length
     await sink(batch, read)
   }
   return read
+}
+
+/** True for the art files, which are the ones worth filtering by reference. */
+export function isGfxDefsPath(path: string): boolean {
+  // Segment-wise, so dropping the `gfx` folder itself is recognised too.
+  return path
+    .replace(/\\/g, '/')
+    .toLowerCase()
+    .split('/')
+    .slice(0, -1)
+    .includes('gfx')
+}
+
+/**
+ * Match a path against the names wasm reported as referenced.
+ *
+ * Textures are named by file name, goods icons by stem, so try both.
+ */
+export function neededGfxFile(path: string, needed: ReadonlySet<string>): boolean {
+  const name = path.replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? ''
+  return needed.has(name) || needed.has(name.replace(/\.[^.]+$/, ''))
 }
 
 /**

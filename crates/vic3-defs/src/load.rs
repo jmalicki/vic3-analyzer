@@ -71,11 +71,20 @@ pub fn load_from_files(
 /// on arrival, so what the builder retains is a few megabytes of thumbnails.
 #[derive(Debug, Default)]
 pub struct DefsBuilder {
-    /// Clausewitz and localization sources, parsed together at the end so a
-    /// later file still overrides an earlier one by sorted path.
+    /// Clausewitz and localization sources, parsed together once every text
+    /// file is in, so a later file still overrides an earlier one by sorted
+    /// path no matter what order the batches arrived in.
     texts: Vec<(String, Vec<u8>)>,
+    /// Parsed form of `texts`, dropped whenever another text file arrives.
+    parsed: Option<ParsedTexts>,
     coa_textures: BTreeMap<String, crate::coa::RgbaImage>,
     icons: BTreeMap<String, Vec<u8>>,
+}
+
+#[derive(Debug)]
+struct ParsedTexts {
+    defs: GameDefs,
+    library: crate::coa::CoaLibrary,
 }
 
 impl DefsBuilder {
@@ -95,6 +104,7 @@ impl DefsBuilder {
             };
             if relative.ends_with(".txt") || relative.ends_with(".yml") {
                 self.texts.push((relative, bytes));
+                self.parsed = None;
             } else if relative.contains("gfx/coat_of_arms/")
                 && (relative.ends_with(".dds") || relative.ends_with(".tga"))
             {
@@ -112,21 +122,52 @@ impl DefsBuilder {
         }
     }
 
-    pub fn finish(self) -> Result<GameDefs, DefsError> {
-        let mut texts = self.texts;
-        texts.sort_by(|left, right| left.0.cmp(&right.0));
-        if !texts
-            .iter()
-            .any(|(path, _)| path.starts_with("common/goods/"))
-        {
-            return Err(DefsError::NotAGameRoot(PathBuf::from("<selected files>")));
+    /// Parse the text sources, reusing the previous parse when nothing new
+    /// arrived since.
+    fn parse_texts(&mut self) -> Result<&ParsedTexts, DefsError> {
+        if self.parsed.is_none() {
+            self.texts.sort_by(|left, right| left.0.cmp(&right.0));
+            if !self
+                .texts
+                .iter()
+                .any(|(path, _)| path.starts_with("common/goods/"))
+            {
+                return Err(DefsError::NotAGameRoot(PathBuf::from("<selected files>")));
+            }
+            let mut defs = GameDefs::default();
+            let mut library = crate::coa::CoaLibrary::default();
+            for (relative, bytes) in &self.texts {
+                parse_defs_text(relative, bytes, &mut defs, &mut library)?;
+            }
+            self.parsed = Some(ParsedTexts { defs, library });
         }
+        Ok(self.parsed.as_ref().expect("just parsed"))
+    }
 
-        let mut defs = GameDefs::default();
-        let mut library = crate::coa::CoaLibrary::default();
-        for (relative, bytes) in &texts {
-            parse_defs_text(relative, bytes, &mut defs, &mut library)?;
-        }
+    /// Lowercase names of the `gfx` sources the text definitions reference.
+    ///
+    /// A full install ships far more art than any coat uses — roughly a third
+    /// of the emblems and most goods icons go untouched. Letting the caller
+    /// ask first means those files are never read at all.
+    ///
+    /// Call once every text file has been added; art added before this is
+    /// still kept, so the answer only ever narrows future reads.
+    pub fn needed_gfx_names(&mut self) -> Result<std::collections::BTreeSet<String>, DefsError> {
+        let parsed = self.parse_texts()?;
+        let mut names = parsed.library.needed_texture_names();
+        names.extend(parsed.defs.goods.values().map(|good| {
+            good.texture
+                .as_deref()
+                .and_then(icon_stem)
+                .unwrap_or_else(|| good.id.to_lowercase())
+        }));
+        Ok(names)
+    }
+
+    pub fn finish(mut self) -> Result<GameDefs, DefsError> {
+        self.parse_texts()?;
+        let ParsedTexts { mut defs, library } = self.parsed.take().expect("parsed above");
+        let mut library = library;
         attach_icons(&mut defs, self.icons);
         crate::coa::render_library_scaled(&mut library, &self.coa_textures);
         finish_coa(&mut defs, library);
