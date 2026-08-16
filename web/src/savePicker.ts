@@ -112,7 +112,7 @@ export async function pickSaveWithRememberedFolder(
   }
 }
 
-export type GameCommonPathHint = {
+export type GamePathHint = {
   platform: Platform
   /** Short lead-in before the path, e.g. "Usual Steam folder". */
   label: string
@@ -131,9 +131,9 @@ export type GameCommonPathHint = {
  * there. The plain `webkitdirectory` input has no such restriction, so the
  * hint tells users how to reach the path in the native dialog.
  */
-export function victoria3GameCommonPaths(
+export function victoria3GamePaths(
   platform: Platform = detectPlatform(),
-): GameCommonPathHint {
+): GamePathHint {
   switch (platform) {
     case 'windows':
       return {

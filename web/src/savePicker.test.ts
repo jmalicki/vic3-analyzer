@@ -3,7 +3,7 @@ import {
   canUseRememberedSavePicker,
   detectPlatform,
   pickSaveWithRememberedFolder,
-  victoria3GameCommonPaths,
+  victoria3GamePaths,
   victoria3SavePaths,
   type Platform,
 } from './savePicker'
@@ -62,9 +62,9 @@ describe('remembered save picker', () => {
   })
 })
 
-describe('game common paths', () => {
+describe('game folder paths', () => {
   it('returns the Windows Steam game path', () => {
-    const hint = victoria3GameCommonPaths('windows')
+    const hint = victoria3GamePaths('windows')
     expect(hint.label).toBe('Usual Steam folder')
     expect(hint.local).toContain('steamapps\\common\\Victoria 3\\game')
     expect(hint.local).not.toMatch(/\\game\\common$/)
@@ -73,7 +73,7 @@ describe('game common paths', () => {
   })
 
   it('tells macOS users how to reach the blocked ~/Library path', () => {
-    const hint = victoria3GameCommonPaths('macos')
+    const hint = victoria3GamePaths('macos')
     expect(hint.local).toBe(
       '~/Library/Application Support/Steam/steamapps/common/Victoria 3/game',
     )
@@ -81,7 +81,7 @@ describe('game common paths', () => {
   })
 
   it('returns the Linux Steam game path', () => {
-    const hint = victoria3GameCommonPaths('linux')
+    const hint = victoria3GamePaths('linux')
     expect(hint.local).toBe(
       '~/.local/share/Steam/steamapps/common/Victoria 3/game',
     )

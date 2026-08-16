@@ -15,7 +15,7 @@ import {
 } from './defsFiles'
 import { FieldHelp } from './FieldHelp'
 import { ProgressBar } from './ProgressBar'
-import { victoria3GameCommonPaths } from './savePicker'
+import { victoria3GamePaths } from './savePicker'
 import type { DefsSummary } from './types'
 import type { WasmApi } from './wasm'
 
@@ -49,7 +49,7 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
   const [dragging, setDragging] = useState(false)
   const [progress, setProgress] = useState<Progress>()
   const folderInputRef = useRef<HTMLInputElement>(null)
-  const commonPaths = useMemo(() => victoria3GameCommonPaths(), [])
+  const gamePaths = useMemo(() => victoria3GamePaths(), [])
   const busy = progress !== undefined
 
   useEffect(() => onBusyChange?.(busy), [busy, onBusyChange])
@@ -141,7 +141,7 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
       if (files.length === 0) {
         fail(
           new Error(
-            'That drop had no supported definitions. Drag the Victoria 3 game folder (or game/common).',
+            'That drop had no supported definitions. Drag the Victoria 3 game folder itself.',
           ),
         )
         return
@@ -154,10 +154,10 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
 
   const copyPath = async () => {
     try {
-      await navigator.clipboard.writeText(commonPaths.local)
+      await navigator.clipboard.writeText(gamePaths.local)
       setStatus('Path copied. Paste it into the folder dialog to jump straight there.')
     } catch {
-      setStatus(`Copy this path into the folder dialog: ${commonPaths.local}`)
+      setStatus(`Copy this path into the folder dialog: ${gamePaths.local}`)
     }
   }
 
@@ -190,8 +190,7 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
       </div>
       <p>
         Prices need base costs and recipes from the game install; the save alone does not carry
-        them. Drag the <code>game</code> folder for localized names, or <code>game/common</code> for
-        definitions only. Only the small allowlisted files are read.
+        them. Drag the <code>game</code> folder itself. Only the small allowlisted files are read.
       </p>
       <div
         className={dragging ? 'defs-drop dragging' : 'defs-drop'}
@@ -216,7 +215,7 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
           disabled={busy || !api}
           onClick={() => folderInputRef.current?.click()}
         >
-          Choose game or game/common folder
+          Choose game folder
         </button>
         <input
           {...directoryProps}
@@ -236,14 +235,14 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
           }}
         />
       </div>
-      <p className="path-hint">{commonPaths.label}</p>
-      <code className="path-hint-path">{commonPaths.local}</code>
+      <p className="path-hint">{gamePaths.label}</p>
+      <code className="path-hint-path">{gamePaths.local}</code>
       <div className="defs-builder-actions">
         <button type="button" className="secondary" onClick={() => void copyPath()}>
           Copy path
         </button>
       </div>
-      <p className="path-hint">{commonPaths.summary}</p>
+      <p className="path-hint">{gamePaths.summary}</p>
       {progress && (
         <ProgressBar label={progress.label} done={progress.done} total={progress.total} />
       )}

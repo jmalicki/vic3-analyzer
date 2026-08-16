@@ -24,15 +24,21 @@ pub fn encode_blob(defs: &GameDefs) -> Result<Vec<u8>, DefsError> {
 }
 
 /// Decode a blob produced by [`encode_blob`].
+///
+/// The version is read on its own before the payload. A blob from an older
+/// format does not deserialize as the current [`GameDefs`], so decoding both at
+/// once would report whatever the payload happened to trip over — an invalid
+/// UTF-8 string, say — instead of the version mismatch that actually explains it.
 pub fn decode_blob(bytes: &[u8]) -> Result<GameDefs, DefsError> {
-    let blob: DefsBlob = postcard::from_bytes(bytes).map_err(DefsError::BlobDecode)?;
-    if blob.version != BLOB_VERSION {
+    let (version, payload) =
+        postcard::take_from_bytes::<u32>(bytes).map_err(DefsError::BlobDecode)?;
+    if version != BLOB_VERSION {
         return Err(DefsError::BlobVersion {
-            found: blob.version,
+            found: version,
             expected: BLOB_VERSION,
         });
     }
-    Ok(blob.defs)
+    postcard::from_bytes(payload).map_err(DefsError::BlobDecode)
 }
 
 #[cfg(test)]
@@ -139,5 +145,31 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// The realistic stale blob: an older version whose payload no longer
+    /// matches [`GameDefs`]. The version has to be reported, not the confusing
+    /// decode failure the mismatched payload would raise.
+    #[test]
+    fn reports_the_version_even_when_the_payload_shape_changed() {
+        let bytes = postcard::to_stdvec(&(BLOB_VERSION - 1, "a payload from an older format"))
+            .expect("encode old blob");
+        let error = decode_blob(&bytes).expect_err("an older blob must require a rebuild");
+        assert!(
+            matches!(
+                error,
+                DefsError::BlobVersion {
+                    found,
+                    expected: BLOB_VERSION,
+                } if found == BLOB_VERSION - 1
+            ),
+            "expected a version mismatch, got {error}"
+        );
+    }
+
+    #[test]
+    fn rejects_bytes_that_are_not_a_blob() {
+        let error = decode_blob(&[]).expect_err("empty input is not a blob");
+        assert!(matches!(error, DefsError::BlobDecode(_)), "got {error}");
     }
 }

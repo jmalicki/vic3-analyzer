@@ -210,7 +210,7 @@ describe('DefsBuilder', () => {
     const input = screen.getByLabelText('Victoria 3 definitions folder')
     const click = vi.spyOn(input, 'click')
 
-    await user.click(screen.getByRole('button', { name: 'Choose game or game/common folder' }))
+    await user.click(screen.getByRole('button', { name: 'Choose game folder' }))
     expect(click).toHaveBeenCalled()
   })
 

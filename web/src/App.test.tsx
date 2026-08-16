@@ -414,7 +414,7 @@ describe('prices UI', () => {
     render(<App wasmApi={api} />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      /version 1 is not supported.*Rebuild definitions/,
+      'defs blob version 1 is not supported (expected 3). Rebuild definitions from your Victoria 3 game folder for this app version.',
     )
     await waitFor(() =>
       expect(screen.queryByText(/ancient-v1\.postcard/)).not.toBeInTheDocument(),

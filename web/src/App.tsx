@@ -240,8 +240,9 @@ function App({ wasmApi }: Props) {
           setDefsFile(undefined)
           setDefsRestored(false)
           void clearStoredDefs()
+          const detail = reason instanceof Error ? reason.message : String(reason)
           setError(
-            `${reason instanceof Error ? reason.message : String(reason)} Rebuild definitions for this app version.`,
+            `${detail.replace(/\.?$/, '.')} Rebuild definitions from your Victoria 3 game folder for this app version.`,
           )
         }
       })
@@ -661,7 +662,7 @@ function App({ wasmApi }: Props) {
           {thinDefs && (
             <p className="demo-warning">
               {defsFile
-                ? `${defsFile.name} only defines ${defsSummary?.goods} goods, so prices below cover just those. Rebuild from the game/common folder itself — picking a subfolder skips common/goods.`
+                ? `${defsFile.name} only defines ${defsSummary?.goods} goods, so prices below cover just those. Rebuild from the game folder itself — picking a subfolder skips the files the solver needs.`
                 : 'The local development demo blob defines only a few fixture goods. Build definitions from a Victoria 3 install for the full goods list.'}
             </p>
           )}

@@ -62,6 +62,21 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     )
   })
 
+  /**
+   * A blob left in IndexedDB by an older build has a payload the current
+   * `GameDefs` cannot read, so the version must be reported rather than
+   * whatever the stale payload trips over first.
+   */
+  it('rejects a stale blob with a version mismatch, not a decode error', async () => {
+    const stale = new Uint8Array(defs)
+    stale[0] = 1
+
+    // The export may throw synchronously or reject; either must carry the version.
+    await expect(Promise.resolve().then(() => api.defs_summary(stale))).rejects.toThrow(
+      /defs blob version 1 is not supported \(expected \d+\)/,
+    )
+  })
+
   it('decodes the fixture DDS icon into a PNG data URL', async () => {
     const icons = JSON.parse(await api.defs_icons(defs))
     expect(icons.grain).toMatch(/^data:image\/png;base64,iVBOR/)
