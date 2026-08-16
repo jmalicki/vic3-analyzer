@@ -72,15 +72,21 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
    * progress bar actually repaint.
    */
   const build = async (
-    pump: (submit: (batch: DefsSourceFile[]) => Promise<void>) => Promise<void>,
+    pump: (
+      submit: (batch: DefsSourceFile[]) => Promise<void>,
+      /** Call once the file count is known, to make the bar determinate. */
+      setTotal: (total: number) => void,
+    ) => Promise<void>,
     label: string,
     emptyMessage: string,
+    knownTotal?: number,
   ) => {
     if (!api) {
       fail(new Error('The analysis engine is still loading. Try again in a moment.'))
       return
     }
-    setProgress({ label, done: 0 })
+    let total = knownTotal
+    setProgress({ label, done: 0, total })
     setBuilt(false)
     setStatus(undefined)
     setError(undefined)
@@ -89,16 +95,22 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
     const builder = new api.DefsBlobBuilder()
     let accepted = 0
     try {
-      await pump(async (batch) => {
-        const packed = packDefsFiles(batch, classify)
-        const manifest = JSON.parse(packed.manifestJson) as unknown[]
-        if (manifest.length > 0) {
-          builder.addBatch(packed.manifestJson, packed.contents)
-          accepted += manifest.length
-        }
-        setProgress({ label, done: accepted })
-        await yieldToBrowser()
-      })
+      await pump(
+        async (batch) => {
+          const packed = packDefsFiles(batch, classify)
+          const manifest = JSON.parse(packed.manifestJson) as unknown[]
+          if (manifest.length > 0) {
+            builder.addBatch(packed.manifestJson, packed.contents)
+            accepted += manifest.length
+          }
+          setProgress({ label, done: accepted, total })
+          await yieldToBrowser()
+        },
+        (counted) => {
+          total = counted
+          setProgress({ label, done: accepted, total })
+        },
+      )
       if (accepted === 0) throw new Error(emptyMessage)
       setProgress({ label: 'Parsing definitions in wasm' })
       // finish() blocks the thread, so let the new label paint first.
@@ -152,6 +164,7 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
       },
       'Reading definition files',
       'No supported common/*.txt definition files were found.',
+      chosen.length,
     )
   }
 
@@ -167,8 +180,10 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
       api.classify_defs_path(path, isDirectory)
     const items = [...(event.dataTransfer.items ?? [])]
     await build(
-      async (submit) => {
-        await streamDroppedDefsFiles(items, classify, (batch) => submit(batch))
+      async (submit, setTotal) => {
+        await streamDroppedDefsFiles(items, classify, (batch) => submit(batch), {
+          onTotal: setTotal,
+        })
       },
       'Reading dropped files',
       'That drop had no supported definitions. Drag the Victoria 3 game folder itself.',

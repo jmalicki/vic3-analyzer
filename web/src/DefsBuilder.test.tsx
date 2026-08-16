@@ -33,6 +33,28 @@ function fileEntry(name: string, contents: string): DefsDropEntry {
   }
 }
 
+function relativeFile(name: string): File {
+  const file = new File(['grain = { cost = 20 }'], name)
+  Object.defineProperty(file, 'webkitRelativePath', { value: `game/common/goods/${name}` })
+  return file
+}
+
+/** A file whose read never settles, freezing progress at a known point. */
+function hangingFile(name: string): File {
+  const file = relativeFile(name)
+  Object.defineProperty(file, 'arrayBuffer', { value: () => new Promise<ArrayBuffer>(() => {}) })
+  return file
+}
+
+function hangingFileEntry(name: string): DefsDropEntry {
+  return {
+    isFile: true,
+    isDirectory: false,
+    name,
+    file: (resolve: (file: File) => void) => resolve(hangingFile(name)),
+  }
+}
+
 function dirEntry(name: string, children: DefsDropEntry[]): DefsDropEntry {
   let sent = false
   return {
@@ -252,6 +274,39 @@ describe('DefsBuilder', () => {
     for (const batch of wasm.builder.batches) {
       expect(JSON.parse(batch.manifestJson).length).toBeLessThanOrEqual(DEFS_BATCH_SIZE)
     }
+  })
+
+  it('counts a dropped tree before reading it so the bar is determinate', async () => {
+    const wasm = api()
+    render(<DefsBuilder api={wasm} onBuilt={vi.fn()} />)
+    // The first read never settles, so the count on screen can only have come
+    // from enumerating the tree up front.
+    const goods = [
+      hangingFileEntry('000_goods.txt'),
+      ...Array.from({ length: 4 }, (_, index) =>
+        fileEntry(`00${index + 1}_goods.txt`, 'grain = { cost = 20 }'),
+      ),
+    ]
+    const common = dirEntry('common', [dirEntry('goods', goods)])
+
+    fireEvent.drop(screen.getByLabelText('Drop the Victoria 3 game folder'), {
+      dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
+    })
+
+    expect(await screen.findByText('Reading dropped files: 0 / 5')).toBeInTheDocument()
+    expect(screen.getByRole('progressbar')).toHaveAttribute('max', '5')
+  })
+
+  it('keeps the chosen-folder bar determinate from the first file', async () => {
+    const user = userEvent.setup()
+    const wasm = api()
+    render(<DefsBuilder api={wasm} onBuilt={vi.fn()} />)
+    const files = [hangingFile('0_goods.txt'), relativeFile('1_goods.txt'), relativeFile('2_goods.txt')]
+
+    await user.upload(screen.getByLabelText('Victoria 3 definitions folder'), files)
+
+    expect(await screen.findByText('Reading definition files: 0 / 3')).toBeInTheDocument()
+    expect(screen.getByRole('progressbar')).toHaveAttribute('max', '3')
   })
 
   it('explains an empty drop instead of failing silently', async () => {

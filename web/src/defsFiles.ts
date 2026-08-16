@@ -45,26 +45,32 @@ export async function streamDroppedDefsFiles(
   items: Iterable<DefsDropItem>,
   classify: DefsPathClassifier,
   sink: DefsBatchSink,
-  batchSize = DEFS_BATCH_SIZE,
+  options: {
+    batchSize?: number
+    /** Reports the file count once the tree has been enumerated. */
+    onTotal?: (total: number) => void
+  } = {},
 ): Promise<number> {
-  let batch: DefsSourceFile[] = []
-  let read = 0
-  const flush = async () => {
-    if (batch.length === 0) return
-    read += batch.length
-    const full = batch
-    batch = []
-    await sink(full, read)
-  }
+  const { batchSize = DEFS_BATCH_SIZE, onTotal } = options
+  // Enumerate before reading: directory listing is cheap next to pulling
+  // bytes, and knowing the count up front makes the progress bar honest.
+  const found: { entry: DefsDropEntry; path: string }[] = []
   for (const item of items) {
     const entry = item.webkitGetAsEntry?.()
-    if (!entry) continue
-    await walkEntryStreaming(entry, entry.name, classify, async (file) => {
-      batch.push(file)
-      if (batch.length >= batchSize) await flush()
-    })
+    if (entry) await collectEntries(entry, entry.name, classify, found)
   }
-  await flush()
+  onTotal?.(found.length)
+
+  let read = 0
+  for (let start = 0; start < found.length; start += batchSize) {
+    const batch: DefsSourceFile[] = []
+    for (const { entry, path } of found.slice(start, start + batchSize)) {
+      const file = await readEntryFile(entry)
+      batch.push({ path, bytes: new Uint8Array(await file.arrayBuffer()) })
+    }
+    read += batch.length
+    await sink(batch, read)
+  }
   return read
 }
 
@@ -74,17 +80,19 @@ export async function streamDroppedDefsFiles(
  */
 export const DEFS_BATCH_SIZE = 24
 
-async function walkEntryStreaming(
+function readEntryFile(entry: DefsDropEntry): Promise<File> {
+  const read = entry.file!.bind(entry)
+  return new Promise<File>((resolve, reject) => read(resolve, reject))
+}
+
+async function collectEntries(
   entry: DefsDropEntry,
   path: string,
   classify: DefsPathClassifier,
-  emit: (file: DefsSourceFile) => Promise<void>,
+  found: { entry: DefsDropEntry; path: string }[],
 ): Promise<void> {
   if (entry.isFile && entry.file) {
-    if (!usefulDefsPath(path, classify)) return
-    const read = entry.file.bind(entry)
-    const file = await new Promise<File>((resolve, reject) => read(resolve, reject))
-    await emit({ path, bytes: new Uint8Array(await file.arrayBuffer()) })
+    if (usefulDefsPath(path, classify)) found.push({ entry, path })
     return
   }
   if (!entry.isDirectory || !entry.createReader) return
@@ -97,7 +105,7 @@ async function walkEntryStreaming(
     )
     if (batch.length === 0) return
     for (const child of batch) {
-      await walkEntryStreaming(child, `${path}/${child.name}`, classify, emit)
+      await collectEntries(child, `${path}/${child.name}`, classify, found)
     }
   }
 }
