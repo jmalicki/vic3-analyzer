@@ -50,6 +50,7 @@ export interface MarketInputs {
   buildings: number
   skipped_buildings: number
   buildings_without_method: number
+  buildings_without_orders: number
   goods_with_orders: number
 }
 

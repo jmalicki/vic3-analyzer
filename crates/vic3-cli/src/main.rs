@@ -509,11 +509,11 @@ fn print_table(result: &PricesResult) -> Result<()> {
         writeln!(
             io::stderr(),
             "warning: no buy or sell orders were reconstructed, so every price above is its base price \
-             (pops used: {}, skipped: {}; buildings used: {}, without a known production method: {})",
+             (pops used: {}, skipped: {}; buildings used: {}, without usable orders: {})",
             result.inputs.pops,
             result.inputs.skipped_pops,
             result.inputs.buildings,
-            result.inputs.buildings_without_method,
+            result.inputs.buildings_without_orders,
         )?;
     }
     Ok(())

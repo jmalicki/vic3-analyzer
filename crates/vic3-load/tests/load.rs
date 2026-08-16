@@ -25,6 +25,7 @@ fn plaintext_fixture_loads() {
     assert_eq!(ger.infamy, Some(12.5));
     assert_eq!(ger.budget.treasury(), Some(10000.0));
     assert_eq!(ger.budget.credit, Some(500.0));
+    assert_eq!(ger.market, Some(1));
 
     let state = save.states.database.get(&1).and_then(|s| s.as_ref());
     assert_eq!(
@@ -39,8 +40,11 @@ fn plaintext_fixture_loads() {
         .map(|(_, b)| b)
         .expect("rye farm");
     assert_eq!(farm.level, 2);
+    assert_eq!(farm.staffing, 1.5);
     assert_eq!(farm.state, Some(1));
     assert_eq!(farm.active_production_methods(), ["pm_simple_forestry"]);
+    assert_eq!(farm.input_goods.goods.get("0"), Some(&5.0));
+    assert_eq!(farm.output_goods.goods.get("1"), Some(&40.0));
 
     let pop = save
         .pops
@@ -49,13 +53,22 @@ fn plaintext_fixture_loads() {
         .map(|(_, p)| p)
         .expect("pop");
     assert_eq!(pop.profession.as_deref(), Some("farmers"));
-    assert_eq!(pop.size, Some(10000.0));
+    assert_eq!(pop.workforce, Some(6000.0));
+    assert_eq!(pop.dependents, Some(4000.0));
     assert_eq!(pop.demand_size(), Some(10000.0));
     assert_eq!(pop.wealth, Some(8));
     assert_eq!(pop.culture.as_deref(), Some("north_german"));
     assert_eq!(pop.state, Some(1));
 
     assert_eq!(save.market_manager.iter_present().count(), 1);
+    assert_eq!(
+        save.market_manager
+            .iter_present()
+            .next()
+            .and_then(|(_, market)| market.owner),
+        Some(16777216)
+    );
+    assert_eq!(save.active_laws(16777216), ["law_autocracy"]);
     let route = save
         .trade_route_manager
         .iter_present()
@@ -85,7 +98,7 @@ fn plural_production_methods_are_read() {
     let text = std::fs::read_to_string(fixture("plaintext.txt"))
         .unwrap()
         .replace(
-            "production_method=\"pm_simple_forestry\"",
+            "production_methods={ \"pm_simple_forestry\" }",
             "production_methods={ \"pm_simple_forestry\" \"pm_no_automation\" }",
         );
     let save = load_slice(text.as_bytes(), empty_tokens()).expect("plural PM save");
@@ -99,6 +112,31 @@ fn plural_production_methods_are_read() {
     assert_eq!(
         farm.active_production_methods(),
         ["pm_simple_forestry", "pm_no_automation"]
+    );
+}
+
+#[test]
+fn legacy_population_and_level_aliases_still_load() {
+    let text = std::fs::read_to_string(fixture("plaintext.txt"))
+        .unwrap()
+        .replace("workforce=6000", "size_wa=6000")
+        .replace("dependents=4000", "size_dn=4000")
+        .replace("levels=2", "level=2");
+    let save = load_slice(text.as_bytes(), empty_tokens()).expect("legacy aliases");
+    let pop = save.pops.iter_present().next().unwrap().1;
+    let building = save.building_manager.iter_present().next().unwrap().1;
+    assert_eq!(pop.demand_size(), Some(10_000.0));
+    assert_eq!(building.level, 2);
+}
+
+#[test]
+fn malformed_building_goods_are_not_silently_discarded() {
+    let text = std::fs::read_to_string(fixture("plaintext.txt"))
+        .unwrap()
+        .replace("0={ value=5 }", "0={ value=\"not-a-number\" }");
+    assert!(
+        load_slice(text.as_bytes(), empty_tokens()).is_err(),
+        "invalid saved IO must fail parsing"
     );
 }
 
@@ -159,5 +197,26 @@ fn live_save_from_env() {
             || save.meta_data.game_date.is_some()
             || save.countries().next().is_some(),
         "live save produced an empty IR"
+    );
+    let (country_id, country) = save
+        .previous_played
+        .iter()
+        .find_map(|player| {
+            let id = player.idtype?;
+            save.country_manager
+                .database
+                .get(&id)
+                .and_then(Option::as_ref)
+                .map(|country| (id, country))
+        })
+        .expect("previous_played.idtype should resolve to a country");
+    assert_eq!(country.definition, "PRU");
+    assert!(country.market.is_some());
+    assert!(!save.active_laws(country_id).is_empty());
+    assert!(
+        save.building_manager.iter_present().any(|(_, building)| {
+            !building.input_goods.goods.is_empty() || !building.output_goods.goods.is_empty()
+        }),
+        "real save should contain saved building goods orders"
     );
 }

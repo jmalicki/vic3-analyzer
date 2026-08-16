@@ -266,6 +266,7 @@ describe('PriceExplorer', () => {
             buildings: 12,
             skipped_buildings: 0,
             buildings_without_method: 12,
+            buildings_without_orders: 12,
             goods_with_orders: 0,
           },
         }}
@@ -275,9 +276,9 @@ describe('PriceExplorer', () => {
     const warning = screen.getByRole('status')
     expect(warning).toHaveTextContent('No buy or sell orders were reconstructed')
     expect(warning).toHaveTextContent(
-      '41,234 pops in the save were missing size_wa/size_dn (or legacy size) or wealth',
+      '41,234 pops in the save were missing workforce/dependents (or legacy population fields) or wealth',
     )
-    expect(warning).toHaveTextContent('none of the 12 buildings use a production method')
+    expect(warning).toHaveTextContent('none of the 12 buildings had saved goods IO')
   })
 
   it('stays quiet when the market has orders', () => {
@@ -291,6 +292,7 @@ describe('PriceExplorer', () => {
             buildings: 1,
             skipped_buildings: 0,
             buildings_without_method: 0,
+            buildings_without_orders: 0,
             goods_with_orders: 2,
           },
         }}

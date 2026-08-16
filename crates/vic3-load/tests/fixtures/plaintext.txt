@@ -11,6 +11,10 @@ country_manager={
 			definition="GER"
 			government="gov_absolute_monarchy"
 			capital=1
+			market=1
+			market_capital=1
+			is_main_tag=yes
+			country_type="recognized"
 			infamy=12.5
 			states={ 1 }
 			budget={
@@ -26,7 +30,6 @@ states={
 		1={
 			region="STATE_BRANDENBURG"
 			country=16777216
-			market=1
 		}
 	}
 }
@@ -35,9 +38,19 @@ building_manager={
 		1={
 			building="building_rye_farm"
 			state=1
-			level=2
-			staffing=1.0
-			production_method="pm_simple_forestry"
+			levels=2
+			staffing=1.5
+			production_methods={ "pm_simple_forestry" }
+			input_goods={
+				goods={
+					0={ value=5 }
+				}
+			}
+			output_goods={
+				goods={
+					1={ value=40 }
+				}
+			}
 		}
 		2=none
 	}
@@ -46,17 +59,32 @@ pops={
 	database={
 		1={
 			type="farmers"
-			size=10000
+			workforce=6000
+			dependents=4000
 			wealth=8
 			culture="north_german"
 			location=1
 		}
 	}
 }
+laws={
+	database={
+		1={
+			law="law_autocracy"
+			country=16777216
+			active=yes
+		}
+		2={
+			law="law_legacy_slavery"
+			country=16777216
+			active=no
+		}
+	}
+}
 market_manager={
 	database={
 		1={
-			states={ 1 }
+			owner=16777216
 		}
 	}
 }
@@ -86,6 +114,6 @@ government_constructions={
 previous_played={
 	{
 		idtype=16777216
-		name="GER"
+		name="fixture_player"
 	}
 }

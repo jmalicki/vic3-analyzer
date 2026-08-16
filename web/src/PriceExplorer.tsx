@@ -367,15 +367,15 @@ function EmptyMarketWarning({ inputs }: { inputs?: MarketInputs }) {
   if (inputs.pops === 0) {
     causes.push(
       inputs.skipped_pops > 0
-        ? `all ${inputs.skipped_pops.toLocaleString()} pops in the save were missing size_wa/size_dn (or legacy size) or wealth`
+        ? `all ${inputs.skipped_pops.toLocaleString()} pops in the save were missing workforce/dependents (or legacy population fields) or wealth`
         : 'the save has no pops',
     )
   }
   if (inputs.buildings === 0) {
     causes.push('no buildings were read from the save')
-  } else if (inputs.buildings_without_method === inputs.buildings) {
+  } else if (inputs.buildings_without_orders === inputs.buildings) {
     causes.push(
-      `none of the ${inputs.buildings.toLocaleString()} buildings use a production method your definitions describe`,
+      `none of the ${inputs.buildings.toLocaleString()} buildings had saved goods IO or a usable production-method fallback`,
     )
   }
   return (

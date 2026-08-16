@@ -108,7 +108,7 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     ).toBe(true)
     const wood = result.goods.find((good: { id: string }) => good.id === 'wood')
     expect(wood?.name).toBe('Wood')
-    expect(wood?.sell).toBe(60)
+    expect(wood?.sell).toBe(40)
     expect(wood?.price).toBeLessThan(wood?.base)
   })
 

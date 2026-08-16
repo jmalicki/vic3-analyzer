@@ -142,16 +142,18 @@ pub struct BuildingEconomics {
 pub struct MarketInputs {
     /// Pops whose consumption entered the solve.
     pub pops: usize,
-    /// Save pops dropped for missing `size_wa`/`size_dn` (or legacy `size`) or
-    /// `wealth`.
+    /// Save pops dropped for missing `workforce`/`dependents` (or legacy
+    /// population fields) or `wealth`.
     pub skipped_pops: usize,
     /// Buildings whose goods flows entered the solve.
     pub buildings: usize,
     /// Save buildings dropped for a missing type id.
     pub skipped_buildings: usize,
-    /// Buildings whose production methods are all absent from the definitions,
-    /// so they neither consume nor produce.
+    /// Buildings with neither saved IO nor a production method present in the
+    /// definitions.
     pub buildings_without_method: usize,
+    /// Buildings with no non-zero saved IO and no usable PM fallback orders.
+    pub buildings_without_orders: usize,
     /// Goods carrying a non-zero buy or sell order. Zero means every price
     /// below is just its base price.
     pub goods_with_orders: usize,

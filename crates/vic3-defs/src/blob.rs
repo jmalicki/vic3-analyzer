@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{DefsError, GameDefs};
 
 /// Postcard blob format version. Bump when [`GameDefs`] is not backward compatible.
-pub const BLOB_VERSION: u32 = 4;
+pub const BLOB_VERSION: u32 = 5;
 
 #[derive(Serialize, Deserialize)]
 struct DefsBlob {
@@ -112,6 +112,7 @@ mod tests {
 
         GameDefs {
             price_range: 0.75,
+            goods_order: vec!["grain".into(), "wood".into()],
             goods,
             labels: BTreeMap::new(),
             icons: BTreeMap::new(),

@@ -33,8 +33,9 @@ silently replaced). The flag tooltip is the localized country name when present.
 
 Pops buy from **need packages** by wealth. Substitution uses `min_supply_share` / `max_supply_share` (**I4**). SoL / real income can move requested quantities; that feedback sits inside the equilibrium, not as a frozen demand vector.
 
-Current saves store pop size as `size_wa` / `size_dn` (dependents count as half
-for demand). Fixture/legacy saves may still use a single `size`.
+Current saves store pop size as `workforce` / `dependents`; both count as full
+household members for demand. Fixture/legacy saves may still use `size`,
+`size_wa`, and `size_dn`.
 
 **Wealth 1–99** is relaxed to a continuous variable during NLS, then **rounded** to an integer wealth. This is not ILP.
 
@@ -46,15 +47,16 @@ Until a later phase:
 - wages
 - trade-center volumes (except what-if deltas on buildings/PMs/levels)
 
-Building PM orders and directed trade-route volumes are reconstructed from the
-IR and held fixed while pops adjust. Government and construction goods orders
-are not yet projected into the solver.
+Saved building `input_goods` / `output_goods` and directed trade-route volumes
+are held fixed while pops adjust. Integer saved-good keys are resolved through
+the deterministic `common/goods` source order in the definitions blob.
+Government and construction goods orders are not yet projected into the solver.
 
-A building runs one active production method per PM group, so its orders are the
-sum over every method the save lists for it (`production_methods`, or the
-singular `production_method` a hand-written fixture may use). Methods absent from
-the definitions contribute nothing; when that happens, saved `input_goods` /
-`output_goods` volumes are used as a fallback buy/sell freeze.
+Saved building IO is authoritative because it records actual current weekly
+volumes. Only buildings with no saved IO fall back to the sum of their active
+production-method recipes. PM fallback throughput is staffed levels:
+`levels * clamp(staffing / levels, 0, 1)` (equivalently `staffing` clamped to
+`0..levels`), because real saves record `staffing` in level units.
 
 ## Empty markets
 
@@ -66,9 +68,9 @@ solve so the two are distinguishable; `goods_with_orders == 0` means the prices
 below it carry no information.
 
 The result also carries state metadata, state-attributed orders, and per-building
-model economics. Building revenue/cost/profit are PM quantities ×
-`level × staffing` × solved shared price. They are modeled diagnostics, not
-cashflow fields read from the save.
+model economics. Building revenue/cost/profit use saved current IO when present,
+otherwise PM quantities × staffed levels, valued at the solved shared price.
+They are modeled diagnostics, not cashflow fields read from the save.
 
 ## Solver
 

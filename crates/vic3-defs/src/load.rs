@@ -35,7 +35,7 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
         price_range: load_price_range(&data_root)?,
         ..GameDefs::default()
     };
-    defs.goods = load_goods(&data_root)?;
+    (defs.goods_order, defs.goods) = load_goods(&data_root)?;
     defs.labels = load_labels(&data_root)?;
     attach_icons(&mut defs, load_icons(&data_root)?);
     load_coa_into(&mut defs, &data_root)?;
@@ -86,19 +86,13 @@ pub fn load_from_files(
                 defs.price_range = value;
             }
         } else if relative.starts_with("common/goods/") {
-            let raw: BTreeMap<String, RawGood> = parse_bytes(path, bytes)?;
-            for (id, good) in raw {
-                if let Some(base_price) = good.base_price() {
-                    defs.goods.insert(
-                        id.clone(),
-                        Good {
-                            id,
-                            base_price,
-                            texture: good.texture,
-                        },
-                    );
+            let (order, goods) = parse_goods_bytes(path, bytes)?;
+            for id in order {
+                if !defs.goods_order.contains(&id) {
+                    defs.goods_order.push(id);
                 }
             }
+            defs.goods.extend(goods);
         } else if relative.starts_with("common/production_methods/") {
             for method in parse_production_methods_bytes(path, bytes)? {
                 defs.production_methods.insert(method.id.clone(), method);
@@ -331,25 +325,63 @@ fn load_price_range(data_root: &Path) -> Result<f64, DefsError> {
     Ok(price_range)
 }
 
-fn load_goods(data_root: &Path) -> Result<BTreeMap<String, Good>, DefsError> {
+fn load_goods(data_root: &Path) -> Result<(Vec<String>, BTreeMap<String, Good>), DefsError> {
+    let mut order = Vec::new();
     let mut goods = BTreeMap::new();
     for path in txt_files(&data_root.join("common/goods"))? {
-        let file: BTreeMap<String, RawGood> = parse_file(&path)?;
-        for (id, raw) in file {
-            let Some(base_price) = raw.base_price() else {
-                continue;
-            };
-            goods.insert(
-                id.clone(),
-                Good {
-                    id,
-                    base_price,
-                    texture: raw.texture,
-                },
-            );
+        let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let (file_order, file_goods) = parse_goods_bytes(&path, &bytes)?;
+        for id in file_order {
+            if !order.contains(&id) {
+                order.push(id);
+            }
         }
+        goods.extend(file_goods);
     }
-    Ok(goods)
+    Ok((order, goods))
+}
+
+fn parse_goods_bytes(
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(Vec<String>, BTreeMap<String, Good>), DefsError> {
+    let bytes = strip_bom(bytes);
+    if looks_empty(bytes) {
+        return Ok((Vec::new(), BTreeMap::new()));
+    }
+    let tape = TextTape::from_slice(bytes).map_err(|source| DefsError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let source_order = tape
+        .utf8_reader()
+        .fields()
+        .map(|(key, _, _)| key.read_str().to_string())
+        .collect::<Vec<_>>();
+    let mut raw: BTreeMap<String, RawGood> = parse_bytes(path, bytes)?;
+    let mut order = Vec::new();
+    let mut goods = BTreeMap::new();
+    for id in source_order {
+        let Some(raw_good) = raw.remove(&id) else {
+            continue;
+        };
+        let Some(base_price) = raw_good.base_price() else {
+            continue;
+        };
+        order.push(id.clone());
+        goods.insert(
+            id.clone(),
+            Good {
+                id,
+                base_price,
+                texture: raw_good.texture,
+            },
+        );
+    }
+    Ok((order, goods))
 }
 
 fn load_labels(data_root: &Path) -> Result<BTreeMap<String, String>, DefsError> {

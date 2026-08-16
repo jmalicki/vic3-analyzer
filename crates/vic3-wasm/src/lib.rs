@@ -255,15 +255,25 @@ pub fn gaps_json(
 }
 
 fn country_tag(save: &Save) -> Result<&str, WasmError> {
-    save.previous_played
-        .iter()
-        .find_map(|player| player.name.as_deref())
+    played_country(save)
+        .map(|(_, country)| country.definition.as_str())
         .or_else(|| {
             save.countries()
                 .next()
                 .map(|(_, country)| country.definition.as_str())
         })
         .ok_or(WasmError::NoCountry)
+}
+
+fn played_country(save: &Save) -> Option<(u32, &vic3_load::Country)> {
+    save.previous_played.iter().find_map(|player| {
+        let id = player.idtype?;
+        save.country_manager
+            .database
+            .get(&id)
+            .and_then(Option::as_ref)
+            .map(|country| (id, country))
+    })
 }
 
 /// CLI-parity gaps payload (`satisfied`, `gaps`, `limitations`).
@@ -422,32 +432,10 @@ struct SaveCounts {
 
 impl From<&Save> for SaveSummary {
     fn from(save: &Save) -> Self {
-        let tag = save
-            .previous_played
-            .iter()
-            .find_map(|player| player.name.clone())
-            .or_else(|| {
-                save.countries()
-                    .next()
-                    .map(|(_, country)| country.definition.clone())
-            });
-        let country_id = save
-            .previous_played
-            .iter()
-            .find_map(|player| player.idtype)
-            .or_else(|| {
-                tag.as_deref().and_then(|tag| {
-                    save.countries()
-                        .find(|(_, country)| country.definition == tag)
-                        .map(|(id, _)| id)
-                })
-            });
-        let market_id = country_id.and_then(|country_id| {
-            save.states
-                .iter_present()
-                .find(|(_, state)| state.country == Some(country_id) && state.market.is_some())
-                .and_then(|(_, state)| state.market)
-        });
+        let selected_country = played_country(save).or_else(|| save.countries().next());
+        let tag = selected_country.map(|(_, country)| country.definition.clone());
+        let country_id = selected_country.map(|(id, _)| id);
+        let market_id = selected_country.and_then(|(_, country)| country.market);
         let date = save.meta_data.game_date.map(|d| d.game_fmt().to_string());
         Self {
             tag,

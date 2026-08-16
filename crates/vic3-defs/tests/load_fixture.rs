@@ -19,11 +19,28 @@ fn fixture_goods_have_known_base_prices() {
     assert_eq!(defs.base_price("wood"), Some(20.0));
     assert_eq!(defs.base_price("coal"), Some(30.0));
     assert_eq!(defs.goods.len(), 3);
+    assert_eq!(defs.goods_order, ["grain", "wood", "coal"]);
+    assert_eq!(defs.good_by_index(1), Some("wood"));
     assert_eq!(defs.labels.get("grain").map(String::as_str), Some("Grain"));
     assert_eq!(
         defs.goods["grain"].texture.as_deref(),
         Some("gfx/interface/icons/goods_icons/grain.dds")
     );
+}
+
+#[test]
+fn in_memory_goods_preserve_source_order() {
+    let mut source = String::new();
+    for index in 0..18 {
+        source.push_str(&format!("good_{index} = {{ cost = 10 }}\n"));
+    }
+    source.push_str("merchant_marine = { cost = 15 }\n");
+    let defs = load_from_files([(
+        "game/common/goods/00_goods.txt".to_string(),
+        source.into_bytes(),
+    )])
+    .expect("ordered goods");
+    assert_eq!(defs.good_by_index(18), Some("merchant_marine"));
 }
 
 #[test]

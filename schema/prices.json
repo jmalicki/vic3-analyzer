@@ -184,7 +184,13 @@
           "type": "integer"
         },
         "buildings_without_method": {
-          "description": "Buildings whose production methods are all absent from the definitions,\nso they neither consume nor produce.",
+          "description": "Buildings with neither saved IO nor a production method present in the\ndefinitions.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "buildings_without_orders": {
+          "description": "Buildings with no non-zero saved IO and no usable PM fallback orders.",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
@@ -208,7 +214,7 @@
           "type": "integer"
         },
         "skipped_pops": {
-          "description": "Save pops dropped for missing `size_wa`/`size_dn` (or legacy `size`) or\n`wealth`.",
+          "description": "Save pops dropped for missing `workforce`/`dependents` (or legacy\npopulation fields) or `wealth`.",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
@@ -220,6 +226,7 @@
         "buildings",
         "skipped_buildings",
         "buildings_without_method",
+        "buildings_without_orders",
         "goods_with_orders"
       ],
       "type": "object"

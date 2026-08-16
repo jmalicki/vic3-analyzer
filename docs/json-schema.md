@@ -103,16 +103,21 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
         "buildings",
         "skipped_buildings",
         "buildings_without_method",
+        "buildings_without_orders",
         "goods_with_orders"
       ],
       "properties": {
         "pops": { "type": "integer", "description": "Pops whose consumption entered the solve." },
-        "skipped_pops": { "type": "integer", "description": "Save pops dropped for missing size_wa/size_dn (or legacy size) or wealth." },
+        "skipped_pops": { "type": "integer", "description": "Save pops dropped for missing workforce/dependents (or legacy population fields) or wealth." },
         "buildings": { "type": "integer", "description": "Buildings whose goods flows entered the solve." },
         "skipped_buildings": { "type": "integer", "description": "Save buildings dropped for a missing type id." },
         "buildings_without_method": {
           "type": "integer",
-          "description": "Buildings whose production methods are all absent from the definitions."
+          "description": "Buildings with neither saved IO nor a production method present in the definitions."
+        },
+        "buildings_without_orders": {
+          "type": "integer",
+          "description": "Buildings with no non-zero saved IO and no usable PM fallback orders."
         },
         "goods_with_orders": {
           "type": "integer",

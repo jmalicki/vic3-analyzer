@@ -48,6 +48,8 @@ pub struct Save {
     pub building_manager: Manager<Building>,
     #[serde(default)]
     pub pops: Manager<Pop>,
+    #[serde(default)]
+    pub laws: Manager<LawEntry>,
     #[serde(default, alias = "markets")]
     pub market_manager: Manager<Market>,
     #[serde(default, alias = "trade_routes")]
@@ -85,9 +87,14 @@ pub struct Country {
     pub infamy: Option<f64>,
     #[serde(default)]
     pub budget: Budget,
-    /// Enacted law type ids when the save records them (`law_autocracy`, …).
     #[serde(default)]
-    pub laws: Vec<String>,
+    pub market: Option<u32>,
+    #[serde(default)]
+    pub market_capital: Option<u32>,
+    #[serde(default)]
+    pub is_main_tag: Option<bool>,
+    #[serde(default)]
+    pub country_type: Option<String>,
     /// Direct overlord country id when this country is a subject.
     #[serde(default)]
     pub overlord: Option<u32>,
@@ -136,8 +143,9 @@ pub struct Building {
     pub building: String,
     #[serde(default)]
     pub state: Option<u32>,
-    #[serde(default)]
+    #[serde(default, rename = "levels", alias = "level")]
     pub level: i32,
+    /// Staffed levels, up to [`Self::level`], rather than a 0–1 fraction.
     #[serde(default)]
     pub staffing: f64,
     /// Active production method when a save records a single id.
@@ -169,14 +177,12 @@ impl<'de> Deserialize<'de> for BuildingGoods {
             #[serde(default)]
             goods: std::collections::BTreeMap<String, GoodQty>,
         }
-        let raw = Raw::deserialize(deserializer).unwrap_or(Raw {
-            goods: Default::default(),
-        });
+        let raw = Raw::deserialize(deserializer)?;
         Ok(Self {
             goods: raw
                 .goods
                 .into_iter()
-                .map(|(key, qty)| (resolve_good_key(&key), qty.0))
+                .map(|(key, qty)| (key, qty.value()))
                 .filter(|(_, qty)| *qty != 0.0)
                 .collect(),
         })
@@ -187,6 +193,12 @@ impl<'de> Deserialize<'de> for BuildingGoods {
 #[derive(Debug, Clone, PartialEq)]
 struct GoodQty(f64);
 
+impl GoodQty {
+    fn value(self) -> f64 {
+        self.0
+    }
+}
+
 impl<'de> Deserialize<'de> for GoodQty {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct V;
@@ -195,17 +207,17 @@ impl<'de> Deserialize<'de> for GoodQty {
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 f.write_str("a number or { value = … }")
             }
-            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
-                Ok(GoodQty(v))
+            fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<Self::Value, E> {
+                Ok(GoodQty(value))
             }
-            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
-                Ok(GoodQty(v as f64))
+            fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Self::Value, E> {
+                Ok(GoodQty(value as f64))
             }
-            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
-                Ok(GoodQty(v as f64))
+            fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(GoodQty(value as f64))
             }
-            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
-                v.parse().map(GoodQty).map_err(E::custom)
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                value.parse().map(GoodQty).map_err(E::custom)
             }
             fn visit_map<A: serde::de::MapAccess<'de>>(
                 self,
@@ -219,76 +231,45 @@ impl<'de> Deserialize<'de> for GoodQty {
                         let _: serde::de::IgnoredAny = map.next_value()?;
                     }
                 }
-                Ok(GoodQty(value.unwrap_or(0.0)))
+                value
+                    .map(GoodQty)
+                    .ok_or_else(|| serde::de::Error::custom("missing building good value"))
+            }
+            // Jomini exposes a single-field Clausewitz object as a sequence
+            // when it is nested below an integer map key.
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut value = None;
+                while let Some(key) = seq.next_element::<String>()? {
+                    let operator = seq.next_element::<String>()?.ok_or_else(|| {
+                        serde::de::Error::custom("missing building good operator")
+                    })?;
+                    if operator != "=" {
+                        return Err(serde::de::Error::custom(format!(
+                            "expected building good assignment, found {operator}"
+                        )));
+                    }
+                    if key == "value" {
+                        value = Some(seq.next_element::<f64>()?.ok_or_else(|| {
+                            serde::de::Error::custom("missing building good value")
+                        })?);
+                    } else {
+                        let _ = seq
+                            .next_element::<serde::de::IgnoredAny>()?
+                            .ok_or_else(|| {
+                                serde::de::Error::custom("missing building good field value")
+                            })?;
+                    }
+                }
+                value
+                    .map(GoodQty)
+                    .ok_or_else(|| serde::de::Error::custom("missing building good value"))
             }
         }
         deserializer.deserialize_any(V)
     }
-}
-
-/// Vanilla `common/goods` order used as the integer index in real saves.
-const VANILLA_GOODS: &[&str] = &[
-    "ammunition",
-    "small_arms",
-    "artillery",
-    "tanks",
-    "aeroplanes",
-    "manowars",
-    "ironclads",
-    "grain",
-    "fish",
-    "fabric",
-    "wood",
-    "groceries",
-    "clothes",
-    "furniture",
-    "paper",
-    "services",
-    "transportation",
-    "electricity",
-    "clippers",
-    "steamers",
-    "silk",
-    "dye",
-    "sulfur",
-    "coal",
-    "iron",
-    "lead",
-    "hardwood",
-    "rubber",
-    "oil",
-    "engines",
-    "steel",
-    "glass",
-    "fertilizer",
-    "tools",
-    "explosives",
-    "porcelain",
-    "meat",
-    "fruit",
-    "liquor",
-    "wine",
-    "tea",
-    "coffee",
-    "sugar",
-    "tobacco",
-    "opium",
-    "automobiles",
-    "telephones",
-    "radios",
-    "luxury_clothes",
-    "luxury_furniture",
-    "gold",
-    "fine_art",
-];
-
-fn resolve_good_key(key: &str) -> String {
-    if let Ok(index) = key.parse::<usize>() {
-        if let Some(name) = VANILLA_GOODS.get(index) {
-            return (*name).to_string();
-        }
-    }
-    key.to_string()
 }
 
 impl Building {
@@ -312,10 +293,10 @@ pub struct Pop {
     pub profession: Option<String>,
     #[serde(default)]
     pub size: Option<f64>,
-    #[serde(default)]
-    pub size_wa: Option<f64>,
-    #[serde(default)]
-    pub size_dn: Option<f64>,
+    #[serde(default, alias = "size_wa")]
+    pub workforce: Option<f64>,
+    #[serde(default, alias = "size_dn")]
+    pub dependents: Option<f64>,
     #[serde(default)]
     pub wealth: Option<i32>,
     #[serde(default)]
@@ -328,13 +309,14 @@ pub struct Pop {
 }
 
 impl Pop {
-    /// Working-adult-equivalent population used to scale demand.
+    /// Total household population used to scale demand.
     ///
-    /// Current saves split pop size into working adults (`size_wa`) and
-    /// dependents (`size_dn`); older saves use the legacy `size` field.
+    /// Current saves split pop size into `workforce` and `dependents`; older
+    /// saves and fixtures use `size`, `size_wa`, and `size_dn`.
     pub fn demand_size(&self) -> Option<f64> {
-        if self.size_wa.is_some() || self.size_dn.is_some() {
-            let size = self.size_wa.unwrap_or(0.0) + 0.5 * self.size_dn.unwrap_or(0.0);
+        if self.workforce.is_some() || self.dependents.is_some() {
+            let size = self.workforce.unwrap_or(0.0)
+                + DEPENDENT_DEMAND_WEIGHT * self.dependents.unwrap_or(0.0);
             return (size > 0.0).then_some(size);
         }
 
@@ -342,11 +324,25 @@ impl Pop {
     }
 }
 
+/// Dependents count as full household members for goods demand.
+pub const DEPENDENT_DEMAND_WEIGHT: f64 = 1.0;
+
 /// A market in `market_manager.database`.
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub struct Market {
     #[serde(default)]
-    pub states: Vec<u32>,
+    pub owner: Option<u32>,
+}
+
+/// One entry in the top-level `laws.database` manager.
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+pub struct LawEntry {
+    #[serde(default)]
+    pub law: String,
+    #[serde(default)]
+    pub country: Option<u32>,
+    #[serde(default)]
+    pub active: Option<bool>,
 }
 
 /// A trade route in `trade_route_manager.database`.
@@ -393,6 +389,19 @@ impl Save {
             .find(|(_, country)| country.definition == tag)
             .map(|(_, country)| country)
     }
+
+    /// Active law ids belonging to `country_id`.
+    pub fn active_laws(&self, country_id: u32) -> Vec<&str> {
+        self.laws
+            .iter_present()
+            .filter(|(_, entry)| {
+                entry.country == Some(country_id)
+                    && entry.active == Some(true)
+                    && !entry.law.is_empty()
+            })
+            .map(|(_, entry)| entry.law.as_str())
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -400,14 +409,14 @@ mod tests {
     use super::Pop;
 
     #[test]
-    fn demand_size_weights_dependents() {
+    fn demand_size_uses_total_household_population() {
         let pop = Pop {
-            size_wa: Some(8_000.0),
-            size_dn: Some(4_000.0),
+            workforce: Some(8_000.0),
+            dependents: Some(4_000.0),
             ..Pop::default()
         };
 
-        assert_eq!(pop.demand_size(), Some(10_000.0));
+        assert_eq!(pop.demand_size(), Some(12_000.0));
     }
 
     #[test]

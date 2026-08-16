@@ -12,6 +12,8 @@ use crate::DEFAULT_PRICE_RANGE;
 pub struct GameDefs {
     /// `NEconomy.PRICE_RANGE` (typically `0.75`).
     pub price_range: f64,
+    /// Good ids in deterministic `common/goods` source-file order.
+    pub goods_order: Vec<String>,
     pub goods: BTreeMap<String, Good>,
     /// Localized display labels keyed by script id. Empty when localization
     /// was not included in the selected game files.
@@ -37,6 +39,7 @@ impl Default for GameDefs {
     fn default() -> Self {
         Self {
             price_range: DEFAULT_PRICE_RANGE,
+            goods_order: Vec::new(),
             goods: BTreeMap::new(),
             labels: BTreeMap::new(),
             icons: BTreeMap::new(),
@@ -54,6 +57,11 @@ impl GameDefs {
     /// Base price for `good_id`, if that good was parsed.
     pub fn base_price(&self, good_id: &str) -> Option<f64> {
         self.goods.get(good_id).map(|g| g.base_price)
+    }
+
+    /// Good id at the integer index used by saved building IO.
+    pub fn good_by_index(&self, index: usize) -> Option<&str> {
+        self.goods_order.get(index).map(String::as_str)
     }
 }
 

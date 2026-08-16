@@ -136,6 +136,11 @@ fn finished(
             .iter()
             .filter(|building| !building.has_known_method(defs))
             .count(),
+        buildings_without_orders: world
+            .buildings
+            .iter()
+            .filter(|building| !building.has_orders(defs))
+            .count(),
         goods_with_orders: goods
             .iter()
             .filter(|good| good.buy > crate::ORDER_EPS || good.sell > crate::ORDER_EPS)
@@ -185,23 +190,7 @@ fn detail_rows(
 
     let mut buildings = Vec::new();
     for building in &world.buildings {
-        let scale = building.level * building.staffing;
-        let mut input_qty = BTreeMap::<String, f64>::new();
-        let mut output_qty = BTreeMap::<String, f64>::new();
-        let methods = building.methods(defs);
-        if methods.is_empty() {
-            input_qty.extend(building.saved_inputs.clone());
-            output_qty.extend(building.saved_outputs.clone());
-        } else {
-            for method in methods {
-                for (good_id, per_level) in &method.inputs {
-                    *input_qty.entry(good_id.clone()).or_default() += per_level * scale;
-                }
-                for (good_id, per_level) in &method.outputs {
-                    *output_qty.entry(good_id.clone()).or_default() += per_level * scale;
-                }
-            }
-        }
+        let (input_qty, output_qty) = building.goods_io(defs);
         let inputs = priced_flows(input_qty, &prices, building.state, &mut state_buy);
         let outputs = priced_flows(output_qty, &prices, building.state, &mut state_sell);
         let cost = inputs.iter().map(|flow| flow.value).sum::<f64>();
