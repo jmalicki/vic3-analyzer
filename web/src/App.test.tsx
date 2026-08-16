@@ -7,6 +7,11 @@ import { clearStoredDefs } from './defsStore'
 import type { AnalysisRecord } from './types'
 import type { WasmApi } from './wasm'
 
+/** Test-only blobs; silly names so they never look like a real install export. */
+const MOCKY_DEFS = new File(['MOCKY-NOT-A-REAL-BLOB'], 'mocky-mcmockface.postcard')
+const STALE_POTATO_DEFS = new File(['stale-potato'], 'stale-potato.postcard')
+const THIN_AS_A_RAIL_DEFS = new File(['thin-as-a-rail'], 'thin-as-a-rail.postcard')
+
 const result = JSON.stringify({
   goods: [{ id: 'iron', base: 40, price: 43.5, buy: 120, sell: 100 }],
   residual: 0.00001,
@@ -172,10 +177,7 @@ describe('prices UI', () => {
     await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
     expect(await screen.findByText('iron')).toBeInTheDocument()
 
-    await user.upload(
-      screen.getByLabelText('Choose definitions blob'),
-      new File(['rebuilt'], 'rebuilt.postcard'),
-    )
+    await user.upload(screen.getByLabelText('Choose definitions blob'), STALE_POTATO_DEFS)
 
     await waitFor(() => expect(screen.queryByText('iron')).not.toBeInTheDocument())
   })
@@ -185,12 +187,11 @@ describe('prices UI', () => {
     render(<App wasmApi={mockApi()} />)
     await selectSave(user)
 
-    await user.upload(
-      screen.getByLabelText('Choose definitions blob'),
-      new File(['blob'], 'partial.postcard'),
-    )
+    await user.upload(screen.getByLabelText('Choose definitions blob'), THIN_AS_A_RAIL_DEFS)
 
-    expect(await screen.findByText(/partial.postcard only defines 3 goods/)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/thin-as-a-rail\.postcard only defines 3 goods/),
+    ).toBeInTheDocument()
   })
 
   it('builds and submits the what-if form from the wasm schema', async () => {
@@ -315,19 +316,20 @@ describe('prices UI', () => {
     expect(defsHelp).toHaveTextContent('postcard-encoded snapshot of goods')
   })
 
-  it('uses the dev-only demo blob by default and lets a custom blob override it', async () => {
+  it('uses the dev-only demo blob by default and lets a mocky blob override it', async () => {
     const user = userEvent.setup()
     const api = mockApi()
     render(<App wasmApi={api} />)
     await selectSave(user)
 
-    await user.upload(screen.getByLabelText('Choose definitions blob'), new File(['custom'], 'custom.postcard'))
-    expect(await screen.findByText(/Using your file: custom\.postcard/)).toBeInTheDocument()
+    await user.upload(screen.getByLabelText('Choose definitions blob'), MOCKY_DEFS)
+    expect(await screen.findByText(/Using your file: mocky-mcmockface\.postcard/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
     await waitFor(() => expect(api.prices).toHaveBeenCalled())
     const defsArg = vi.mocked(api.prices).mock.calls[0][2]
-    expect(Array.from(defsArg)).toEqual([99, 117, 115, 116, 111, 109]) // "custom"
+    // Exact contents of MOCKY_DEFS — proves prices got the mock, not the demo fixture.
+    expect(new TextDecoder().decode(defsArg)).toBe('MOCKY-NOT-A-REAL-BLOB')
   })
 
   it('asks for definitions when no demo blob is served', async () => {
@@ -342,16 +344,15 @@ describe('prices UI', () => {
     const user = userEvent.setup()
     render(<App wasmApi={mockApi()} />)
     await selectSave(user)
-    await user.upload(
-      screen.getByLabelText('Choose definitions blob'),
-      new File(['custom'], 'custom.postcard'),
-    )
-    await screen.findByText(/Using your file: custom\.postcard/)
+    await user.upload(screen.getByLabelText('Choose definitions blob'), MOCKY_DEFS)
+    await screen.findByText(/Using your file: mocky-mcmockface\.postcard/)
 
     cleanup()
     render(<App wasmApi={mockApi()} />)
     expect(
-      await screen.findByText(/Using your file: custom\.postcard.*kept from a previous visit/),
+      await screen.findByText(
+        /Using your file: mocky-mcmockface\.postcard.*kept from a previous visit/,
+      ),
     ).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Forget these definitions' }))
