@@ -56,11 +56,26 @@ describe('workerWasmApi', () => {
 
     expect(local.prices).not.toHaveBeenCalled()
     expect(sent).toEqual([
-      { id: 1, method: 'prices', args: [save, undefined, defs, '{}'] },
+      { id: 1, method: 'loaded_prices', args: [] },
     ])
 
     reply({ id: 1, ok: true, value: '{"prices":[]}' })
     expect(await pending).toBe('{"prices":[]}')
+  })
+
+  it('loads a worker-owned analysis session with save and definitions', async () => {
+    const { port, sent, reply } = fakePort()
+    const api = workerWasmApi(localApi(), port)
+    const save = new Uint8Array([1])
+    const defs = new Uint8Array([2])
+
+    const pending = api.load_analysis(save, undefined, defs, '{}')
+    expect(sent).toEqual([
+      { id: 1, method: 'load_analysis', args: [save, undefined, defs, '{}'] },
+    ])
+    reply({ id: 1, ok: true, value: '{"summary":{},"prices":{}}' })
+
+    expect(await pending).toBe('{"summary":{},"prices":{}}')
   })
 
   it('keeps the allowlist local, since the folder walk cannot await', () => {

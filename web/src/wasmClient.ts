@@ -53,14 +53,21 @@ export function workerWasmApi(local: WasmApi, port: WasmWorkerPort): WasmApi {
     defs_summary: (defs) => call('defs_summary', [defs]),
     defs_icons: (defs) => call('defs_icons', [defs]),
     parse_save: (save, tokens) => call('parse_save', [save, tokens]),
-    prices: (save, tokens, defs, solveOptsJson) =>
-      call('prices', [save, tokens, defs, solveOptsJson]),
-    what_if: (save, tokens, defs, solveOptsJson, whatIfOptsJson) =>
-      call('what_if', [save, tokens, defs, solveOptsJson, whatIfOptsJson]),
-    gaps: (save, tokens, defs, solveOptsJson, goal) =>
-      call('gaps', [save, tokens, defs, solveOptsJson, goal]),
-    plan: (save, tokens, defs, solveOptsJson, planOptsJson) =>
-      call('plan', [save, tokens, defs, solveOptsJson, planOptsJson]),
+    load_analysis: (save, tokens, defs, solveOptsJson) =>
+      call('load_analysis', [save, tokens, defs, solveOptsJson]),
+    clear_analysis: () => call('clear_analysis', []),
+    loaded_prices: () => call('loaded_prices', []),
+    loaded_what_if: (whatIfOptsJson) => call('loaded_what_if', [whatIfOptsJson]),
+    loaded_gaps: (goal) => call('loaded_gaps', [goal]),
+    loaded_plan: (planOptsJson) => call('loaded_plan', [planOptsJson]),
+    // Keep the public byte-oriented API stable while production calls reuse
+    // the worker-owned session loaded by App.
+    prices: (_save, _tokens, _defs, _solveOptsJson) => call('loaded_prices', []),
+    what_if: (_save, _tokens, _defs, _solveOptsJson, whatIfOptsJson) =>
+      call('loaded_what_if', [whatIfOptsJson]),
+    gaps: (_save, _tokens, _defs, _solveOptsJson, goal) => call('loaded_gaps', [goal]),
+    plan: (_save, _tokens, _defs, _solveOptsJson, planOptsJson) =>
+      call('loaded_plan', [planOptsJson]),
   }
 }
 

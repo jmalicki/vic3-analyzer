@@ -23,6 +23,18 @@ export interface WasmApi {
   /** JSON map of good id to a PNG data URL. */
   defs_icons(defs: Uint8Array): string | Promise<string>
   parse_save(save: Uint8Array, tokens?: Uint8Array): string | Promise<string>
+  /** Build and retain the current save's world; returns summary and baseline prices. */
+  load_analysis(
+    save: Uint8Array,
+    tokens: Uint8Array | undefined,
+    defs: Uint8Array,
+    solveOptsJson: string,
+  ): string | Promise<string>
+  clear_analysis(): void | Promise<void>
+  loaded_prices(): string | Promise<string>
+  loaded_what_if(whatIfOptsJson: string): string | Promise<string>
+  loaded_gaps(goal: string): string | Promise<string>
+  loaded_plan(planOptsJson: string): string | Promise<string>
   prices(
     save: Uint8Array,
     tokens: Uint8Array | undefined,

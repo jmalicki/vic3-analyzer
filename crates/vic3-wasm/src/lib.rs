@@ -15,6 +15,7 @@ mod error;
 mod schema;
 
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use vic3_goals::Atom;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save};
@@ -26,6 +27,20 @@ use vic3save::PdsDate;
 use wasm_bindgen::prelude::*;
 
 pub use error::WasmError;
+
+struct LoadedAnalysis {
+    save: Save,
+    defs: vic3_defs::GameDefs,
+    world: World,
+    solve_opts: SolveOpts,
+    prices: PricesResult,
+}
+
+thread_local! {
+    /// The wasm module lives in the analysis worker, so this singleton has the
+    /// same lifetime and isolation as that worker.
+    static LOADED_ANALYSIS: RefCell<Option<LoadedAnalysis>> = const { RefCell::new(None) };
+}
 
 /// Crate version from Cargo.
 #[wasm_bindgen]
@@ -40,6 +55,58 @@ pub fn version() -> String {
 #[wasm_bindgen]
 pub fn parse_save(save_bytes: &[u8], tokens_bytes: Option<Vec<u8>>) -> Result<String, JsError> {
     parse_save_json(save_bytes, tokens_bytes.as_deref()).map_err(to_js)
+}
+
+/// Load one worker-owned analysis session and solve its baseline prices.
+///
+/// The decoded save, definitions, and built world remain in wasm for subsequent
+/// prices, what-if, gaps, and plan calls. Loading another save replaces them.
+#[wasm_bindgen]
+pub fn load_analysis(
+    save_bytes: &[u8],
+    tokens_bytes: Option<Vec<u8>>,
+    defs_blob: &[u8],
+    solve_opts_json: &str,
+) -> Result<String, JsError> {
+    load_analysis_json(
+        save_bytes,
+        tokens_bytes.as_deref(),
+        defs_blob,
+        solve_opts_json,
+    )
+    .map_err(to_js)
+}
+
+/// Release the worker-owned save, definitions, world, and baseline prices.
+#[wasm_bindgen]
+pub fn clear_analysis() {
+    LOADED_ANALYSIS.with(|loaded| {
+        loaded.borrow_mut().take();
+    });
+}
+
+/// Return the prices computed while loading the current analysis.
+#[wasm_bindgen]
+pub fn loaded_prices() -> Result<String, JsError> {
+    loaded_prices_json().map_err(to_js)
+}
+
+/// Apply a what-if delta to the current worker-owned world.
+#[wasm_bindgen]
+pub fn loaded_what_if(what_if_opts_json: &str) -> Result<String, JsError> {
+    loaded_what_if_json(what_if_opts_json).map_err(to_js)
+}
+
+/// Evaluate goal gaps against the current worker-owned analysis.
+#[wasm_bindgen]
+pub fn loaded_gaps(goal: &str) -> Result<String, JsError> {
+    loaded_gaps_json(goal).map_err(to_js)
+}
+
+/// Plan from the current worker-owned analysis.
+#[wasm_bindgen]
+pub fn loaded_plan(plan_opts_json: &str) -> Result<String, JsError> {
+    loaded_plan_json(plan_opts_json).map_err(to_js)
 }
 
 /// Build a postcard definitions blob from browser-selected Victoria 3 files.
@@ -221,6 +288,99 @@ pub fn parse_save_json(
 ) -> Result<String, WasmError> {
     let save = load_save(save_bytes, tokens_bytes)?;
     Ok(serde_json::to_string(&SaveSummary::from(&save))?)
+}
+
+#[derive(Serialize)]
+struct LoadedAnalysisPayload<'a> {
+    summary: SaveSummary,
+    prices: &'a PricesResult,
+}
+
+/// Native/test entry for loading the worker-owned analysis session.
+pub fn load_analysis_json(
+    save_bytes: &[u8],
+    tokens_bytes: Option<&[u8]>,
+    defs_blob: &[u8],
+    solve_opts_json: &str,
+) -> Result<String, WasmError> {
+    let save = load_save(save_bytes, tokens_bytes)?;
+    let mut defs = vic3_defs::decode_blob(defs_blob)?;
+    // The UI extracts icons separately. They are never consulted by World or
+    // the solver, so do not retain their PNG bytes in the worker session too.
+    defs.icons.clear();
+    let solve_opts = parse_solve_opts(solve_opts_json)?;
+    let world = World::from_save(&save, &defs);
+    let prices = solve(&world, &defs, solve_opts);
+    let json = serde_json::to_string(&LoadedAnalysisPayload {
+        summary: SaveSummary::from(&save),
+        prices: &prices,
+    })?;
+    LOADED_ANALYSIS.with(|loaded| {
+        loaded.replace(Some(LoadedAnalysis {
+            save,
+            defs,
+            world,
+            solve_opts,
+            prices,
+        }));
+    });
+    Ok(json)
+}
+
+pub fn loaded_prices_json() -> Result<String, WasmError> {
+    with_loaded_analysis(|loaded| Ok(serde_json::to_string(&loaded.prices)?))
+}
+
+pub fn loaded_what_if_json(what_if_opts_json: &str) -> Result<String, WasmError> {
+    let delta: WhatIfOpts = serde_json::from_str(what_if_opts_json)?;
+    with_loaded_analysis(|loaded| {
+        let result = solve_what_if(&loaded.world, &loaded.defs, &delta, loaded.solve_opts);
+        Ok(serde_json::to_string(&result)?)
+    })
+}
+
+pub fn loaded_gaps_json(goal: &str) -> Result<String, WasmError> {
+    let goal = vic3_goals::parse(goal)?;
+    with_loaded_analysis(|loaded| {
+        let country = country_tag(&loaded.save)?;
+        let state = PlanningState::from_save_with_prices(&loaded.save, country, &loaded.prices)?;
+        let result = GapsResult {
+            satisfied: vic3_goals::evaluate(&goal, &state),
+            gaps: vic3_goals::gaps(&goal, &state),
+            limitations: loaded.prices.limitations.clone(),
+        };
+        Ok(serde_json::to_string(&result)?)
+    })
+}
+
+pub fn loaded_plan_json(plan_opts_json: &str) -> Result<String, WasmError> {
+    let plan_opts: PlanOpts = serde_json::from_str(plan_opts_json)?;
+    let goal = vic3_goals::parse(&plan_opts.goal)?;
+    with_loaded_analysis(|loaded| {
+        let country = country_tag(&loaded.save)?;
+        let state = PlanningState::from_save_with_prices(&loaded.save, country, &loaded.prices)?;
+        let economy =
+            EconomyContext::new(loaded.world.clone(), loaded.defs.clone(), loaded.solve_opts);
+        let result = vic3_plan::plan_with_economy(
+            state,
+            goal,
+            SimConfig::default(),
+            economy,
+            plan_opts.max_days,
+            loaded.prices.residual,
+            loaded.prices.limitations.clone(),
+        )?;
+        Ok(serde_json::to_string(&result)?)
+    })
+}
+
+fn with_loaded_analysis<T>(
+    run: impl FnOnce(&LoadedAnalysis) -> Result<T, WasmError>,
+) -> Result<T, WasmError> {
+    LOADED_ANALYSIS.with(|loaded| {
+        let loaded = loaded.borrow();
+        run(loaded.as_ref().ok_or(WasmError::NoLoadedAnalysis)?)
+    })
 }
 
 /// Native/test entry: same `PricesResult` JSON as the CLI.
@@ -663,6 +823,34 @@ mod tests {
         bytes.extend_from_slice(&[0u8; 32]);
         let err = parse_save_json(&bytes, Some(&[])).expect_err("empty tokens");
         assert!(matches!(err, WasmError::Load(LoadError::MissingTokens)));
+    }
+
+    #[test]
+    fn loaded_analysis_keeps_baseline_world_and_prices() {
+        clear_analysis();
+        assert!(matches!(
+            loaded_prices_json(),
+            Err(WasmError::NoLoadedAnalysis)
+        ));
+
+        let json =
+            load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
+        let payload: Value = serde_json::from_str(&json).expect("loaded payload");
+        assert_eq!(payload["summary"]["tag"], "GER");
+        assert!(payload["prices"]["goods"].is_array());
+
+        let baseline: PricesResult =
+            serde_json::from_str(&loaded_prices_json().expect("cached prices"))
+                .expect("PricesResult");
+        assert!(!baseline.goods.is_empty());
+        let changed: PricesResult = serde_json::from_str(
+            &loaded_what_if_json(r#"{"building":"building_rye_farm","extra_levels":5}"#)
+                .expect("cached what-if"),
+        )
+        .expect("PricesResult");
+        assert!(changed.residual.is_finite());
+
+        clear_analysis();
     }
 
     #[test]

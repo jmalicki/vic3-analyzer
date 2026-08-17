@@ -43,6 +43,15 @@ const planResult = JSON.stringify({
   limitations: ['Research duration is fixed by the compact simulator.'],
 })
 
+const saveSummary = {
+  tag: 'FRA',
+  country_id: 16777216,
+  market_id: 1,
+  date: '1840.2.3',
+  version: '1.9.0',
+  buildings: ['building_rye_farm', 'building_steel_mills'],
+}
+
 const schema = JSON.stringify({
   title: 'WhatIfOpts',
   type: 'object',
@@ -79,16 +88,15 @@ function mockApi(): WasmApi {
         price_range: 0.75,
       }),
     ),
-    parse_save: vi.fn(() =>
-      JSON.stringify({
-        tag: 'FRA',
-        country_id: 16777216,
-        market_id: 1,
-        date: '1840.2.3',
-        version: '1.9.0',
-        buildings: ['building_rye_farm', 'building_steel_mills'],
-      }),
+    parse_save: vi.fn(() => JSON.stringify(saveSummary)),
+    load_analysis: vi.fn(() =>
+      JSON.stringify({ summary: saveSummary, prices: JSON.parse(result) }),
     ),
+    clear_analysis: vi.fn(),
+    loaded_prices: vi.fn(() => result),
+    loaded_what_if: vi.fn(() => result),
+    loaded_gaps: vi.fn(() => gapsResult),
+    loaded_plan: vi.fn(() => planResult),
     prices: vi.fn(() => result),
     what_if: vi.fn(() => result),
     gaps: vi.fn(() => gapsResult),
@@ -155,7 +163,7 @@ describe('prices UI', () => {
     expect(screen.getByText('43.50')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Method and limitations' })).toBeInTheDocument()
     await waitFor(async () => expect(await listAnalyses()).toHaveLength(1))
-    expect(api.prices).toHaveBeenCalled()
+    expect(api.loaded_prices).toHaveBeenCalled()
   })
 
   it('shows the game icon for a priced good', async () => {
@@ -209,16 +217,18 @@ describe('prices UI', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('clears a stale price table when the definitions change', async () => {
+  it('rebuilds prices when the definitions change', async () => {
     const user = userEvent.setup()
-    render(<App wasmApi={mockApi()} />)
+    const api = mockApi()
+    render(<App wasmApi={api} />)
     await selectSave(user)
     await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
     expect(await screen.findByText('Iron')).toBeInTheDocument()
 
     await buildDefinitions(user)
 
-    await waitFor(() => expect(screen.queryByText('Iron')).not.toBeInTheDocument())
+    await waitFor(() => expect(api.load_analysis).toHaveBeenCalledTimes(2))
+    expect(screen.getByText('Iron')).toBeInTheDocument()
   })
 
   it('flags a user blob that is missing common/goods', async () => {
@@ -246,11 +256,7 @@ describe('prices UI', () => {
     await user.click(screen.getByRole('button', { name: 'Run what-if' }))
 
     await waitFor(() =>
-      expect(api.what_if).toHaveBeenCalledWith(
-        expect.any(Uint8Array),
-        undefined,
-        expect.any(Uint8Array),
-        '{}',
+      expect(api.loaded_what_if).toHaveBeenCalledWith(
         JSON.stringify({ building: 'building_steel_mills', extra_levels: 5 }),
       ),
     )
@@ -273,13 +279,7 @@ describe('prices UI', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('Solvent')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Method and limitations' })).toBeInTheDocument()
-    expect(api.gaps).toHaveBeenCalledWith(
-      expect.any(Uint8Array),
-      undefined,
-      expect.any(Uint8Array),
-      '{}',
-      'research(tech=nitroglycerin)',
-    )
+    expect(api.loaded_gaps).toHaveBeenCalledWith('research(tech=nitroglycerin)')
     await waitFor(async () => expect((await listAnalyses())[0].kind).toBe('gaps'))
   })
 
@@ -296,7 +296,7 @@ describe('prices UI', () => {
     expect(await screen.findByText('365 total days')).toBeInTheDocument()
     expect(screen.getByText('Queue technology: nitroglycerin')).toBeInTheDocument()
     expect(screen.getByText('Wait 365 days for nitroglycerin')).toBeInTheDocument()
-    await waitFor(() => expect(api.plan).toHaveBeenCalled())
+    await waitFor(() => expect(api.loaded_plan).toHaveBeenCalled())
     const records = await listAnalyses()
     expect(records[0]).toMatchObject({ kind: 'plan', label: 'rush' })
     expect(records[0].result).toMatchObject({ day_cost: 365 })
@@ -316,11 +316,7 @@ describe('prices UI', () => {
     await user.click(screen.getByRole('button', { name: 'Build timeline' }))
 
     await waitFor(() =>
-      expect(api.plan).toHaveBeenCalledWith(
-        expect.any(Uint8Array),
-        undefined,
-        expect.any(Uint8Array),
-        '{}',
+      expect(api.loaded_plan).toHaveBeenCalledWith(
         JSON.stringify({
           goal: 'gdp >= 100000000',
           max_days: 3650,
@@ -415,9 +411,9 @@ describe('prices UI', () => {
     expect(await screen.findByText(/Using your file: defs\.postcard/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
-    await waitFor(() => expect(api.prices).toHaveBeenCalled())
-    const defsArg = vi.mocked(api.prices).mock.calls[0][2]
-    // Exact builder output proves prices got the locally built definitions, not the demo fixture.
+    await waitFor(() => expect(api.loaded_prices).toHaveBeenCalled())
+    const defsArg = vi.mocked(api.load_analysis).mock.calls.at(-1)?.[2]
+    // Exact builder output proves the retained world used the locally built definitions.
     expect(new TextDecoder().decode(defsArg)).toBe('MOCKY-NOT-A-REAL-BLOB')
   })
 

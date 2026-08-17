@@ -32,7 +32,7 @@ import type {
   PricesResult,
   SaveSummary,
 } from './types'
-import { runGaps, type WasmApi } from './wasm'
+import type { WasmApi } from './wasm'
 import { loadWasmApi } from './wasmClient'
 
 /**
@@ -171,6 +171,7 @@ function App({ wasmApi }: Props) {
   const [busy, setBusy] = useState(false)
   const [builderOpen, setBuilderOpen] = useState(false)
   const [builderBusy, setBuilderBusy] = useState(false)
+  const [analysisReady, setAnalysisReady] = useState(false)
   const [error, setError] = useState<string>()
   const saveInputRef = useRef<HTMLInputElement>(null)
   const savePaths = useMemo(() => victoria3SavePaths(), [])
@@ -247,21 +248,41 @@ function App({ wasmApi }: Props) {
   useEffect(() => {
     if (!api || !saveFile) {
       setSummary(undefined)
+      setAnalysisReady(false)
+      if (api) void api.clear_analysis()
       return
     }
     let cancelled = false
-    void Promise.all([bytes(saveFile), bytes(tokensFile)])
-      .then(async ([saveBytes, tokenBytes]) => {
-        const json = await api.parse_save(saveBytes!, tokenBytes)
-        if (!cancelled) setSummary(JSON.parse(json) as SaveSummary)
+    setAnalysisReady(false)
+    const inputs = effectiveDefs
+      ? Promise.all([bytes(saveFile), bytes(tokensFile), bytes(effectiveDefs)])
+      : Promise.all([bytes(saveFile), bytes(tokensFile)])
+    void inputs
+      .then(async (loaded) => {
+        if (effectiveDefs) {
+          const [saveBytes, tokenBytes, defsBytes] = loaded
+          const json = await api.load_analysis(saveBytes!, tokenBytes, defsBytes!, '{}')
+          if (cancelled) return
+          const payload = JSON.parse(json) as { summary: SaveSummary; prices: PricesResult }
+          setSummary(payload.summary)
+          setResult(payload.prices)
+          setAnalysisReady(true)
+        } else {
+          const [saveBytes, tokenBytes] = loaded
+          const json = await api.parse_save(saveBytes!, tokenBytes)
+          if (!cancelled) setSummary(JSON.parse(json) as SaveSummary)
+        }
       })
       .catch((reason: unknown) => {
-        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason))
+        if (!cancelled) {
+          setAnalysisReady(false)
+          setError(reason instanceof Error ? reason.message : String(reason))
+        }
       })
     return () => {
       cancelled = true
     }
-  }, [api, saveFile, tokensFile])
+  }, [api, saveFile, tokensFile, effectiveDefs])
 
   // Swapping inputs invalidates any table on screen; keeping it would read as
   // the new blob's output.
@@ -269,7 +290,7 @@ function App({ wasmApi }: Props) {
     setResult(undefined)
     setGapsResult(undefined)
     setPlanResult(undefined)
-  }, [saveFile, effectiveDefs])
+  }, [saveFile, tokensFile, effectiveDefs])
 
   useEffect(() => {
     if (!api || !effectiveDefs) {
@@ -343,21 +364,11 @@ function App({ wasmApi }: Props) {
     setBusy(true)
     setError(undefined)
     try {
-      const [saveBytes, tokenBytes, defsBytes] = await Promise.all([
-        bytes(saveFile),
-        bytes(tokensFile),
-        bytes(effectiveDefs),
-      ])
+      const [saveBytes, tokenBytes] = await Promise.all([bytes(saveFile), bytes(tokensFile)])
       const json =
         kind === 'prices'
-          ? await api.prices(saveBytes!, tokenBytes, defsBytes!, '{}')
-          : await api.what_if(
-              saveBytes!,
-              tokenBytes,
-              defsBytes!,
-              '{}',
-              JSON.stringify(whatIfOpts),
-            )
+          ? await api.loaded_prices()
+          : await api.loaded_what_if(JSON.stringify(whatIfOpts))
       const nextResult = JSON.parse(json) as PricesResult
       setResult(nextResult)
       await archiveResult(kind, kind === 'prices' ? {} : whatIfOpts, nextResult, saveBytes!, tokenBytes)
@@ -402,12 +413,8 @@ function App({ wasmApi }: Props) {
     setBusy(true)
     setError(undefined)
     try {
-      const [saveBytes, tokenBytes, defsBytes] = await Promise.all([
-        bytes(saveFile),
-        bytes(tokensFile),
-        bytes(effectiveDefs),
-      ])
-      const json = await runGaps(api, saveBytes!, tokenBytes, defsBytes!, goal.trim())
+      const [saveBytes, tokenBytes] = await Promise.all([bytes(saveFile), bytes(tokensFile)])
+      const json = await api.loaded_gaps(goal.trim())
       const nextResult = JSON.parse(json) as GapsResult
       setGapsResult(nextResult)
       await archiveResult('gaps', { goal: goal.trim() }, nextResult, saveBytes!, tokenBytes)
@@ -423,16 +430,10 @@ function App({ wasmApi }: Props) {
     if (!api || !saveFile || !effectiveDefs) return
     setBusy(true)
     setError(undefined)
-    void Promise.all([bytes(saveFile), bytes(tokensFile), bytes(effectiveDefs)])
-      .then(async ([saveBytes, tokenBytes, defsBytes]) => {
+    void Promise.all([bytes(saveFile), bytes(tokensFile)])
+      .then(async ([saveBytes, tokenBytes]) => {
         const opts = { goal, max_days: 3650, label: label || null }
-        const json = await api.plan(
-          saveBytes!,
-          tokenBytes,
-          defsBytes!,
-          '{}',
-          JSON.stringify(opts),
-        )
+        const json = await api.loaded_plan(JSON.stringify(opts))
         const nextResult = JSON.parse(json) as PlanResult
         setPlanResult(nextResult)
         await archiveResult('plan', opts, nextResult, saveBytes!, tokenBytes, label)
@@ -514,7 +515,7 @@ function App({ wasmApi }: Props) {
   }
 
   const hasDefs = Boolean(effectiveDefs)
-  const ready = Boolean(api && saveFile && effectiveDefs)
+  const ready = Boolean(api && saveFile && effectiveDefs && analysisReady)
   const missing = [
     ...(saveFile ? [] : ['a .v3 save']),
     ...(hasDefs ? [] : ['game definitions']),

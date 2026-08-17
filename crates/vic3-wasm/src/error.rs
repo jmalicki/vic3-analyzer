@@ -27,4 +27,7 @@ pub enum WasmError {
     /// The save contains no playable country.
     #[error("save has no playable country")]
     NoCountry,
+    /// A worker analysis method ran before a save and definitions were loaded.
+    #[error("no analysis is loaded")]
+    NoLoadedAnalysis,
 }

@@ -125,6 +125,26 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     expect(icons.grain).toMatch(/^data:image\/png;base64,iVBOR/)
   })
 
+  it('loads and reuses a worker-style analysis session', async () => {
+    await api.clear_analysis()
+    await expect(Promise.resolve().then(() => api.loaded_prices())).rejects.toThrow(
+      'no analysis is loaded',
+    )
+
+    const loaded = JSON.parse(await api.load_analysis(save, undefined, defs, '{}'))
+    expect(loaded.summary.tag).toBe('GER')
+    expect(loaded.prices.goods.length).toBeGreaterThan(0)
+
+    const cached = JSON.parse(await api.loaded_prices())
+    expect(cached).toEqual(loaded.prices)
+    const changed = JSON.parse(
+      await api.loaded_what_if(
+        JSON.stringify({ building: 'building_rye_farm', extra_levels: 1 }),
+      ),
+    )
+    expect(changed.goods.length).toBeGreaterThan(0)
+  })
+
   it('prices returns residual and limitations', async () => {
     const result = JSON.parse(await api.prices(save, undefined, defs, '{}'))
     expect(typeof result.residual).toBe('number')
