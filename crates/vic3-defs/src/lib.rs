@@ -33,6 +33,7 @@ mod error;
 mod goods;
 mod icons;
 mod load;
+mod needs;
 mod path_rules;
 mod staging;
 mod substitution;
@@ -43,6 +44,7 @@ pub use coa::{select_coa, select_flag_coa};
 pub use error::DefsError;
 pub use goods::{GoodIdx, GoodsVec};
 pub use load::{load_from_files, load_from_path, DefsBuilder};
+pub use needs::{NeedIdx, NeedsVec};
 pub use path_rules::{classify_defs_path, DefsPathClass, COMMON_DIRS};
 pub use substitution::{clamp_supply_share, substitution_shares, substitution_weight};
 pub use types::{

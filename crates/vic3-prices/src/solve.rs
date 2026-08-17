@@ -8,7 +8,7 @@ use basin::{
 };
 use vic3_defs::{GameDefs, GoodIdx, GoodsVec};
 
-use crate::consumption::consumption;
+use crate::consumption::{add_pop_consumption, consumption};
 use crate::formula::price;
 use crate::result::{
     BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, GoodFlow, GoodPrice,
@@ -53,6 +53,7 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
     let price_range = defs.price_range.max(0.0);
     let n = goods.len();
     let (frozen_buy, frozen_sell) = reconstruct_non_pop_orders(world, defs);
+    let (wage_pop_idxs, frozen_pop_buy) = split_pop_buy(world, defs, &base_prices, &frozen_sell);
     let problem = PriceResidual {
         world,
         defs,
@@ -64,6 +65,8 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
         upper: vec![1.0 + price_range; n],
         frozen_buy,
         frozen_sell,
+        wage_pop_idxs,
+        frozen_pop_buy,
     };
 
     let mut rel = vec![1.0; n];
@@ -436,6 +439,33 @@ fn market_goods(base_prices: &GoodsVec) -> Vec<GoodIdx> {
         .collect()
 }
 
+/// Split pops into wage-sensitive vs frozen-wealth; precompute the constant buy.
+fn split_pop_buy(
+    world: &World,
+    defs: &GameDefs,
+    base_prices: &GoodsVec,
+    frozen_sell: &GoodsVec,
+) -> (Vec<usize>, GoodsVec) {
+    let mut wage_pop_idxs = Vec::new();
+    let mut frozen_pop_buy = GoodsVec::zeros(defs.goods_order.len());
+    for (i, pop) in world.pops.iter().enumerate() {
+        if pop.wages > 0.0 {
+            wage_pop_idxs.push(i);
+        } else {
+            // Prices are irrelevant for wages ≤ 0 (wealth is frozen).
+            add_pop_consumption(
+                &mut frozen_pop_buy,
+                pop,
+                base_prices,
+                base_prices,
+                defs,
+                frozen_sell,
+            );
+        }
+    }
+    (wage_pop_idxs, frozen_pop_buy)
+}
+
 #[derive(Clone)]
 struct PriceResidual<'a> {
     world: &'a World,
@@ -448,6 +478,8 @@ struct PriceResidual<'a> {
     upper: Vec<f64>,
     frozen_buy: GoodsVec,
     frozen_sell: GoodsVec,
+    wage_pop_idxs: Vec<usize>,
+    frozen_pop_buy: GoodsVec,
 }
 
 impl PriceResidual<'_> {
@@ -459,15 +491,24 @@ impl PriceResidual<'_> {
         prices
     }
 
+    fn pop_buy_at(&self, prices: &GoodsVec) -> GoodsVec {
+        let mut buy = self.frozen_pop_buy.clone();
+        for &i in &self.wage_pop_idxs {
+            add_pop_consumption(
+                &mut buy,
+                &self.world.pops[i],
+                prices,
+                &self.base_prices,
+                self.defs,
+                &self.frozen_sell,
+            );
+        }
+        buy
+    }
+
     fn formula_rel(&self, rel: &[f64]) -> Vec<f64> {
         let prices = self.prices_from_rel(rel);
-        let pop_buy = consumption(
-            &self.world.pops,
-            &prices,
-            &self.base_prices,
-            self.defs,
-            &self.frozen_sell,
-        );
+        let pop_buy = self.pop_buy_at(&prices);
         self.goods
             .iter()
             .zip(self.bases)
@@ -505,13 +546,7 @@ impl PriceResidual<'_> {
 
     fn evaluate(&self, rel: &[f64]) -> (Vec<GoodPrice>, f64) {
         let prices = self.prices_from_rel(rel);
-        let pop_buy = consumption(
-            &self.world.pops,
-            &prices,
-            &self.base_prices,
-            self.defs,
-            &self.frozen_sell,
-        );
+        let pop_buy = self.pop_buy_at(&prices);
         let residual = self
             .residual_at(rel)
             .iter()

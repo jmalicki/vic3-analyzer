@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{DefsError, GameDefs};
 
 /// Postcard blob format version. Bump when [`GameDefs`] is not backward compatible.
-pub const BLOB_VERSION: u32 = 7;
+pub const BLOB_VERSION: u32 = 8;
 
 #[derive(Serialize, Deserialize)]
 struct DefsBlob {
@@ -44,7 +44,9 @@ pub fn decode_blob(bytes: &[u8]) -> Result<GameDefs, DefsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BuyPackage, Good, GoodIdx, NeedEntry, PopNeed, ProductionMethod};
+    use crate::{
+        BuyPackage, Good, GoodIdx, NeedEntry, NeedIdx, NeedsVec, PopNeed, ProductionMethod,
+    };
     use std::collections::BTreeMap;
 
     fn sample_defs() -> GameDefs {
@@ -76,23 +78,9 @@ mod tests {
             },
         );
 
-        let mut pop_needs = BTreeMap::new();
-        pop_needs.insert(
-            "popneed_heating".into(),
-            PopNeed {
-                id: "popneed_heating".into(),
-                default_good: Some(GoodIdx::from_usize(1)),
-                entries: vec![NeedEntry {
-                    good: GoodIdx::from_usize(1),
-                    weight: 1.0,
-                    min_supply_share: 0.0,
-                    max_supply_share: 1.0,
-                }],
-            },
-        );
-
-        let mut needs = BTreeMap::new();
-        needs.insert("popneed_heating".into(), 15.0);
+        let heat = NeedIdx::from_usize(0);
+        let mut needs = NeedsVec::zeros(1);
+        needs[heat] = 15.0;
         let mut buy_packages = BTreeMap::new();
         buy_packages.insert(
             1,
@@ -106,9 +94,10 @@ mod tests {
         let mut obsessions = BTreeMap::new();
         obsessions.insert("french".into(), vec![GoodIdx::from_usize(0)]);
 
-        GameDefs {
+        let mut defs = GameDefs {
             price_range: 0.75,
             goods_order: vec!["grain".into(), "wood".into()],
+            needs_order: vec!["popneed_heating".into()],
             goods,
             labels: BTreeMap::new(),
             icons: BTreeMap::new(),
@@ -117,10 +106,22 @@ mod tests {
             production_methods,
             buildings: BTreeMap::new(),
             building_groups: BTreeMap::new(),
-            pop_needs,
+            pop_needs: vec![PopNeed {
+                id: "popneed_heating".into(),
+                default_good: Some(GoodIdx::from_usize(1)),
+                entries: vec![NeedEntry {
+                    good: GoodIdx::from_usize(1),
+                    weight: 1.0,
+                    min_supply_share: 0.0,
+                    max_supply_share: 1.0,
+                }],
+            }],
             buy_packages,
+            package_ladder: Vec::new(),
             obsessions,
-        }
+        };
+        defs.rebuild_package_ladder();
+        defs
     }
 
     #[test]

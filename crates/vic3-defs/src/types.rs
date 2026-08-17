@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{GoodIdx, DEFAULT_PRICE_RANGE};
+use crate::{GoodIdx, NeedIdx, NeedsVec, DEFAULT_PRICE_RANGE};
 
 /// Parsed Victoria 3 definitions used by the price solver and wasm UI.
 ///
@@ -14,6 +14,8 @@ pub struct GameDefs {
     pub price_range: f64,
     /// Good ids in deterministic `common/goods` source-file order.
     pub goods_order: Vec<String>,
+    /// Need ids in deterministic first-seen load order.
+    pub needs_order: Vec<String>,
     pub goods: BTreeMap<String, Good>,
     /// Localized display labels keyed by script id. Empty when localization
     /// was not included in the selected game files.
@@ -32,9 +34,14 @@ pub struct GameDefs {
     pub buildings: BTreeMap<String, BuildingType>,
     /// Building group id → grouping and slot-capacity metadata.
     pub building_groups: BTreeMap<String, BuildingGroup>,
-    pub pop_needs: BTreeMap<String, PopNeed>,
+    /// Pop needs aligned with [`Self::needs_order`].
+    pub pop_needs: Vec<PopNeed>,
     /// Wealth level (1–99) → buy package.
     pub buy_packages: BTreeMap<u8, BuyPackage>,
+    /// Dense need values for wealth levels 1..=99 (interpolated from packages).
+    /// Empty when there are no buy packages. Index `w - 1` holds wealth `w`.
+    #[serde(default)]
+    pub package_ladder: Vec<NeedsVec>,
     /// Culture id → obsessed good indices. Empty when the tree has no obsessions.
     pub obsessions: BTreeMap<String, Vec<GoodIdx>>,
 }
@@ -44,6 +51,7 @@ impl Default for GameDefs {
         Self {
             price_range: DEFAULT_PRICE_RANGE,
             goods_order: Vec::new(),
+            needs_order: Vec::new(),
             goods: BTreeMap::new(),
             labels: BTreeMap::new(),
             icons: BTreeMap::new(),
@@ -52,8 +60,9 @@ impl Default for GameDefs {
             production_methods: BTreeMap::new(),
             buildings: BTreeMap::new(),
             building_groups: BTreeMap::new(),
-            pop_needs: BTreeMap::new(),
+            pop_needs: Vec::new(),
             buy_packages: BTreeMap::new(),
+            package_ladder: Vec::new(),
             obsessions: BTreeMap::new(),
         }
     }
@@ -66,6 +75,14 @@ impl GameDefs {
             .iter()
             .position(|id| id == good_id)
             .map(GoodIdx::from_usize)
+    }
+
+    /// Index of `need_id` in [`Self::needs_order`], if known.
+    pub fn need_index_of(&self, need_id: &str) -> Option<NeedIdx> {
+        self.needs_order
+            .iter()
+            .position(|id| id == need_id)
+            .map(NeedIdx::from_usize)
     }
 
     /// Base price for `good_id`, if that good was parsed.
@@ -83,6 +100,73 @@ impl GameDefs {
     pub fn good_by_index(&self, index: GoodIdx) -> Option<&str> {
         self.goods_order.get(index.as_usize()).map(String::as_str)
     }
+
+    /// Need id at `index`.
+    pub fn need_id_by_index(&self, index: NeedIdx) -> Option<&str> {
+        self.needs_order.get(index.as_usize()).map(String::as_str)
+    }
+
+    /// Pop need definition at `index`.
+    pub fn need_by_index(&self, index: NeedIdx) -> Option<&PopNeed> {
+        self.pop_needs.get(index.as_usize())
+    }
+
+    /// Pop need definition by script id.
+    pub fn pop_need(&self, need_id: &str) -> Option<&PopNeed> {
+        self.need_index_of(need_id)
+            .and_then(|idx| self.need_by_index(idx))
+    }
+
+    /// Rebuild [`Self::package_ladder`] from [`Self::buy_packages`].
+    ///
+    /// Call after manually assembling packages in tests.
+    pub fn rebuild_package_ladder(&mut self) {
+        self.package_ladder = build_package_ladder(&self.buy_packages, self.needs_order.len());
+    }
+}
+
+/// Fill wealth levels 1..=99 by interpolating neighboring defined packages.
+pub(crate) fn build_package_ladder(
+    packages: &BTreeMap<u8, BuyPackage>,
+    n_needs: usize,
+) -> Vec<NeedsVec> {
+    if packages.is_empty() || n_needs == 0 {
+        return Vec::new();
+    }
+    let keys: Vec<u8> = packages.keys().copied().collect();
+    let min_w = keys[0];
+    let max_w = *keys.last().expect("non-empty keys");
+    (1u8..=99)
+        .map(|wealth| {
+            let w = wealth.clamp(min_w, max_w);
+            let mut lo = keys[0];
+            let mut hi = keys[0];
+            for &k in &keys {
+                if k <= w {
+                    lo = k;
+                }
+                if k >= w {
+                    hi = k;
+                    break;
+                }
+                hi = k;
+            }
+            let p_lo = &packages[&lo].needs;
+            if lo == hi {
+                return p_lo.aligned(n_needs);
+            }
+            let span = f64::from(hi) - f64::from(lo);
+            if span <= 0.0 {
+                return p_lo.aligned(n_needs);
+            }
+            let t = (f64::from(w) - f64::from(lo)) / span;
+            NeedsVec::lerp(
+                &p_lo.aligned(n_needs),
+                &packages[&hi].needs.aligned(n_needs),
+                t,
+            )
+        })
+        .collect()
 }
 
 /// One selectable flag for a country tag (`common/flag_definitions`).
@@ -154,6 +238,6 @@ pub struct NeedEntry {
 pub struct BuyPackage {
     pub wealth: u8,
     pub political_strength: f64,
-    /// Need id → package value (Vic3: base-price units per 10k working pops).
-    pub needs: BTreeMap<String, f64>,
+    /// Dense need package values (Vic3: base-price units per 10k working pops).
+    pub needs: NeedsVec,
 }

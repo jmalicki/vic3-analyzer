@@ -43,17 +43,37 @@ pub fn version() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
 
     use proptest::prelude::*;
     use vic3_defs::{
-        BuyPackage, GameDefs, Good, GoodIdx, GoodsVec, NeedEntry, PopNeed, ProductionMethod,
+        BuyPackage, GameDefs, Good, GoodIdx, GoodsVec, NeedEntry, NeedIdx, NeedsVec, PopNeed,
+        ProductionMethod,
     };
 
     fn heating_defs() -> GameDefs {
+        let heat = NeedIdx::from_usize(0);
         let mut defs = GameDefs {
             price_range: 0.75,
             goods_order: vec!["grain".into(), "wood".into(), "coal".into()],
+            needs_order: vec!["popneed_heating".into()],
+            pop_needs: vec![PopNeed {
+                id: "popneed_heating".into(),
+                default_good: Some(GoodIdx::from_usize(1)),
+                entries: vec![
+                    NeedEntry {
+                        good: GoodIdx::from_usize(1),
+                        weight: 1.0,
+                        min_supply_share: 0.0,
+                        max_supply_share: 0.5,
+                    },
+                    NeedEntry {
+                        good: GoodIdx::from_usize(2),
+                        weight: 2.0,
+                        min_supply_share: 0.1,
+                        max_supply_share: 1.0,
+                    },
+                ],
+            }],
             ..GameDefs::default()
         };
         defs.goods.insert(
@@ -80,41 +100,24 @@ mod tests {
                 texture: None,
             },
         );
-        defs.pop_needs.insert(
-            "popneed_heating".into(),
-            PopNeed {
-                id: "popneed_heating".into(),
-                default_good: Some(GoodIdx::from_usize(1)),
-                entries: vec![
-                    NeedEntry {
-                        good: GoodIdx::from_usize(1),
-                        weight: 1.0,
-                        min_supply_share: 0.0,
-                        max_supply_share: 0.5,
-                    },
-                    NeedEntry {
-                        good: GoodIdx::from_usize(2),
-                        weight: 2.0,
-                        min_supply_share: 0.1,
-                        max_supply_share: 1.0,
-                    },
-                ],
-            },
-        );
+        let mut needs1 = NeedsVec::zeros(1);
+        needs1[heat] = 15.0;
         defs.buy_packages.insert(
             1,
             BuyPackage {
                 wealth: 1,
                 political_strength: 0.03,
-                needs: BTreeMap::from([("popneed_heating".into(), 15.0)]),
+                needs: needs1,
             },
         );
+        let mut needs2 = NeedsVec::zeros(1);
+        needs2[heat] = 17.0;
         defs.buy_packages.insert(
             2,
             BuyPackage {
                 wealth: 2,
                 political_strength: 0.04,
-                needs: BTreeMap::from([("popneed_heating".into(), 17.0)]),
+                needs: needs2,
             },
         );
         defs.production_methods.insert(
@@ -125,14 +128,40 @@ mod tests {
                 outputs: vec![(GoodIdx::from_usize(1), 30.0)],
             },
         );
+        defs.rebuild_package_ladder();
         defs
     }
 
     /// Two goods, two singleton needs — buy can equal sell at base prices.
     fn two_good_defs() -> GameDefs {
+        let staple = NeedIdx::from_usize(0);
+        let heat = NeedIdx::from_usize(1);
         let mut defs = GameDefs {
             price_range: 0.75,
             goods_order: vec!["grain".into(), "wood".into()],
+            needs_order: vec!["popneed_staple".into(), "popneed_heating".into()],
+            pop_needs: vec![
+                PopNeed {
+                    id: "popneed_staple".into(),
+                    default_good: Some(GoodIdx::from_usize(0)),
+                    entries: vec![NeedEntry {
+                        good: GoodIdx::from_usize(0),
+                        weight: 1.0,
+                        min_supply_share: 0.0,
+                        max_supply_share: 1.0,
+                    }],
+                },
+                PopNeed {
+                    id: "popneed_heating".into(),
+                    default_good: Some(GoodIdx::from_usize(1)),
+                    entries: vec![NeedEntry {
+                        good: GoodIdx::from_usize(1),
+                        weight: 1.0,
+                        min_supply_share: 0.0,
+                        max_supply_share: 1.0,
+                    }],
+                },
+            ],
             ..GameDefs::default()
         };
         defs.goods.insert(
@@ -151,52 +180,26 @@ mod tests {
                 texture: None,
             },
         );
-        defs.pop_needs.insert(
-            "popneed_staple".into(),
-            PopNeed {
-                id: "popneed_staple".into(),
-                default_good: Some(GoodIdx::from_usize(0)),
-                entries: vec![NeedEntry {
-                    good: GoodIdx::from_usize(0),
-                    weight: 1.0,
-                    min_supply_share: 0.0,
-                    max_supply_share: 1.0,
-                }],
-            },
-        );
-        defs.pop_needs.insert(
-            "popneed_heating".into(),
-            PopNeed {
-                id: "popneed_heating".into(),
-                default_good: Some(GoodIdx::from_usize(1)),
-                entries: vec![NeedEntry {
-                    good: GoodIdx::from_usize(1),
-                    weight: 1.0,
-                    min_supply_share: 0.0,
-                    max_supply_share: 1.0,
-                }],
-            },
-        );
+        let mut needs1 = NeedsVec::zeros(2);
+        needs1[staple] = 20.0;
+        needs1[heat] = 20.0;
         defs.buy_packages.insert(
             1,
             BuyPackage {
                 wealth: 1,
                 political_strength: 0.03,
-                needs: BTreeMap::from([
-                    ("popneed_staple".into(), 20.0),
-                    ("popneed_heating".into(), 20.0),
-                ]),
+                needs: needs1,
             },
         );
+        let mut needs2 = NeedsVec::zeros(2);
+        needs2[staple] = 22.0;
+        needs2[heat] = 22.0;
         defs.buy_packages.insert(
             2,
             BuyPackage {
                 wealth: 2,
                 political_strength: 0.04,
-                needs: BTreeMap::from([
-                    ("popneed_staple".into(), 22.0),
-                    ("popneed_heating".into(), 22.0),
-                ]),
+                needs: needs2,
             },
         );
         defs.production_methods.insert(
@@ -207,6 +210,7 @@ mod tests {
                 outputs: vec![(GoodIdx::from_usize(1), 30.0)],
             },
         );
+        defs.rebuild_package_ladder();
         defs
     }
 

@@ -1,8 +1,6 @@
 //! Pop consumption from buy packages, substitution, and relaxed wealth.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use vic3_defs::{substitution_shares, GameDefs, GoodsVec, PopNeed};
+use vic3_defs::{substitution_shares, GameDefs, GoodsVec, NeedsVec, PopNeed};
 
 use crate::world::{WorldPop, POP_SCALE};
 
@@ -26,7 +24,8 @@ pub fn consumption(
     buy
 }
 
-fn add_pop_consumption(
+/// Add one pop's buy orders into `buy` (used by the residual wage-pop path).
+pub(crate) fn add_pop_consumption(
     buy: &mut GoodsVec,
     pop: &WorldPop,
     prices: &GoodsVec,
@@ -40,8 +39,11 @@ fn add_pop_consumption(
     let wealth = continuous_wealth(pop, prices, base_prices, defs, sell_orders);
     let needs = package_needs(wealth, defs);
     let scale = pop.size / POP_SCALE;
-    for (need_id, package_value) in needs {
-        let Some(need) = defs.pop_needs.get(&need_id) else {
+    for (need_idx, package_value) in needs.iter_indexed() {
+        if package_value == 0.0 {
+            continue;
+        }
+        let Some(need) = defs.need_by_index(need_idx) else {
             continue;
         };
         let Some(qty) = need_quantity(need, package_value, scale, base_prices) else {
@@ -95,8 +97,11 @@ fn basket_quantities(
     let mut buy = GoodsVec::zeros(defs.goods_order.len());
     let needs = package_needs(wealth, defs);
     let scale = size / POP_SCALE;
-    for (need_id, package_value) in needs {
-        let Some(need) = defs.pop_needs.get(&need_id) else {
+    for (need_idx, package_value) in needs.iter_indexed() {
+        if package_value == 0.0 {
+            continue;
+        }
+        let Some(need) = defs.need_by_index(need_idx) else {
             continue;
         };
         let Some(qty) = need_quantity(need, package_value, scale, base_prices) else {
@@ -131,48 +136,23 @@ fn apply_need_shares(
     }
 }
 
-fn package_needs(wealth: f64, defs: &GameDefs) -> BTreeMap<String, f64> {
-    if defs.buy_packages.is_empty() {
-        return BTreeMap::new();
+/// Interpolated need package values at continuous `wealth` (no String clones).
+fn package_needs(wealth: f64, defs: &GameDefs) -> NeedsVec {
+    let n = defs.needs_order.len();
+    if defs.package_ladder.is_empty() || n == 0 {
+        return NeedsVec::zeros(n);
     }
-    let keys: Vec<u8> = defs.buy_packages.keys().copied().collect();
-    let min_w = f64::from(keys[0]);
-    let max_w = f64::from(*keys.last().expect("non-empty keys"));
-    let w = wealth.clamp(min_w, max_w);
-
-    let mut lo = keys[0];
-    let mut hi = keys[0];
-    for &k in &keys {
-        if f64::from(k) <= w {
-            lo = k;
-        }
-        if f64::from(k) >= w {
-            hi = k;
-            break;
-        }
-        hi = k;
+    let max_w = defs.package_ladder.len() as f64;
+    let w = wealth.clamp(1.0, max_w);
+    let lo = w.floor();
+    let hi = w.ceil();
+    let i_lo = (lo as usize).saturating_sub(1);
+    let i_hi = (hi as usize).saturating_sub(1);
+    if i_lo == i_hi {
+        return defs.package_ladder[i_lo].clone();
     }
-
-    let p_lo = &defs.buy_packages[&lo].needs;
-    if lo == hi {
-        return p_lo.clone();
-    }
-    let span = f64::from(hi) - f64::from(lo);
-    if span <= 0.0 {
-        return p_lo.clone();
-    }
-    let t = (w - f64::from(lo)) / span;
-    let p_hi = &defs.buy_packages[&hi].needs;
-    let mut ids: BTreeSet<&String> = BTreeSet::new();
-    ids.extend(p_lo.keys());
-    ids.extend(p_hi.keys());
-    ids.into_iter()
-        .map(|need| {
-            let a = p_lo.get(need).copied().unwrap_or(0.0);
-            let b = p_hi.get(need).copied().unwrap_or(0.0);
-            (need.clone(), a * (1.0 - t) + b * t)
-        })
-        .collect()
+    let t = w - lo;
+    NeedsVec::lerp(&defs.package_ladder[i_lo], &defs.package_ladder[i_hi], t)
 }
 
 fn need_quantity(

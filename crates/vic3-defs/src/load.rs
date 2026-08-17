@@ -8,9 +8,8 @@ use serde::Deserialize;
 
 use crate::{
     classify_defs_path, icons,
-    staging::{StagingDefs, StagingNeed, StagingNeedEntry, StagingPm},
-    BuildingGroup, BuildingType, BuyPackage, DefsError, DefsPathClass, GameDefs, Good,
-    DEFAULT_PRICE_RANGE,
+    staging::{StagingBuyPackage, StagingDefs, StagingNeed, StagingNeedEntry, StagingPm},
+    BuildingGroup, BuildingType, DefsError, DefsPathClass, GameDefs, Good, DEFAULT_PRICE_RANGE,
 };
 
 /// Load definitions from a Victoria 3 install or a fixture tree.
@@ -46,7 +45,7 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
     defs.production_methods = load_production_methods(&data_root)?;
     defs.buildings = load_buildings(&data_root)?;
     defs.building_groups = load_building_groups(&data_root)?;
-    defs.pop_needs = load_pop_needs(&data_root)?;
+    (defs.needs_order, defs.pop_needs) = load_pop_needs(&data_root)?;
     defs.buy_packages = load_buy_packages(&data_root)?;
     defs.obsessions = load_obsessions(&data_root)?;
     defs.resolve()
@@ -246,6 +245,9 @@ fn parse_defs_text(
                         })
                     })
                     .collect();
+                if !defs.needs_order.contains(&id) {
+                    defs.needs_order.push(id.clone());
+                }
                 defs.pop_needs.insert(
                     id.clone(),
                     StagingNeed {
@@ -261,7 +263,7 @@ fn parse_defs_text(
                 if let Some(wealth) = parse_wealth_key(&key) {
                     defs.buy_packages.insert(
                         wealth,
-                        BuyPackage {
+                        StagingBuyPackage {
                             wealth,
                             political_strength: package.political_strength.unwrap_or(0.0),
                             needs: package.goods,
@@ -684,7 +686,10 @@ fn collect_goods_modifiers<E: Encoding + Clone>(
     }
 }
 
-fn load_pop_needs(data_root: &Path) -> Result<BTreeMap<String, StagingNeed>, DefsError> {
+fn load_pop_needs(
+    data_root: &Path,
+) -> Result<(Vec<String>, BTreeMap<String, StagingNeed>), DefsError> {
+    let mut order = Vec::new();
     let mut needs = BTreeMap::new();
     for path in txt_files(&data_root.join("common/pop_needs"))? {
         let file: BTreeMap<String, RawNeed> = parse_file(&path)?;
@@ -701,6 +706,9 @@ fn load_pop_needs(data_root: &Path) -> Result<BTreeMap<String, StagingNeed>, Def
                     })
                 })
                 .collect();
+            if !order.contains(&id) {
+                order.push(id.clone());
+            }
             needs.insert(
                 id.clone(),
                 StagingNeed {
@@ -711,10 +719,10 @@ fn load_pop_needs(data_root: &Path) -> Result<BTreeMap<String, StagingNeed>, Def
             );
         }
     }
-    Ok(needs)
+    Ok((order, needs))
 }
 
-fn load_buy_packages(data_root: &Path) -> Result<BTreeMap<u8, BuyPackage>, DefsError> {
+fn load_buy_packages(data_root: &Path) -> Result<BTreeMap<u8, StagingBuyPackage>, DefsError> {
     let mut packages = BTreeMap::new();
     for path in txt_files(&data_root.join("common/buy_packages"))? {
         let file: BTreeMap<String, RawBuyPackage> = parse_file(&path)?;
@@ -724,7 +732,7 @@ fn load_buy_packages(data_root: &Path) -> Result<BTreeMap<u8, BuyPackage>, DefsE
             };
             packages.insert(
                 wealth,
-                BuyPackage {
+                StagingBuyPackage {
                     wealth,
                     political_strength: raw.political_strength.unwrap_or(0.0),
                     needs: raw.goods,

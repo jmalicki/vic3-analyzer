@@ -67,7 +67,7 @@ fn fixture_price_range_from_neconomy() {
 #[test]
 fn fixture_need_and_wealth_packages() {
     let defs = load_fixture();
-    let need = defs.pop_needs.get("popneed_heating").expect("heating need");
+    let need = defs.pop_need("popneed_heating").expect("heating need");
     assert_eq!(need.default_good, defs.index_of("wood"));
     assert_eq!(need.entries.len(), 2);
     assert_eq!(need.entries[0].good, defs.index_of("wood").unwrap());
@@ -75,15 +75,14 @@ fn fixture_need_and_wealth_packages() {
     assert_eq!(need.entries[1].good, defs.index_of("coal").unwrap());
     assert!((need.entries[1].min_supply_share - 0.1).abs() < f64::EPSILON);
 
+    assert_eq!(defs.needs_order, ["popneed_heating"]);
     assert_eq!(defs.buy_packages.len(), 2);
-    assert_eq!(
-        defs.buy_packages[&1].needs.get("popneed_heating").copied(),
-        Some(15.0)
-    );
-    assert_eq!(
-        defs.buy_packages[&2].needs.get("popneed_heating").copied(),
-        Some(17.0)
-    );
+    let heat = defs.need_index_of("popneed_heating").unwrap();
+    assert_eq!(defs.buy_packages[&1].needs[heat], 15.0);
+    assert_eq!(defs.buy_packages[&2].needs[heat], 17.0);
+    assert_eq!(defs.package_ladder.len(), 99);
+    assert_eq!(defs.package_ladder[0][heat], 15.0);
+    assert_eq!(defs.package_ladder[1][heat], 17.0);
 }
 
 #[test]
