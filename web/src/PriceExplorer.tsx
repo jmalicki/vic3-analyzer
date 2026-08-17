@@ -107,10 +107,40 @@ function NeedBaskets({
   return (
     <div className="need-baskets">
       {needs.map((need) => (
-        <div key={need.need_id} className="need-basket">
-          <strong>{need.need_name || displayId(need.need_id)}</strong>
-          <GoodFlows flows={need.goods} goods={goods} icons={icons} />
-        </div>
+        <article key={need.need_id} className="need-basket">
+          <h4>{need.need_name || displayId(need.need_id)}</h4>
+          {need.goods.length ? (
+            <table>
+              <thead>
+                <tr>
+                  <th>Good</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {need.goods.map((flow) => {
+                  const good = goods.find((row) => row.id === flow.good_id)
+                  return (
+                    <tr key={flow.good_id}>
+                      <th>
+                        <a
+                          className="good-link"
+                          href={`#/prices/good/${encodeURIComponent(flow.good_id)}`}
+                        >
+                          <GoodIcon id={flow.good_id} icons={icons} />
+                          {good ? goodName(good) : displayId(flow.good_id)}
+                        </a>
+                      </th>
+                      <td>{flow.quantity.toFixed(1)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <p>No goods in this basket.</p>
+          )}
+        </article>
       ))}
     </div>
   )

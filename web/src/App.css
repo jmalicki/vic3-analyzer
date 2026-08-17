@@ -102,7 +102,7 @@ th:first-child { text-align: left; }
 .table-sort:hover { text-decoration: underline; }
 .breadcrumbs { display: flex; align-items: center; gap: .55rem; margin-bottom: .75rem; color: #9ba79d; }
 .breadcrumbs a, table a { color: #d7e6a7; }
-.good-link { display: inline-flex; align-items: center; gap: .45rem; }
+.good-link, .good-link:visited { color: #d7e6a7; display: inline-flex; align-items: center; gap: .45rem; }
 /* Game icons are 8-bit art, so keep the upscale crisp rather than blurred. */
 .good-icon { image-rendering: pixelated; vertical-align: middle; flex: none; }
 h2 > .good-icon { margin-right: .45rem; }
@@ -230,8 +230,29 @@ section[aria-labelledby] { margin-top: 1rem; }
 .overview-kpis div, .state-information div { display: grid; gap: .15rem; }
 .overview-kpis dt, .state-information dt { color: #9ba79d; font-size: .75rem; text-transform: uppercase; }
 .overview-kpis dd, .state-information dd { margin: 0; }
-.need-baskets { display: grid; gap: .65rem; }
-.need-basket { display: grid; gap: .25rem; }
+.need-baskets {
+  display: grid;
+  gap: .65rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(16rem, 100%), 1fr));
+}
+.need-basket {
+  background: #141b16;
+  border: 1px solid #37433a;
+  display: grid;
+  align-content: start;
+  gap: .35rem;
+  min-width: 0;
+  padding: .65rem .75rem;
+}
+.need-basket h4 {
+  color: #b9c78c;
+  font-family: Georgia, serif;
+  font-weight: 400;
+  margin: 0;
+}
+.need-basket table { margin: 0; }
+.need-basket th, .need-basket td { padding: .35rem 0; }
+.need-basket p { margin: 0; color: #9ba79d; font-size: .85rem; }
 .state-needs-strip { margin-bottom: 1rem; }
 .pop-expand { background: transparent; border: 0; color: inherit; font: inherit; padding: 0; text-align: left; }
 .pop-expand:hover { text-decoration: underline; }

@@ -271,7 +271,8 @@ describe('PriceExplorer', () => {
     expect(screen.getAllByText('8,000').length).toBeGreaterThan(0)
     await user.click(screen.getByRole('button', { name: 'Machinists' }))
     expect(screen.getAllByText('Staple foods').length).toBeGreaterThan(0)
-    expect(screen.getAllByRole('link', { name: /Apples 4\.0/ }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('link', { name: 'Apples' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('4.0').length).toBeGreaterThan(0)
   })
 
   it('shows distinct locally attributed prices for each state', () => {
