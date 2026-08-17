@@ -145,7 +145,10 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
 ```
 
 `status = converged` implies `residual < SolveOpts.residual_eps` (I5).
-`state_goods.price` is not a MAPI-local price.
+`state_goods.price` blends `market_price` and `state_price` using
+`effective_mapi = 0.75 * market_access`. Access is infrastructure-only in this
+milestone and scales state-attributed orders into the single market residual;
+route endpoints, MAPI modifiers, and overseas constraints are not yet modeled.
 
 A market with no orders prices every good at its base price and still converges
 with a zero residual, so `inputs.goods_with_orders == 0` is the only way to tell

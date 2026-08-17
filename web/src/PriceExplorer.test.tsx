@@ -2,7 +2,30 @@ import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { PriceExplorer } from './PriceExplorer'
-import type { PricesResult } from './types'
+import type { PricesResult, StateGood } from './types'
+
+function stateGood(
+  state_id: number,
+  state_price: number,
+  buy: number,
+  sell: number,
+  market_access = 1,
+  market_price = 50,
+): StateGood {
+  const effective_mapi = 0.75 * market_access
+  return {
+    state_id,
+    good_id: 'zany_tools',
+    base: 40,
+    buy,
+    sell,
+    market_price,
+    state_price,
+    market_access,
+    effective_mapi,
+    price: effective_mapi * market_price + (1 - effective_mapi) * state_price,
+  }
+}
 
 const result: PricesResult = {
   scope: 'whole_save_synthetic',
@@ -23,8 +46,8 @@ const result: PricesResult = {
     },
   ],
   state_goods: [
-    { state_id: 2, good_id: 'zany_tools', base: 40, price: 50, buy: 8, sell: 1 },
-    { state_id: 1, good_id: 'zany_tools', base: 40, price: 50, buy: 2, sell: 7 },
+    stateGood(2, 70, 8, 1),
+    stateGood(1, 30, 2, 7),
   ],
   buildings: [
     {
@@ -96,10 +119,10 @@ const scopedResult: PricesResult = {
     { id: 4, region_id: 'STATE_YAK', country_id: 20, market_id: 3 },
   ],
   state_goods: [
-    { state_id: 1, good_id: 'zany_tools', base: 40, price: 50, buy: 2, sell: 7 },
-    { state_id: 2, good_id: 'zany_tools', base: 40, price: 50, buy: 8, sell: 1 },
-    { state_id: 3, good_id: 'zany_tools', base: 40, price: 50, buy: 3, sell: 4 },
-    { state_id: 4, good_id: 'zany_tools', base: 40, price: 50, buy: 5, sell: 6 },
+    stateGood(1, 35, 2, 7),
+    stateGood(2, 70, 8, 1),
+    stateGood(3, 45, 3, 4),
+    stateGood(4, 55, 5, 6),
   ],
   buildings: [
     ...result.buildings!,
@@ -150,7 +173,11 @@ describe('PriceExplorer', () => {
   it('says a good is at base price rather than showing a bare zero', () => {
     render(
       <PriceExplorer
-        result={{ ...result, goods: [{ ...result.goods[0], price: result.goods[0].base }] }}
+        result={{
+          ...result,
+          goods: [{ ...result.goods[0], price: result.goods[0].base }],
+          state_goods: result.state_goods?.map((row) => ({ ...row, price: row.base })),
+        }}
       />,
     )
 
@@ -188,7 +215,7 @@ describe('PriceExplorer', () => {
 
     await user.click(screen.getByRole('link', { name: 'Zany Tools' }))
     expect(await screen.findByRole('heading', { name: 'Zany Tools by state' })).toBeInTheDocument()
-    expect(screen.getByText(/not a MAPI local price/)).toBeInTheDocument()
+    expect(screen.getByText(/base MAPI 75%/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Sort by State' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('link', { name: 'Alpaca' }))
@@ -202,6 +229,34 @@ describe('PriceExplorer', () => {
     await user.click(screen.getByRole('tab', { name: 'Pops' }))
     expect(screen.getByText('Machinists')).toBeInTheDocument()
     expect(screen.getByText('North German')).toBeInTheDocument()
+  })
+
+  it('shows distinct locally attributed prices for each state', () => {
+    window.location.hash = '#/prices/good/zany_tools'
+    render(<PriceExplorer result={result} />)
+
+    expect(screen.getByRole('button', { name: 'Sort by State price' })).toBeInTheDocument()
+    const zebra = screen.getByRole('link', { name: 'Zebra' }).closest('tr')
+    const alpaca = screen.getByRole('link', { name: 'Alpaca' }).closest('tr')
+    expect(zebra).toHaveTextContent('55.00')
+    expect(alpaca).toHaveTextContent('45.00')
+  })
+
+  it('applies scope to global order-weighted average prices and orders', async () => {
+    const user = userEvent.setup()
+    render(<PriceExplorer result={scopedResult} playerCountryId={10} playerMarketId={1} />)
+
+    const globalRow = () => screen.getByRole('link', { name: 'Zany Tools' }).closest('tr')
+    // Our market: states 1 and 3, weighted by each state's buy + sell orders.
+    expect(globalRow()).toHaveTextContent('47.34')
+    expect(globalRow()).toHaveTextContent('5.00')
+    expect(globalRow()).toHaveTextContent('11.00')
+
+    await user.click(screen.getByRole('button', { name: 'Domestic' }))
+    // Domestic: states 1 and 2.
+    expect(globalRow()).toHaveTextContent('50.63')
+    expect(globalRow()).toHaveTextContent('10.00')
+    expect(globalRow()).toHaveTextContent('8.00')
   })
 
   it('defaults to our market and hides states in foreign markets', () => {

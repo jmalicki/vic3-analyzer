@@ -33,12 +33,25 @@ pub(crate) fn add_pop_consumption(
     defs: &GameDefs,
     sell_orders: &GoodsVec,
 ) {
-    if pop.size <= 0.0 {
+    add_pop_consumption_scaled(buy, pop, prices, base_prices, defs, sell_orders, 1.0);
+}
+
+/// Add one pop's buy orders multiplied by its market-access contribution.
+pub(crate) fn add_pop_consumption_scaled(
+    buy: &mut GoodsVec,
+    pop: &WorldPop,
+    prices: &GoodsVec,
+    base_prices: &GoodsVec,
+    defs: &GameDefs,
+    sell_orders: &GoodsVec,
+    order_scale: f64,
+) {
+    if pop.size <= 0.0 || order_scale <= 0.0 {
         return;
     }
     let wealth = continuous_wealth(pop, prices, base_prices, defs, sell_orders);
     let needs = package_needs(wealth, defs);
-    let scale = pop.size / POP_SCALE;
+    let scale = pop.size / POP_SCALE * order_scale;
     for (need_idx, package_value) in needs.iter_indexed() {
         if package_value == 0.0 {
             continue;

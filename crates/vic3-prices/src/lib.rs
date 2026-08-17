@@ -11,7 +11,7 @@ mod solve;
 mod world;
 
 pub use consumption::consumption;
-pub use formula::{market_ratio, price, ORDER_EPS};
+pub use formula::{local_price, market_access, market_ratio, price, ORDER_EPS};
 pub use result::{
     BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, GoodFlow, GoodPrice,
     MarketInputs, PricesResult, SolveOpts, SolveStatus, StateGood, StateInfo, StatePop, WhatIfOpts,
@@ -27,11 +27,13 @@ pub use world::{
 /// 1. Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.
 /// 2. Prices are clamped to ±PRICE_RANGE; the clamp is part of the model.
 /// 3. Employment, wages, and trade volumes are frozen except explicit what-if deltas.
-/// 4. The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.
+/// 4. State orders are access-scaled into one whole-save market; trade routes lack endpoints, while MAPI modifiers and overseas constraints are not modeled.
+/// 5. The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.
 pub const LIMITATIONS: &[&str] = &[
     "Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.",
     "Prices are clamped to ±PRICE_RANGE; the clamp is part of the model.",
     "Employment, wages, and trade volumes are frozen except explicit what-if deltas.",
+    "State orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, trade routes lack endpoints, and MAPI modifiers and overseas convoy constraints are not modeled.",
     "The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.",
 ];
 
@@ -309,7 +311,7 @@ mod tests {
     #[test]
     fn limitations_nonempty_and_matches_const() {
         assert!(!LIMITATIONS.is_empty());
-        assert_eq!(LIMITATIONS.len(), 4);
+        assert_eq!(LIMITATIONS.len(), 5);
         assert_eq!(
             LIMITATIONS[0],
             "Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve."
@@ -324,6 +326,10 @@ mod tests {
         );
         assert_eq!(
             LIMITATIONS[3],
+            "State orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, trade routes lack endpoints, and MAPI modifiers and overseas convoy constraints are not modeled."
+        );
+        assert_eq!(
+            LIMITATIONS[4],
             "The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point."
         );
         let result = solve(
@@ -367,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn state_and_building_detail_uses_pm_io_and_shared_prices() {
+    fn state_and_building_detail_uses_pm_io_and_local_prices() {
         let mut defs = heating_defs();
         defs.labels.insert("wood".into(), "Wood".into());
         defs.production_methods.insert(
@@ -425,6 +431,85 @@ mod tests {
             .state_goods
             .iter()
             .any(|row| row.state_id == 7 && row.good_id == "wood" && row.sell == 3.0));
+    }
+
+    #[test]
+    fn state_prices_follow_local_attributed_orders() {
+        let mut defs = heating_defs();
+        defs.production_methods.insert(
+            "pm_wood_buyer".into(),
+            ProductionMethod {
+                id: "pm_wood_buyer".into(),
+                inputs: vec![(GoodIdx::from_usize(1), 10.0)],
+                outputs: Vec::new(),
+            },
+        );
+        defs.production_methods.insert(
+            "pm_wood_seller".into(),
+            ProductionMethod {
+                id: "pm_wood_seller".into(),
+                inputs: Vec::new(),
+                outputs: vec![(GoodIdx::from_usize(1), 10.0)],
+            },
+        );
+        let state = |id| WorldState {
+            id,
+            region: None,
+            country: Some(1),
+            market: Some(1),
+            arable_land: None,
+            infrastructure: (id == 1).then_some(45.0),
+            infrastructure_usage: (id == 1).then_some(90.0),
+        };
+        let building = |id, state, method: &str| WorldBuilding {
+            id,
+            state: Some(state),
+            building: format!("building_{method}"),
+            level: 1.0,
+            staffing: 1.0,
+            production_methods: vec![method.into()],
+            saved_inputs: Default::default(),
+            saved_outputs: Default::default(),
+        };
+        let world = World {
+            states: vec![state(1), state(2)],
+            buildings: vec![
+                building(1, 1, "pm_wood_buyer"),
+                building(2, 2, "pm_wood_seller"),
+            ],
+            ..World::default()
+        };
+
+        let result = solve(&world, &defs, SolveOpts::default());
+        let market_wood = result
+            .goods
+            .iter()
+            .find(|row| row.id == "wood")
+            .expect("market wood row");
+        assert_eq!(market_wood.buy, 5.0);
+        assert_eq!(market_wood.sell, 10.0);
+        let wood = |state_id| {
+            result
+                .state_goods
+                .iter()
+                .find(|row| row.state_id == state_id && row.good_id == "wood")
+                .expect("wood state row")
+        };
+        assert!(wood(1).price > wood(1).base);
+        assert!(wood(2).price < wood(2).base);
+        assert_ne!(wood(1).price, wood(2).price);
+        assert_eq!(wood(1).market_access, 0.5);
+        assert_eq!(wood(1).effective_mapi, 0.375);
+        assert_eq!(wood(2).market_access, 1.0);
+        assert_eq!(wood(2).effective_mapi, 0.75);
+        assert_eq!(
+            wood(1).price,
+            local_price(
+                wood(1).effective_mapi,
+                wood(1).market_price,
+                wood(1).state_price
+            )
+        );
     }
 
     #[test]

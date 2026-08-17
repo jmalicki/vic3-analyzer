@@ -8,13 +8,13 @@ use basin::{
 };
 use vic3_defs::{GameDefs, GoodIdx, GoodsVec};
 
-use crate::consumption::{add_pop_consumption, consumption};
-use crate::formula::price;
+use crate::consumption::{add_pop_consumption_scaled, consumption};
+use crate::formula::{local_price, market_access, price};
 use crate::result::{
     BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, GoodFlow, GoodPrice,
     MarketInputs, PricesResult, SolveOpts, SolveStatus, StateGood, StateInfo, StatePop,
 };
-use crate::world::{reconstruct_non_pop_orders, World};
+use crate::world::World;
 use crate::LIMITATIONS;
 
 const WARM_START_ALPHA: f64 = 0.5;
@@ -33,7 +33,8 @@ const FD_STEP: f64 = 1e-7;
 /// 1. Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.
 /// 2. Prices are clamped to ±PRICE_RANGE; the clamp is part of the model.
 /// 3. Employment, wages, and trade volumes are frozen except explicit what-if deltas.
-/// 4. The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.
+/// 4. State orders are access-scaled into one whole-save market; route endpoints and full MAPI modifiers are unavailable.
+/// 5. The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.
 pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
     let base_prices: GoodsVec = defs
         .goods_order
@@ -52,8 +53,28 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
 
     let price_range = defs.price_range.max(0.0);
     let n = goods.len();
-    let (frozen_buy, frozen_sell) = reconstruct_non_pop_orders(world, defs);
-    let (wage_pop_idxs, frozen_pop_buy) = split_pop_buy(world, defs, &base_prices, &frozen_sell);
+    let access_by_state = world
+        .states
+        .iter()
+        .map(|state| {
+            (
+                state.id,
+                market_access(state.infrastructure, state.infrastructure_usage),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let pop_access = world
+        .pops
+        .iter()
+        .map(|pop| {
+            pop.state
+                .and_then(|state| access_by_state.get(&state).copied())
+                .unwrap_or(1.0)
+        })
+        .collect::<Vec<_>>();
+    let (frozen_buy, frozen_sell) = access_scaled_non_pop_orders(world, defs, &access_by_state);
+    let (wage_pop_idxs, frozen_pop_buy) =
+        split_pop_buy(world, defs, &base_prices, &frozen_sell, &pop_access);
     let problem = PriceResidual {
         world,
         defs,
@@ -67,6 +88,7 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
         frozen_sell,
         wage_pop_idxs,
         frozen_pop_buy,
+        pop_access,
     };
 
     let mut rel = vec![1.0; n];
@@ -271,15 +293,24 @@ fn detail_rows(
     let state_goods = world
         .states
         .iter()
-        .flat_map(|state| rows.iter().map(move |(&idx, row)| (state.id, idx, *row)))
-        .filter_map(|(state_id, idx, row)| {
+        .flat_map(|state| rows.iter().map(move |(&idx, row)| (state, idx, *row)))
+        .filter_map(|(state, idx, row)| {
             let good_id = defs.good_by_index(idx)?.to_string();
+            let buy = state_buy.get(&(state.id, idx)).copied().unwrap_or(0.0);
+            let sell = state_sell.get(&(state.id, idx)).copied().unwrap_or(0.0);
+            let state_price = price(row.base, buy, sell, defs.price_range.max(0.0));
+            let market_access = market_access(state.infrastructure, state.infrastructure_usage);
+            let effective_mapi = 0.75 * market_access;
             Some(StateGood {
-                state_id,
+                state_id: state.id,
                 good_id,
-                buy: state_buy.get(&(state_id, idx)).copied().unwrap_or(0.0),
-                sell: state_sell.get(&(state_id, idx)).copied().unwrap_or(0.0),
-                price: row.price,
+                buy,
+                sell,
+                price: local_price(effective_mapi, row.price, state_price),
+                market_price: row.price,
+                state_price,
+                market_access,
+                effective_mapi,
                 base: row.base,
             })
         })
@@ -439,12 +470,41 @@ fn market_goods(base_prices: &GoodsVec) -> Vec<GoodIdx> {
         .collect()
 }
 
+/// Non-pop orders reaching the single market after state access scaling.
+///
+/// Trade remains frozen and unscaled because the current save IR does not
+/// retain route endpoints. Buildings without a state remain global at 100%.
+fn access_scaled_non_pop_orders(
+    world: &World,
+    defs: &GameDefs,
+    access_by_state: &BTreeMap<u32, f64>,
+) -> (GoodsVec, GoodsVec) {
+    let n = defs.goods_order.len();
+    let mut buy = world.frozen_buy.aligned(n);
+    let mut sell = world.frozen_sell.aligned(n);
+    for building in &world.buildings {
+        let access = building
+            .state
+            .and_then(|state| access_by_state.get(&state).copied())
+            .unwrap_or(1.0);
+        let (inputs, outputs) = building.goods_io(defs);
+        for (good, quantity) in inputs.iter_indexed() {
+            buy.add(good, quantity * access);
+        }
+        for (good, quantity) in outputs.iter_indexed() {
+            sell.add(good, quantity * access);
+        }
+    }
+    (buy, sell)
+}
+
 /// Split pops into wage-sensitive vs frozen-wealth; precompute the constant buy.
 fn split_pop_buy(
     world: &World,
     defs: &GameDefs,
     base_prices: &GoodsVec,
     frozen_sell: &GoodsVec,
+    pop_access: &[f64],
 ) -> (Vec<usize>, GoodsVec) {
     let mut wage_pop_idxs = Vec::new();
     let mut frozen_pop_buy = GoodsVec::zeros(defs.goods_order.len());
@@ -453,13 +513,14 @@ fn split_pop_buy(
             wage_pop_idxs.push(i);
         } else {
             // Prices are irrelevant for wages ≤ 0 (wealth is frozen).
-            add_pop_consumption(
+            add_pop_consumption_scaled(
                 &mut frozen_pop_buy,
                 pop,
                 base_prices,
                 base_prices,
                 defs,
                 frozen_sell,
+                pop_access.get(i).copied().unwrap_or(1.0),
             );
         }
     }
@@ -480,6 +541,7 @@ struct PriceResidual<'a> {
     frozen_sell: GoodsVec,
     wage_pop_idxs: Vec<usize>,
     frozen_pop_buy: GoodsVec,
+    pop_access: Vec<f64>,
 }
 
 impl PriceResidual<'_> {
@@ -494,13 +556,14 @@ impl PriceResidual<'_> {
     fn pop_buy_at(&self, prices: &GoodsVec) -> GoodsVec {
         let mut buy = self.frozen_pop_buy.clone();
         for &i in &self.wage_pop_idxs {
-            add_pop_consumption(
+            add_pop_consumption_scaled(
                 &mut buy,
                 &self.world.pops[i],
                 prices,
                 &self.base_prices,
                 self.defs,
                 &self.frozen_sell,
+                self.pop_access.get(i).copied().unwrap_or(1.0),
             );
         }
         buy

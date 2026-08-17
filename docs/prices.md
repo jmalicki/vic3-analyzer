@@ -17,14 +17,26 @@ price = base * (1 + PRICE_RANGE * clamp(ratio, -1, +1))
 
 Zero orders: define a documented convention in P4 (do not divide by zero); property tests cover it.
 
-MAPI is not implemented yet. State drill-down attributes buy/sell orders to the
-parsed state but repeats the shared whole-save synthetic market price; the UI
-labels that distinction. A future local-price implementation must copy the
-game’s market-access blend from defs rather than inventing one.
+The first MAPI milestone blends the solved whole-save market price with each
+state's attributed-order price:
 
-Geography filters (`Our market` default, `Domestic`, `All`) appear only on the
-goods-by-state list and hide attributed state rows. They do **not** re-solve
-prices. A single-state page is never geography-filtered.
+```text
+market_access = clamp(infrastructure / infrastructure_usage, 0, 1)
+effective_MAPI = 0.75 * market_access
+local_price = effective_MAPI * market_price + (1 - effective_MAPI) * state_price
+```
+
+Missing infrastructure data defaults to full access. State-attributed building
+and pop orders are multiplied by that access before entering the current single
+whole-save market residual; full local orders still determine `state_price`.
+Trade routes remain unscaled because their endpoints are absent from the IR.
+Laws, technologies, incorporation, state traits, overseas convoy access, and
+separate market solves are not included yet. The global goods table displays an
+order-weighted average of the local prices.
+
+Geography filters (`Our market` default, `Domestic`, `All`) scope both the
+global average and the goods-by-state list. They do **not** re-solve prices. A
+single-state page is never geography-filtered.
 
 Foreign states show the country’s current flag when defs can select and render a
 coat of arms (laws + `flag_definitions`; unsupported triggers are skipped, not

@@ -335,11 +335,26 @@
           "format": "double",
           "type": "number"
         },
+        "effective_mapi": {
+          "description": "Base MAPI 0.75 multiplied by [`Self::market_access`].",
+          "format": "double",
+          "type": "number"
+        },
         "good_id": {
           "type": "string"
         },
+        "market_access": {
+          "description": "Infrastructure-only state market access in `[0, 1]`.",
+          "format": "double",
+          "type": "number"
+        },
+        "market_price": {
+          "description": "Solved whole-save market price (Milestone 1; per-market solves follow).",
+          "format": "double",
+          "type": "number"
+        },
         "price": {
-          "description": "Shared whole-save synthetic price. This is not a MAPI local price.",
+          "description": "Final local price after blending market and pure state prices.",
           "format": "double",
           "type": "number"
         },
@@ -351,6 +366,11 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        },
+        "state_price": {
+          "description": "Pure state price from this state's attributed buy and sell orders.",
+          "format": "double",
+          "type": "number"
         }
       },
       "required": [
@@ -359,6 +379,10 @@
         "buy",
         "sell",
         "price",
+        "market_price",
+        "state_price",
+        "market_access",
+        "effective_mapi",
         "base"
       ],
       "type": "object"

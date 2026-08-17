@@ -55,6 +55,27 @@ pub fn price(base: f64, buy: f64, sell: f64, price_range: f64) -> f64 {
     base * (1.0 + price_range * ratio)
 }
 
+/// Infrastructure-only market access in `[0, 1]`.
+///
+/// Missing data and zero usage default to full access. Overseas convoy and
+/// shipping-lane constraints are not represented in the current save IR.
+pub fn market_access(infrastructure: Option<f64>, usage: Option<f64>) -> f64 {
+    match (infrastructure, usage) {
+        (Some(infrastructure), Some(usage)) if usage > 0.0 => {
+            (infrastructure / usage).clamp(0.0, 1.0)
+        }
+        _ => 1.0,
+    }
+}
+
+/// Blend a pure state price with its market price using effective MAPI.
+///
+/// Vic3 uses `local = mapi * market + (1 - mapi) * state`.
+pub fn local_price(effective_mapi: f64, market_price: f64, state_price: f64) -> f64 {
+    let mapi = effective_mapi.clamp(0.0, 1.0);
+    mapi * market_price + (1.0 - mapi) * state_price
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,6 +114,18 @@ mod tests {
     fn only_sell_clamps_low() {
         let p = price(20.0, 0.0, 10.0, 0.75);
         assert!((p - 20.0 * 0.25).abs() < EPS);
+    }
+
+    #[test]
+    fn wiki_mapi_blends_market_and_state_prices() {
+        assert!((local_price(0.85, 40.0, 10.0) - 35.5).abs() < EPS);
+    }
+
+    #[test]
+    fn infrastructure_caps_market_access() {
+        assert_eq!(market_access(Some(45.0), Some(90.0)), 0.5);
+        assert_eq!(market_access(Some(90.0), Some(45.0)), 1.0);
+        assert_eq!(market_access(None, Some(45.0)), 1.0);
     }
 
     proptest! {

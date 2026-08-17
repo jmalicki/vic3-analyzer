@@ -159,6 +159,43 @@ function ScopeFilter({
 
 type GoodSort = 'name' | 'price' | 'delta' | 'buy' | 'sell'
 
+function aggregateGoods(
+  goods: GoodPrice[],
+  stateGoods: StateGood[],
+  states: StateInfo[],
+  stateIsInScope: (state?: StateInfo) => boolean,
+): GoodPrice[] {
+  const statesById = new Map(states.map((state) => [state.id, state]))
+  const scopedRows = stateGoods.filter((row) => stateIsInScope(statesById.get(row.state_id)))
+  const rowsByGood = new Map<string, StateGood[]>()
+  for (const row of scopedRows) {
+    const rows = rowsByGood.get(row.good_id)
+    if (rows) rows.push(row)
+    else rowsByGood.set(row.good_id, [row])
+  }
+  return goods.map((good) => {
+    const rows = rowsByGood.get(good.id)
+    if (!rows?.length) return good
+    let buy = 0
+    let sell = 0
+    let weightedPrice = 0
+    let weight = 0
+    for (const row of rows) {
+      buy += row.buy
+      sell += row.sell
+      const rowWeight = Math.max(0, row.buy) + Math.max(0, row.sell)
+      weightedPrice += row.price * rowWeight
+      weight += rowWeight
+    }
+    return {
+      ...good,
+      buy,
+      sell,
+      price: weight > 0 ? weightedPrice / weight : good.base,
+    }
+  })
+}
+
 function GoodsTable({ goods, icons }: { goods: GoodPrice[]; icons: Icons }) {
   const [sort, onSort] = useSort<GoodSort>('name')
   const sorted = useMemo(
@@ -273,7 +310,7 @@ function StatesTable({
         <thead>
           <tr>
             <th><SortButton label="State" sortKey="name" sort={sort} onSort={onSort} /></th>
-            <th><SortButton label="Market price" sortKey="price" sort={sort} onSort={onSort} /></th>
+            <th><SortButton label="State price" sortKey="price" sort={sort} onSort={onSort} /></th>
             <th><SortButton label="% from base price" sortKey="delta" sort={sort} onSort={onSort} /></th>
             <th><SortButton label="State buy" sortKey="buy" sort={sort} onSort={onSort} /></th>
             <th><SortButton label="State sell" sortKey="sell" sort={sort} onSort={onSort} /></th>
@@ -550,6 +587,7 @@ export function PriceExplorer({
     if (effectiveFilterMode === 'our_market') return state?.market_id === playerMarketId
     return state?.country_id === playerCountryId
   }
+  const scopedGoods = aggregateGoods(result.goods, stateGoods, states, stateIsInScope)
 
   if (view.kind === 'good') {
     const good = result.goods.find((row) => row.id === view.id)
@@ -574,8 +612,8 @@ export function PriceExplorer({
           <p className="model-info">Player market unavailable; showing all states.</p>
         )}
         <p className="model-info">
-          The shared price is whole-save synthetic, not a MAPI local price. This filter scopes only
-          the locally attributed state buy/sell orders.
+          Local prices blend the solved market price with each state&apos;s attributed-order price
+          using infrastructure-only market access and base MAPI 75%.
         </p>
         {rows.length ? (
           <StatesTable rows={rows} countries={countries} playerCountryId={playerCountryId} />
@@ -669,11 +707,17 @@ export function PriceExplorer({
     <section aria-labelledby="prices-heading">
       <div className="result-heading">
         <h2 id="prices-heading">{scenario ? 'Scenario prices' : 'Goods prices'}</h2>
-        <span>{result.goods.length} goods</span>
+        <span>{scopedGoods.length} goods</span>
       </div>
-      <p className="model-info">Scope: whole-save synthetic market.</p>
+      <ScopeFilter mode={effectiveFilterMode} onChange={setFilterMode} />
+      {missingPlayerMarket && (
+        <p className="model-info">Player market unavailable; showing all states.</p>
+      )}
+      <p className="model-info">
+        Prices are order-weighted averages of state prices in the selected scope.
+      </p>
       <EmptyMarketWarning inputs={result.inputs} />
-      <GoodsTable goods={result.goods} icons={icons} />
+      <GoodsTable goods={scopedGoods} icons={icons} />
     </section>
   )
 }

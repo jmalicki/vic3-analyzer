@@ -51,6 +51,10 @@ export interface StateGood {
   buy: number
   sell: number
   price: number
+  market_price: number
+  state_price: number
+  market_access: number
+  effective_mapi: number
   base: number
 }
 

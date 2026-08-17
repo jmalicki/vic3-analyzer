@@ -34,8 +34,11 @@ blob is kept in IndexedDB so a reload does not lose it.
 Goods results are sortable, show the game's icon and localized name, and link to
 state-attributed orders, then to
 individual building model revenue, costs, profit, IO, and shortages. Prices are
-currently one shared whole-save synthetic market price; state-local MAPI is not
-yet modeled.
+per-state MAPI blends of the solved market price and attributed local orders,
+using infrastructure-only access and base MAPI 75%; the global table shows an
+order-weighted average for the selected geography. Full modifiers, overseas
+access, and separate market solves are not yet modeled. State-attributed orders
+are access-scaled into the current single market; route endpoints are unavailable.
 
 ## Docs
 

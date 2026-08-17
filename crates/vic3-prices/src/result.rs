@@ -138,8 +138,16 @@ pub struct StateGood {
     pub good_id: String,
     pub buy: f64,
     pub sell: f64,
-    /// Shared whole-save synthetic price. This is not a MAPI local price.
+    /// Final local price after blending market and pure state prices.
     pub price: f64,
+    /// Solved whole-save market price (Milestone 1; per-market solves follow).
+    pub market_price: f64,
+    /// Pure state price from this state's attributed buy and sell orders.
+    pub state_price: f64,
+    /// Infrastructure-only state market access in `[0, 1]`.
+    pub market_access: f64,
+    /// Base MAPI 0.75 multiplied by [`Self::market_access`].
+    pub effective_mapi: f64,
     pub base: f64,
 }
 
