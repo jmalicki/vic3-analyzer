@@ -3,11 +3,14 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { DefsBuilder } from './DefsBuilder'
 import {
+  DEFS_BATCH_BYTES,
   DEFS_BATCH_SIZE,
   enumerateDroppedDefsFiles,
   packDefsFiles,
+  streamDefsFiles,
   type DefsDropEntry,
   type DefsDropItem,
+  type DefsFileSource,
   type DefsPathClassifier,
 } from './defsFiles'
 import type { WasmApi } from './wasm'
@@ -150,6 +153,26 @@ describe('DefsBuilder', () => {
       { path: 'game/common/defines/defines.txt', offset: 0, length: 1 },
       { path: 'game/common/goods/goods.txt', offset: 1, length: 2 },
     ])
+  })
+
+  it('caps streamed batches by source bytes as well as file count', async () => {
+    const source = (path: string, size: number): DefsFileSource => ({
+      path,
+      size: async () => size,
+      read: async () => new Uint8Array(size),
+    })
+    const sizes: number[][] = []
+
+    await streamDefsFiles(
+      [source('a', 3), source('b', 3), source('c', 1), source('large', 6)],
+      async (batch) => {
+        sizes.push(batch.map((file) => file.bytes.length))
+      },
+      { batchSize: 24, maxBatchBytes: 4 },
+    )
+
+    expect(sizes).toEqual([[3], [3, 1], [6]])
+    expect(DEFS_BATCH_BYTES).toBe(4 * 1024 * 1024)
   })
 
   it('shows a platform game path hint under the picker', () => {

@@ -33,6 +33,8 @@ export type DefsBatchSink = (batch: DefsSourceFile[], read: number) => Promise<v
 /** A file located but not yet read. */
 export type DefsFileSource = {
   path: string
+  /** File size without loading its contents, used to bound each handoff. */
+  size: () => Promise<number>
   read: () => Promise<Uint8Array>
 }
 
@@ -55,10 +57,17 @@ export async function enumerateDroppedDefsFiles(
     const entry = item.webkitGetAsEntry?.()
     if (entry) await collectEntries(entry, entry.name, classify, found)
   }
-  return found.map(({ entry, path }) => ({
-    path,
-    read: async () => new Uint8Array(await (await readEntryFile(entry)).arrayBuffer()),
-  }))
+  return found.map(({ entry, path }) => {
+    // Keep opening lazy so art rejected by neededGfxNames() is never touched.
+    // Once selected, size() and read() share the same metadata-only File lookup.
+    let file: Promise<File> | undefined
+    const open = () => (file ??= readEntryFile(entry))
+    return {
+      path,
+      size: async () => (await open()).size,
+      read: async () => new Uint8Array(await (await open()).arrayBuffer()),
+    }
+  })
 }
 
 /** The useful files from a folder-picker selection. */
@@ -70,6 +79,7 @@ export function selectedDefsFiles(
     .filter((file) => usefulDefsPath(file.webkitRelativePath || file.name, classify))
     .map((file) => ({
       path: file.webkitRelativePath || file.name,
+      size: async () => file.size,
       read: async () => new Uint8Array(await file.arrayBuffer()),
     }))
 }
@@ -79,25 +89,35 @@ export function selectedDefsFiles(
  *
  * A full install offers more than 400 MB of coat-of-arms art. Retaining all of
  * it — then copying it again into wasm — is what wedges the tab, so files are
- * released as soon as the sink has taken them. Within a batch the reads run
- * together, because each one is mostly waiting on the browser's file thread.
+ * released as soon as the sink has taken them. Batches are capped by both file
+ * count and known source bytes, then read concurrently. A single source larger
+ * than the byte cap is necessarily submitted alone.
  */
 export async function streamDefsFiles(
   sources: DefsFileSource[],
   sink: DefsBatchSink,
-  options: { batchSize?: number; alreadyRead?: number } = {},
+  options: { batchSize?: number; maxBatchBytes?: number; alreadyRead?: number } = {},
 ): Promise<number> {
-  const { batchSize = DEFS_BATCH_SIZE } = options
+  const { batchSize = DEFS_BATCH_SIZE, maxBatchBytes = DEFS_BATCH_BYTES } = options
   let read = options.alreadyRead ?? 0
-  for (let start = 0; start < sources.length; start += batchSize) {
+  for (let start = 0; start < sources.length; ) {
+    let end = start
+    let bytes = 0
+    while (end < sources.length && end - start < batchSize) {
+      const nextBytes = await sources[end].size()
+      if (end > start && bytes + nextBytes > maxBatchBytes) break
+      bytes += nextBytes
+      end += 1
+    }
     const batch = await Promise.all(
-      sources.slice(start, start + batchSize).map(async (source) => ({
+      sources.slice(start, end).map(async (source) => ({
         path: source.path,
         bytes: await source.read(),
       })),
     )
     read += batch.length
     await sink(batch, read)
+    start = end
   }
   return read
 }
@@ -124,10 +144,11 @@ export function neededGfxFile(path: string, needed: ReadonlySet<string>): boolea
 }
 
 /**
- * Files per wasm handoff. Small enough that a 30 MB coat-of-arms batch is the
- * peak, large enough that per-call overhead stays invisible.
+ * Upper bounds per wasm handoff. The byte cap prevents a group of unusually
+ * large textures from producing the old roughly 30 MB payload peak.
  */
 export const DEFS_BATCH_SIZE = 24
+export const DEFS_BATCH_BYTES = 4 * 1024 * 1024
 
 function readEntryFile(entry: DefsDropEntry): Promise<File> {
   const read = entry.file!.bind(entry)
