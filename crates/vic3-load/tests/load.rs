@@ -72,7 +72,11 @@ fn plaintext_fixture_loads() {
     assert_eq!(pop.dependents, Some(4000.0));
     assert_eq!(pop.demand_size(), Some(10000.0));
     assert_eq!(pop.wealth, Some(8));
-    assert_eq!(pop.culture.as_deref(), Some("north_german"));
+    assert_eq!(pop.culture.as_deref(), Some("0"));
+    assert_eq!(
+        save.culture_id(pop.culture.as_deref()).as_deref(),
+        Some("north_german")
+    );
     assert_eq!(pop.state, Some(1));
     assert_eq!(pop.workplace, Some(1));
     assert_eq!(pop.literate, Some(1200.0));
@@ -263,5 +267,15 @@ fn live_save_from_env() {
             !building.input_goods.goods.is_empty() || !building.output_goods.goods.is_empty()
         }),
         "real save should contain saved building goods orders"
+    );
+    let (_, pop) = save
+        .pops
+        .iter_present()
+        .find(|(_, pop)| pop.culture.as_deref() == Some("0"))
+        .expect("real save should have a culture index 0 pop");
+    assert_eq!(
+        save.culture_id(pop.culture.as_deref()).as_deref(),
+        Some("north_german"),
+        "cultures.database[0].type should be north_german in vanilla"
     );
 }

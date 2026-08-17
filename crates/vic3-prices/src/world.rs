@@ -192,7 +192,7 @@ impl World {
                 dependents: pop.dependents,
                 wealth: pop.wealth,
                 wages: pop.wages,
-                culture: pop.culture.clone(),
+                culture: save.culture_id(pop.culture.as_deref()),
                 profession: pop.profession.clone(),
                 literate: pop.literate,
                 workplace_id: pop.workplace,
@@ -202,7 +202,12 @@ impl World {
         let pops: Vec<_> = save
             .pops
             .iter_present()
-            .filter_map(|(_, pop)| WorldPop::from_ir(pop))
+            .filter_map(|(_, pop)| {
+                WorldPop::from_ir(pop).map(|mut world_pop| {
+                    world_pop.culture = save.culture_id(pop.culture.as_deref());
+                    world_pop
+                })
+            })
             .collect();
         let saved_buildings = save.building_manager.iter_present().count();
         let buildings: Vec<_> = save
@@ -751,6 +756,10 @@ mod tests {
         assert_eq!(result.state_pops[0].dependents, Some(4_000.0));
         assert_eq!(result.state_pops[0].literate, Some(1_200.0));
         assert_eq!(result.state_pops[0].workplace_id, Some(1));
+        assert_eq!(
+            result.state_pops[0].culture_id.as_deref(),
+            Some("north_german")
+        );
         assert!(
             result.state_pops[0]
                 .qualifications

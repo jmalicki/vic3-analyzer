@@ -63,6 +63,11 @@ jobs inferred from pops with a `workplace` building id. Monthly qualification ga
 recomputed from `pop_types` scripts; the table omits a rate unless the save
 stores one.
 
+Pop `culture` is a numeric index into `cultures.database` (`0={ type=north_german }`).
+That table is not `common/cultures` file order. The defs blob already has
+English labels keyed by script id (`cultures_l_english.yml`); resolving the
+index is what lets the Population tab show "North German" instead of `0`.
+
 Pop **needs** on the Population tab are the same package-ladder + substitution
 path as the residual, valued at solved prices. They are model baskets, not a
 cashflow ledger from the save.

@@ -50,6 +50,9 @@ pub struct Save {
     pub building_manager: Manager<Building>,
     #[serde(default)]
     pub pops: Manager<Pop>,
+    /// Index → script id (`0={ type=north_german }`). Not file order in `common/cultures`.
+    #[serde(default)]
+    pub cultures: Manager<Culture>,
     #[serde(default)]
     pub laws: Manager<LawEntry>,
     #[serde(default, alias = "markets")]
@@ -427,6 +430,16 @@ impl Building {
     }
 }
 
+/// A culture in `cultures.database`.
+///
+/// Pops store a numeric index (`culture=0`); this table maps that index to a
+/// script id. Localization labels are in the defs blob, keyed by that id.
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+pub struct Culture {
+    #[serde(default, rename = "type")]
+    pub id: String,
+}
+
 /// A pop in `pops.database`.
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub struct Pop {
@@ -569,6 +582,22 @@ impl Save {
             .map(|(_, country)| country)
     }
 
+    /// Script id for a saved pop `culture` field.
+    ///
+    /// 1.13 writes an index into [`Self::cultures`]. Fixtures and older saves
+    /// may already store `north_german`; those pass through unchanged.
+    pub fn culture_id(&self, saved: Option<&str>) -> Option<String> {
+        let saved = saved.filter(|value| !value.is_empty())?;
+        if let Ok(index) = saved.parse::<u32>() {
+            if let Some(culture) = self.cultures.database.get(&index).and_then(Option::as_ref) {
+                if !culture.id.is_empty() {
+                    return Some(culture.id.clone());
+                }
+            }
+        }
+        Some(saved.to_string())
+    }
+
     /// Active law ids belonging to `country_id`.
     pub fn active_laws(&self, country_id: u32) -> Vec<&str> {
         self.laws
@@ -670,6 +699,42 @@ states={
         let state = save.states.iter_present().next().unwrap().1;
         assert_eq!(state.employable().values.get("0"), Some(&2.0));
         assert_eq!(state.workforce_by_profession().values.get("7"), Some(&11.0));
+    }
+
+    #[test]
+    fn culture_index_resolves_from_save_database() {
+        let save = crate::load_slice(
+            br#"SAV01000000000000000000
+cultures={
+	database={
+		0={ type=north_german }
+		1=none
+		2={ type=ashkenazi }
+	}
+}
+pops={
+	database={
+		1={ culture=0 }
+		2={ culture="south_german" }
+	}
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("cultures database");
+        let mut pops: Vec<_> = save.pops.iter_present().collect();
+        pops.sort_by_key(|(id, _)| *id);
+        assert_eq!(pops[0].1.culture.as_deref(), Some("0"));
+        assert_eq!(
+            save.culture_id(pops[0].1.culture.as_deref()).as_deref(),
+            Some("north_german")
+        );
+        assert_eq!(
+            save.culture_id(pops[1].1.culture.as_deref()).as_deref(),
+            Some("south_german")
+        );
+        assert_eq!(save.culture_id(Some("2")).as_deref(), Some("ashkenazi"));
+        assert_eq!(save.culture_id(Some("1")).as_deref(), Some("1"));
     }
 
     #[test]

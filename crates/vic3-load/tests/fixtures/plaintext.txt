@@ -77,12 +77,20 @@ pops={
 			workforce=6000
 			dependents=4000
 			wealth=8
-			culture="north_german"
+			culture=0
 			location=1
 			workplace=1
 			num_literate=1200
 			qualifications={ 15 0=1.5 6=2.0 }
 		}
+	}
+}
+cultures={
+	database={
+		0={
+			type=north_german
+		}
+		1=none
 	}
 }
 laws={
