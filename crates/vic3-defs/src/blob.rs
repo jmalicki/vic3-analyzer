@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{DefsError, GameDefs};
 
 /// Postcard blob format version. Bump when [`GameDefs`] is not backward compatible.
-pub const BLOB_VERSION: u32 = 8;
+pub const BLOB_VERSION: u32 = 9;
 
 #[derive(Serialize, Deserialize)]
 struct DefsBlob {
@@ -56,6 +56,7 @@ mod tests {
             Good {
                 id: "grain".into(),
                 base_price: 20.0,
+                traded_quantity: 12.0,
                 texture: None,
             },
         );
@@ -64,6 +65,7 @@ mod tests {
             Good {
                 id: "wood".into(),
                 base_price: 20.0,
+                traded_quantity: 10.0,
                 texture: None,
             },
         );

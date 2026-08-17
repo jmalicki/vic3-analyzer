@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use vic3_defs::{
     decode_blob, encode_blob, load_from_files, load_from_path, GoodIdx, DEFAULT_PRICE_RANGE,
+    DEFAULT_TRADED_QUANTITY,
 };
 
 fn fixture_root() -> PathBuf {
@@ -20,6 +21,9 @@ fn fixture_goods_have_known_base_prices() {
     assert_eq!(defs.base_price("grain"), Some(20.0));
     assert_eq!(defs.base_price("wood"), Some(20.0));
     assert_eq!(defs.base_price("coal"), Some(30.0));
+    assert_eq!(defs.goods["grain"].traded_quantity, 12.0);
+    assert_eq!(defs.goods["wood"].traded_quantity, DEFAULT_TRADED_QUANTITY);
+    assert_eq!(defs.goods["coal"].traded_quantity, 6.0);
     assert_eq!(defs.goods.len(), 3);
     assert_eq!(defs.goods_order, ["grain", "wood", "coal"]);
     assert_eq!(defs.good_by_index(GoodIdx::from_usize(1)), Some("wood"));

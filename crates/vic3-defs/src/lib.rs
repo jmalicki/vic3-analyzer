@@ -55,6 +55,10 @@ pub use types::{
 /// Vanilla `NEconomy.PRICE_RANGE` when a defines file does not override it.
 pub const DEFAULT_PRICE_RANGE: f64 = 0.75;
 
+/// Vanilla `GOODS_DEFAULT_TRADE_QUANTITY` used when a good omits
+/// `traded_quantity`.
+pub const DEFAULT_TRADED_QUANTITY: f64 = 10.0;
+
 /// Crate version from Cargo.
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")

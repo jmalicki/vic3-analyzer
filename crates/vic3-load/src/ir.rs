@@ -164,6 +164,12 @@ pub struct State {
     pub infrastructure: Option<f64>,
     #[serde(default)]
     pub infrastructure_usage: Option<f64>,
+    /// Signed post-1.9 world-market trade capacity by goods-table index.
+    ///
+    /// Positive values are imports into the state; negative values are exports
+    /// from it. Multiply by the good's `traded_quantity` for goods volume.
+    #[serde(default)]
+    pub trade: BuildingGoods,
 }
 
 /// A building in `building_manager.database`.

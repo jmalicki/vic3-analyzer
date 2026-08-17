@@ -38,7 +38,8 @@ per-state MAPI blends of the solved market price and attributed local orders,
 using infrastructure-only access and base MAPI 75%; the global table shows an
 order-weighted average for the selected geography. Full modifiers, overseas
 access, and separate market solves are not yet modeled. State-attributed orders
-are access-scaled into the current single market; route endpoints are unavailable.
+are access-scaled into the current single market, including post-1.9 trade
+recorded directly on each trade-center state.
 
 ## Docs
 

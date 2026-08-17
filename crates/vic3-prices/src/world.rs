@@ -1,7 +1,7 @@
 //! Synthetic (and later IR-backed) market: pops, buildings, frozen orders.
 
 use vic3_defs::{GameDefs, GoodIdx, GoodsVec, ProductionMethod};
-use vic3_load::{Building, Pop, Save, TradeRoute};
+use vic3_load::{Building, Pop, Save};
 
 /// Pop size unit for buy packages (Vic3: package values are per 10k working pops).
 pub const POP_SCALE: f64 = 10_000.0;
@@ -20,6 +20,10 @@ pub struct World {
     pub frozen_buy: GoodsVec,
     /// Trade (and any other non-building) sell orders, held fixed during the solve.
     pub frozen_sell: GoodsVec,
+    /// Post-1.9 world-market goods volumes attributed to the state containing
+    /// the trade center. Positive quantities are imports; negative quantities
+    /// are exports.
+    pub state_trade: Vec<WorldStateTrade>,
     /// Save pops dropped for missing household population (or legacy `size`) or
     /// `wealth`. They consume nothing, so a large count here explains a market
     /// stuck at base prices.
@@ -46,6 +50,14 @@ pub struct WorldState {
     pub arable_land: Option<f64>,
     pub infrastructure: Option<f64>,
     pub infrastructure_usage: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldStateTrade {
+    pub state: u32,
+    pub good: GoodIdx,
+    /// Positive = import into the state; negative = export from the state.
+    pub quantity: f64,
 }
 
 /// A pop whose consumption sits in the price loop.
@@ -96,6 +108,9 @@ pub struct WorldBuilding {
 pub fn reconstruct_non_pop_orders(world: &World, defs: &GameDefs) -> (GoodsVec, GoodsVec) {
     let mut buy = world.frozen_buy.aligned(defs.goods_order.len());
     let mut sell = world.frozen_sell.aligned(defs.goods_order.len());
+    for trade in &world.state_trade {
+        trade.add_orders(&mut buy, &mut sell, 1.0);
+    }
     for building in &world.buildings {
         let (inputs, outputs) = building.goods_io(defs);
         for (good, qty) in inputs.iter_indexed() {
@@ -112,8 +127,8 @@ impl World {
     /// Frozen market snapshot from save IR.
     ///
     /// Pops missing household population (or legacy `size`) or `wealth`,
-    /// buildings with an empty type id, and trade routes missing goods, volume,
-    /// or export direction are skipped.
+    /// buildings with an empty type id, and state trade entries with unknown
+    /// goods-table indices are skipped.
     pub fn from_save(save: &Save, defs: &GameDefs) -> Self {
         let countries = save
             .country_manager
@@ -175,11 +190,22 @@ impl World {
             .iter_present()
             .filter_map(|(id, building)| WorldBuilding::from_ir(id, building, defs))
             .collect();
-        let mut frozen_buy = GoodsVec::zeros(defs.goods_order.len());
-        let mut frozen_sell = GoodsVec::zeros(defs.goods_order.len());
-        for (_, route) in save.trade_route_manager.iter_present() {
-            apply_trade_route(route, defs, &mut frozen_buy, &mut frozen_sell);
-        }
+        let state_trade = save
+            .states
+            .iter_present()
+            .flat_map(|(state_id, state)| {
+                resolve_saved_goods(&state.trade.goods, defs)
+                    .into_iter()
+                    .map(move |(good, quantity)| WorldStateTrade {
+                        state: state_id,
+                        good,
+                        quantity: quantity
+                            * defs
+                                .traded_quantity_idx(good)
+                                .unwrap_or(vic3_defs::DEFAULT_TRADED_QUANTITY),
+                    })
+            })
+            .collect();
         Self {
             skipped_pops: saved_pops - pops.len(),
             skipped_buildings: saved_buildings - buildings.len(),
@@ -188,8 +214,9 @@ impl World {
             pops,
             state_pops,
             buildings,
-            frozen_buy,
-            frozen_sell,
+            frozen_buy: GoodsVec::zeros(defs.goods_order.len()),
+            frozen_sell: GoodsVec::zeros(defs.goods_order.len()),
+            state_trade,
         }
     }
 
@@ -324,6 +351,17 @@ impl WorldBuilding {
     }
 }
 
+impl WorldStateTrade {
+    pub(crate) fn add_orders(&self, buy: &mut GoodsVec, sell: &mut GoodsVec, scale: f64) {
+        let quantity = self.quantity * scale;
+        if quantity > 0.0 {
+            sell.add(self.good, quantity);
+        } else if quantity < 0.0 {
+            buy.add(self.good, -quantity);
+        }
+    }
+}
+
 fn resolve_saved_goods(
     raw: &std::collections::BTreeMap<String, f64>,
     defs: &GameDefs,
@@ -343,33 +381,11 @@ fn resolve_saved_goods(
         .collect()
 }
 
-fn apply_trade_route(
-    route: &TradeRoute,
-    defs: &GameDefs,
-    frozen_buy: &mut GoodsVec,
-    frozen_sell: &mut GoodsVec,
-) {
-    let Some(good) = route.goods.as_ref().filter(|g| !g.is_empty()) else {
-        return;
-    };
-    let Some(volume) = route.volume.filter(|v| *v != 0.0) else {
-        return;
-    };
-    let Some(export) = route.export else {
-        return;
-    };
-    let Some(good) = defs.index_of(good) else {
-        return;
-    };
-    let dest = if export { frozen_sell } else { frozen_buy };
-    dest.add(good, volume.abs());
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
-    use vic3_load::{Building, BuildingGoods, Pop, Save, TradeRoute};
+    use vic3_load::{Building, BuildingGoods, Pop, Save, State};
 
     fn defs_with_goods(ids: &[&str]) -> GameDefs {
         GameDefs {
@@ -382,6 +398,7 @@ mod tests {
                         vic3_defs::Good {
                             id: (*id).to_string(),
                             base_price: 20.0,
+                            traded_quantity: 10.0,
                             texture: None,
                         },
                     )
@@ -448,24 +465,25 @@ mod tests {
                 ..Building::default()
             }),
         );
-        save.trade_route_manager.database.insert(
+        save.states.database.insert(
             1,
-            Some(TradeRoute {
-                goods: Some("grain".into()),
-                volume: Some(50.0),
-                export: None,
-            }),
-        );
-        save.trade_route_manager.database.insert(
-            2,
-            Some(TradeRoute {
-                goods: Some("wood".into()),
-                volume: Some(10.0),
-                export: Some(true),
+            Some(State {
+                trade: BuildingGoods {
+                    goods: BTreeMap::from([
+                        ("grain".into(), 50.0),
+                        ("wood".into(), -10.0),
+                        ("unknown".into(), 99.0),
+                    ]),
+                },
+                ..State::default()
             }),
         );
 
-        let defs = defs_with_goods(&["grain", "wood"]);
+        let mut defs = defs_with_goods(&["grain", "wood"]);
+        defs.goods
+            .get_mut("grain")
+            .expect("grain definition")
+            .traded_quantity = 12.0;
         let world = World::from_save(&save, &defs);
         assert_eq!(world.pops.len(), 2);
         let weighted_pop = world
@@ -480,8 +498,11 @@ mod tests {
         assert_eq!(world.buildings[0].level, 2.0);
         assert_eq!(world.buildings[0].production_methods, ["pm_simple_farming"]);
         assert_eq!(world.frozen_buy.as_slice(), &[0.0, 0.0]);
-        assert_eq!(world.frozen_sell[defs.index_of("wood").unwrap()], 10.0);
-        assert_eq!(world.frozen_sell[defs.index_of("grain").unwrap()], 0.0);
+        assert_eq!(world.frozen_sell.as_slice(), &[0.0, 0.0]);
+        assert_eq!(world.state_trade.len(), 2);
+        let (buy, sell) = reconstruct_non_pop_orders(&world, &defs);
+        assert_eq!(buy[defs.index_of("wood").unwrap()], 100.0);
+        assert_eq!(sell[defs.index_of("grain").unwrap()], 600.0);
         assert_eq!(world.skipped_pops, 2);
         assert_eq!(world.skipped_buildings, 1);
     }
@@ -699,6 +720,10 @@ mod tests {
             Some("merchant_marine")
         );
         let world = World::from_save(&save, &defs);
+        assert!(
+            !world.state_trade.is_empty(),
+            "post-1.9 save should contain state-attributed trade"
+        );
         let (buy, sell) = reconstruct_non_pop_orders(&world, &defs);
         assert!(buy
             .as_slice()

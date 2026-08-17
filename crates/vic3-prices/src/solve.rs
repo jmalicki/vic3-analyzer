@@ -33,7 +33,7 @@ const FD_STEP: f64 = 1e-7;
 /// 1. Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.
 /// 2. Prices are clamped to ±PRICE_RANGE; the clamp is part of the model.
 /// 3. Employment, wages, and trade volumes are frozen except explicit what-if deltas.
-/// 4. State orders are access-scaled into one whole-save market; route endpoints and full MAPI modifiers are unavailable.
+/// 4. State building, pop, and post-1.9 trade orders are access-scaled into one whole-save market; full MAPI modifiers are unavailable.
 /// 5. The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.
 pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
     let base_prices: GoodsVec = defs
@@ -290,6 +290,14 @@ fn detail_rows(
         });
     }
 
+    for trade in &world.state_trade {
+        if trade.quantity > 0.0 {
+            *state_sell.entry((trade.state, trade.good)).or_default() += trade.quantity;
+        } else if trade.quantity < 0.0 {
+            *state_buy.entry((trade.state, trade.good)).or_default() -= trade.quantity;
+        }
+    }
+
     let state_goods = world
         .states
         .iter()
@@ -472,8 +480,8 @@ fn market_goods(base_prices: &GoodsVec) -> Vec<GoodIdx> {
 
 /// Non-pop orders reaching the single market after state access scaling.
 ///
-/// Trade remains frozen and unscaled because the current save IR does not
-/// retain route endpoints. Buildings without a state remain global at 100%.
+/// Post-1.9 trade and buildings are attributed to their states. Buildings
+/// without a state remain global at 100%.
 fn access_scaled_non_pop_orders(
     world: &World,
     defs: &GameDefs,
@@ -482,6 +490,10 @@ fn access_scaled_non_pop_orders(
     let n = defs.goods_order.len();
     let mut buy = world.frozen_buy.aligned(n);
     let mut sell = world.frozen_sell.aligned(n);
+    for trade in &world.state_trade {
+        let access = access_by_state.get(&trade.state).copied().unwrap_or(1.0);
+        trade.add_orders(&mut buy, &mut sell, access);
+    }
     for building in &world.buildings {
         let access = building
             .state

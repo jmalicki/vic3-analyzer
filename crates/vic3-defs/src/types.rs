@@ -96,6 +96,12 @@ impl GameDefs {
             .and_then(|id| self.goods.get(id).map(|g| g.base_price))
     }
 
+    /// Goods volume represented by one unit of saved state trade capacity.
+    pub fn traded_quantity_idx(&self, idx: GoodIdx) -> Option<f64> {
+        self.good_by_index(idx)
+            .and_then(|id| self.goods.get(id).map(|g| g.traded_quantity))
+    }
+
     /// Good id at the integer index used by saved building IO.
     pub fn good_by_index(&self, index: GoodIdx) -> Option<&str> {
         self.goods_order.get(index.as_usize()).map(String::as_str)
@@ -185,6 +191,8 @@ pub struct FlagDefinition {
 pub struct Good {
     pub id: String,
     pub base_price: f64,
+    /// Goods volume moved per unit of post-1.9 state trade capacity.
+    pub traded_quantity: f64,
     /// Game-relative DDS path. The blob does not embed image bytes.
     pub texture: Option<String>,
 }

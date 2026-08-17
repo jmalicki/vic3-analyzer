@@ -456,6 +456,7 @@ mod tests {
                 Good {
                     id: "wood".into(),
                     base_price: 20.0,
+                    traded_quantity: 10.0,
                     texture: None,
                 },
             )]),

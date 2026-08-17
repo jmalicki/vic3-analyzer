@@ -4,6 +4,7 @@
 grain = {
 	texture = "gfx/interface/icons/goods_icons/grain.dds"
 	cost = 20
+	traded_quantity = 12
 	category = staple
 }
 
@@ -16,5 +17,6 @@ wood = {
 coal = {
 	texture = "gfx/interface/icons/goods_icons/coal.dds"
 	cost = 30
+	traded_quantity = 6
 	category = staple
 }

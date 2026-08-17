@@ -34,6 +34,12 @@ states={
 			arable_land=45
 			infrastructure=32.5
 			infrastructure_usage=21
+			trade={
+				goods={
+					0={ value=5 }
+					1={ value=-3 }
+				}
+			}
 		}
 	}
 }

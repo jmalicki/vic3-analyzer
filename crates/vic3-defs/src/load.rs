@@ -509,6 +509,9 @@ fn parse_goods_bytes(
             Good {
                 id,
                 base_price,
+                traded_quantity: raw_good
+                    .traded_quantity
+                    .unwrap_or(crate::DEFAULT_TRADED_QUANTITY),
                 texture: raw_good.texture,
             },
         );
@@ -870,6 +873,7 @@ struct RawNEconomy {
 struct RawGood {
     cost: Option<f64>,
     base_price: Option<f64>,
+    traded_quantity: Option<f64>,
     texture: Option<String>,
 }
 

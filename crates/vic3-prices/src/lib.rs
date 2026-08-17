@@ -19,7 +19,7 @@ pub use result::{
 pub use solve::{solve, what_if};
 pub use world::{
     reconstruct_non_pop_orders, World, WorldBuilding, WorldCountry, WorldPop, WorldState,
-    WorldStatePop, POP_SCALE,
+    WorldStatePop, WorldStateTrade, POP_SCALE,
 };
 
 /// Solver caveats copied into CLI JSON and the UI.
@@ -27,13 +27,13 @@ pub use world::{
 /// 1. Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.
 /// 2. Prices are clamped to ±PRICE_RANGE; the clamp is part of the model.
 /// 3. Employment, wages, and trade volumes are frozen except explicit what-if deltas.
-/// 4. State orders are access-scaled into one whole-save market; trade routes lack endpoints, while MAPI modifiers and overseas constraints are not modeled.
+/// 4. State building, pop, and post-1.9 trade orders are access-scaled into one whole-save market; MAPI modifiers and overseas constraints are not modeled.
 /// 5. The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.
 pub const LIMITATIONS: &[&str] = &[
     "Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.",
     "Prices are clamped to ±PRICE_RANGE; the clamp is part of the model.",
     "Employment, wages, and trade volumes are frozen except explicit what-if deltas.",
-    "State orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, trade routes lack endpoints, and MAPI modifiers and overseas convoy constraints are not modeled.",
+    "State building, pop, and post-1.9 trade orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, and MAPI modifiers and overseas convoy constraints are not modeled.",
     "The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.",
 ];
 
@@ -83,6 +83,7 @@ mod tests {
             Good {
                 id: "grain".into(),
                 base_price: 20.0,
+                traded_quantity: 12.0,
                 texture: None,
             },
         );
@@ -91,6 +92,7 @@ mod tests {
             Good {
                 id: "wood".into(),
                 base_price: 20.0,
+                traded_quantity: 10.0,
                 texture: None,
             },
         );
@@ -99,6 +101,7 @@ mod tests {
             Good {
                 id: "coal".into(),
                 base_price: 30.0,
+                traded_quantity: 6.0,
                 texture: None,
             },
         );
@@ -171,6 +174,7 @@ mod tests {
             Good {
                 id: "grain".into(),
                 base_price: 20.0,
+                traded_quantity: 12.0,
                 texture: None,
             },
         );
@@ -179,6 +183,7 @@ mod tests {
             Good {
                 id: "wood".into(),
                 base_price: 20.0,
+                traded_quantity: 10.0,
                 texture: None,
             },
         );
@@ -326,7 +331,7 @@ mod tests {
         );
         assert_eq!(
             LIMITATIONS[3],
-            "State orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, trade routes lack endpoints, and MAPI modifiers and overseas convoy constraints are not modeled."
+            "State building, pop, and post-1.9 trade orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, and MAPI modifiers and overseas convoy constraints are not modeled."
         );
         assert_eq!(
             LIMITATIONS[4],
@@ -510,6 +515,57 @@ mod tests {
                 wood(1).state_price
             )
         );
+    }
+
+    #[test]
+    fn modern_state_trade_is_attributed_and_access_scaled() {
+        let defs = heating_defs();
+        let wood = defs.index_of("wood").expect("wood index");
+        let state = |id, access: f64| WorldState {
+            id,
+            region: None,
+            country: Some(1),
+            market: Some(1),
+            arable_land: None,
+            infrastructure: Some(access * 100.0),
+            infrastructure_usage: Some(100.0),
+        };
+        let world = World {
+            states: vec![state(1, 0.5), state(2, 1.0)],
+            state_trade: vec![
+                WorldStateTrade {
+                    state: 1,
+                    good: wood,
+                    quantity: 10.0,
+                },
+                WorldStateTrade {
+                    state: 2,
+                    good: wood,
+                    quantity: -8.0,
+                },
+            ],
+            ..World::default()
+        };
+
+        let result = solve(&world, &defs, SolveOpts::default());
+        let market_wood = result
+            .goods
+            .iter()
+            .find(|row| row.id == "wood")
+            .expect("market wood row");
+        assert_eq!(market_wood.buy, 8.0);
+        assert_eq!(market_wood.sell, 5.0);
+        let local = |state_id| {
+            result
+                .state_goods
+                .iter()
+                .find(|row| row.state_id == state_id && row.good_id == "wood")
+                .expect("state wood row")
+        };
+        assert_eq!(local(1).buy, 0.0);
+        assert_eq!(local(1).sell, 10.0);
+        assert_eq!(local(2).buy, 8.0);
+        assert_eq!(local(2).sell, 0.0);
     }
 
     #[test]

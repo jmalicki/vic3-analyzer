@@ -58,11 +58,16 @@ Until a later phase:
 
 - building employment / hire-fire
 - wages
-- trade-center volumes (except what-if deltas on buildings/PMs/levels)
+- trade-center volumes
 
-Saved building `input_goods` / `output_goods` and directed trade-route volumes
-are held fixed while pops adjust. Integer saved-good keys are resolved through
-the deterministic `common/goods` source order in the definitions blob.
+Saved building `input_goods` / `output_goods` and post-1.9 signed
+`state.trade.goods` allocations are held fixed while pops adjust. Each saved
+trade-capacity allocation is multiplied by the good's `traded_quantity` (or the
+vanilla default 10) to recover goods volume. Positive state trade is an import
+(a local sell order); negative state trade is an export (a local buy order).
+Both are attributed to the trade-center state and access-scaled into the
+market. Integer saved-good keys are resolved through the deterministic
+`common/goods` source order in the definitions blob.
 Government and construction goods orders are not yet projected into the solver.
 
 Saved building IO is authoritative because it records actual current weekly
@@ -110,7 +115,8 @@ instead of placing solver diagnostics above the main results:
 1. Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.
 2. Prices are clamped to ±`PRICE_RANGE`; the clamp is part of the model.
 3. Employment, wages, and trade volumes are frozen except explicit what-if deltas.
-4. The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.
+4. State building, pop, and post-1.9 trade orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, and MAPI modifiers and overseas convoy constraints are not modeled.
+5. The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.
 
 ## What-if / prices result shape
 
