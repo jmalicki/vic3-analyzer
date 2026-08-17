@@ -40,6 +40,11 @@ states={
 					1={ value=-3 }
 				}
 			}
+			pop_statistics={
+				population_by_profession={ 15 0=12 7=10000 }
+				population_workforce_by_profession={ 15 7=6000 }
+				population_employable_qualifications={ 15 0=2 7=50 }
+			}
 		}
 	}
 }
@@ -74,6 +79,9 @@ pops={
 			wealth=8
 			culture="north_german"
 			location=1
+			workplace=1
+			num_literate=1200
+			qualifications={ 15 0=1.5 6=2.0 }
 		}
 	}
 }

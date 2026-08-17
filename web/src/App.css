@@ -179,7 +179,7 @@ section[aria-labelledby] { margin-top: 1rem; }
 .state-capacity div { display: grid; gap: .15rem; }
 .state-capacity dt { color: #9ba79d; font-size: .75rem; text-transform: uppercase; }
 .state-capacity dd { font-variant-numeric: tabular-nums; margin: 0; }
-.state-tabs { border-bottom: 1px solid #4e5c50; display: flex; gap: .25rem; margin-top: 1.25rem; }
+.state-tabs { border-bottom: 1px solid #4e5c50; display: flex; flex-wrap: wrap; gap: .25rem; margin-top: 1.25rem; }
 .state-tabs button { background: transparent; border-radius: 0; color: #c8ccc5; }
 .state-tabs button[aria-selected="true"] {
   border-bottom: 3px solid #d7e6a7;
@@ -217,6 +217,25 @@ section[aria-labelledby] { margin-top: 1rem; }
 .state-building-stats div { display: grid; grid-template-columns: 8rem 1fr; gap: .5rem; }
 .state-building-stats dt { color: #9ba79d; }
 .state-building-stats dd { margin: 0; overflow-wrap: anywhere; }
+.good-chips { display: flex; flex-wrap: wrap; gap: .35rem .7rem; list-style: none; margin: 0; padding: 0; }
+.good-chips .good-link { align-items: center; display: inline-flex; gap: .3rem; }
+.building-link { color: inherit; text-decoration: none; }
+.building-link:hover { text-decoration: underline; }
+.overview-kpis, .state-information {
+  display: grid;
+  gap: .75rem 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  margin: 1rem 0;
+}
+.overview-kpis div, .state-information div { display: grid; gap: .15rem; }
+.overview-kpis dt, .state-information dt { color: #9ba79d; font-size: .75rem; text-transform: uppercase; }
+.overview-kpis dd, .state-information dd { margin: 0; }
+.need-baskets { display: grid; gap: .65rem; }
+.need-basket { display: grid; gap: .25rem; }
+.state-needs-strip { margin-bottom: 1rem; }
+.pop-expand { background: transparent; border: 0; color: inherit; font: inherit; padding: 0; text-align: left; }
+.pop-expand:hover { text-decoration: underline; }
+.pop-detail td { background: #141b16; }
 .defs-builder { border-top: 1px solid #37433a; display: grid; gap: .65rem; padding-top: 1rem; }
 .defs-builder p { color: #9ba79d; font-size: .88rem; line-height: 1.4; margin: 0; }
 .defs-builder code { color: #d7e6a7; }

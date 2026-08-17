@@ -1,8 +1,16 @@
 //! Pop consumption from buy packages, substitution, and relaxed wealth.
 
-use vic3_defs::{substitution_shares, GameDefs, GoodsVec, NeedsVec, PopNeed};
+use vic3_defs::{substitution_shares, GameDefs, GoodIdx, GoodsVec, NeedIdx, NeedsVec, PopNeed};
 
 use crate::world::{WorldPop, POP_SCALE};
+
+/// One need's goods after package interpolation and substitution.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct NeedBasket {
+    pub need_idx: NeedIdx,
+    pub package_value: f64,
+    pub goods: Vec<(GoodIdx, f64)>,
+}
 
 /// Pop buy orders at `prices` (good id → quantity).
 ///
@@ -49,9 +57,28 @@ pub(crate) fn add_pop_consumption_scaled(
     if pop.size <= 0.0 || order_scale <= 0.0 {
         return;
     }
+    for basket in pop_need_baskets(pop, prices, base_prices, defs, sell_orders) {
+        for (good, qty) in basket.goods {
+            buy.add(good, qty * order_scale);
+        }
+    }
+}
+
+/// Per-need goods basket for one pop at the given prices / sell orders.
+pub(crate) fn pop_need_baskets(
+    pop: &WorldPop,
+    prices: &GoodsVec,
+    base_prices: &GoodsVec,
+    defs: &GameDefs,
+    sell_orders: &GoodsVec,
+) -> Vec<NeedBasket> {
+    if pop.size <= 0.0 {
+        return Vec::new();
+    }
     let wealth = continuous_wealth(pop, prices, base_prices, defs, sell_orders);
     let needs = package_needs(wealth, defs);
-    let scale = pop.size / POP_SCALE * order_scale;
+    let scale = pop.size / POP_SCALE;
+    let mut baskets = Vec::new();
     for (need_idx, package_value) in needs.iter_indexed() {
         if package_value == 0.0 {
             continue;
@@ -66,7 +93,39 @@ pub(crate) fn add_pop_consumption_scaled(
             continue;
         }
         let shares = substitution_shares(need, sell_orders);
-        apply_need_shares(buy, need, qty, &shares);
+        let mut goods = Vec::new();
+        apply_need_shares_into(&mut goods, need, qty, &shares);
+        if !goods.is_empty() {
+            baskets.push(NeedBasket {
+                need_idx,
+                package_value,
+                goods,
+            });
+        }
+    }
+    baskets
+}
+
+fn apply_need_shares_into(
+    goods: &mut Vec<(GoodIdx, f64)>,
+    need: &PopNeed,
+    qty: f64,
+    shares: &[(GoodIdx, f64)],
+) {
+    let share_sum: f64 = shares.iter().map(|(_, share)| *share).sum();
+    if share_sum <= 0.0 {
+        if let Some(default) = need
+            .default_good
+            .or_else(|| need.entries.first().map(|e| e.good))
+        {
+            goods.push((default, qty));
+        }
+        return;
+    }
+    for (good, share) in shares {
+        if *share > 0.0 {
+            goods.push((*good, qty * share));
+        }
     }
 }
 

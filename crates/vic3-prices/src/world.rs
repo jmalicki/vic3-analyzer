@@ -41,7 +41,7 @@ pub struct WorldCountry {
     pub subject_type: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct WorldState {
     pub id: u32,
     pub region: Option<String>,
@@ -50,6 +50,9 @@ pub struct WorldState {
     pub arable_land: Option<f64>,
     pub infrastructure: Option<f64>,
     pub infrastructure_usage: Option<f64>,
+    pub qualifications: std::collections::BTreeMap<String, f64>,
+    pub employable_qualifications: std::collections::BTreeMap<String, f64>,
+    pub workforce_by_type: std::collections::BTreeMap<String, f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -73,13 +76,20 @@ pub struct WorldPop {
     pub profession: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct WorldStatePop {
+    pub id: u32,
     pub state: Option<u32>,
     pub demand_size: Option<f64>,
+    pub workforce: Option<f64>,
+    pub dependents: Option<f64>,
     pub wealth: Option<i32>,
+    pub wages: Option<f64>,
     pub culture: Option<String>,
     pub profession: Option<String>,
+    pub literate: Option<f64>,
+    pub workplace_id: Option<u32>,
+    pub qualifications: std::collections::BTreeMap<String, f64>,
 }
 
 /// A building whose goods IO is reconstructed from defs PMs and then frozen
@@ -165,18 +175,28 @@ impl World {
                 arable_land: state.arable_land,
                 infrastructure: state.infrastructure,
                 infrastructure_usage: state.infrastructure_usage,
+                qualifications: resolve_qty_map(&state.qualifications.values),
+                employable_qualifications: resolve_qty_map(&state.employable().values),
+                workforce_by_type: resolve_qty_map(&state.workforce_by_profession().values),
             })
             .collect();
         let saved_pops = save.pops.iter_present().count();
         let state_pops = save
             .pops
             .iter_present()
-            .map(|(_, pop)| WorldStatePop {
+            .map(|(id, pop)| WorldStatePop {
+                id,
                 state: pop.state,
                 demand_size: pop.demand_size(),
+                workforce: pop.workforce,
+                dependents: pop.dependents,
                 wealth: pop.wealth,
+                wages: pop.wages,
                 culture: pop.culture.clone(),
                 profession: pop.profession.clone(),
+                literate: pop.literate,
+                workplace_id: pop.workplace,
+                qualifications: resolve_qty_map(&pop.qualifications.values),
             })
             .collect();
         let pops: Vec<_> = save
@@ -360,6 +380,44 @@ impl WorldStateTrade {
             buy.add(self.good, -quantity);
         }
     }
+}
+
+/// Vanilla `common/pop_types` filename order. Wiki 1.13: index 0 is academics.
+pub const VANILLA_POP_TYPES: &[&str] = &[
+    "academics",
+    "aristocrats",
+    "bureaucrats",
+    "capitalists",
+    "clergymen",
+    "clerks",
+    "engineers",
+    "farmers",
+    "laborers",
+    "machinists",
+    "officers",
+    "peasants",
+    "shopkeepers",
+    "slaves",
+    "soldiers",
+];
+
+pub(crate) fn resolve_profession_key(key: &str) -> String {
+    if let Ok(index) = key.parse::<usize>() {
+        if let Some(id) = VANILLA_POP_TYPES.get(index) {
+            return (*id).to_string();
+        }
+    }
+    key.to_string()
+}
+
+fn resolve_qty_map(
+    raw: &std::collections::BTreeMap<String, f64>,
+) -> std::collections::BTreeMap<String, f64> {
+    let mut out = std::collections::BTreeMap::new();
+    for (key, qty) in raw {
+        *out.entry(resolve_profession_key(key)).or_default() += *qty;
+    }
+    out
 }
 
 fn resolve_saved_goods(
@@ -689,6 +747,27 @@ mod tests {
             Some("farmers")
         );
         assert_eq!(result.state_pops[0].demand_size, Some(10_000.0));
+        assert_eq!(result.state_pops[0].workforce, Some(6_000.0));
+        assert_eq!(result.state_pops[0].dependents, Some(4_000.0));
+        assert_eq!(result.state_pops[0].literate, Some(1_200.0));
+        assert_eq!(result.state_pops[0].workplace_id, Some(1));
+        assert!(
+            result.state_pops[0]
+                .qualifications
+                .iter()
+                .any(|row| row.profession_id == "academics" && (row.count - 1.5).abs() < 1e-9),
+            "index 0 should map to academics"
+        );
+        assert_eq!(result.buildings[0].employees[0].profession_id, "farmers");
+        assert_eq!(result.buildings[0].employees[0].count, 6_000.0);
+        assert!(result
+            .state_qualifications
+            .iter()
+            .any(|row| row.state_id == 1
+                && row.profession_id == "farmers"
+                && row.employed == 6_000.0));
+        assert!(!result.state_pops[0].needs.is_empty());
+        assert!(!result.state_needs.is_empty());
         assert!(
             result
                 .goods

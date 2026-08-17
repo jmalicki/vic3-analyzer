@@ -473,12 +473,8 @@ mod tests {
             }],
             states: vec![WorldState {
                 id: 1,
-                region: None,
                 country: Some(1),
-                market: None,
-                arable_land: None,
-                infrastructure: None,
-                infrastructure_usage: None,
+                ..WorldState::default()
             }],
             buildings: vec![WorldBuilding {
                 id: 1,

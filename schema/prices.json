@@ -6,6 +6,12 @@
           "format": "double",
           "type": "number"
         },
+        "employees": {
+          "items": {
+            "$ref": "#/$defs/ProfessionCount"
+          },
+          "type": "array"
+        },
         "id": {
           "format": "uint32",
           "minimum": 0,
@@ -305,6 +311,57 @@
       ],
       "type": "object"
     },
+    "PopNeedBasket": {
+      "properties": {
+        "goods": {
+          "items": {
+            "$ref": "#/$defs/GoodFlow"
+          },
+          "type": "array"
+        },
+        "need_id": {
+          "type": "string"
+        },
+        "need_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "package_value": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "need_id",
+        "package_value",
+        "goods"
+      ],
+      "type": "object"
+    },
+    "ProfessionCount": {
+      "properties": {
+        "count": {
+          "format": "double",
+          "type": "number"
+        },
+        "profession_id": {
+          "type": "string"
+        },
+        "profession_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "profession_id",
+        "count"
+      ],
+      "type": "object"
+    },
     "SolveStatus": {
       "description": "Why [`crate::solve`] stopped.",
       "oneOf": [
@@ -449,6 +506,41 @@
       ],
       "type": "object"
     },
+    "StateNeed": {
+      "properties": {
+        "goods": {
+          "items": {
+            "$ref": "#/$defs/GoodFlow"
+          },
+          "type": "array"
+        },
+        "need_id": {
+          "type": "string"
+        },
+        "need_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "package_value": {
+          "format": "double",
+          "type": "number"
+        },
+        "state_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "state_id",
+        "need_id",
+        "package_value",
+        "goods"
+      ],
+      "type": "object"
+    },
     "StatePop": {
       "properties": {
         "culture_id": {
@@ -470,6 +562,34 @@
             "null"
           ]
         },
+        "dependents": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "literate": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "needs": {
+          "items": {
+            "$ref": "#/$defs/PopNeedBasket"
+          },
+          "type": "array"
+        },
         "profession_id": {
           "type": [
             "string",
@@ -482,6 +602,12 @@
             "null"
           ]
         },
+        "qualifications": {
+          "items": {
+            "$ref": "#/$defs/ProfessionCount"
+          },
+          "type": "array"
+        },
         "state_id": {
           "format": "uint32",
           "minimum": 0,
@@ -493,10 +619,82 @@
             "integer",
             "null"
           ]
+        },
+        "workforce": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "workplace_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
         "state_id"
+      ],
+      "type": "object"
+    },
+    "StateQualification": {
+      "properties": {
+        "employable": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "employed": {
+          "format": "double",
+          "type": "number"
+        },
+        "jobs": {
+          "format": "double",
+          "type": "number"
+        },
+        "monthly_change": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "profession_id": {
+          "type": "string"
+        },
+        "profession_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "qualified": {
+          "format": "double",
+          "type": "number"
+        },
+        "shortage": {
+          "format": "double",
+          "type": "number"
+        },
+        "state_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "state_id",
+        "profession_id",
+        "qualified",
+        "employed",
+        "jobs",
+        "shortage"
       ],
       "type": "object"
     }
@@ -559,9 +757,21 @@
       },
       "type": "array"
     },
+    "state_needs": {
+      "items": {
+        "$ref": "#/$defs/StateNeed"
+      },
+      "type": "array"
+    },
     "state_pops": {
       "items": {
         "$ref": "#/$defs/StatePop"
+      },
+      "type": "array"
+    },
+    "state_qualifications": {
+      "items": {
+        "$ref": "#/$defs/StateQualification"
       },
       "type": "array"
     },

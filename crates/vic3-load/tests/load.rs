@@ -74,6 +74,26 @@ fn plaintext_fixture_loads() {
     assert_eq!(pop.wealth, Some(8));
     assert_eq!(pop.culture.as_deref(), Some("north_german"));
     assert_eq!(pop.state, Some(1));
+    assert_eq!(pop.workplace, Some(1));
+    assert_eq!(pop.literate, Some(1200.0));
+    assert_eq!(pop.qualifications.values.get("0"), Some(&1.5));
+    assert_eq!(pop.qualifications.values.get("6"), Some(&2.0));
+    assert_eq!(
+        state
+            .and_then(|s| s.pop_statistics.population_by_profession.values.get("7"))
+            .copied(),
+        Some(10000.0)
+    );
+    assert_eq!(
+        state.and_then(|s| s.employable().values.get("0")).copied(),
+        Some(2.0)
+    );
+    assert_eq!(
+        state
+            .and_then(|s| s.workforce_by_profession().values.get("7"))
+            .copied(),
+        Some(6000.0)
+    );
 
     assert_eq!(save.market_manager.iter_present().count(), 1);
     assert_eq!(
@@ -142,6 +162,16 @@ fn legacy_population_and_level_aliases_still_load() {
     let building = save.building_manager.iter_present().next().unwrap().1;
     assert_eq!(pop.demand_size(), Some(10_000.0));
     assert_eq!(building.level, 2);
+}
+
+#[test]
+fn literate_alias_still_loads() {
+    let text = std::fs::read_to_string(fixture("plaintext.txt"))
+        .unwrap()
+        .replace("num_literate=1200", "literate=1200");
+    let save = load_slice(text.as_bytes(), empty_tokens()).expect("literate alias");
+    let pop = save.pops.iter_present().next().unwrap().1;
+    assert_eq!(pop.literate, Some(1200.0));
 }
 
 #[test]

@@ -63,6 +63,7 @@ const result: PricesResult = {
       cost: 80,
       profit: 70,
       short_inputs: ['iron'],
+      employees: [{ profession_id: 'machinists', profession_name: 'Machinists', count: 8000 }],
     },
   ],
   building_types: [
@@ -90,9 +91,42 @@ const result: PricesResult = {
       profession_id: 'machinists',
       profession_name: 'Machinists',
       demand_size: 12000,
+      workforce: 8000,
+      dependents: 4000,
+      literate: 2400,
       wealth: 14,
       culture_id: 'north_german',
       culture_name: 'North German',
+      workplace_id: 7,
+      needs: [
+        {
+          need_id: 'popneed_staple_foods',
+          need_name: 'Staple foods',
+          package_value: 10,
+          goods: [{ good_id: 'apples', quantity: 4, value: 60 }],
+        },
+      ],
+    },
+  ],
+  state_qualifications: [
+    {
+      state_id: 1,
+      profession_id: 'machinists',
+      profession_name: 'Machinists',
+      qualified: 9000,
+      employable: 8500,
+      employed: 8000,
+      jobs: 8000,
+      shortage: 0,
+    },
+  ],
+  state_needs: [
+    {
+      state_id: 1,
+      need_id: 'popneed_staple_foods',
+      need_name: 'Staple foods',
+      package_value: 10,
+      goods: [{ good_id: 'apples', quantity: 4, value: 60 }],
     },
   ],
   residual: 0,
@@ -209,7 +243,7 @@ describe('PriceExplorer', () => {
     expect(within(body).getAllByRole('row')[0]).toHaveTextContent('Cheap')
   })
 
-  it('links a good to the state Buildings and Pops page', async () => {
+  it('links a good to the Vic3-style state panel', async () => {
     const user = userEvent.setup()
     render(<PriceExplorer result={result} />)
 
@@ -220,15 +254,24 @@ describe('PriceExplorer', () => {
 
     await user.click(screen.getByRole('link', { name: 'Alpaca' }))
     expect(await screen.findByRole('heading', { name: 'Alpaca' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Buildings' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: 'Pops' })).toBeInTheDocument()
-    expect(screen.getByText('Silly Hammer Factory')).toBeInTheDocument()
-    expect(screen.getByText('70.00')).toBeInTheDocument()
-    expect(screen.getByText(/Iron 2\.0/)).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
+    for (const tab of ['Overview', 'Buildings', 'Population', 'Local Prices', 'Information']) {
+      expect(screen.getByRole('tab', { name: tab })).toBeInTheDocument()
+    }
+    expect(screen.getByText('12,000')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('tab', { name: 'Pops' }))
-    expect(screen.getByText('Machinists')).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Buildings' }))
+    expect(screen.getByRole('link', { name: 'Silly Hammer Factory' })).toBeInTheDocument()
+    expect(screen.getByText('70.00')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Iron 2\.0/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Population' }))
+    expect(screen.getByRole('button', { name: 'Machinists' })).toBeInTheDocument()
     expect(screen.getByText('North German')).toBeInTheDocument()
+    expect(screen.getAllByText('8,000').length).toBeGreaterThan(0)
+    await user.click(screen.getByRole('button', { name: 'Machinists' }))
+    expect(screen.getAllByText('Staple foods').length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('link', { name: /Apples 4\.0/ }).length).toBeGreaterThan(0)
   })
 
   it('shows distinct locally attributed prices for each state', () => {
@@ -288,19 +331,57 @@ describe('PriceExplorer', () => {
     expect(screen.queryByRole('link', { name: 'Badger' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('link', { name: 'Zebra' }))
+    await user.click(screen.getByRole('tab', { name: 'Buildings' }))
     expect(await screen.findByText('Zebra Mill')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Our market' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Domestic' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'All' })).not.toBeInTheDocument()
   })
 
-  it('shows remaining arable land as honest rural capacity', () => {
+  it('shows remaining arable land as honest rural capacity', async () => {
+    const user = userEvent.setup()
     window.location.hash = '#/prices/state/1'
     render(<PriceExplorer result={result} />)
 
+    await user.click(screen.getByRole('tab', { name: 'Buildings' }))
     expect(screen.getByText('10 empty rural slots')).toBeInTheDocument()
     expect(screen.getByText('Rye Farms')).toBeInTheDocument()
     expect(screen.getByText(/constructable placeholder/)).toBeInTheDocument()
+  })
+
+  it('opens a building detail route with workforce and linked goods', async () => {
+    const user = userEvent.setup()
+    window.location.hash = '#/prices/state/1'
+    render(<PriceExplorer result={result} />)
+
+    await user.click(screen.getByRole('tab', { name: 'Buildings' }))
+    await user.click(screen.getByRole('link', { name: 'Silly Hammer Factory' }))
+    expect(await screen.findByRole('heading', { name: 'Silly Hammer Factory' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Alpaca' })).toBeInTheDocument()
+    expect(screen.getByText('Workforce')).toBeInTheDocument()
+    expect(screen.getByText('Machinists')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Zany Tools 3\.0/ })).toBeInTheDocument()
+  })
+
+  it('lists this state local prices with good links', async () => {
+    const user = userEvent.setup()
+    window.location.hash = '#/prices/state/1'
+    render(<PriceExplorer result={result} />)
+
+    await user.click(screen.getByRole('tab', { name: 'Local Prices' }))
+    expect(screen.getByRole('link', { name: 'Zany Tools' })).toBeInTheDocument()
+    expect(screen.getByText('45.00')).toBeInTheDocument()
+  })
+
+  it('parks capacity facts on Information', async () => {
+    const user = userEvent.setup()
+    window.location.hash = '#/prices/state/1'
+    render(<PriceExplorer result={result} />)
+
+    await user.click(screen.getByRole('tab', { name: 'Information' }))
+    expect(screen.getByText('Arable land')).toBeInTheDocument()
+    expect(screen.getByText('10')).toBeInTheDocument()
+    expect(screen.getByText(/incorporation/)).toBeInTheDocument()
   })
 
   it('can return to Our market when playerMarketId is present', async () => {

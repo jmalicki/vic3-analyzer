@@ -48,7 +48,24 @@ Pops buy from **need packages** by wealth. Substitution uses `min_supply_share` 
 
 Current saves store pop size as `workforce` / `dependents`; both count as full
 household members for demand. Fixture/legacy saves may still use `size`,
-`size_wa`, and `size_dn`.
+`size_wa`, and `size_dn`. Workforce and dependents are kept separately on the
+state Population tab. Literacy is `literate / workforce`; 1.13 spells that field
+`num_literate` (count of literate workers, not a fraction).
+
+Profession indices in `qualifications={ 15 0=… }` follow vanilla
+`common/pop_types` filename order (0 = academics). 1.13 states have no
+`qualifications=` of their own — the profession tables live in `pop_statistics`
+as `population_by_profession`, `population_workforce_by_profession`, and
+`population_employable_qualifications`; the flat `employable_qualifications` /
+`pop_workforce_by_type` names are still read first for older saves. State
+qualifications compare that stock (or the employable subset when present) to
+jobs inferred from pops with a `workplace` building id. Monthly qualification gain is not
+recomputed from `pop_types` scripts; the table omits a rate unless the save
+stores one.
+
+Pop **needs** on the Population tab are the same package-ladder + substitution
+path as the residual, valued at solved prices. They are model baskets, not a
+cashflow ledger from the save.
 
 **Wealth 1–99** is relaxed to a continuous variable during NLS, then **rounded** to an integer wealth. This is not ILP.
 

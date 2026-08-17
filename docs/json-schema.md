@@ -92,7 +92,7 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
     },
     "buildings": {
       "type": "array",
-      "description": "Per-instance modeled PM inputs/outputs, revenue, cost, profit, and short inputs."
+      "description": "Per-instance modeled PM inputs/outputs, revenue, cost, profit, short inputs, and employees by profession."
     },
     "building_types": {
       "type": "array",
@@ -104,7 +104,15 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
     },
     "state_pops": {
       "type": "array",
-      "description": "Every parsed state pop with profession, household demand size, wealth, and culture."
+      "description": "Collapsed state pops with workforce/dependents, literacy, qualifications, and model need baskets."
+    },
+    "state_qualifications": {
+      "type": "array",
+      "description": "Per-state profession stock vs employed jobs. Shortage is jobs minus employable/qualified; monthly qualification gain is omitted unless the save stores it."
+    },
+    "state_needs": {
+      "type": "array",
+      "description": "State-summed pop need baskets at solved prices (model consumption, not a save cashflow ledger)."
     },
     "inputs": {
       "type": "object",

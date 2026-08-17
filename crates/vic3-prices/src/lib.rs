@@ -14,7 +14,8 @@ pub use consumption::consumption;
 pub use formula::{local_price, market_access, market_ratio, price, ORDER_EPS};
 pub use result::{
     BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, GoodFlow, GoodPrice,
-    MarketInputs, PricesResult, SolveOpts, SolveStatus, StateGood, StateInfo, StatePop, WhatIfOpts,
+    MarketInputs, PopNeedBasket, PricesResult, ProfessionCount, SolveOpts, SolveStatus, StateGood,
+    StateInfo, StateNeed, StatePop, StateQualification, WhatIfOpts,
 };
 pub use solve::{solve, what_if};
 pub use world::{
@@ -395,9 +396,7 @@ mod tests {
                 region: Some("STATE_TESTOPIA".into()),
                 country: Some(1),
                 market: Some(2),
-                arable_land: None,
-                infrastructure: None,
-                infrastructure_usage: None,
+                ..WorldState::default()
             }],
             buildings: vec![WorldBuilding {
                 id: 9,
@@ -459,12 +458,11 @@ mod tests {
         );
         let state = |id| WorldState {
             id,
-            region: None,
             country: Some(1),
             market: Some(1),
-            arable_land: None,
             infrastructure: (id == 1).then_some(45.0),
             infrastructure_usage: (id == 1).then_some(90.0),
+            ..WorldState::default()
         };
         let building = |id, state, method: &str| WorldBuilding {
             id,
@@ -523,12 +521,11 @@ mod tests {
         let wood = defs.index_of("wood").expect("wood index");
         let state = |id, access: f64| WorldState {
             id,
-            region: None,
             country: Some(1),
             market: Some(1),
-            arable_land: None,
             infrastructure: Some(access * 100.0),
             infrastructure_usage: Some(100.0),
+            ..WorldState::default()
         };
         let world = World {
             states: vec![state(1, 0.5), state(2, 1.0)],

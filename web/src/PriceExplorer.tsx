@@ -1,21 +1,31 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import type {
   BuildingEconomics,
   BuildingGroupInfo,
   BuildingTypeInfo,
   CountryInfo,
+  GoodFlow,
   GoodPrice,
   MarketInputs,
+  PopNeedBasket,
   PricesResult,
+  ProfessionCount,
   StateGood,
   StateInfo,
+  StateNeed,
   StatePop,
+  StateQualification,
 } from './types'
 
 type Direction = 'asc' | 'desc'
 type SortState<K extends string> = { key: K; direction: Direction }
-type View = { kind: 'goods' } | { kind: 'good'; id: string } | { kind: 'state'; id: number }
+type View =
+  | { kind: 'goods' }
+  | { kind: 'good'; id: string }
+  | { kind: 'state'; id: number }
+  | { kind: 'building'; id: number }
 type FilterMode = 'our_market' | 'domestic' | 'all'
+type StateTab = 'overview' | 'buildings' | 'population' | 'prices' | 'information'
 
 function currentView(): View {
   const path = window.location.hash.replace(/^#\/?/, '').split('/')
@@ -23,6 +33,9 @@ function currentView(): View {
   if (path[1] === 'good' && path[2]) return { kind: 'good', id: decodeURIComponent(path[2]) }
   if (path[1] === 'state' && Number.isFinite(Number(path[2]))) {
     return { kind: 'state', id: Number(path[2]) }
+  }
+  if (path[1] === 'building' && Number.isFinite(Number(path[2]))) {
+    return { kind: 'building', id: Number(path[2]) }
   }
   return { kind: 'goods' }
 }
@@ -50,6 +63,57 @@ function GoodIcon({ id, icons }: { id: string; icons: Icons }) {
   const src = icons[id]
   if (!src) return null
   return <img className="good-icon" src={src} alt="" width={24} height={24} />
+}
+
+function GoodFlows({
+  flows,
+  goods,
+  icons,
+}: {
+  flows: GoodFlow[]
+  goods: GoodPrice[]
+  icons: Icons
+}) {
+  if (!flows.length) return <>—</>
+  return (
+    <ul className="good-chips">
+      {flows.map((flow) => {
+        const good = goods.find((row) => row.id === flow.good_id)
+        return (
+          <li key={flow.good_id}>
+            <a className="good-link" href={`#/prices/good/${encodeURIComponent(flow.good_id)}`}>
+              <GoodIcon id={flow.good_id} icons={icons} />
+              {good ? goodName(good) : displayId(flow.good_id)}
+              {' '}
+              {flow.quantity.toFixed(1)} ({flow.value.toFixed(2)})
+            </a>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+function NeedBaskets({
+  needs,
+  goods,
+  icons,
+}: {
+  needs: PopNeedBasket[]
+  goods: GoodPrice[]
+  icons: Icons
+}) {
+  if (!needs.length) return <p>No modeled needs for this selection.</p>
+  return (
+    <div className="need-baskets">
+      {needs.map((need) => (
+        <div key={need.need_id} className="need-basket">
+          <strong>{need.need_name || displayId(need.need_id)}</strong>
+          <GoodFlows flows={need.goods} goods={goods} icons={icons} />
+        </div>
+      ))}
+    </div>
+  )
 }
 
 /**
@@ -358,12 +422,6 @@ function inheritedGroupValue(
   return undefined
 }
 
-function flowText(building: BuildingEconomics, side: 'inputs' | 'outputs'): string {
-  return building[side]
-    .map((flow) => `${displayId(flow.good_id)} ${flow.quantity.toFixed(1)} (${flow.value.toFixed(2)})`)
-    .join(', ') || '—'
-}
-
 type StateBuildingRow =
   | { kind: 'building'; building: BuildingEconomics; type?: BuildingTypeInfo; group?: BuildingGroupInfo }
   | { kind: 'empty-rural'; capacity: number }
@@ -374,11 +432,15 @@ function StateBuildings({
   buildings,
   buildingTypes,
   buildingGroups,
+  goods,
+  icons,
 }: {
   state?: StateInfo
   buildings: BuildingEconomics[]
   buildingTypes: BuildingTypeInfo[]
   buildingGroups: BuildingGroupInfo[]
+  goods: GoodPrice[]
+  icons: Icons
 }) {
   const types = new Map(buildingTypes.map((building) => [building.id, building]))
   const groups = new Map(buildingGroups.map((group) => [group.id, group]))
@@ -449,20 +511,31 @@ function StateBuildings({
               const employment = building.level > 0
                 ? Math.max(0, Math.min(1, building.staffing / building.level))
                 : 0
+              const name = type?.name || displayId(building.type_id)
               return (
                 <article className="state-building-card" key={`${building.id}-${index}`}>
                   <div className="state-building-title">
                     <div>
-                      <strong>{type?.name || displayId(building.type_id)}</strong>
+                      <a className="building-link" href={`#/prices/building/${building.id}`}>
+                        <strong>{name}</strong>
+                      </a>
                       <span>{group?.name || (group ? displayId(group.id) : 'Other')}</span>
                     </div>
                     <b>{building.level.toLocaleString()} levels</b>
                   </div>
                   <dl className="state-building-stats">
                     <div><dt>Employment</dt><dd>{(employment * 100).toFixed(0)}%</dd></div>
+                    <div><dt>Revenue</dt><dd>{building.revenue.toFixed(2)}</dd></div>
+                    <div><dt>Cost</dt><dd>{building.cost.toFixed(2)}</dd></div>
                     <div><dt>Model profit</dt><dd>{building.profit.toFixed(2)}</dd></div>
-                    <div><dt>Inputs</dt><dd>{flowText(building, 'inputs')}</dd></div>
-                    <div><dt>Outputs</dt><dd>{flowText(building, 'outputs')}</dd></div>
+                    <div><dt>Inputs</dt><dd><GoodFlows flows={building.inputs} goods={goods} icons={icons} /></dd></div>
+                    <div><dt>Outputs</dt><dd><GoodFlows flows={building.outputs} goods={goods} icons={icons} /></dd></div>
+                    {building.short_inputs.length > 0 && (
+                      <div>
+                        <dt>Short inputs</dt>
+                        <dd>{building.short_inputs.map(displayId).join(', ')}</dd>
+                      </div>
+                    )}
                     <div>
                       <dt>Production methods</dt>
                       <dd>{(building.production_method_ids ?? []).map(displayId).join(', ') || '—'}</dd>
@@ -478,40 +551,333 @@ function StateBuildings({
   )
 }
 
-type PopSort = 'profession' | 'size' | 'wealth' | 'culture'
+type PopSort = 'profession' | 'workforce' | 'dependents' | 'wealth' | 'culture'
 
-function StatePops({ pops }: { pops: StatePop[] }) {
-  const [sort, onSort] = useSort<PopSort>('size', 'desc')
+function StatePops({
+  pops,
+  qualifications,
+  stateNeeds,
+  goods,
+  icons,
+}: {
+  pops: StatePop[]
+  qualifications: StateQualification[]
+  stateNeeds: StateNeed[]
+  goods: GoodPrice[]
+  icons: Icons
+}) {
+  const [sort, onSort] = useSort<PopSort>('workforce', 'desc')
+  const [open, setOpen] = useState<number | null>(null)
   const sorted = useMemo(
     () => sortRows(pops, sort, (pop, key) => {
       if (key === 'profession') return pop.profession_name || displayId(pop.profession_id || 'unknown')
       if (key === 'culture') return pop.culture_name || displayId(pop.culture_id || 'unknown')
-      if (key === 'size') return pop.demand_size ?? 0
+      if (key === 'workforce') return pop.workforce ?? pop.demand_size ?? 0
+      if (key === 'dependents') return pop.dependents ?? 0
       return pop.wealth ?? 0
     }),
     [pops, sort],
   )
   return (
+    <div className="state-population">
+      <p className="model-info">
+        Needs are model baskets at solved prices (package ladder + substitution), not a save cashflow ledger.
+      </p>
+      {stateNeeds.length > 0 && (
+        <section className="state-needs-strip" aria-label="State needs">
+          <h3>State needs</h3>
+          <NeedBaskets
+            needs={stateNeeds.map((need) => ({
+              need_id: need.need_id,
+              need_name: need.need_name,
+              package_value: need.package_value,
+              goods: need.goods,
+            }))}
+            goods={goods}
+            icons={icons}
+          />
+        </section>
+      )}
+      {qualifications.length > 0 && (
+        <section aria-label="Qualifications">
+          <h3>Qualifications</h3>
+          <p className="model-info">
+            Shortage is filled jobs minus employable (or qualified) stock. Monthly qualification gain is omitted unless the save stores it.
+          </p>
+          <QualificationsTable rows={qualifications} />
+        </section>
+      )}
+      <div className="table-scroll">
+        <table>
+          <thead><tr>
+            <th><SortButton label="Profession" sortKey="profession" sort={sort} onSort={onSort} /></th>
+            <th><SortButton label="Workforce" sortKey="workforce" sort={sort} onSort={onSort} /></th>
+            <th><SortButton label="Dependents" sortKey="dependents" sort={sort} onSort={onSort} /></th>
+            <th>Literacy</th>
+            <th><SortButton label="Wealth" sortKey="wealth" sort={sort} onSort={onSort} /></th>
+            <th><SortButton label="Culture" sortKey="culture" sort={sort} onSort={onSort} /></th>
+          </tr></thead>
+          <tbody>
+            {sorted.map((pop, index) => {
+              const literacy = pop.workforce && pop.workforce > 0 && pop.literate != null
+                ? `${((pop.literate / pop.workforce) * 100).toFixed(0)}%`
+                : '—'
+              return (
+                <Fragment key={`${pop.profession_id}-${pop.culture_id}-${index}`}>
+                  <tr>
+                    <th>
+                      <button
+                        type="button"
+                        className="pop-expand"
+                        aria-expanded={open === index}
+                        onClick={() => setOpen(open === index ? null : index)}
+                      >
+                        {pop.profession_name || displayId(pop.profession_id || 'unknown')}
+                      </button>
+                    </th>
+                    <td>{pop.workforce?.toLocaleString() ?? '—'}</td>
+                    <td>{pop.dependents?.toLocaleString() ?? '—'}</td>
+                    <td>{literacy}</td>
+                    <td>{pop.wealth ?? '—'}</td>
+                    <td>{pop.culture_name || displayId(pop.culture_id || 'unknown')}</td>
+                  </tr>
+                  {open === index && (
+                    <tr className="pop-detail">
+                      <td colSpan={6}>
+                        <NeedBaskets needs={pop.needs ?? []} goods={goods} icons={icons} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+        {!pops.length && <p>No pops in this state.</p>}
+      </div>
+    </div>
+  )
+}
+
+function QualificationsTable({ rows }: { rows: StateQualification[] }) {
+  return (
     <div className="table-scroll">
       <table>
-        <thead><tr>
-          <th><SortButton label="Profession" sortKey="profession" sort={sort} onSort={onSort} /></th>
-          <th><SortButton label="Demand size" sortKey="size" sort={sort} onSort={onSort} /></th>
-          <th><SortButton label="Wealth" sortKey="wealth" sort={sort} onSort={onSort} /></th>
-          <th><SortButton label="Culture" sortKey="culture" sort={sort} onSort={onSort} /></th>
-        </tr></thead>
+        <thead>
+          <tr>
+            <th>Profession</th>
+            <th>Employed</th>
+            <th>Jobs</th>
+            <th>Qualified</th>
+            <th>Employable</th>
+            <th>Shortage</th>
+          </tr>
+        </thead>
         <tbody>
-          {sorted.map((pop, index) => (
-            <tr key={`${pop.profession_id}-${pop.culture_id}-${index}`}>
-              <th>{pop.profession_name || displayId(pop.profession_id || 'unknown')}</th>
-              <td>{pop.demand_size?.toLocaleString() ?? '—'}</td>
-              <td>{pop.wealth ?? '—'}</td>
-              <td>{pop.culture_name || displayId(pop.culture_id || 'unknown')}</td>
+          {rows.map((row) => (
+            <tr key={row.profession_id}>
+              <th>{row.profession_name || displayId(row.profession_id)}</th>
+              <td>{row.employed.toLocaleString()}</td>
+              <td>{row.jobs.toLocaleString()}</td>
+              <td>{row.qualified.toLocaleString()}</td>
+              <td>{row.employable?.toLocaleString() ?? '—'}</td>
+              <td>{row.shortage.toLocaleString()}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      {!pops.length && <p>No pops in this state.</p>}
+    </div>
+  )
+}
+
+function StateOverview({
+  pops,
+  buildings,
+  qualifications,
+  stateNeeds,
+  goods,
+  icons,
+}: {
+  pops: StatePop[]
+  buildings: BuildingEconomics[]
+  qualifications: StateQualification[]
+  stateNeeds: StateNeed[]
+  goods: GoodPrice[]
+  icons: Icons
+}) {
+  const workforce = pops.reduce((sum, pop) => sum + (pop.workforce ?? 0), 0)
+  const dependents = pops.reduce((sum, pop) => sum + (pop.dependents ?? 0), 0)
+  const literate = pops.reduce((sum, pop) => sum + (pop.literate ?? 0), 0)
+  const literacy = workforce > 0 && pops.some((pop) => pop.literate != null)
+    ? `${((literate / workforce) * 100).toFixed(0)}%`
+    : '—'
+  const levels = buildings.reduce((sum, building) => sum + building.level, 0)
+  const profit = buildings.reduce((sum, building) => sum + building.profit, 0)
+  const staffing = buildings.reduce((sum, building) => {
+    if (building.level <= 0) return sum
+    return sum + Math.max(0, Math.min(1, building.staffing / building.level))
+  }, 0)
+  const avgStaffing = buildings.length ? staffing / buildings.length : 0
+  const employed = qualifications.reduce((sum, row) => sum + row.employed, 0)
+  const shortage = qualifications.reduce((sum, row) => sum + row.shortage, 0)
+  return (
+    <div className="state-overview">
+      <dl className="overview-kpis">
+        <div><dt>Population</dt><dd>{(workforce + dependents).toLocaleString()}</dd></div>
+        <div><dt>Workforce</dt><dd>{workforce.toLocaleString()}</dd></div>
+        <div><dt>Dependents</dt><dd>{dependents.toLocaleString()}</dd></div>
+        <div><dt>Literacy</dt><dd>{literacy}</dd></div>
+        <div><dt>Building levels</dt><dd>{levels.toLocaleString()}</dd></div>
+        <div><dt>Model profit</dt><dd>{profit.toFixed(2)}</dd></div>
+        <div><dt>Avg. employment</dt><dd>{(avgStaffing * 100).toFixed(0)}%</dd></div>
+        <div><dt>Employed</dt><dd>{employed.toLocaleString()}</dd></div>
+        <div><dt>Jobs shortage</dt><dd>{shortage.toLocaleString()}</dd></div>
+      </dl>
+      {stateNeeds.length > 0 && (
+        <section aria-label="State needs">
+          <h3>State needs</h3>
+          <NeedBaskets
+            needs={stateNeeds.map((need) => ({
+              need_id: need.need_id,
+              need_name: need.need_name,
+              package_value: need.package_value,
+              goods: need.goods,
+            }))}
+            goods={goods}
+            icons={icons}
+          />
+        </section>
+      )}
+    </div>
+  )
+}
+
+type LocalPriceSort = 'name' | 'price' | 'buy' | 'sell'
+
+function StateLocalPrices({
+  rows,
+  goods,
+  icons,
+}: {
+  rows: StateGood[]
+  goods: GoodPrice[]
+  icons: Icons
+}) {
+  const [sort, onSort] = useSort<LocalPriceSort>('name')
+  const sorted = useMemo(
+    () => sortRows(rows, sort, (row, key) => {
+      if (key === 'name') {
+        const good = goods.find((item) => item.id === row.good_id)
+        return good ? goodName(good) : displayId(row.good_id)
+      }
+      return row[key]
+    }),
+    [rows, sort, goods],
+  )
+  return (
+    <div>
+      <p className="model-info">
+        Local prices blend the solved market price with each state&apos;s attributed-order price
+        using infrastructure-only market access and base MAPI 75%.
+      </p>
+      {rows.length ? (
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th><SortButton label="Good" sortKey="name" sort={sort} onSort={onSort} /></th>
+                <th><SortButton label="Local price" sortKey="price" sort={sort} onSort={onSort} /></th>
+                <th>Market price</th>
+                <th>State price</th>
+                <th><SortButton label="Buy" sortKey="buy" sort={sort} onSort={onSort} /></th>
+                <th><SortButton label="Sell" sortKey="sell" sort={sort} onSort={onSort} /></th>
+                <th>Market access</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((row) => {
+                const good = goods.find((item) => item.id === row.good_id)
+                return (
+                  <tr key={row.good_id}>
+                    <th>
+                      <a className="good-link" href={`#/prices/good/${encodeURIComponent(row.good_id)}`}>
+                        <GoodIcon id={row.good_id} icons={icons} />
+                        {good ? goodName(good) : displayId(row.good_id)}
+                      </a>
+                    </th>
+                    <td>{row.price.toFixed(2)}</td>
+                    <td>{row.market_price.toFixed(2)}</td>
+                    <td>{row.state_price.toFixed(2)}</td>
+                    <td>{row.buy.toFixed(2)}</td>
+                    <td>{row.sell.toFixed(2)}</td>
+                    <td>{(row.market_access * 100).toFixed(0)}%</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p>No local prices for this state.</p>
+      )}
+    </div>
+  )
+}
+
+function StateInformation({
+  state,
+  owner,
+}: {
+  state?: StateInfo
+  owner?: CountryInfo
+}) {
+  return (
+    <dl className="state-information">
+      <div><dt>Region</dt><dd>{state?.region_name || displayId(state?.region_id || '—')}</dd></div>
+      <div><dt>Region id</dt><dd>{state?.region_id || '—'}</dd></div>
+      <div><dt>Country</dt><dd>{owner?.name || owner?.tag || '—'}</dd></div>
+      <div><dt>Market id</dt><dd>{state?.market_id ?? '—'}</dd></div>
+      <div><dt>Arable land</dt><dd>{state?.arable_land?.toLocaleString() ?? '—'}</dd></div>
+      <div>
+        <dt>Infrastructure</dt>
+        <dd>
+          {state?.infrastructure != null
+            ? `${state.infrastructure.toLocaleString()}${
+                state.infrastructure_usage != null
+                  ? ` (${state.infrastructure_usage.toLocaleString()} used)`
+                  : ''
+              }`
+            : '—'}
+        </dd>
+      </div>
+      <div>
+        <dt>Not modeled</dt>
+        <dd>State traits, resources, incorporation, and tax capacity are unavailable from the current save IR.</dd>
+      </div>
+    </dl>
+  )
+}
+
+function EmployeesTable({ employees }: { employees: ProfessionCount[] }) {
+  if (!employees.length) return <p>No workplace pops linked to this building.</p>
+  return (
+    <div className="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Profession</th>
+            <th>Employed</th>
+          </tr>
+        </thead>
+        <tbody>
+          {employees.map((row) => (
+            <tr key={row.profession_id}>
+              <th>{row.profession_name || displayId(row.profession_id)}</th>
+              <td>{row.count.toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -562,12 +928,12 @@ export function PriceExplorer({
 }) {
   const [view, setView] = useState<View>(() => currentView())
   const [filterMode, setFilterMode] = useState<FilterMode>('our_market')
-  const [stateTab, setStateTab] = useState<'buildings' | 'pops'>('buildings')
+  const [stateTab, setStateTab] = useState<StateTab>('overview')
   useEffect(() => {
     const update = () => {
       const next = currentView()
       setView(next)
-      if (next.kind === 'state') setStateTab('buildings')
+      if (next.kind === 'state') setStateTab('overview')
     }
     window.addEventListener('hashchange', update)
     return () => window.removeEventListener('hashchange', update)
@@ -579,6 +945,8 @@ export function PriceExplorer({
   const buildingTypes = result.building_types ?? []
   const buildingGroups = result.building_groups ?? []
   const statePops = result.state_pops ?? []
+  const stateQualifications = result.state_qualifications ?? []
+  const stateNeeds = result.state_needs ?? []
   const countries = result.countries ?? []
   const missingPlayerMarket = filterMode === 'our_market' && playerMarketId == null
   const effectiveFilterMode: FilterMode = missingPlayerMarket ? 'all' : filterMode
@@ -624,12 +992,66 @@ export function PriceExplorer({
     )
   }
 
+  if (view.kind === 'building') {
+    const building = buildings.find((row) => row.id === view.id)
+    const state = states.find((row) => row.id === building?.state_id)
+    const type = buildingTypes.find((row) => row.id === building?.type_id)
+    const name = type?.name || displayId(building?.type_id || `Building ${view.id}`)
+    const stateName = state?.region_name || displayId(state?.region_id || (state ? `State ${state.id}` : 'State'))
+    const employment = building && building.level > 0
+      ? Math.max(0, Math.min(1, building.staffing / building.level))
+      : 0
+    return (
+      <section aria-labelledby="building-heading" className="state-panel">
+        <nav className="breadcrumbs" aria-label="Price detail">
+          <a href="#/prices">Goods</a><span>›</span>
+          {state ? <a href={`#/prices/state/${state.id}`}>{stateName}</a> : <span>{stateName}</span>}
+          <span>›</span><span>{name}</span>
+        </nav>
+        <div className="state-header">
+          <div>
+            <h2 id="building-heading">{name}</h2>
+            <span>{building ? `${building.level.toLocaleString()} levels` : 'Building unavailable'}</span>
+          </div>
+        </div>
+        {building ? (
+          <>
+            <dl className="overview-kpis">
+              <div><dt>Employment</dt><dd>{(employment * 100).toFixed(0)}%</dd></div>
+              <div><dt>Revenue</dt><dd>{building.revenue.toFixed(2)}</dd></div>
+              <div><dt>Cost</dt><dd>{building.cost.toFixed(2)}</dd></div>
+              <div><dt>Model profit</dt><dd>{building.profit.toFixed(2)}</dd></div>
+            </dl>
+            <dl className="state-building-stats">
+              <div><dt>Inputs</dt><dd><GoodFlows flows={building.inputs} goods={result.goods} icons={icons} /></dd></div>
+              <div><dt>Outputs</dt><dd><GoodFlows flows={building.outputs} goods={result.goods} icons={icons} /></dd></div>
+            </dl>
+            <h3>Workforce</h3>
+            <EmployeesTable employees={building.employees ?? []} />
+          </>
+        ) : (
+          <p>No building with that id.</p>
+        )}
+      </section>
+    )
+  }
+
   if (view.kind === 'state') {
     const state = states.find((row) => row.id === view.id)
     const rows = buildings.filter((building) => building.state_id === view.id)
     const pops = statePops.filter((pop) => pop.state_id === view.id)
+    const qualifications = stateQualifications.filter((row) => row.state_id === view.id)
+    const needs = stateNeeds.filter((row) => row.state_id === view.id)
+    const localGoods = stateGoods.filter((row) => row.state_id === view.id)
     const name = state?.region_name || displayId(state?.region_id || `State ${view.id}`)
     const owner = countries.find((country) => country.id === state?.country_id)
+    const tabs: Array<{ id: StateTab; label: string }> = [
+      { id: 'overview', label: 'Overview' },
+      { id: 'buildings', label: 'Buildings' },
+      { id: 'population', label: 'Population' },
+      { id: 'prices', label: 'Local Prices' },
+      { id: 'information', label: 'Information' },
+    ]
     return (
       <section aria-labelledby="state-heading" className="state-panel">
         <nav className="breadcrumbs" aria-label="Price detail">
@@ -648,40 +1070,33 @@ export function PriceExplorer({
               <span>{owner?.name || owner?.tag || 'Owner unavailable'}</span>
             </div>
           </div>
-          <dl className="state-capacity">
-            <div><dt>Arable land</dt><dd>{state?.arable_land?.toLocaleString() ?? '—'}</dd></div>
-            {state?.infrastructure != null && (
-              <div>
-                <dt>Infrastructure</dt>
-                <dd>
-                  {state.infrastructure.toLocaleString()}
-                  {state.infrastructure_usage != null
-                    ? ` (${state.infrastructure_usage.toLocaleString()} used)`
-                    : ''}
-                </dd>
-              </div>
-            )}
-          </dl>
         </div>
         <div className="state-tabs" role="tablist" aria-label="State details">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={stateTab === 'buildings'}
-            onClick={() => setStateTab('buildings')}
-          >
-            Buildings
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={stateTab === 'pops'}
-            onClick={() => setStateTab('pops')}
-          >
-            Pops
-          </button>
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={stateTab === tab.id}
+              onClick={() => setStateTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
-        {stateTab === 'buildings' ? (
+        {stateTab === 'overview' && (
+          <div role="tabpanel" aria-label="Overview">
+            <StateOverview
+              pops={pops}
+              buildings={rows}
+              qualifications={qualifications}
+              stateNeeds={needs}
+              goods={result.goods}
+              icons={icons}
+            />
+          </div>
+        )}
+        {stateTab === 'buildings' && (
           <div role="tabpanel" aria-label="Buildings">
             <p className="model-info">
               Profit and goods flows are estimates at whole-save synthetic prices. Empty rows show
@@ -692,11 +1107,30 @@ export function PriceExplorer({
               buildings={rows}
               buildingTypes={buildingTypes}
               buildingGroups={buildingGroups}
+              goods={result.goods}
+              icons={icons}
             />
           </div>
-        ) : (
-          <div role="tabpanel" aria-label="Pops">
-            <StatePops pops={pops} />
+        )}
+        {stateTab === 'population' && (
+          <div role="tabpanel" aria-label="Population">
+            <StatePops
+              pops={pops}
+              qualifications={qualifications}
+              stateNeeds={needs}
+              goods={result.goods}
+              icons={icons}
+            />
+          </div>
+        )}
+        {stateTab === 'prices' && (
+          <div role="tabpanel" aria-label="Local Prices">
+            <StateLocalPrices rows={localGoods} goods={result.goods} icons={icons} />
+          </div>
+        )}
+        {stateTab === 'information' && (
+          <div role="tabpanel" aria-label="Information">
+            <StateInformation state={state} owner={owner} />
           </div>
         )}
       </section>

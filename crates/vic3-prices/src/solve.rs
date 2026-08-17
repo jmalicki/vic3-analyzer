@@ -8,13 +8,14 @@ use basin::{
 };
 use vic3_defs::{GameDefs, GoodIdx, GoodsVec};
 
-use crate::consumption::{add_pop_consumption_scaled, consumption};
+use crate::consumption::{add_pop_consumption_scaled, consumption, pop_need_baskets};
 use crate::formula::{local_price, market_access, price};
 use crate::result::{
     BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, GoodFlow, GoodPrice,
-    MarketInputs, PricesResult, SolveOpts, SolveStatus, StateGood, StateInfo, StatePop,
+    MarketInputs, PopNeedBasket, PricesResult, ProfessionCount, SolveOpts, SolveStatus, StateGood,
+    StateInfo, StateNeed, StatePop, StateQualification,
 };
-use crate::world::World;
+use crate::world::{World, WorldPop, WorldStatePop};
 use crate::LIMITATIONS;
 
 const WARM_START_ALPHA: f64 = 0.5;
@@ -152,7 +153,7 @@ fn finished(
     residual: f64,
     status: SolveStatus,
 ) -> PricesResult {
-    let (states, state_goods, buildings, state_pops) = detail_rows(world, defs, &goods);
+    let detail = detail_rows(world, defs, &goods);
     let countries = country_rows(world, defs);
     let building_types = defs
         .buildings
@@ -201,12 +202,14 @@ fn finished(
         scope: "whole_save_synthetic".to_string(),
         goods,
         countries,
-        states,
-        state_goods,
-        buildings,
+        states: detail.states,
+        state_goods: detail.state_goods,
+        buildings: detail.buildings,
         building_types,
         building_groups,
-        state_pops,
+        state_pops: detail.state_pops,
+        state_qualifications: detail.state_qualifications,
+        state_needs: detail.state_needs,
         inputs,
         residual,
         status,
@@ -214,22 +217,24 @@ fn finished(
     }
 }
 
-fn detail_rows(
-    world: &World,
-    defs: &GameDefs,
-    goods: &[GoodPrice],
-) -> (
-    Vec<StateInfo>,
-    Vec<StateGood>,
-    Vec<BuildingEconomics>,
-    Vec<StatePop>,
-) {
+struct DetailRows {
+    states: Vec<StateInfo>,
+    state_goods: Vec<StateGood>,
+    buildings: Vec<BuildingEconomics>,
+    state_pops: Vec<StatePop>,
+    state_qualifications: Vec<StateQualification>,
+    state_needs: Vec<StateNeed>,
+}
+
+fn detail_rows(world: &World, defs: &GameDefs, goods: &[GoodPrice]) -> DetailRows {
     let mut prices = GoodsVec::zeros(defs.goods_order.len());
     let mut base_prices = GoodsVec::zeros(defs.goods_order.len());
+    let mut sell_orders = GoodsVec::zeros(defs.goods_order.len());
     for good in goods {
         if let Some(idx) = defs.index_of(&good.id) {
             prices[idx] = good.price;
             base_prices[idx] = good.base;
+            sell_orders[idx] = good.sell;
         }
     }
     let rows = goods
@@ -253,6 +258,8 @@ fn detail_rows(
             *state_buy.entry((state.id, good)).or_default() += quantity;
         }
     }
+
+    let employees_by_building = building_employees(world, defs);
 
     let mut buildings = Vec::new();
     for building in &world.buildings {
@@ -287,6 +294,10 @@ fn detail_rows(
             cost,
             profit: revenue - cost,
             short_inputs,
+            employees: employees_by_building
+                .get(&building.id)
+                .cloned()
+                .unwrap_or_default(),
         });
     }
 
@@ -341,57 +352,347 @@ fn detail_rows(
             infrastructure_usage: state.infrastructure_usage,
         })
         .collect();
-    let state_pops = if world.state_pops.is_empty() {
+    let state_pops = collapsed_state_pops(world, defs, &prices, &base_prices, &sell_orders);
+    let state_needs = aggregate_state_needs(&state_pops);
+    let state_qualifications = state_qualification_rows(world, defs, &employees_by_building);
+    DetailRows {
+        states,
+        state_goods,
+        buildings,
+        state_pops,
+        state_qualifications,
+        state_needs,
+    }
+}
+
+fn profession_counts(map: &BTreeMap<String, f64>, defs: &GameDefs) -> Vec<ProfessionCount> {
+    map.iter()
+        .filter(|(_, count)| **count > 0.0)
+        .map(|(id, count)| ProfessionCount {
+            profession_id: id.clone(),
+            profession_name: defs.labels.get(id).cloned(),
+            count: *count,
+        })
+        .collect()
+}
+
+fn building_employees(world: &World, defs: &GameDefs) -> BTreeMap<u32, Vec<ProfessionCount>> {
+    let mut counts: BTreeMap<u32, BTreeMap<String, f64>> = BTreeMap::new();
+    for pop in &world.state_pops {
+        let Some(building_id) = pop.workplace_id else {
+            continue;
+        };
+        let Some(profession) = pop.profession.as_ref() else {
+            continue;
+        };
+        let workforce = pop.workforce.unwrap_or(0.0);
+        if workforce <= 0.0 {
+            continue;
+        }
+        *counts
+            .entry(building_id)
+            .or_default()
+            .entry(profession.clone())
+            .or_default() += workforce;
+    }
+    counts
+        .into_iter()
+        .map(|(building_id, by_prof)| (building_id, profession_counts(&by_prof, defs)))
+        .collect()
+}
+
+type PopGroupKey = (u32, Option<String>, Option<String>, Option<i32>);
+
+fn collapsed_state_pops(
+    world: &World,
+    defs: &GameDefs,
+    prices: &GoodsVec,
+    base_prices: &GoodsVec,
+    sell_orders: &GoodsVec,
+) -> Vec<StatePop> {
+    let source: Vec<WorldStatePop> = if world.state_pops.is_empty() {
         world
             .pops
             .iter()
-            .filter_map(|pop| {
-                Some(state_pop_row(
-                    pop.state?,
-                    pop.profession.as_ref(),
-                    Some(pop.size),
-                    Some(i32::from(pop.wealth)),
-                    pop.culture.as_ref(),
-                    defs,
-                ))
+            .enumerate()
+            .filter_map(|(index, pop)| {
+                Some(WorldStatePop {
+                    id: u32::try_from(index).ok()?,
+                    state: pop.state,
+                    demand_size: Some(pop.size),
+                    workforce: Some(pop.size),
+                    dependents: Some(0.0),
+                    wealth: Some(i32::from(pop.wealth)),
+                    wages: Some(pop.wages),
+                    culture: pop.culture.clone(),
+                    profession: pop.profession.clone(),
+                    literate: None,
+                    workplace_id: None,
+                    qualifications: BTreeMap::new(),
+                })
             })
             .collect()
     } else {
-        world
-            .state_pops
-            .iter()
-            .filter_map(|pop| {
-                Some(state_pop_row(
-                    pop.state?,
-                    pop.profession.as_ref(),
-                    pop.demand_size,
-                    pop.wealth,
-                    pop.culture.as_ref(),
-                    defs,
-                ))
-            })
-            .collect()
+        world.state_pops.clone()
     };
-    (states, state_goods, buildings, state_pops)
+
+    let mut groups: BTreeMap<PopGroupKey, WorldStatePop> = BTreeMap::new();
+    for pop in source {
+        let Some(state_id) = pop.state else {
+            continue;
+        };
+        let key = (
+            state_id,
+            pop.profession.clone(),
+            pop.culture.clone(),
+            pop.wealth,
+        );
+        groups
+            .entry(key)
+            .and_modify(|existing| {
+                existing.demand_size =
+                    Some(existing.demand_size.unwrap_or(0.0) + pop.demand_size.unwrap_or(0.0));
+                existing.workforce =
+                    Some(existing.workforce.unwrap_or(0.0) + pop.workforce.unwrap_or(0.0));
+                existing.dependents =
+                    Some(existing.dependents.unwrap_or(0.0) + pop.dependents.unwrap_or(0.0));
+                existing.literate = match (existing.literate, pop.literate) {
+                    (Some(left), Some(right)) => Some(left + right),
+                    (Some(left), None) => Some(left),
+                    (None, Some(right)) => Some(right),
+                    (None, None) => None,
+                };
+                if existing.workplace_id != pop.workplace_id {
+                    existing.workplace_id = None;
+                }
+                for (profession, count) in &pop.qualifications {
+                    *existing
+                        .qualifications
+                        .entry(profession.clone())
+                        .or_default() += *count;
+                }
+            })
+            .or_insert(pop);
+    }
+
+    groups
+        .into_values()
+        .map(|pop| {
+            let needs = pop_needs_for(&pop, defs, prices, base_prices, sell_orders);
+            StatePop {
+                id: Some(pop.id),
+                state_id: pop.state.unwrap_or(0),
+                profession_id: pop.profession.clone(),
+                profession_name: pop
+                    .profession
+                    .as_ref()
+                    .and_then(|id| defs.labels.get(id))
+                    .cloned(),
+                demand_size: pop.demand_size,
+                workforce: pop.workforce,
+                dependents: pop.dependents,
+                wealth: pop.wealth,
+                culture_id: pop.culture.clone(),
+                culture_name: pop
+                    .culture
+                    .as_ref()
+                    .and_then(|id| defs.labels.get(id))
+                    .cloned(),
+                literate: pop.literate,
+                workplace_id: pop.workplace_id,
+                qualifications: profession_counts(&pop.qualifications, defs),
+                needs,
+            }
+        })
+        .collect()
 }
 
-fn state_pop_row(
-    state_id: u32,
-    profession: Option<&String>,
-    demand_size: Option<f64>,
-    wealth: Option<i32>,
-    culture: Option<&String>,
+fn pop_needs_for(
+    pop: &WorldStatePop,
     defs: &GameDefs,
-) -> StatePop {
-    StatePop {
-        state_id,
-        profession_id: profession.cloned(),
-        profession_name: profession.and_then(|id| defs.labels.get(id)).cloned(),
-        demand_size,
+    prices: &GoodsVec,
+    base_prices: &GoodsVec,
+    sell_orders: &GoodsVec,
+) -> Vec<PopNeedBasket> {
+    let Some(size) = pop.demand_size.filter(|size| *size > 0.0) else {
+        return Vec::new();
+    };
+    let Some(wealth) = pop.wealth else {
+        return Vec::new();
+    };
+    let Ok(wealth) = u8::try_from(wealth.clamp(1, 99)) else {
+        return Vec::new();
+    };
+    let world_pop = WorldPop {
+        state: pop.state,
+        size,
         wealth,
-        culture_id: culture.cloned(),
-        culture_name: culture.and_then(|id| defs.labels.get(id)).cloned(),
+        wages: pop.wages.filter(|wages| *wages > 0.0).unwrap_or(0.0),
+        culture: pop.culture.clone(),
+        profession: pop.profession.clone(),
+    };
+    pop_need_baskets(&world_pop, prices, base_prices, defs, sell_orders)
+        .into_iter()
+        .filter_map(|basket| {
+            let need_id = defs.need_by_index(basket.need_idx)?.id.clone();
+            Some(PopNeedBasket {
+                need_name: defs.labels.get(&need_id).cloned(),
+                need_id,
+                package_value: basket.package_value,
+                goods: basket
+                    .goods
+                    .into_iter()
+                    .filter_map(|(idx, quantity)| {
+                        let good_id = defs.good_by_index(idx)?.to_string();
+                        Some(GoodFlow {
+                            value: quantity * prices[idx],
+                            good_id,
+                            quantity,
+                        })
+                    })
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+fn aggregate_state_needs(pops: &[StatePop]) -> Vec<StateNeed> {
+    let mut by_state: BTreeMap<(u32, String), StateNeed> = BTreeMap::new();
+    for pop in pops {
+        for need in &pop.needs {
+            let entry = by_state
+                .entry((pop.state_id, need.need_id.clone()))
+                .or_insert_with(|| StateNeed {
+                    state_id: pop.state_id,
+                    need_id: need.need_id.clone(),
+                    need_name: need.need_name.clone(),
+                    package_value: 0.0,
+                    goods: Vec::new(),
+                });
+            entry.package_value += need.package_value;
+            for flow in &need.goods {
+                if let Some(existing) = entry
+                    .goods
+                    .iter_mut()
+                    .find(|row| row.good_id == flow.good_id)
+                {
+                    existing.quantity += flow.quantity;
+                    existing.value += flow.value;
+                } else {
+                    entry.goods.push(flow.clone());
+                }
+            }
+        }
     }
+    by_state.into_values().collect()
+}
+
+fn state_qualification_rows(
+    world: &World,
+    defs: &GameDefs,
+    employees_by_building: &BTreeMap<u32, Vec<ProfessionCount>>,
+) -> Vec<StateQualification> {
+    let mut jobs_by_state: BTreeMap<(u32, String), f64> = BTreeMap::new();
+    let building_state: BTreeMap<u32, Option<u32>> = world
+        .buildings
+        .iter()
+        .map(|building| (building.id, building.state))
+        .collect();
+    for (building_id, employees) in employees_by_building {
+        let Some(Some(state_id)) = building_state.get(building_id) else {
+            continue;
+        };
+        for employee in employees {
+            *jobs_by_state
+                .entry((*state_id, employee.profession_id.clone()))
+                .or_default() += employee.count;
+        }
+    }
+
+    let mut employed_by_state: BTreeMap<(u32, String), f64> = BTreeMap::new();
+    let mut qualified_from_pops: BTreeMap<(u32, String), f64> = BTreeMap::new();
+    for pop in &world.state_pops {
+        let Some(state_id) = pop.state else {
+            continue;
+        };
+        if let Some(profession) = &pop.profession {
+            let workforce = pop.workforce.unwrap_or(0.0);
+            if pop.workplace_id.is_some() && workforce > 0.0 {
+                *employed_by_state
+                    .entry((state_id, profession.clone()))
+                    .or_default() += workforce;
+            }
+            if workforce > 0.0 {
+                *qualified_from_pops
+                    .entry((state_id, profession.clone()))
+                    .or_default() += workforce;
+            }
+        }
+        for (profession, count) in &pop.qualifications {
+            *qualified_from_pops
+                .entry((state_id, profession.clone()))
+                .or_default() += *count;
+        }
+    }
+
+    let mut rows = Vec::new();
+    for state in &world.states {
+        let mut professions: BTreeMap<String, ()> = BTreeMap::new();
+        for key in state.qualifications.keys() {
+            professions.insert(key.clone(), ());
+        }
+        for key in state.employable_qualifications.keys() {
+            professions.insert(key.clone(), ());
+        }
+        for key in state.workforce_by_type.keys() {
+            professions.insert(key.clone(), ());
+        }
+        for (state_id, profession) in employed_by_state.keys().chain(jobs_by_state.keys()) {
+            if *state_id == state.id {
+                professions.insert(profession.clone(), ());
+            }
+        }
+        for (state_id, profession) in qualified_from_pops.keys() {
+            if *state_id == state.id {
+                professions.insert(profession.clone(), ());
+            }
+        }
+        for profession_id in professions.keys() {
+            let qualified = state
+                .qualifications
+                .get(profession_id)
+                .copied()
+                .unwrap_or_else(|| {
+                    qualified_from_pops
+                        .get(&(state.id, profession_id.clone()))
+                        .copied()
+                        .unwrap_or(0.0)
+                });
+            let employable = state.employable_qualifications.get(profession_id).copied();
+            let employed = employed_by_state
+                .get(&(state.id, profession_id.clone()))
+                .copied()
+                .or_else(|| state.workforce_by_type.get(profession_id).copied())
+                .unwrap_or(0.0);
+            let jobs = jobs_by_state
+                .get(&(state.id, profession_id.clone()))
+                .copied()
+                .unwrap_or(employed);
+            let stock = employable.unwrap_or(qualified);
+            rows.push(StateQualification {
+                state_id: state.id,
+                profession_name: defs.labels.get(profession_id).cloned(),
+                profession_id: profession_id.clone(),
+                qualified,
+                employable,
+                employed,
+                jobs,
+                shortage: (jobs - stock).max(0.0),
+                monthly_change: None,
+            });
+        }
+    }
+    rows
 }
 
 fn country_rows(world: &World, defs: &GameDefs) -> Vec<CountryInfo> {

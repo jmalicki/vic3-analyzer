@@ -460,6 +460,8 @@ mod tests {
             residual: 0.0,
             status: SolveStatus::Converged,
             limitations: Vec::new(),
+            state_qualifications: Vec::new(),
+            state_needs: Vec::new(),
         }
     }
 
@@ -639,6 +641,7 @@ mod tests {
             cost: 0.0,
             profit: revenue,
             short_inputs: Vec::new(),
+            employees: Vec::new(),
         };
         prices.buildings = vec![building(1, 10, 125.0), building(2, 20, 900.0)];
 

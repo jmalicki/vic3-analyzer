@@ -4,8 +4,10 @@
 //! older patches) still load. Extra save keys are ignored.
 
 use crate::maybe::maybe_map;
+use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 use vic3save::Vic3Date;
 
 /// Paradox `foo_manager.database` (or `states.database`, `pops.database`, …):
@@ -170,6 +172,56 @@ pub struct State {
     /// from it. Multiply by the good's `traded_quantity` for goods volume.
     #[serde(default)]
     pub trade: BuildingGoods,
+    /// Profession-index (or id) → qualification stock. Vic3 prefixes the map
+    /// with the pop-type count (`{ 15 0=… 7=… }`); 0 is `academics`.
+    #[serde(default)]
+    pub qualifications: IndexQtyMap,
+    /// Hireable subset of [`Self::qualifications`] when the save stores it.
+    #[serde(default)]
+    pub employable_qualifications: IndexQtyMap,
+    /// Employed workforce by profession index, when present on the state.
+    #[serde(default)]
+    pub pop_workforce_by_type: IndexQtyMap,
+    /// 1.13 keeps the profession tables here rather than on the state itself.
+    #[serde(default)]
+    pub pop_statistics: StatePopStatistics,
+}
+
+impl State {
+    /// Hireable qualification stock by profession, from wherever the save keeps it.
+    pub fn employable(&self) -> &IndexQtyMap {
+        if self.employable_qualifications.values.is_empty() {
+            &self.pop_statistics.population_employable_qualifications
+        } else {
+            &self.employable_qualifications
+        }
+    }
+
+    /// Employed workforce by profession, from wherever the save keeps it.
+    pub fn workforce_by_profession(&self) -> &IndexQtyMap {
+        if self.pop_workforce_by_type.values.is_empty() {
+            &self.pop_statistics.population_workforce_by_profession
+        } else {
+            &self.pop_workforce_by_type
+        }
+    }
+}
+
+/// `pop_statistics` block on a 1.13 state.
+///
+/// The state itself has no `qualifications=`; the profession tables live here
+/// under `population_*` names, each a size-prefixed index map (`{ 15 0=… }`).
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+pub struct StatePopStatistics {
+    /// Profession index → people (workforce plus dependents).
+    #[serde(default)]
+    pub population_by_profession: IndexQtyMap,
+    /// Profession index → working people.
+    #[serde(default)]
+    pub population_workforce_by_profession: IndexQtyMap,
+    /// Profession index → people qualified and available to hire.
+    #[serde(default)]
+    pub population_employable_qualifications: IndexQtyMap,
 }
 
 /// A building in `building_manager.database`.
@@ -200,10 +252,63 @@ pub struct Building {
     pub output_goods: BuildingGoods,
 }
 
+/// Sparse Clausewitz map of id-or-index → quantity.
+///
+/// Real 1.13 pops/states store `qualifications={ 15 0=1.64 7=6.73 }` (leading
+/// integer is the pop-type table size; 0 = academics). Fixtures may omit the
+/// prefix or use script ids.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct IndexQtyMap {
+    pub values: BTreeMap<String, f64>,
+}
+
+impl<'de> Deserialize<'de> for IndexQtyMap {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = IndexQtyMap;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a Clausewitz map of id = quantity, optionally size-prefixed")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut values = BTreeMap::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    if key == "remainder" {
+                        let _: de::IgnoredAny = map.next_value()?;
+                        continue;
+                    }
+                    let qty = map.next_value::<GoodQty>()?;
+                    values.insert(key, qty.value());
+                }
+                Ok(IndexQtyMap { values })
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut values = BTreeMap::new();
+                let mut pending: Option<String> = None;
+                while let Some(token) = seq.next_element::<String>()? {
+                    if token == "=" {
+                        let key = pending.take().ok_or_else(|| {
+                            de::Error::custom("qualification assignment missing key")
+                        })?;
+                        let qty = seq.next_element::<f64>()?.ok_or_else(|| {
+                            de::Error::custom("qualification assignment missing value")
+                        })?;
+                        values.insert(key, qty);
+                    } else {
+                        pending = Some(token);
+                    }
+                }
+                Ok(IndexQtyMap { values })
+            }
+        }
+        deserializer.deserialize_any(V)
+    }
+}
+
 /// Goods quantities on a building (`input_goods` / `output_goods`).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct BuildingGoods {
-    pub goods: std::collections::BTreeMap<String, f64>,
+    pub goods: BTreeMap<String, f64>,
 }
 
 impl<'de> Deserialize<'de> for BuildingGoods {
@@ -342,6 +447,44 @@ pub struct Pop {
     /// Frozen wage bill when present; omitted pops keep wealth at the saved integer.
     #[serde(default)]
     pub wages: Option<f64>,
+    /// Building id this pop works at. Missing or `none` means unemployed.
+    #[serde(default, deserialize_with = "optional_id")]
+    pub workplace: Option<u32>,
+    /// Literate workers (not a fraction). Alias `num_literate`.
+    #[serde(default, alias = "num_literate")]
+    pub literate: Option<f64>,
+    /// Profession-index → people who could work that profession.
+    #[serde(default)]
+    pub qualifications: IndexQtyMap,
+}
+
+fn optional_id<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u32>, D::Error> {
+    struct V;
+    impl<'de> Visitor<'de> for V {
+        type Value = Option<u32>;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a building id, none, or omission")
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+            if value.eq_ignore_ascii_case("none") {
+                return Ok(None);
+            }
+            value.parse().map(Some).map_err(E::custom)
+        }
+        fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+            u32::try_from(value).map(Some).map_err(E::custom)
+        }
+        fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+            u32::try_from(value).map(Some).map_err(E::custom)
+        }
+    }
+    deserializer.deserialize_any(V)
 }
 
 impl Pop {
@@ -463,6 +606,70 @@ mod tests {
         };
 
         assert_eq!(pop.demand_size(), Some(10_000.0));
+    }
+
+    #[test]
+    fn qualifications_packed_array_skips_size_prefix() {
+        let save = crate::load_slice(
+            br#"SAV01000000000000000000
+pops={
+	database={
+		1={
+			qualifications={ 15 0=1.64121 2=2.76406 7=6.73474 }
+		}
+	}
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("packed qualifications");
+        let pop = save.pops.iter_present().next().unwrap().1;
+        assert_eq!(pop.qualifications.values.get("0"), Some(&1.64121));
+        assert_eq!(pop.qualifications.values.get("2"), Some(&2.76406));
+        assert_eq!(pop.qualifications.values.get("7"), Some(&6.73474));
+        assert!(!pop.qualifications.values.contains_key("15"));
+
+        let named = crate::load_slice(
+            br#"SAV01000000000000000000
+pops={
+	database={
+		1={
+			qualifications={ academics=10 farmers=5 }
+		}
+	}
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("named qualifications");
+        let pop = named.pops.iter_present().next().unwrap().1;
+        assert_eq!(pop.qualifications.values.get("academics"), Some(&10.0));
+        assert_eq!(pop.qualifications.values.get("farmers"), Some(&5.0));
+    }
+
+    #[test]
+    fn state_profession_tables_prefer_flat_fields_over_pop_statistics() {
+        let save = crate::load_slice(
+            br#"SAV01000000000000000000
+states={
+	database={
+		1={
+			employable_qualifications={ 15 0=2 }
+			pop_workforce_by_type={ 15 7=11 }
+			pop_statistics={
+				population_workforce_by_profession={ 15 7=6000 }
+				population_employable_qualifications={ 15 0=50 }
+			}
+		}
+	}
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("state profession tables");
+        let state = save.states.iter_present().next().unwrap().1;
+        assert_eq!(state.employable().values.get("0"), Some(&2.0));
+        assert_eq!(state.workforce_by_profession().values.get("7"), Some(&11.0));
     }
 
     #[test]

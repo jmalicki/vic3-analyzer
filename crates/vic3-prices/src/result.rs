@@ -105,12 +105,65 @@ pub struct StateInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StatePop {
     pub state_id: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<u32>,
     pub profession_id: Option<String>,
     pub profession_name: Option<String>,
     pub demand_size: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workforce: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dependents: Option<f64>,
     pub wealth: Option<i32>,
     pub culture_id: Option<String>,
     pub culture_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub literate: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workplace_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub qualifications: Vec<ProfessionCount>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub needs: Vec<PopNeedBasket>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ProfessionCount {
+    pub profession_id: String,
+    pub profession_name: Option<String>,
+    pub count: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PopNeedBasket {
+    pub need_id: String,
+    pub need_name: Option<String>,
+    pub package_value: f64,
+    pub goods: Vec<GoodFlow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StateNeed {
+    pub state_id: u32,
+    pub need_id: String,
+    pub need_name: Option<String>,
+    pub package_value: f64,
+    pub goods: Vec<GoodFlow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StateQualification {
+    pub state_id: u32,
+    pub profession_id: String,
+    pub profession_name: Option<String>,
+    pub qualified: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub employable: Option<f64>,
+    pub employed: f64,
+    pub jobs: f64,
+    pub shortage: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monthly_change: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -172,6 +225,8 @@ pub struct BuildingEconomics {
     pub cost: f64,
     pub profit: f64,
     pub short_inputs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub employees: Vec<ProfessionCount>,
 }
 
 /// What the save and definitions actually contributed to the market.
@@ -221,6 +276,10 @@ pub struct PricesResult {
     pub building_types: Vec<BuildingTypeInfo>,
     pub building_groups: Vec<BuildingGroupInfo>,
     pub state_pops: Vec<StatePop>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub state_qualifications: Vec<StateQualification>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub state_needs: Vec<StateNeed>,
     /// Where the orders behind these prices came from.
     pub inputs: MarketInputs,
     /// `‖r − r_formula(orders(r))‖₂`. Always present (I5).

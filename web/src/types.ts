@@ -20,12 +20,52 @@ export interface StateInfo {
 
 export interface StatePop {
   state_id: number
+  id?: number
   profession_id?: string
   profession_name?: string
   demand_size?: number
+  workforce?: number
+  dependents?: number
   wealth?: number
   culture_id?: string
   culture_name?: string
+  literate?: number
+  workplace_id?: number
+  qualifications?: ProfessionCount[]
+  needs?: PopNeedBasket[]
+}
+
+export interface ProfessionCount {
+  profession_id: string
+  profession_name?: string
+  count: number
+}
+
+export interface PopNeedBasket {
+  need_id: string
+  need_name?: string
+  package_value: number
+  goods: GoodFlow[]
+}
+
+export interface StateNeed {
+  state_id: number
+  need_id: string
+  need_name?: string
+  package_value: number
+  goods: GoodFlow[]
+}
+
+export interface StateQualification {
+  state_id: number
+  profession_id: string
+  profession_name?: string
+  qualified: number
+  employable?: number
+  employed: number
+  jobs: number
+  shortage: number
+  monthly_change?: number
 }
 
 export interface BuildingTypeInfo {
@@ -77,6 +117,7 @@ export interface BuildingEconomics {
   cost: number
   profit: number
   short_inputs: string[]
+  employees?: ProfessionCount[]
 }
 
 export interface MarketInputs {
@@ -107,6 +148,8 @@ export interface PricesResult {
   building_types?: BuildingTypeInfo[]
   building_groups?: BuildingGroupInfo[]
   state_pops?: StatePop[]
+  state_qualifications?: StateQualification[]
+  state_needs?: StateNeed[]
   inputs?: MarketInputs
   residual: number
   status: 'converged' | 'max_iters' | 'failed'
