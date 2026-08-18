@@ -20,7 +20,8 @@ fn live_solve_timings() {
     let defs = if let Ok(path) = std::env::var("VIC3_DEFS") {
         vic3_defs::decode_blob(&std::fs::read(path).expect("defs blob")).expect("decode blob")
     } else {
-        vic3_defs::load_from_path(std::env::var("VIC3_GAME").expect("VIC3_GAME")).expect("game defs")
+        vic3_defs::load_from_path(std::env::var("VIC3_GAME").expect("VIC3_GAME"))
+            .expect("game defs")
     };
 
     let load_started = Instant::now();
@@ -53,16 +54,14 @@ fn live_solve_timings() {
     let _ = world.clone();
     eprintln!("world.clone {:?}", clone_started.elapsed());
 
-    let cold = time_runs("cold solve", 3, || solve(&world, &defs, SolveOpts::default()));
+    let cold = time_runs("cold solve", 3, || {
+        solve(&world, &defs, SolveOpts::default())
+    });
     let relative = cold.relative.clone();
-    let mut warm_opts = SolveOpts::default();
-    warm_opts.warm_rel = Some(relative.clone());
+    let warm_opts = with_warm_rel(&relative);
     time_runs("warm solve", 3, || solve(&world, &defs, warm_opts.clone()));
 
-    let building = world
-        .buildings
-        .first()
-        .expect("live save has buildings");
+    let building = world.buildings.first().expect("live save has buildings");
     let extra = WorldDelta {
         extra_levels: vec![ExtraLevelsDelta {
             building: None,
@@ -72,9 +71,7 @@ fn live_solve_timings() {
         ..WorldDelta::default()
     };
     time_runs("preview +1 level (warm)", 3, || {
-        let mut opts = SolveOpts::default();
-        opts.warm_rel = Some(relative.clone());
-        preview(&world, &defs, &extra, opts)
+        preview(&world, &defs, &extra, with_warm_rel(&relative))
     });
 
     if let Some(delta) = pm_swap_delta(&world, &defs) {
@@ -89,9 +86,7 @@ fn live_solve_timings() {
             delta.production_methods[0].methods
         );
         time_runs("preview PM swap (warm)", 3, || {
-            let mut opts = SolveOpts::default();
-            opts.warm_rel = Some(relative.clone());
-            preview(&world, &defs, &delta, opts)
+            preview(&world, &defs, &delta, with_warm_rel(&relative))
         });
     } else {
         eprintln!("no alternate PM list on a shared building type; skipped PM swap");
@@ -136,6 +131,13 @@ fn pm_swap_delta(world: &World, defs: &GameDefs) -> Option<WorldDelta> {
         }
     }
     None
+}
+
+fn with_warm_rel(relative: &[f64]) -> SolveOpts {
+    SolveOpts {
+        warm_rel: Some(relative.to_vec()),
+        ..SolveOpts::default()
+    }
 }
 
 fn time_runs<T>(label: &str, n: usize, mut run: impl FnMut() -> T) -> T {

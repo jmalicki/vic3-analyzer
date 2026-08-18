@@ -186,7 +186,7 @@ function asBytes(value: unknown): Uint8Array | undefined {
 
 async function fileFromStored(value: unknown, name: string): Promise<File | undefined> {
   const bytes = asBytes(value)
-  if (bytes) return new File([bytes], name)
+  if (bytes) return new File([bytes.slice().buffer as ArrayBuffer], name)
   if (value && typeof value === 'object' && typeof (value as Blob).arrayBuffer === 'function') {
     return new File([await (value as Blob).arrayBuffer()], name)
   }

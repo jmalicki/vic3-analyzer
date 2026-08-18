@@ -551,7 +551,7 @@ describe('prices UI', () => {
     expect(cached?.summary?.tag).toBe('FRA')
     expect(cached?.prices?.goods[0]?.id).toBe('iron')
     const api = mockApi()
-    api.load_analysis = vi.fn(() => new Promise(() => {}))
+    api.load_analysis = vi.fn(() => new Promise<string>(() => {}))
     render(<App wasmApi={api} />)
 
     expect(
@@ -833,7 +833,8 @@ describe('prices UI', () => {
 
     await user.click(screen.getByRole('button', { name: 'Download' }))
     await waitFor(() => expect(click).toHaveBeenCalled())
-    expect(click.mock.instances[0].download).toMatch(/^campaign_analyzer_1840\.2\.3_.+\.v3$/)
+    const anchor = click.mock.instances[0] as HTMLAnchorElement
+    expect(anchor.download).toMatch(/^campaign_analyzer_1840\.2\.3_.+\.v3$/)
   })
 
   it('opens confirm from an alert Apply and shows Undo after commit', async () => {

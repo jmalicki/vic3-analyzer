@@ -58,12 +58,13 @@ recorded directly on each trade-center state.
 ## Develop
 
 ```text
+git config core.hooksPath .githooks   # fmt, clippy, web tsc on commit (same as CI lint)
 cargo test --workspace
 cargo run -p vic3-cli
 cd web && npm install && npm run build:wasm && npm run build:defs && npm run dev
 ```
 
-CI runs Rust (`fmt`, `clippy`, `test`) and the web job (`npm test`, `npm run test:wasm`, `npm run build`). Pushes to `main` deploy `web/dist` to GitHub Pages.
+CI runs Rust (`fmt`, `clippy`, `test`) and the web job (`npm test`, `npm run test:wasm`, `npm run build`). Pushes to `main` deploy `web/dist` to GitHub Pages. Pre-commit is `./scripts/lint.sh` (fmt, clippy, `tsc -b`); it does not run tests or wasm-pack.
 
 ## License
 

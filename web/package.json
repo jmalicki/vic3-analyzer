@@ -11,6 +11,7 @@
     "bench:defs": "node scripts/defs-bench.mjs",
     "bench:prices": "node scripts/prices-bench.mjs",
     "lint": "oxlint",
+    "typecheck": "tsc -b",
     "test": "vitest run --project unit",
     "test:wasm": "npm run build:wasm && npm run build:defs && vitest run --project wasm",
     "preview": "vite preview"
