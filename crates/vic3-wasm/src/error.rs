@@ -6,6 +6,9 @@ pub enum WasmError {
     /// Save or token map could not be loaded.
     #[error(transparent)]
     Load(#[from] vic3_load::LoadError),
+    /// Plaintext save could not be patched.
+    #[error(transparent)]
+    Export(#[from] vic3_load::ExportError),
     /// Defs postcard blob could not be decoded.
     #[error(transparent)]
     Defs(#[from] vic3_defs::DefsError),

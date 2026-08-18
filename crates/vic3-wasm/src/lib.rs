@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use vic3_goals::Atom;
-use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save};
+use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save, SavePatch};
 use vic3_plan::PlanOpts;
 use vic3_prices::{
     alerts as diagnose_alerts, solve, what_if as solve_what_if, PricesResult, SolveOpts,
@@ -99,6 +99,16 @@ pub fn loaded_prices() -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn loaded_military() -> Result<String, JsError> {
     loaded_military_json().map_err(to_js)
+}
+
+/// Patch plaintext `.v3` bytes with building production methods and extra levels.
+///
+/// `original_bytes` are the origin save from JS (IndexedDB). They are not
+/// mutated; the return is a new buffer. Ironman/binary saves error.
+/// `delta_json` is [`SavePatch`].
+#[wasm_bindgen]
+pub fn export_save(original_bytes: &[u8], delta_json: &str) -> Result<Vec<u8>, JsError> {
+    export_save_bytes(original_bytes, delta_json).map_err(to_js)
 }
 
 /// Apply a what-if delta to the current worker-owned world.
@@ -347,7 +357,7 @@ pub fn load_analysis_json(
     defs.extra_icons.clear();
     let solve_opts = parse_solve_opts(solve_opts_json)?;
     let world = World::from_save(&save, &defs);
-    let prices = solve(&world, &defs, solve_opts);
+    let prices = solve(&world, &defs, solve_opts.clone());
     let json = serde_json::to_string(&LoadedAnalysisPayload {
         summary: SaveSummary::from(&save),
         prices: &prices,
@@ -378,10 +388,20 @@ pub fn loaded_military_json() -> Result<String, WasmError> {
     })
 }
 
+pub fn export_save_bytes(original_bytes: &[u8], delta_json: &str) -> Result<Vec<u8>, WasmError> {
+    let patch: SavePatch = serde_json::from_str(delta_json)?;
+    Ok(vic3_load::export_save(original_bytes, &patch)?)
+}
+
 pub fn loaded_what_if_json(what_if_opts_json: &str) -> Result<String, WasmError> {
     let delta: WhatIfOpts = serde_json::from_str(what_if_opts_json)?;
     with_loaded_analysis(|loaded| {
-        let result = solve_what_if(&loaded.world, &loaded.defs, &delta, loaded.solve_opts);
+        let result = solve_what_if(
+            &loaded.world,
+            &loaded.defs,
+            &delta,
+            loaded.solve_opts.clone(),
+        );
         Ok(serde_json::to_string(&result)?)
     })
 }
@@ -406,8 +426,11 @@ pub fn loaded_plan_json(plan_opts_json: &str) -> Result<String, WasmError> {
     with_loaded_analysis(|loaded| {
         let country = country_tag(&loaded.world)?;
         let state = PlanningState::from_world_with_prices(&loaded.world, country, &loaded.prices)?;
-        let economy =
-            EconomyContext::new(loaded.world.clone(), loaded.defs.clone(), loaded.solve_opts);
+        let economy = EconomyContext::new(
+            loaded.world.clone(),
+            loaded.defs.clone(),
+            loaded.solve_opts.clone(),
+        );
         let result = vic3_plan::plan_with_economy(
             state,
             goal,
@@ -478,12 +501,12 @@ pub fn plan_json(
     let solve_opts = parse_solve_opts(solve_opts_json)?;
     let plan_opts: PlanOpts = serde_json::from_str(plan_opts_json)?;
     let world = World::from_save(&save, &defs);
-    let prices = solve(&world, &defs, solve_opts);
+    let prices = solve(&world, &defs, solve_opts.clone());
     let country = country_tag(&world)?;
     drop(save);
     let state = PlanningState::from_world_with_prices(&world, country, &prices)?;
     let goal = vic3_goals::parse(&plan_opts.goal)?;
-    let economy = EconomyContext::new(world, defs, solve_opts);
+    let economy = EconomyContext::new(world, defs, solve_opts.clone());
     let result = vic3_plan::plan_with_economy(
         state,
         goal,
@@ -897,7 +920,7 @@ mod tests {
     use serde_json::Value;
     use std::path::PathBuf;
     use vic3_defs::{encode_blob, load_from_path};
-    use vic3_load::LoadError;
+    use vic3_load::{empty_tokens, load_slice, LoadError};
     use vic3_prices::SolveStatus;
 
     fn load_fixture() -> Vec<u8> {
@@ -1102,6 +1125,47 @@ mod tests {
             loaded_military_json(),
             Err(WasmError::NoLoadedAnalysis)
         ));
+    }
+
+    #[test]
+    fn export_save_patches_fixture_pms_without_mutating_origin() {
+        let original = load_fixture();
+        let before = original.clone();
+        let patched = export_save_bytes(
+            &original,
+            r#"{"production_methods":[{"building_id":1,"methods":["pm_soil_enriching_farming","pm_no_automation"]}]}"#,
+        )
+        .expect("export");
+        assert_eq!(original, before);
+        assert_ne!(patched, original);
+        let save = load_slice(&patched, empty_tokens()).expect("load patched");
+        let farm = save
+            .building_manager
+            .database
+            .get(&1)
+            .and_then(|slot| slot.as_ref())
+            .expect("building 1");
+        assert_eq!(
+            farm.active_production_methods(),
+            ["pm_soil_enriching_farming", "pm_no_automation"]
+        );
+    }
+
+    #[test]
+    fn export_save_rejects_binary_sav_header() {
+        let mut bytes = b"SAV0101deadbeef00000000\n".to_vec();
+        bytes.extend_from_slice(&[0u8; 32]);
+        let err = export_save_bytes(
+            &bytes,
+            r#"{"production_methods":[{"building_id":1,"methods":["pm_a"]}]}"#,
+        )
+        .expect_err("binary");
+        let msg = err.to_string();
+        assert!(
+            msg.to_ascii_lowercase().contains("ironman")
+                && msg.to_ascii_lowercase().contains("binary"),
+            "{msg}"
+        );
     }
 
     #[test]

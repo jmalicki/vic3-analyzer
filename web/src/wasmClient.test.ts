@@ -63,6 +63,19 @@ describe('workerWasmApi', () => {
     expect(await pending).toBe('{"prices":[]}')
   })
 
+  it('sends origin save bytes and delta JSON to export_save on the worker', async () => {
+    const { port, sent, reply } = fakePort()
+    const api = workerWasmApi(localApi(), port)
+    const original = new Uint8Array([9, 8, 7])
+    const pending = api.export_save(original, '{"production_methods":[]}')
+    expect(sent).toEqual([
+      { id: 1, method: 'export_save', args: [original, '{"production_methods":[]}'] },
+    ])
+    const patched = new Uint8Array([1])
+    reply({ id: 1, ok: true, value: patched })
+    expect(await pending).toBe(patched)
+  })
+
   it('loads a worker-owned analysis session with save and definitions', async () => {
     const { port, sent, reply } = fakePort()
     const api = workerWasmApi(localApi(), port)
