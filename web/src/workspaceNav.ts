@@ -54,6 +54,10 @@ export function parseStateId(hash = window.location.hash): number | undefined {
   return Number(path[1])
 }
 
+export function hashForGood(id: string): string {
+  return `#/prices/good/${encodeURIComponent(id)}`
+}
+
 export function hashForBuilding(id: number, source: 'prices' | 'buildings' = 'buildings'): string {
   return source === 'prices' ? `#/prices/building/${id}` : `#/buildings/building/${id}`
 }

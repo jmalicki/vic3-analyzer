@@ -521,4 +521,38 @@ describe('PriceExplorer', () => {
 
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
+
+  it('shows local recommendations on a good page', async () => {
+    const user = userEvent.setup()
+    window.location.hash = '#/prices/good/zany_tools'
+    render(
+      <PriceExplorer
+        result={result}
+        alerts={[
+          {
+            id: 'goods_shortage:zany_tools',
+            kind: 'goods_shortage',
+            severity: 1,
+            title: 'Zany tools shortage',
+            summary: 'Buy exceeds sell.',
+            good_id: 'zany_tools',
+            evidence: [],
+            mitigations: [
+              {
+                id: 'build',
+                title: 'Add factory levels',
+                detail: 'Produce more tools.',
+                rank: 1,
+                apply_ready: false,
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Recommendations' })).toBeInTheDocument()
+    await user.click(screen.getByText('Zany tools shortage'))
+    expect(screen.getByText(/Add factory levels/)).toBeInTheDocument()
+  })
 })

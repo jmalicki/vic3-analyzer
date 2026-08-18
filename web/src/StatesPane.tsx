@@ -11,12 +11,14 @@ import {
   type FilterMode,
 } from './PriceExplorer'
 import type {
+  Alert,
   BuildingEconomics,
   DefsIcons,
   PricesResult,
   StateInfo,
   StatePop,
   StateQualification,
+  WorldDelta,
 } from './types'
 import { hashForState, parseStateId } from './workspaceNav'
 
@@ -138,12 +140,16 @@ export function StatesPane({
   playerCountryId,
   playerMarketId,
   gated = false,
+  alerts = [],
+  onApply,
 }: {
   result?: PricesResult
   icons?: DefsIcons
   playerCountryId?: number
   playerMarketId?: number
   gated?: boolean
+  alerts?: Alert[]
+  onApply?: (delta: WorldDelta) => void
 }) {
   const [hash, setHash] = useState(() => window.location.hash)
   const [filterMode, setFilterMode] = useState<FilterMode>('our_market')
@@ -185,6 +191,8 @@ export function StatesPane({
           playerCountryId={playerCountryId}
           stateId={stateId}
           source="states"
+          alerts={alerts}
+          onApply={onApply}
         />
       </section>
     )

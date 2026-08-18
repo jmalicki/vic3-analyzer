@@ -140,9 +140,9 @@ pub fn alerts(world: &World, defs: &GameDefs, prices: &PricesResult) -> AlertsRe
     let mut extra_limitations = BTreeSet::new();
 
     collect_goods_alerts(world, defs, prices, &mut alerts, &mut extra_limitations);
-    collect_needs_unmet(defs, prices, &mut alerts, &mut extra_limitations);
-    collect_market_access(prices, world, &mut alerts);
-    collect_education(world, prices, &mut alerts);
+    collect_needs_unmet(world, defs, prices, &mut alerts, &mut extra_limitations);
+    collect_market_access(prices, world, defs, &mut alerts);
+    collect_education(world, defs, prices, &mut alerts);
     collect_pop_and_underemployed(world, defs, prices, &mut alerts, &mut extra_limitations);
 
     let mut limitations = prices.limitations.clone();
@@ -461,7 +461,10 @@ fn goods_mitigations(
                     action_mit(
                         format!("{alert_id}:reallocate-{state}"),
                         "Reallocate trade-center imports",
-                        format!("State {state} is not importing {good_id}. Reallocation is advice only (frozen trade)."),
+                        format!(
+                            "{} is not importing {good_id}. Reallocation is advice only (frozen trade).",
+                            state_label(prices, world, defs, state)
+                        ),
                         MitigationAction::TradeAlloc {
                             state_id: state,
                             good_id: good_id.into(),
@@ -782,6 +785,7 @@ fn signed(value: f64) -> String {
 }
 
 fn collect_needs_unmet(
+    world: &World,
     defs: &GameDefs,
     prices: &PricesResult,
     alerts: &mut Vec<Alert>,
@@ -825,7 +829,10 @@ fn collect_needs_unmet(
             id: format!("needs_unmet:{state_id}"),
             kind: AlertKind::NeedsUnmet,
             severity: 1,
-            title: format!("Unmet pop needs in state {state_id}"),
+            title: format!(
+                "Unmet pop needs in {}",
+                state_label(prices, world, defs, state_id)
+            ),
             summary: "Pop need baskets exceed local sell, or package prices are at the ceiling."
                 .into(),
             state_id: Some(state_id),
@@ -893,7 +900,12 @@ fn need_mitigations(state_id: u32, goods: &[String]) -> Vec<Mitigation> {
     rank(items)
 }
 
-fn collect_market_access(prices: &PricesResult, world: &World, alerts: &mut Vec<Alert>) {
+fn collect_market_access(
+    prices: &PricesResult,
+    world: &World,
+    defs: &GameDefs,
+    alerts: &mut Vec<Alert>,
+) {
     let states: Vec<AccessState> = if prices.states.is_empty() {
         world
             .states
@@ -926,7 +938,10 @@ fn collect_market_access(prices: &PricesResult, world: &World, alerts: &mut Vec<
             id: format!("low_market_access:{}", state.id),
             kind: AlertKind::LowMarketAccess,
             severity: 1,
-            title: format!("Low market access in state {}", state.id),
+            title: format!(
+                "Low market access in {}",
+                state_label(prices, world, defs, state.id)
+            ),
             summary: format!(
                 "Infrastructure {} / usage {} is {:.0}% (threshold {:.0}%).",
                 format_num(infra),
@@ -971,7 +986,12 @@ struct AccessState {
     infrastructure_usage: Option<f64>,
 }
 
-fn collect_education(world: &World, prices: &PricesResult, alerts: &mut Vec<Alert>) {
+fn collect_education(
+    world: &World,
+    defs: &GameDefs,
+    prices: &PricesResult,
+    alerts: &mut Vec<Alert>,
+) {
     for row in &prices.state_qualifications {
         if row.shortage <= ORDER_EPS {
             continue;
@@ -987,16 +1007,16 @@ fn collect_education(world: &World, prices: &PricesResult, alerts: &mut Vec<Aler
                 "An unstaffed university is already in this state; do not queue another campus.",
             ));
         }
+        let profession = display_prof(defs, row);
+        let place = state_label(prices, world, defs, row.state_id);
         alerts.push(Alert {
             id: format!("unfilled_education:{}:{target}", row.state_id),
             kind: AlertKind::UnfilledEducation,
             severity: 1,
-            title: format!("{} qualification shortage", display_prof(row)),
+            title: format!("{profession} qualification shortage in {place}"),
             summary: format!(
-                "State {} is short {} {} (jobs {} vs employable/qualified {}).",
-                row.state_id,
+                "{place} is short {} {profession} (jobs {} vs employable/qualified {}).",
                 format_num(row.shortage),
-                display_prof(row),
                 format_num(row.jobs),
                 format_num(row.employable.unwrap_or(row.qualified))
             ),
@@ -1005,8 +1025,12 @@ fn collect_education(world: &World, prices: &PricesResult, alerts: &mut Vec<Aler
             good_id: None,
             evidence: vec![
                 Evidence {
+                    label: "State".into(),
+                    value: place,
+                },
+                Evidence {
                     label: "Profession".into(),
-                    value: display_prof(row),
+                    value: profession,
                 },
                 Evidence {
                     label: "Shortage".into(),
@@ -1046,6 +1070,10 @@ fn collect_pop_and_underemployed(
         if building.level <= ORDER_EPS || building.staffing + ORDER_EPS >= building.level {
             continue;
         }
+        let building_name = building_label(prices, defs, &building.type_id);
+        let place = in_state(prices, world, defs, building.state_id);
+        let profs = building_professions(defs, building);
+        let prof_clause = profession_clause(&profs);
         let ratio = building.staffing / building.level;
         let qual_short = has_employee_qual_shortage(prices, building);
         if !qual_short {
@@ -1057,21 +1085,25 @@ fn collect_pop_and_underemployed(
                 .state_id
                 .map(|id| state_mix(prices, id))
                 .unwrap_or_default();
+            let unfilled = if profs.is_empty() {
+                format!("Unfilled pops at {building_name}{place}")
+            } else {
+                format!("Unfilled {} at {building_name}{place}", profs.join(", "))
+            };
             alerts.push(Alert {
                 id: format!("unfilled_pops:{}", building.id),
                 kind: AlertKind::UnfilledPops,
                 severity: 1,
-                title: format!("Unfilled pops at {}", building.type_id),
+                title: unfilled,
                 summary: format!(
-                    "{} is staffed {} / {} with no qualification shortage for its employees.",
-                    building.type_id,
+                    "{building_name}{place} is staffed {} / {} with no qualification shortage for its employees{prof_clause}.",
                     format_num(building.staffing),
                     format_num(building.level)
                 ),
                 state_id: building.state_id,
                 building_id: Some(building.id),
                 good_id: None,
-                evidence: pop_evidence(building, &mix, false),
+                evidence: pop_evidence(prices, world, defs, building, &mix, false),
                 mitigations: rank(pop_shortage_mitigations(prices, defs, building, &mix)),
             });
         }
@@ -1079,16 +1111,22 @@ fn collect_pop_and_underemployed(
             id: format!("underemployed:{}", building.id),
             kind: AlertKind::Underemployed,
             severity: 2,
-            title: format!("Underemployed {}", building.type_id),
+            title: format!("Underemployed {building_name}{place}{prof_clause}"),
             summary: format!(
-                "Staffing/level is {:.0}% on {}.",
-                ratio * 100.0,
-                building.type_id
+                "Staffing/level is {:.0}% on {building_name}{place}{prof_clause}.",
+                ratio * 100.0
             ),
             state_id: building.state_id,
             building_id: Some(building.id),
             good_id: None,
-            evidence: pop_evidence(building, &state_mix_opt(prices, building.state_id), qual_short),
+            evidence: pop_evidence(
+                prices,
+                world,
+                defs,
+                building,
+                &state_mix_opt(prices, building.state_id),
+                qual_short,
+            ),
             mitigations: rank(if qual_short {
                 vec![plain(
                     format!("under:{}:qual", building.id),
@@ -1114,8 +1152,37 @@ fn collect_pop_and_underemployed(
     }
 }
 
-fn pop_evidence(building: &BuildingEconomics, mix: &StateMix, qual_short: bool) -> Vec<Evidence> {
+fn pop_evidence(
+    prices: &PricesResult,
+    world: &World,
+    defs: &GameDefs,
+    building: &BuildingEconomics,
+    mix: &StateMix,
+    qual_short: bool,
+) -> Vec<Evidence> {
     vec![
+        Evidence {
+            label: "State".into(),
+            value: building
+                .state_id
+                .map(|id| state_label(prices, world, defs, id))
+                .unwrap_or_else(|| "unknown".into()),
+        },
+        Evidence {
+            label: "Building".into(),
+            value: building_label(prices, defs, &building.type_id),
+        },
+        Evidence {
+            label: "Profession".into(),
+            value: {
+                let names = building_professions(defs, building);
+                if names.is_empty() {
+                    "unknown".into()
+                } else {
+                    names.join(", ")
+                }
+            },
+        },
         Evidence {
             label: "Staffing / level".into(),
             value: format!(
@@ -1546,10 +1613,107 @@ fn profession_rung(id: &str) -> Option<u8> {
     }
 }
 
-fn display_prof(row: &crate::StateQualification) -> String {
-    row.profession_name
-        .clone()
-        .unwrap_or_else(|| row.profession_id.clone())
+fn display_prof(defs: &GameDefs, row: &crate::StateQualification) -> String {
+    profession_label(defs, &row.profession_id, row.profession_name.as_deref())
+}
+
+fn state_label(prices: &PricesResult, world: &World, defs: &GameDefs, state_id: u32) -> String {
+    if let Some(state) = prices.states.iter().find(|state| state.id == state_id) {
+        if let Some(name) = state.region_name.as_deref().filter(|name| !name.is_empty()) {
+            return name.to_string();
+        }
+        if let Some(region) = state.region_id.as_deref() {
+            return script_label(defs, region);
+        }
+    }
+    if let Some(state) = world.states.iter().find(|state| state.id == state_id) {
+        if let Some(region) = state.region.as_deref() {
+            return script_label(defs, region);
+        }
+    }
+    format!("state {state_id}")
+}
+
+fn in_state(
+    prices: &PricesResult,
+    world: &World,
+    defs: &GameDefs,
+    state_id: Option<u32>,
+) -> String {
+    match state_id {
+        Some(id) => format!(" in {}", state_label(prices, world, defs, id)),
+        None => String::new(),
+    }
+}
+
+fn script_label(defs: &GameDefs, id: &str) -> String {
+    defs.labels
+        .get(id)
+        .cloned()
+        .unwrap_or_else(|| pretty_id(id))
+}
+
+fn pretty_id(id: &str) -> String {
+    let trimmed = id
+        .strip_prefix("STATE_")
+        .or_else(|| id.strip_prefix("building_"))
+        .or_else(|| id.strip_prefix("pm_"))
+        .or_else(|| id.strip_prefix("popneed_"))
+        .unwrap_or(id);
+    trimmed
+        .split('_')
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => {
+                    first.to_uppercase().collect::<String>() + &chars.as_str().to_ascii_lowercase()
+                }
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn building_label(prices: &PricesResult, defs: &GameDefs, type_id: &str) -> String {
+    prices
+        .building_types
+        .iter()
+        .find(|row| row.id == type_id)
+        .and_then(|row| row.name.clone())
+        .or_else(|| defs.labels.get(type_id).cloned())
+        .unwrap_or_else(|| pretty_id(type_id))
+}
+
+fn profession_label(defs: &GameDefs, profession_id: &str, profession_name: Option<&str>) -> String {
+    profession_name
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .or_else(|| defs.labels.get(profession_id).cloned())
+        .unwrap_or_else(|| pretty_id(profession_id))
+}
+
+fn building_professions(defs: &GameDefs, building: &BuildingEconomics) -> Vec<String> {
+    let mut names = Vec::new();
+    for row in &building.employees {
+        if row.count <= ORDER_EPS {
+            continue;
+        }
+        let name = profession_label(defs, &row.profession_id, row.profession_name.as_deref());
+        if !names.iter().any(|existing| existing == &name) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+fn profession_clause(names: &[String]) -> String {
+    if names.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", names.join(", "))
+    }
 }
 
 fn id_has(id: &str, needle: &str) -> bool {
@@ -2072,6 +2236,47 @@ mod tests {
             .expect("unfilled pops on farm");
         assert_eq!(pops.mitigations[0].rank, 1);
         assert!(pops.evidence.iter().any(|row| row.label == "In-migration"));
+        assert!(
+            farm_under.title.contains("Test")
+                && farm_under.title.contains("Rye Farm")
+                && farm_under.title.contains("Farmers")
+                && !farm_under.title.contains("building_rye_farm"),
+            "underemployed title should name state, building, and profession, got {}",
+            farm_under.title
+        );
+        assert!(
+            pops.title.contains("Test")
+                && pops.title.contains("Farmers")
+                && pops.title.contains("Rye Farm"),
+            "unfilled pops title should name state, profession, and building, got {}",
+            pops.title
+        );
+        assert!(pops
+            .evidence
+            .iter()
+            .any(|row| row.label == "State" && row.value == "Test"));
+        let needs = result
+            .alerts
+            .iter()
+            .find(|alert| alert.kind == AlertKind::NeedsUnmet)
+            .expect("needs");
+        assert_eq!(needs.title, "Unmet pop needs in Test");
+        let access = result
+            .alerts
+            .iter()
+            .find(|alert| alert.kind == AlertKind::LowMarketAccess)
+            .expect("access");
+        assert_eq!(access.title, "Low market access in Test");
+        let edu = result
+            .alerts
+            .iter()
+            .find(|alert| alert.kind == AlertKind::UnfilledEducation)
+            .expect("education");
+        assert!(
+            edu.title.contains("Test") && !edu.title.contains("state 1"),
+            "qualification title should name the state, got {}",
+            edu.title
+        );
     }
 
     #[test]

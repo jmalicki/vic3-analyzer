@@ -106,6 +106,15 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     expect(
       api.classify_defs_path('game/gfx/interface/icons/building_icons/building_rye_farm.dds', false),
     ).toBe('read')
+    expect(
+      api.classify_defs_path('game/gfx/interface/icons/pops_icons/academics.dds', false),
+    ).toBe('read')
+    expect(
+      api.classify_defs_path(
+        'game/gfx/interface/icons/ships/ship_types/silhouette_frigate.dds',
+        false,
+      ),
+    ).toBe('read')
     expect(api.classify_defs_path('game/gfx/interface/icons/country_icons', true)).toBe('prune')
   })
 

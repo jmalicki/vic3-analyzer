@@ -30,11 +30,18 @@ pub(crate) const ICON_LEAFS: &[&str] = &[
     "popup_icon",
     "alert_icons",
     "pops",
+    "pops_icons",
     "pop_types",
     "pop_types_icons",
     "unit_types",
     "battalions",
     "military_unit_icons",
+    "military_icons",
+    "ships",
+    "mobilization_options",
+    "generic_icons",
+    "state_status_icons",
+    "notification_icons",
 ];
 const COA_GFX_DIR: &[&str] = &["gfx", "coat_of_arms"];
 const COA_GFX_LEAFS: &[&str] = &["patterns", "colored_emblems", "textured_emblems"];
@@ -211,8 +218,14 @@ pub(crate) fn extra_icon_kind(path: &str) -> Option<&'static str> {
         | "production_method_icons"
         | "production_method_groups_icons" => Some("pm"),
         "popup_icon" | "alert_icons" => Some("alert"),
-        "pops" | "pop_types" | "pop_types_icons" => Some("pop"),
-        "unit_types" | "battalions" | "military_unit_icons" => Some("military"),
+        "pops" | "pops_icons" | "pop_types" | "pop_types_icons" => Some("pop"),
+        "unit_types"
+        | "battalions"
+        | "military_unit_icons"
+        | "military_icons"
+        | "ships"
+        | "mobilization_options" => Some("military"),
+        "generic_icons" | "state_status_icons" | "notification_icons" => Some("generic"),
         _ => None,
     }
 }
@@ -306,6 +319,40 @@ mod tests {
                 false
             ),
             DefsPathClass::Read
+        );
+        assert_eq!(
+            classify_defs_path("game/gfx/interface/icons/pops_icons", true),
+            DefsPathClass::Descend
+        );
+        assert_eq!(
+            classify_defs_path("game/gfx/interface/icons/pops_icons/academics.dds", false),
+            DefsPathClass::Read
+        );
+        assert_eq!(
+            extra_icon_kind("game/gfx/interface/icons/pops_icons/academics.dds"),
+            Some("pop")
+        );
+        assert_eq!(
+            classify_defs_path(
+                "game/gfx/interface/icons/ships/ship_types/silhouette_frigate.dds",
+                false
+            ),
+            DefsPathClass::Read
+        );
+        assert_eq!(
+            extra_icon_kind("game/gfx/interface/icons/ships/ship_types/silhouette_frigate.dds"),
+            Some("military")
+        );
+        assert_eq!(
+            classify_defs_path(
+                "game/gfx/interface/icons/mobilization_options/chocolate.dds",
+                false
+            ),
+            DefsPathClass::Read
+        );
+        assert_eq!(
+            extra_icon_kind("game/gfx/interface/icons/generic_icons/population.dds"),
+            Some("generic")
         );
         assert_eq!(
             classify_defs_path("game/gfx/models", true),

@@ -1070,6 +1070,8 @@ function App({ wasmApi }: Props) {
           playerCountryId={summary?.country_id}
           playerMarketId={summary?.market_id}
           gated={gated}
+          alerts={alertsResult?.alerts}
+          onApply={(delta) => void requestApply(delta)}
         />
       )}
 
@@ -1080,6 +1082,8 @@ function App({ wasmApi }: Props) {
           playerCountryId={summary?.country_id}
           playerMarketId={summary?.market_id}
           gated={gated}
+          alerts={alertsResult?.alerts}
+          onApply={(delta) => void requestApply(delta)}
         />
       )}
 
@@ -1090,12 +1094,7 @@ function App({ wasmApi }: Props) {
         >
           <h2 id="alerts-heading">Alerts</h2>
           {alertsResult ? (
-            <AlertsPane
-              result={alertsResult}
-              icons={goodIcons}
-              buildings={result?.buildings}
-              onApply={(delta) => void requestApply(delta)}
-            />
+            <AlertsPane result={alertsResult} icons={goodIcons} />
           ) : (
             <p>Alerts appear after a save is priced.</p>
           )}
@@ -1138,6 +1137,7 @@ function App({ wasmApi }: Props) {
           icons={goodIcons}
           gated={gated}
           api={api}
+          alerts={alertsResult?.alerts}
           onWhatIf={(building, extraLevels) => {
             void applyWhatIf({ building, extra_levels: extraLevels })
           }}
@@ -1307,6 +1307,8 @@ function App({ wasmApi }: Props) {
             scenario={activeView === 'what-if'}
             playerCountryId={summary?.country_id}
             playerMarketId={summary?.market_id}
+            alerts={alertsResult?.alerts}
+            onApply={(delta) => void requestApply(delta)}
           />
           <ModelInfo status={result.status} />
         </>

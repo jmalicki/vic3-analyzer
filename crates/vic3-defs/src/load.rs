@@ -41,13 +41,13 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
     };
     (defs.goods_order, defs.goods) = load_goods(&data_root)?;
     defs.labels = load_labels(&data_root)?;
+    defs.production_methods = load_production_methods(&data_root)?;
+    defs.buildings = load_buildings(&data_root)?;
+    defs.building_groups = load_building_groups(&data_root)?;
     let (goods_icons, extra_icons) = load_icons(&data_root)?;
     attach_icons(&mut defs, goods_icons);
     attach_extra_icons(&mut defs, extra_icons);
     load_coa_into(&mut defs, &data_root)?;
-    defs.production_methods = load_production_methods(&data_root)?;
-    defs.buildings = load_buildings(&data_root)?;
-    defs.building_groups = load_building_groups(&data_root)?;
     (defs.needs_order, defs.pop_needs) = load_pop_needs(&data_root)?;
     defs.buy_packages = load_buy_packages(&data_root)?;
     defs.obsessions = load_obsessions(&data_root)?;
@@ -171,13 +171,12 @@ impl DefsBuilder {
                 .unwrap_or_else(|| good.id.to_lowercase())
         }));
         names.extend(parsed.defs.buildings.keys().map(|id| id.to_lowercase()));
-        names.extend(
-            parsed
-                .defs
-                .production_methods
-                .keys()
-                .map(|id| id.to_lowercase()),
-        );
+        names.extend(parsed.defs.production_methods.values().filter_map(|pm| {
+            pm.texture
+                .as_deref()
+                .and_then(icon_stem)
+                .or_else(|| Some(pm.id.to_lowercase()))
+        }));
         Ok(names)
     }
 
@@ -367,26 +366,87 @@ fn attach_icons(defs: &mut StagingDefs, decoded: BTreeMap<String, Vec<u8>>) {
     defs.icons.extend(wanted);
 }
 
-/// Store namespaced extra icons and alias building stems onto building type ids.
+/// Store namespaced extra icons and alias script ids onto texture stems.
 fn attach_extra_icons(defs: &mut StagingDefs, decoded: BTreeMap<String, Vec<u8>>) {
     if decoded.is_empty() {
         return;
     }
     defs.extra_icons.extend(decoded);
-    let aliases = defs
-        .buildings
-        .keys()
-        .filter_map(|id| {
-            let key = format!("building:{id}");
-            if defs.extra_icons.contains_key(&key) {
-                return None;
-            }
-            let stem = id.strip_prefix("building_").unwrap_or(id);
-            let png = defs.extra_icons.get(&format!("building:{stem}")).cloned()?;
-            Some((key, png))
-        })
-        .collect::<Vec<_>>();
+    let mut aliases = Vec::new();
+    for id in defs.buildings.keys() {
+        let key = format!("building:{id}");
+        if defs.extra_icons.contains_key(&key) {
+            continue;
+        }
+        let stem = id.strip_prefix("building_").unwrap_or(id);
+        if let Some(png) = defs.extra_icons.get(&format!("building:{stem}")).cloned() {
+            aliases.push((key, png));
+        }
+    }
+    for pm in defs.production_methods.values() {
+        let key = format!("pm:{}", pm.id);
+        if defs.extra_icons.contains_key(&key) {
+            continue;
+        }
+        let stem = pm
+            .texture
+            .as_deref()
+            .and_then(icon_stem)
+            .unwrap_or_else(|| pm.id.strip_prefix("pm_").unwrap_or(&pm.id).to_lowercase());
+        if let Some(png) = defs.extra_icons.get(&format!("pm:{stem}")).cloned() {
+            aliases.push((key, png));
+        }
+    }
     defs.extra_icons.extend(aliases);
+    copy_extra(&mut defs.extra_icons, "military:army", "military:army_01");
+    copy_extra(&mut defs.extra_icons, "military:navy", "military:fleet_01");
+    copy_extra(&mut defs.extra_icons, "military:fleet", "military:fleet_01");
+    copy_extra(
+        &mut defs.extra_icons,
+        "military:battalions",
+        "generic:battalions",
+    );
+    copy_extra(&mut defs.extra_icons, "alert:starvation", "alert:starving");
+    copy_extra(
+        &mut defs.extra_icons,
+        "alert:market",
+        "alert:goods_shortage",
+    );
+    copy_extra(
+        &mut defs.extra_icons,
+        "alert:market_access",
+        "generic:world_market_access",
+    );
+    copy_extra(
+        &mut defs.extra_icons,
+        "alert:world_market_access",
+        "generic:world_market_access",
+    );
+    copy_extra(
+        &mut defs.extra_icons,
+        "alert:qualification",
+        "generic:literacy",
+    );
+    copy_extra(&mut defs.extra_icons, "alert:literacy", "generic:literacy");
+    copy_extra(
+        &mut defs.extra_icons,
+        "alert:population",
+        "generic:population",
+    );
+    copy_extra(
+        &mut defs.extra_icons,
+        "alert:unemployment",
+        "generic:population",
+    );
+}
+
+fn copy_extra(extra: &mut BTreeMap<String, Vec<u8>>, dest: &str, src: &str) {
+    if extra.contains_key(dest) {
+        return;
+    }
+    if let Some(png) = extra.get(src).cloned() {
+        extra.insert(dest.to_string(), png);
+    }
 }
 
 fn load_coa_into(defs: &mut StagingDefs, data_root: &Path) -> Result<(), DefsError> {
@@ -698,11 +758,21 @@ fn parse_production_methods_bytes(path: &Path, bytes: &[u8]) -> Result<Vec<Stagi
         let id = key.read_str().to_string();
         let mut inputs = BTreeMap::new();
         let mut outputs = BTreeMap::new();
+        let mut texture = None;
         if let Ok(obj) = value.read_object() {
+            for (field, _op, field_value) in obj.fields() {
+                if field.read_str().as_ref() == "texture" {
+                    texture = field_value
+                        .read_scalar()
+                        .ok()
+                        .map(|scalar| scalar.to_string().trim_matches('"').to_string());
+                }
+            }
             collect_goods_modifiers(&obj, &mut inputs, &mut outputs);
         }
         out.push(StagingPm {
             id,
+            texture,
             inputs,
             outputs,
         });

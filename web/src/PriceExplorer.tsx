@@ -1,6 +1,13 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
+import {
+  LocalRecommendations,
+  alertsForBuilding,
+  alertsForGood,
+  alertsForState,
+} from './AlertsPane'
 import { GameIcon } from './GameIcon'
 import type {
+  Alert,
   BuildingEconomics,
   BuildingGroupInfo,
   BuildingTypeInfo,
@@ -17,6 +24,7 @@ import type {
   StateNeed,
   StatePop,
   StateQualification,
+  WorldDelta,
 } from './types'
 
 type Direction = 'asc' | 'desc'
@@ -911,12 +919,16 @@ export function StatePage({
   playerCountryId,
   stateId,
   source = 'prices',
+  alerts = [],
+  onApply,
 }: {
   result: PricesResult
   icons?: DefsIcons
   playerCountryId?: number
   stateId: number
   source?: 'prices' | 'states'
+  alerts?: Alert[]
+  onApply?: (delta: WorldDelta) => void
 }) {
   const [stateTab, setStateTab] = useState<StateTab>('overview')
   useEffect(() => {
@@ -949,6 +961,7 @@ export function StatePage({
   ]
   const parentHref = source === 'states' ? '#/states' : '#/prices'
   const parentLabel = source === 'states' ? 'States' : 'Goods'
+  const localAlerts = alertsForState(alerts, stateId, buildings)
   return (
     <section aria-labelledby="state-heading" className="state-panel">
       <nav className="breadcrumbs" aria-label={source === 'states' ? 'State detail' : 'Price detail'}>
@@ -968,6 +981,12 @@ export function StatePage({
           </div>
         </div>
       </div>
+      <LocalRecommendations
+        alerts={localAlerts}
+        buildings={buildings}
+        icons={icons}
+        onApply={onApply}
+      />
       <div className="state-tabs" role="tablist" aria-label="State details">
         {tabs.map((tab) => (
           <button
@@ -1063,11 +1082,15 @@ export function BuildingPage({
   icons = {},
   buildingId,
   source = 'prices',
+  alerts = [],
+  onApply,
 }: {
   result: PricesResult
   icons?: DefsIcons
   buildingId: number
   source?: 'prices' | 'buildings'
+  alerts?: Alert[]
+  onApply?: (delta: WorldDelta) => void
 }) {
   const states = result.states ?? []
   const buildings = result.buildings ?? []
@@ -1114,6 +1137,12 @@ export function BuildingPage({
           </dl>
           <h3>Workforce</h3>
           <EmployeesTable employees={building.employees ?? []} />
+          <LocalRecommendations
+            alerts={alertsForBuilding(alerts, building)}
+            buildings={buildings}
+            icons={icons}
+            onApply={onApply}
+          />
         </>
       ) : (
         <p>No building with that id.</p>
@@ -1159,12 +1188,16 @@ export function PriceExplorer({
   scenario = false,
   playerCountryId,
   playerMarketId,
+  alerts = [],
+  onApply,
 }: {
   result: PricesResult
   icons?: Icons
   scenario?: boolean
   playerCountryId?: number
   playerMarketId?: number
+  alerts?: Alert[]
+  onApply?: (delta: WorldDelta) => void
 }) {
   const [view, setView] = useState<View>(() => currentView())
   const [filterMode, setFilterMode] = useState<FilterMode>('our_market')
@@ -1217,6 +1250,12 @@ export function PriceExplorer({
         ) : (
           <p>No state-attributed orders for this good.</p>
         )}
+        <LocalRecommendations
+          alerts={alertsForGood(alerts, view.id)}
+          buildings={result.buildings ?? []}
+          icons={icons}
+          onApply={onApply}
+        />
       </section>
     )
   }
@@ -1228,6 +1267,8 @@ export function PriceExplorer({
         icons={icons}
         buildingId={view.id}
         source={view.from}
+        alerts={alerts}
+        onApply={onApply}
       />
     )
   }
@@ -1240,6 +1281,8 @@ export function PriceExplorer({
         playerCountryId={playerCountryId}
         stateId={view.id}
         source={view.from}
+        alerts={alerts}
+        onApply={onApply}
       />
     )
   }

@@ -52,6 +52,7 @@ impl Default for StagingDefs {
 #[derive(Debug, Clone)]
 pub(crate) struct StagingPm {
     pub id: String,
+    pub texture: Option<String>,
     pub inputs: BTreeMap<String, f64>,
     pub outputs: BTreeMap<String, f64>,
 }

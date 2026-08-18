@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   hashForView,
   hashForState,
+  hashForGood,
   hashForBuilding,
   parseHash,
   parseStateId,
@@ -30,6 +31,7 @@ describe('workspaceNav', () => {
     expect(hashForState(12)).toBe('#/states/12')
     expect(parseStateId('#/states/12')).toBe(12)
     expect(parseStateId('#/states')).toBeUndefined()
+    expect(hashForGood('grain')).toBe('#/prices/good/grain')
     expect(hashForBuilding(9)).toBe('#/buildings/building/9')
     expect(hashForBuilding(4, 'prices')).toBe('#/prices/building/4')
     expect(parseBuildingId('#/buildings/building/9')).toBe(9)

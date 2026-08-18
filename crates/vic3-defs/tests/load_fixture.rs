@@ -45,6 +45,42 @@ fn pop_type_labels_resolve_icon_markup() {
 }
 
 #[test]
+fn production_method_icons_alias_script_id_onto_texture_stem() {
+    let dds = std::fs::read(fixture_root().join("gfx/interface/icons/goods_icons/grain.dds"))
+        .expect("fixture dds");
+    let defs = load_from_files([
+        (
+            "game/common/goods/00_goods.txt".to_string(),
+            b"grain = { cost = 20 }\n".to_vec(),
+        ),
+        (
+            "game/common/production_methods/00_production_methods.txt".to_string(),
+            br#"pm_bakery = {
+	texture = "gfx/interface/icons/production_method_icons/bakeries.dds"
+	building_modifiers = { workforce_scaled = { goods_output_grain_add = 1 } }
+}
+"#
+            .to_vec(),
+        ),
+        (
+            "game/gfx/interface/icons/production_method_icons/bakeries.dds".to_string(),
+            dds,
+        ),
+    ])
+    .expect("pm texture alias");
+    let by_stem = defs
+        .extra_icons
+        .get("pm:bakeries")
+        .expect("stem key from filename");
+    let by_id = defs
+        .extra_icons
+        .get("pm:pm_bakery")
+        .expect("script id aliased onto texture stem");
+    assert_eq!(by_stem, by_id);
+    assert_eq!(&by_id[1..4], b"PNG");
+}
+
+#[test]
 fn fixture_goods_have_known_base_prices() {
     let defs = load_fixture();
     assert_eq!(defs.base_price("grain"), Some(20.0));

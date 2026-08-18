@@ -27,17 +27,63 @@ export function parseDefsIcons(raw: unknown): DefsIcons {
   return { goods, extra }
 }
 
+const SCRIPT_PREFIXES = [
+  'pm_',
+  'building_',
+  'combat_unit_type_',
+  'ship_type_',
+  'mobilization_option_',
+  'silhouette_',
+] as const
+
+const ID_ALIASES: Record<string, string[]> = {
+  army: ['army_01', 'battalions'],
+  navy: ['fleet_01', 'fleet'],
+  fleet: ['fleet_01'],
+  starvation: ['starving', 'famine'],
+  market: ['goods_shortage'],
+  market_access: ['world_market_access', 'market_isolated', 'market_over_capacity'],
+  qualification: ['literacy'],
+  unemployment: ['population'],
+}
+
+/** Script ids, texture stems, and a few vanilla filename aliases. */
+export function iconLookupKeys(id: string): string[] {
+  const keys: string[] = []
+  const push = (key: string) => {
+    if (key && !keys.includes(key)) keys.push(key)
+  }
+  push(id)
+  for (const alias of ID_ALIASES[id] ?? []) push(alias)
+  let stripped = id
+  for (const prefix of SCRIPT_PREFIXES) {
+    if (stripped.startsWith(prefix)) stripped = stripped.slice(prefix.length)
+  }
+  if (stripped !== id) {
+    push(stripped)
+    push(`silhouette_${stripped}`)
+  }
+  return keys
+}
+
 function lookupIcon(kind: GameIconKind, id: string, icons?: DefsIcons | null): string | undefined {
   if (!icons) return undefined
-  if (kind === 'good') {
-    return (
-      icons.goods?.[id] ??
-      icons.extra?.[`good:${id}`] ??
-      icons.extra?.[id] ??
-      (typeof icons[id] === 'string' ? icons[id] : undefined)
-    )
+  for (const key of iconLookupKeys(id)) {
+    const hit =
+      icons.extra?.[`${kind}:${key}`] ??
+      icons.extra?.[`generic:${key}`] ??
+      icons.extra?.[key] ??
+      ((kind === 'good' || kind === 'alert')
+        ? (icons.goods?.[key] ??
+          icons.extra?.[`good:${key}`] ??
+          (typeof icons[key] === 'string' ? icons[key] : undefined))
+        : undefined)
+    if (hit) return hit
   }
-  return icons.extra?.[`${kind}:${id}`] ?? icons.extra?.[id]
+  if (kind === 'military' && /combat_unit|infantry|artillery|cavalry|battalion|^army$/i.test(id)) {
+    return icons.extra?.['military:battalions'] ?? icons.extra?.['generic:battalions']
+  }
+  return undefined
 }
 
 export function GameIcon({

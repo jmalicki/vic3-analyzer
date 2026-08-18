@@ -120,7 +120,7 @@ describe('PopsPane', () => {
     expect(screen.getByRole('link', { name: 'Alpaca' })).toHaveAttribute('href', '#/states/1')
     expect(screen.getByRole('link', { name: 'Silly Hammer Factory' })).toHaveAttribute(
       'href',
-      '#/prices/building/7',
+      '#/buildings/building/7',
     )
   })
 
@@ -131,5 +131,41 @@ describe('PopsPane', () => {
     await user.click(screen.getByRole('button', { name: 'Domestic' }))
     expect(screen.getByRole('button', { name: /Machinists/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Farmers/ })).not.toBeInTheDocument()
+  })
+
+  it('shows local pop recommendations for the current scope', () => {
+    render(
+      <PopsPane
+        result={result}
+        playerCountryId={10}
+        playerMarketId={1}
+        alerts={[
+          {
+            id: 'needs_unmet:1',
+            kind: 'needs_unmet',
+            severity: 1,
+            title: 'Unmet pop needs in Alpaca',
+            summary: 'Baskets exceed local sell.',
+            state_id: 1,
+            evidence: [],
+            mitigations: [],
+          },
+          {
+            id: 'needs_unmet:2',
+            kind: 'needs_unmet',
+            severity: 1,
+            title: 'Unmet pop needs in Zebra',
+            summary: 'Out of market.',
+            state_id: 2,
+            evidence: [],
+            mitigations: [],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Recommendations' })).toBeInTheDocument()
+    expect(screen.getByText('Unmet pop needs in Alpaca')).toBeInTheDocument()
+    expect(screen.queryByText('Unmet pop needs in Zebra')).not.toBeInTheDocument()
   })
 })

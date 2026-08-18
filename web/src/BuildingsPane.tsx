@@ -8,6 +8,7 @@ import {
   useSort,
 } from './PriceExplorer'
 import type {
+  Alert,
   BuildingEconomics,
   BuildingTypeInfo,
   DefsIcons,
@@ -183,6 +184,7 @@ export function BuildingsPane({
   onWhatIf,
   onApply,
   productionMethods,
+  alerts = [],
 }: {
   result?: PricesResult
   icons?: DefsIcons
@@ -191,6 +193,7 @@ export function BuildingsPane({
   onWhatIf?: (building: string, extraLevels: number) => void
   onApply?: (delta: WorldDelta) => void
   productionMethods?: ProductionMethodDef[]
+  alerts?: Alert[]
 }) {
   const [hash, setHash] = useState(() => window.location.hash)
   const [sort, onSort] = useSort<BuildingSort>('name')
@@ -245,7 +248,14 @@ export function BuildingsPane({
   if (buildingId != null && result) {
     return (
       <section className={gated ? 'workspace-page needs-defs' : 'workspace-page'}>
-        <BuildingPage result={result} icons={icons} buildingId={buildingId} source="buildings" />
+        <BuildingPage
+          result={result}
+          icons={icons}
+          buildingId={buildingId}
+          source="buildings"
+          alerts={alerts}
+          onApply={onApply}
+        />
       </section>
     )
   }

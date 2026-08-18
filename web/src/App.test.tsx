@@ -905,6 +905,8 @@ describe('prices UI', () => {
     expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Alerts' }))
+    await user.click(await screen.findByRole('link', { name: /Grain shortage/ }))
+    expect(window.location.hash).toBe('#/prices/good/grain')
     await user.click(await screen.findByText('Grain shortage'))
     await user.click(screen.getByRole('button', { name: 'Apply' }))
 

@@ -33,4 +33,59 @@ describe('GameIcon', () => {
       'data:image/png;base64,FLAT',
     )
   })
+
+  it('aliases script ids onto texture stems and generic icons', () => {
+    const icons = parseDefsIcons({
+      goods: { electricity: 'data:image/png;base64,ELEC' },
+      extra: {
+        'pm:pm_bakery': 'data:image/png;base64,BAKE',
+        'military:silhouette_frigate': 'data:image/png;base64,SHIP',
+        'military:chocolate': 'data:image/png;base64,CHOC',
+        'generic:battalions': 'data:image/png;base64,BAT',
+        'generic:population': 'data:image/png;base64,POP',
+        'alert:starving': 'data:image/png;base64,STARVE',
+      },
+    })
+    const { container, rerender } = render(<GameIcon kind="pm" id="pm_bakery" icons={icons} />)
+    expect(container.querySelector('img.good-icon')).toHaveAttribute(
+      'src',
+      'data:image/png;base64,BAKE',
+    )
+
+    rerender(<GameIcon kind="military" id="ship_type_frigate" icons={icons} />)
+    expect(container.querySelector('img.good-icon')).toHaveAttribute(
+      'src',
+      'data:image/png;base64,SHIP',
+    )
+
+    rerender(<GameIcon kind="military" id="mobilization_option_chocolate" icons={icons} />)
+    expect(container.querySelector('img.good-icon')).toHaveAttribute(
+      'src',
+      'data:image/png;base64,CHOC',
+    )
+
+    rerender(<GameIcon kind="military" id="combat_unit_type_line_infantry" icons={icons} />)
+    expect(container.querySelector('img.good-icon')).toHaveAttribute(
+      'src',
+      'data:image/png;base64,BAT',
+    )
+
+    rerender(<GameIcon kind="alert" id="electricity" icons={icons} />)
+    expect(container.querySelector('img.good-icon')).toHaveAttribute(
+      'src',
+      'data:image/png;base64,ELEC',
+    )
+
+    rerender(<GameIcon kind="alert" id="starvation" icons={icons} />)
+    expect(container.querySelector('img.good-icon')).toHaveAttribute(
+      'src',
+      'data:image/png;base64,STARVE',
+    )
+
+    rerender(<GameIcon kind="alert" id="population" icons={icons} />)
+    expect(container.querySelector('img.good-icon')).toHaveAttribute(
+      'src',
+      'data:image/png;base64,POP',
+    )
+  })
 })

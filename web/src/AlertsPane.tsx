@@ -9,6 +9,7 @@ import type {
   MitigationAction,
   WorldDelta,
 } from './types'
+import { hashForBuilding, hashForGood, hashForState } from './workspaceNav'
 
 function actionBuilding(action?: MitigationAction): string | undefined {
   if (!action) return undefined
@@ -27,53 +28,246 @@ function actionPm(action?: MitigationAction): string | undefined {
   return undefined
 }
 
-function alertIconId(kind: AlertKind): string {
+function buildingIdsForAlert(alert: Alert): number[] {
+  const ids = new Set<number>()
+  if (alert.building_id != null) ids.add(alert.building_id)
+  for (const mitigation of alert.mitigations) {
+    const action = mitigation.action
+    if (action?.type === 'pm' || action?.type === 'subsidize') {
+      ids.add(action.building_id)
+    }
+  }
+  return [...ids]
+}
+
+export function alertIconId(kind: AlertKind): string {
   switch (kind) {
     case 'electricity_shortage':
       return 'electricity'
     case 'transportation_shortage':
       return 'transportation'
     case 'goods_shortage':
-      return 'market'
+      return 'goods_shortage'
     case 'needs_unmet':
-      return 'starvation'
+      return 'starving'
     case 'low_market_access':
-      return 'market_access'
+      return 'world_market_access'
     case 'unfilled_education':
-      return 'qualification'
+      return 'literacy'
     case 'unfilled_pops':
       return 'population'
     case 'underemployed':
-      return 'unemployment'
+      return 'population'
   }
+}
+
+function alertGroup(kind: AlertKind): { id: string; label: string } {
+  switch (kind) {
+    case 'electricity_shortage':
+    case 'transportation_shortage':
+    case 'goods_shortage':
+      return { id: 'shortages', label: 'Shortages' }
+    case 'needs_unmet':
+      return { id: 'needs', label: 'Unmet needs' }
+    case 'low_market_access':
+      return { id: 'market_access', label: 'Market access' }
+    case 'unfilled_education':
+      return { id: 'qualifications', label: 'Qualifications' }
+    case 'unfilled_pops':
+    case 'underemployed':
+      return { id: 'employment', label: 'Employment' }
+  }
+}
+
+const GROUP_ORDER = ['shortages', 'needs', 'market_access', 'qualifications', 'employment']
+
+export function hrefForAlert(alert: Alert): string {
+  switch (alert.kind) {
+    case 'unfilled_pops':
+    case 'underemployed':
+      if (alert.building_id != null) return hashForBuilding(alert.building_id)
+      if (alert.state_id != null) return hashForState(alert.state_id)
+      return '#/buildings'
+    case 'electricity_shortage':
+    case 'transportation_shortage':
+    case 'goods_shortage':
+      if (alert.good_id) return hashForGood(alert.good_id)
+      if (alert.building_id != null) return hashForBuilding(alert.building_id)
+      if (alert.state_id != null) return hashForState(alert.state_id)
+      return '#/prices'
+    case 'needs_unmet':
+    case 'low_market_access':
+      if (alert.state_id != null) return hashForState(alert.state_id)
+      return '#/states'
+    case 'unfilled_education':
+      if (alert.state_id != null) return hashForState(alert.state_id)
+      return '#/pops'
+  }
+}
+
+export function alertsForBuilding(alerts: Alert[], building: BuildingEconomics): Alert[] {
+  const goods = new Set([
+    ...(building.short_inputs ?? []),
+    ...(building.inputs ?? []).map((flow) => flow.good_id),
+    ...(building.outputs ?? []).map((flow) => flow.good_id),
+  ])
+  return alerts.filter((alert) => {
+    if (alert.building_id === building.id) return true
+    if (
+      alert.mitigations.some(
+        (item) => item.action?.type === 'pm' && item.action.building_id === building.id,
+      )
+    ) {
+      return true
+    }
+    if (
+      alert.good_id &&
+      goods.has(alert.good_id) &&
+      (alert.state_id == null || alert.state_id === building.state_id)
+    ) {
+      return (
+        alert.kind === 'electricity_shortage' ||
+        alert.kind === 'transportation_shortage' ||
+        alert.kind === 'goods_shortage'
+      )
+    }
+    return false
+  })
+}
+
+export function alertsForState(
+  alerts: Alert[],
+  stateId: number,
+  buildings: BuildingEconomics[] = [],
+): Alert[] {
+  const ids = new Set(
+    buildings.filter((building) => building.state_id === stateId).map((building) => building.id),
+  )
+  return alerts.filter(
+    (alert) =>
+      alert.state_id === stateId || (alert.building_id != null && ids.has(alert.building_id)),
+  )
+}
+
+export function alertsForGood(alerts: Alert[], goodId: string): Alert[] {
+  return alerts.filter((alert) => alert.good_id === goodId)
+}
+
+export function alertsForPops(alerts: Alert[]): Alert[] {
+  return alerts.filter(
+    (alert) =>
+      alert.kind === 'unfilled_education' ||
+      alert.kind === 'unfilled_pops' ||
+      alert.kind === 'underemployed' ||
+      alert.kind === 'needs_unmet',
+  )
 }
 
 export function AlertsPane({
   result,
   icons,
-  buildings = [],
-  onApply,
 }: {
   result: AlertsResult
   icons?: DefsIcons
-  buildings?: BuildingEconomics[]
-  onApply?: (delta: WorldDelta) => void
 }) {
   if (result.alerts.length === 0) {
     return <p>No shortages detected in the current solve.</p>
   }
+  const groups = GROUP_ORDER.flatMap((id) => {
+    const items = result.alerts.filter((alert) => alertGroup(alert.kind).id === id)
+    if (!items.length) return []
+    return [{ id, label: alertGroup(items[0].kind).label, items }]
+  })
   return (
-    <ul className="alerts-list">
-      {result.alerts.map((alert) => (
-        <li key={alert.id}>
-          <AlertExpander alert={alert} icons={icons} buildings={buildings} onApply={onApply} />
+    <ul className="alert-groups">
+      {groups.map((group) => (
+        <li key={group.id}>
+          <details className="alert-group" open>
+            <summary>
+              <span className="alert-heading">
+                <GameIcon kind="alert" id={alertIconId(group.items[0].kind)} icons={icons} />
+                <strong>{group.label}</strong>
+                <span className="alert-severity">
+                  {group.items.length} alert{group.items.length === 1 ? '' : 's'}
+                </span>
+              </span>
+            </summary>
+            <ul className="alerts-list">
+              {group.items.map((alert) => (
+                <li key={alert.id}>
+                  <AlertIndexRow alert={alert} icons={icons} />
+                </li>
+              ))}
+            </ul>
+          </details>
         </li>
       ))}
     </ul>
   )
 }
 
-function AlertExpander({
+function AlertIndexRow({ alert, icons }: { alert: Alert; icons?: DefsIcons }) {
+  const href = hrefForAlert(alert)
+  const stateHref = alert.state_id != null ? hashForState(alert.state_id) : undefined
+  const buildingHrefs = buildingIdsForAlert(alert)
+    .map((id) => hashForBuilding(id))
+    .filter((buildingHref) => buildingHref !== href)
+  return (
+    <div className="alert-index-row">
+      <a className="alert-index-link" href={href}>
+        <GameIcon kind="alert" id={alertIconId(alert.kind)} icons={icons} />
+        {alert.good_id && <GameIcon kind="good" id={alert.good_id} icons={icons} />}
+        <strong>{alert.title}</strong>
+        <span className="alert-severity">severity {alert.severity}</span>
+      </a>
+      {buildingHrefs.map((buildingHref) => (
+        <a key={buildingHref} className="alert-index-place" href={buildingHref}>
+          Building
+        </a>
+      ))}
+      {stateHref && stateHref !== href && (
+        <a className="alert-index-place" href={stateHref}>
+          State
+        </a>
+      )}
+    </div>
+  )
+}
+
+export function LocalRecommendations({
+  alerts,
+  buildings = [],
+  icons,
+  onApply,
+  heading = 'Recommendations',
+}: {
+  alerts: Alert[]
+  buildings?: BuildingEconomics[]
+  icons?: DefsIcons
+  onApply?: (delta: WorldDelta) => void
+  heading?: string
+}) {
+  if (!alerts.length) return null
+  return (
+    <section className="local-alerts" aria-label={heading}>
+      <h3>{heading}</h3>
+      <ul className="alerts-list">
+        {alerts.map((alert) => (
+          <li key={alert.id}>
+            <LocalAlertCard
+              alert={alert}
+              icons={icons}
+              buildings={buildings}
+              onApply={onApply}
+            />
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function LocalAlertCard({
   alert,
   icons,
   buildings,

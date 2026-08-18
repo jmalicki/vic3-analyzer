@@ -156,6 +156,43 @@ section[aria-labelledby] { margin-top: 1rem; }
 .workspace-page { border: 1px solid #37433a; background: #18201a; padding: 1.25rem; margin-top: 0; }
 .workspace-page h2 { margin: .15rem 0; }
 .alerts-list { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: .75rem; }
+.alert-groups { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: .85rem; }
+.alert-group {
+  border: 1px solid #3d4a40;
+  background: #151c17;
+  padding: .25rem .85rem .85rem;
+}
+.alert-group > summary {
+  cursor: pointer;
+  padding: .55rem 0 .35rem;
+}
+.alert-group > .alerts-list { margin-top: .35rem; }
+.alert-index-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .55rem;
+}
+.alert-index-link {
+  align-items: center;
+  color: inherit;
+  display: inline-flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: .5rem;
+  text-decoration: none;
+}
+.alert-index-link:hover { text-decoration: underline; }
+.alert-index-place {
+  color: #d7e6a7;
+  font-size: .85rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.alert-index-place:hover { text-decoration: underline; }
+.local-alerts { margin: 1rem 0; }
+.local-alerts h3 { margin: 0 0 .35rem; }
+.local-alerts .alerts-list { margin-top: .5rem; }
 .military-list { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: .75rem; }
 .military-card {
   background: #141b16;

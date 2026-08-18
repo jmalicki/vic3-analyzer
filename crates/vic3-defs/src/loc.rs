@@ -1,8 +1,9 @@
 //! Resolve Clausewitz localization markup into display text.
 //!
 //! Vic3 pop-type names are stored as `@academics! $academics_no_icon$` with the
-//! readable word on the `_no_icon` key. Icons are already shown separately in
-//! the UI, so labels keep the substituted name and drop `@icon!` markers.
+//! readable word on the `_no_icon` key. `@academics!` is a texticon for
+//! `gfx/interface/icons/pops_icons/academics.dds`, stored as `pop:academics`;
+//! labels keep the substituted name and drop the marker.
 
 use std::collections::{BTreeMap, HashSet};
 

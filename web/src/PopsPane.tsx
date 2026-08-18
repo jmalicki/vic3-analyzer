@@ -1,4 +1,8 @@
 import { Fragment, useMemo, useState } from 'react'
+import {
+  LocalRecommendations,
+  alertsForPops,
+} from './AlertsPane'
 import { GameIcon } from './GameIcon'
 import {
   NeedBaskets,
@@ -8,6 +12,7 @@ import {
   type FilterMode,
 } from './PriceExplorer'
 import type {
+  Alert,
   BuildingEconomics,
   BuildingTypeInfo,
   DefsIcons,
@@ -15,8 +20,9 @@ import type {
   StateInfo,
   StateNeed,
   StatePop,
+  WorldDelta,
 } from './types'
-import { hashForState } from './workspaceNav'
+import { hashForBuilding, hashForState } from './workspaceNav'
 
 type ProfessionGroup = {
   id: string
@@ -101,12 +107,16 @@ export function PopsPane({
   playerCountryId,
   playerMarketId,
   gated = false,
+  alerts = [],
+  onApply,
 }: {
   result?: PricesResult
   icons?: DefsIcons
   playerCountryId?: number
   playerMarketId?: number
   gated?: boolean
+  alerts?: Alert[]
+  onApply?: (delta: WorldDelta) => void
 }) {
   const [filterMode, setFilterMode] = useState<FilterMode>('our_market')
   const [openProfession, setOpenProfession] = useState<string | null>(null)
@@ -150,6 +160,13 @@ export function PopsPane({
     () => (result?.state_needs ?? []).filter((need) => scopedStateIds.has(need.state_id)),
     [result?.state_needs, scopedStateIds],
   )
+  const popAlerts = useMemo(
+    () =>
+      alertsForPops(alerts).filter(
+        (alert) => alert.state_id == null || scopedStateIds.has(alert.state_id),
+      ),
+    [alerts, scopedStateIds],
+  )
   const needsByState = useMemo(() => {
     const ids = [...new Set(scopedNeeds.map((need) => need.state_id))]
     return ids.map((stateId) => ({
@@ -172,6 +189,12 @@ export function PopsPane({
       {missingPlayerMarket && (
         <p className="model-info">Player market unavailable; showing all pops.</p>
       )}
+      <LocalRecommendations
+        alerts={popAlerts}
+        buildings={result?.buildings ?? []}
+        icons={icons}
+        onApply={onApply}
+      />
       {shortages.length > 0 && (
         <section className="pop-shortages" aria-label="Qualification shortages">
           <h3>Qualification shortages</h3>
@@ -270,7 +293,7 @@ export function PopsPane({
                                   {pop.workplace_id != null ? (
                                     <a
                                       className="building-link"
-                                      href={`#/prices/building/${pop.workplace_id}`}
+                                      href={hashForBuilding(pop.workplace_id)}
                                     >
                                       {workplace}
                                     </a>

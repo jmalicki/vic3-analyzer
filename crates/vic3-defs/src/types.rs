@@ -18,15 +18,16 @@ pub struct GameDefs {
     pub needs_order: Vec<String>,
     pub goods: BTreeMap<String, Good>,
     /// Localized display labels keyed by script id. Empty when localization
-    /// was not included in the selected game files. `$key$` substitutions and
-    /// `@icon!` markers are resolved, so pop types show "Academics" rather than
-    /// `@academics! $academics_no_icon$`.
+    /// was not included in the selected game files. `$key$` substitutions are
+    /// expanded and `@icon!` markers dropped: the matching PNG lives in
+    /// [`Self::extra_icons`] (`pop:academics` from `pops_icons/academics.dds`).
     pub labels: BTreeMap<String, String>,
     /// Good id → PNG icon decoded from the install's DDS textures. Empty when
     /// the icon folder was not part of the selected game files.
     pub icons: BTreeMap<String, Vec<u8>>,
     /// Namespaced PNG icons (`building:id`, `pm:id`, `pop:id`, `alert:id`,
-    /// `military:id`) from other `gfx/interface/icons` leaf folders.
+    /// `military:id`, `generic:id`) from other `gfx/interface/icons` leaf folders.
+    /// Script ids are aliased onto texture stems (`pm:pm_bakery` from `bakeries.dds`).
     #[serde(default)]
     pub extra_icons: BTreeMap<String, Vec<u8>>,
     /// Coat-of-arms id → rendered PNG flag (small). Empty when CoA assets were

@@ -1112,6 +1112,17 @@ mod tests {
             "read"
         );
         assert_eq!(
+            classify_defs_path("game/gfx/interface/icons/pops_icons/academics.dds", false),
+            "read"
+        );
+        assert_eq!(
+            classify_defs_path(
+                "game/gfx/interface/icons/ships/ship_types/silhouette_frigate.dds",
+                false
+            ),
+            "read"
+        );
+        assert_eq!(
             classify_defs_path("game/gfx/interface/icons/country_icons", true),
             "prune"
         );
