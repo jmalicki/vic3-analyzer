@@ -76,7 +76,23 @@ button:focus-visible {
   text-align: center;
 }
 input, select, textarea { width: 100%; border: 1px solid #4e5c50; background: #111713; color: #f4f5eb; padding: .55rem; }
-.save-summary { display: flex; gap: 1rem; background: #29362c; padding: .8rem 1rem; margin-top: 1rem; }
+.save-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.75rem;
+  background: #29362c;
+  padding: .8rem 1rem;
+  margin-top: 1rem;
+}
+.save-summary > div { display: grid; gap: .15rem; }
+.hud-label {
+  color: #9ba79d;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.save-summary strong { font-variant-numeric: tabular-nums; }
 [role="alert"] { color: #ffb5a9; }
 .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 1rem 0; align-items: start; }
 .actions > button { min-height: 4rem; font-size: 1rem; }

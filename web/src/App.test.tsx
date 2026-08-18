@@ -142,6 +142,7 @@ async function buildDefinitions(user: ReturnType<typeof userEvent.setup>) {
 
 describe('prices UI', () => {
   beforeEach(async () => {
+    window.location.hash = ''
     await clearAnalyses()
     await clearStoredDefs()
     await clearStoredSave()
@@ -153,27 +154,23 @@ describe('prices UI', () => {
     vi.restoreAllMocks()
   })
 
-  it('renders mocked wasm goods and limitations, then archives the run', async () => {
+  it('renders mocked wasm goods and limitations after loading a save', async () => {
     const user = userEvent.setup()
     const api = mockApi()
     render(<App wasmApi={api} />)
     await selectSave(user)
 
-    await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
-
     expect(await screen.findByText('Iron')).toBeInTheDocument()
     expect(screen.getByText('43.50')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Method and limitations' })).toBeInTheDocument()
-    await waitFor(async () => expect(await listAnalyses()).toHaveLength(1))
-    expect(api.loaded_prices).toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Analyze prices' })).not.toBeInTheDocument()
+    expect(api.load_analysis).toHaveBeenCalled()
   })
 
   it('shows the game icon for a priced good', async () => {
     const user = userEvent.setup()
     const { container } = render(<App wasmApi={mockApi()} />)
     await selectSave(user)
-
-    await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
     await screen.findByText('Iron')
 
     const icon = container.querySelector('img.good-icon')
@@ -224,7 +221,6 @@ describe('prices UI', () => {
     const api = mockApi()
     render(<App wasmApi={api} />)
     await selectSave(user)
-    await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
     expect(await screen.findByText('Iron')).toBeInTheDocument()
 
     await buildDefinitions(user)
@@ -412,8 +408,7 @@ describe('prices UI', () => {
     await buildDefinitions(user)
     expect(await screen.findByText(/Using your file: defs\.postcard/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Analyze prices' }))
-    await waitFor(() => expect(api.loaded_prices).toHaveBeenCalled())
+    await waitFor(() => expect(api.load_analysis).toHaveBeenCalled())
     const defsArg = vi.mocked(api.load_analysis).mock.calls.at(-1)?.[2]
     // Exact builder output proves the retained world used the locally built definitions.
     expect(new TextDecoder().decode(defsArg)).toBe('MOCKY-NOT-A-REAL-BLOB')
@@ -581,6 +576,7 @@ describe('prices UI', () => {
 
   it('greys out analysis tools and names every missing input', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('no defs'))
+    const user = userEvent.setup()
     render(<App wasmApi={mockApi()} />)
 
     expect(
@@ -589,7 +585,11 @@ describe('prices UI', () => {
     await waitFor(() =>
       expect(document.querySelector('.workspace-page')).toHaveClass('needs-defs'),
     )
-    expect(screen.getByRole('button', { name: 'Analyze prices' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Analyze prices' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'States' }))
+    expect(screen.getByRole('heading', { name: 'States' })).toBeInTheDocument()
+    expect(document.querySelector('.workspace-page')).toHaveClass('needs-defs')
     fetchMock.mockRestore()
   })
 
@@ -602,6 +602,40 @@ describe('prices UI', () => {
       expect(document.querySelector('.workspace-page')).not.toHaveClass('needs-defs'),
     )
     expect(screen.queryByText(/Analysis needs/)).not.toBeInTheDocument()
+  })
+
+  it('shows a campaign HUD and workbench panes after loading a save', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+
+    const hud = screen.getByRole('region', { name: 'Campaign summary' })
+    expect(hud).toHaveTextContent('FRA')
+    expect(hud).toHaveTextContent('1840.2.3')
+    expect(hud).toHaveTextContent('Victoria 3 1.9.0')
+
+    for (const name of ['States', 'Pops', 'Alerts', 'Military', 'Buildings']) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument()
+    }
+
+    await user.click(screen.getByRole('button', { name: 'States' }))
+    expect(screen.getByRole('heading', { name: 'States' })).toBeInTheDocument()
+    expect(screen.getByText('State list arrives in a follow-up.')).toBeInTheDocument()
+    expect(window.location.hash).toBe('#/states')
+
+    await user.click(screen.getByRole('button', { name: 'Military' }))
+    expect(screen.getByRole('heading', { name: 'Military' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Army' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Navy' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Mobilization' })).toBeInTheDocument()
+  })
+
+  it('opens a known pane from the location hash', async () => {
+    window.location.hash = '#/military/navy'
+    render(<App wasmApi={mockApi()} />)
+
+    expect(await screen.findByRole('heading', { name: 'Military' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Navy' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('shows version, revision, and build time in the footer', () => {

@@ -35,6 +35,13 @@ import type {
 } from './types'
 import type { WasmApi } from './wasm'
 import { loadWasmApi } from './wasmClient'
+import {
+  hashForView,
+  parseHash,
+  WORKSPACE_NAV,
+  type MilitaryTab,
+  type WorkspaceView,
+} from './workspaceNav'
 
 /**
  * Demo definitions exist for local development and tests only. The fixture is
@@ -51,8 +58,6 @@ function demoDefsUrl(): string | undefined {
 interface Props {
   wasmApi?: WasmApi | Promise<WasmApi>
 }
-
-type WorkspaceView = 'prices' | 'what-if' | 'timeline' | 'gaps' | 'archive'
 
 const MODEL_DOCS =
   'https://github.com/jmalicki/vic3-analyzer/blob/main/docs/prices.md#limitations-must-appear-in-rustdoc-cli-json-ui'
@@ -166,7 +171,8 @@ function App({ wasmApi }: Props) {
     building: '',
     extra_levels: 1,
   })
-  const [activeView, setActiveView] = useState<WorkspaceView>('prices')
+  const [activeView, setActiveView] = useState<WorkspaceView>(() => parseHash().view ?? 'prices')
+  const [militaryTab, setMilitaryTab] = useState<MilitaryTab>(() => parseHash().militaryTab)
   const [records, setRecords] = useState<AnalysisRecord[]>([])
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
   const [archiveNote, setArchiveNote] = useState<string>()
@@ -371,6 +377,16 @@ function App({ wasmApi }: Props) {
     }
   }, [summary, whatIfOpts.building])
 
+  useEffect(() => {
+    const sync = () => {
+      const parsed = parseHash()
+      if (parsed.view) setActiveView(parsed.view)
+      setMilitaryTab(parsed.militaryTab)
+    }
+    window.addEventListener('hashchange', sync)
+    return () => window.removeEventListener('hashchange', sync)
+  }, [])
+
   const archiveResult = async (
     kind: AnalysisKind,
     opts: Record<string, unknown>,
@@ -397,29 +413,27 @@ function App({ wasmApi }: Props) {
     setRecords(await listAnalyses())
   }
 
-  const run = async (kind: 'prices' | 'what_if') => {
+  const runWhatIf = async () => {
     if (!api || !saveFile || !effectiveDefs) return
     setBusy(true)
     setError(undefined)
     try {
       const [saveBytes, tokenBytes] = await Promise.all([bytes(saveFile), bytes(tokensFile)])
-      const json =
-        kind === 'prices'
-          ? await api.loaded_prices()
-          : await api.loaded_what_if(JSON.stringify(whatIfOpts))
+      const json = await api.loaded_what_if(JSON.stringify(whatIfOpts))
       const nextResult = JSON.parse(json) as PricesResult
       setResult(nextResult)
-      await archiveResult(kind, kind === 'prices' ? {} : whatIfOpts, nextResult, saveBytes!, tokenBytes)
-      if (kind === 'prices' && summary) {
-        void storeSaveAnalysis(summary, nextResult).catch((error: unknown) => {
-          setError(persistErrorMessage(error))
-        })
-      }
+      await archiveResult('what_if', whatIfOpts, nextResult, saveBytes!, tokenBytes)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setBusy(false)
     }
+  }
+
+  const selectView = (view: WorkspaceView) => {
+    setActiveView(view)
+    const next = hashForView(view)
+    if (window.location.hash !== next) window.location.hash = next
   }
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
@@ -446,7 +460,7 @@ function App({ wasmApi }: Props) {
 
   const submitWhatIf = (event: FormEvent) => {
     event.preventDefault()
-    void run('what_if')
+    void runWhatIf()
   }
 
   const submitGaps = async (event: FormEvent) => {
@@ -712,33 +726,43 @@ function App({ wasmApi }: Props) {
       )}
 
       {summary && (
-        <section className="save-summary" aria-label="Save summary">
-          <span>{summary.tag ?? 'Unknown country'}</span>
-          <span>{summary.date ?? 'Unknown date'}</span>
-          <span>Victoria 3 {summary.version}</span>
+        <section className="save-summary" role="region" aria-label="Campaign summary">
+          <div>
+            <span className="hud-label">Country</span>
+            <strong>{summary.tag ?? 'Unknown country'}</strong>
+          </div>
+          <div>
+            <span className="hud-label">Date</span>
+            <strong>{summary.date ?? 'Unknown date'}</strong>
+          </div>
+          <div>
+            <span className="hud-label">Version</span>
+            <strong>Victoria 3 {summary.version}</strong>
+          </div>
+          <div>
+            <span className="hud-label">GDP</span>
+            <strong>—</strong>
+          </div>
+          <div>
+            <span className="hud-label">SoL</span>
+            <strong>—</strong>
+          </div>
+          <div>
+            <span className="hud-label">Alerts</span>
+            <strong>—</strong>
+          </div>
         </section>
       )}
 
       {error && <p role="alert">{error}</p>}
 
       <nav className="workspace-nav" aria-label="Analysis tools">
-        {(
-          [
-            ['prices', 'Prices'],
-            ['what-if', 'What-if'],
-            ['timeline', 'Timeline'],
-            ['gaps', 'Goal gaps'],
-            ['archive', 'Archive'],
-          ] as const
-        ).map(([view, label]) => (
+        {WORKSPACE_NAV.map(({ view, label }) => (
           <button
             type="button"
             key={view}
             aria-current={activeView === view ? 'page' : undefined}
-            onClick={() => {
-              setActiveView(view)
-              if (view === 'prices') window.location.hash = '/prices'
-            }}
+            onClick={() => selectView(view)}
           >
             {label}
           </button>
@@ -768,9 +792,6 @@ function App({ wasmApi }: Props) {
               <h2 id="prices-tool-heading">Goods prices</h2>
               <p>Estimate current prices from your save and selected game definitions.</p>
             </div>
-            <button disabled={!ready || busy} onClick={() => void run('prices')}>
-              Analyze prices
-            </button>
           </div>
           {thinDefs && (
             <p className="demo-warning">
@@ -779,6 +800,72 @@ function App({ wasmApi }: Props) {
                 : 'The local development demo blob defines only a few fixture goods. Build definitions from a Victoria 3 install for the full goods list.'}
             </p>
           )}
+        </section>
+      )}
+
+      {activeView === 'states' && (
+        <section
+          className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
+          aria-labelledby="states-heading"
+        >
+          <h2 id="states-heading">States</h2>
+          <p>State list arrives in a follow-up.</p>
+        </section>
+      )}
+
+      {activeView === 'pops' && (
+        <section
+          className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
+          aria-labelledby="pops-heading"
+        >
+          <h2 id="pops-heading">Pops</h2>
+        </section>
+      )}
+
+      {activeView === 'alerts' && (
+        <section
+          className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
+          aria-labelledby="alerts-heading"
+        >
+          <h2 id="alerts-heading">Alerts</h2>
+        </section>
+      )}
+
+      {activeView === 'military' && (
+        <section
+          className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
+          aria-labelledby="military-heading"
+        >
+          <h2 id="military-heading">Military</h2>
+          <div className="state-tabs" role="tablist" aria-label="Military branches">
+            {(['army', 'navy', 'mobilization'] as const).map((tab) => (
+              <button
+                type="button"
+                key={tab}
+                role="tab"
+                aria-selected={militaryTab === tab}
+                onClick={() => {
+                  setMilitaryTab(tab)
+                  window.location.hash = hashForView('military', tab)
+                }}
+              >
+                {tab === 'army' ? 'Army' : tab === 'navy' ? 'Navy' : 'Mobilization'}
+              </button>
+            ))}
+          </div>
+          <p>
+            {militaryTab === 'army' ? 'Army' : militaryTab === 'navy' ? 'Navy' : 'Mobilization'}{' '}
+            details arrive in a follow-up.
+          </p>
+        </section>
+      )}
+
+      {activeView === 'buildings' && (
+        <section
+          className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
+          aria-labelledby="buildings-heading"
+        >
+          <h2 id="buildings-heading">Buildings</h2>
         </section>
       )}
 
