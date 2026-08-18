@@ -9,6 +9,7 @@ import {
 } from './archive'
 import { DefsBuilder } from './DefsBuilder'
 import { clearStoredDefs, loadStoredDefs, storeDefs } from './defsStore'
+import { clearStoredSave, loadStoredSave, storeSave } from './saveStore'
 import { FieldHelp } from './FieldHelp'
 import { GoalBuilder } from './GoalBuilder'
 import { Modal } from './Modal'
@@ -145,6 +146,7 @@ function App({ wasmApi }: Props) {
   const [api, setApi] = useState<WasmApi>()
   const [saveFile, setSaveFile] = useState<File>()
   const [tokensFile, setTokensFile] = useState<File>()
+  const [saveRestored, setSaveRestored] = useState(false)
   const [defsFile, setDefsFile] = useState<File>()
   const [defsRestored, setDefsRestored] = useState(false)
   const [demoDefsFile, setDemoDefsFile] = useState<File>()
@@ -187,7 +189,25 @@ function App({ wasmApi }: Props) {
     setLabel(template.label)
   }
 
-  /** Keep the chosen blob across reloads; nothing else survives a refresh. */
+  const persistSave = (save: File, tokens?: File) => {
+    void storeSave(save, tokens).catch(() => {
+      setError('Save could not be kept in this browser; it lasts until reload.')
+    })
+  }
+
+  /** Keep the chosen save (and optional token map) across reloads. */
+  const applySaveFile = (file?: File, tokens: File | null = null) => {
+    setSaveFile(file)
+    setTokensFile(file ? tokens ?? undefined : undefined)
+    setSaveRestored(false)
+    if (!file) {
+      void clearStoredSave().catch(() => {})
+      return
+    }
+    persistSave(file, tokens ?? undefined)
+  }
+
+  /** Keep the chosen blob across reloads. */
   const applyDefsFile = (file?: File) => {
     setDefsFile(file)
     setDefsRestored(false)
@@ -195,6 +215,21 @@ function App({ wasmApi }: Props) {
       setError('Definitions could not be saved in this browser; they last until reload.')
     })
   }
+
+  useEffect(() => {
+    let cancelled = false
+    void loadStoredSave()
+      .then((stored) => {
+        if (!stored || cancelled) return
+        setSaveFile(stored.save)
+        setTokensFile(stored.tokens)
+        setSaveRestored(true)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     void listAnalyses().then(setRecords)
@@ -384,15 +419,14 @@ function App({ wasmApi }: Props) {
     const files = [...event.dataTransfer.files]
     const save = files.find((file) => file.name.endsWith('.v3')) ?? files[0]
     const tokens = files.find((file) => file !== save)
-    setSaveFile(save)
-    if (tokens) setTokensFile(tokens)
+    applySaveFile(save, tokens ?? null)
   }
 
   const chooseSave = async () => {
     if (rememberedPicker) {
       try {
         const file = await pickSaveWithRememberedFolder()
-        if (file) setSaveFile(file)
+        if (file) applySaveFile(file)
         return
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : String(reason))
@@ -503,13 +537,11 @@ function App({ wasmApi }: Props) {
       setArchiveNote(`Re-drop ${record.filename ?? 'the save'}; its fingerprint must match.`)
       return
     }
-    setSaveFile(
+    applySaveFile(
       new File([record.blob.save.slice().buffer as ArrayBuffer], record.filename ?? 'archive.v3'),
-    )
-    setTokensFile(
       record.blob.tokens
         ? new File([record.blob.tokens.slice().buffer as ArrayBuffer], 'tokens.txt')
-        : undefined,
+        : null,
     )
     setArchiveNote(`Reopened ${record.filename ?? record.id} from the local archive.`)
   }
@@ -550,9 +582,22 @@ function App({ wasmApi }: Props) {
             type="file"
             accept=".v3"
             className="visually-hidden"
-            onChange={(event) => setSaveFile(event.target.files?.[0])}
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) applySaveFile(file)
+            }}
           />
-          {saveFile && <output>{saveFile.name}</output>}
+          {saveFile && (
+            <>
+              <output>
+                {saveFile.name}
+                {saveRestored ? ' (kept from a previous visit)' : ''}
+              </output>
+              <button type="button" className="secondary" onClick={() => applySaveFile(undefined)}>
+                Forget this save
+              </button>
+            </>
+          )}
           <p className="path-hint">{savePaths.label}</p>
           <code className="path-hint-path">{savePaths.local}</code>
           <p className="path-hint">{savePaths.summary}</p>
@@ -594,7 +639,12 @@ function App({ wasmApi }: Props) {
               <input
                 type="file"
                 aria-label="Tokens file"
-                onChange={(e) => setTokensFile(e.target.files?.[0])}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  setTokensFile(file)
+                  setSaveRestored(false)
+                  if (saveFile) persistSave(saveFile, file)
+                }}
               />
             </label>
           </div>

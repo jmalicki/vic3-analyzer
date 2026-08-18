@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { clearAnalyses, listAnalyses, saveAnalysis } from './archive'
 import { clearStoredDefs, storeDefs } from './defsStore'
+import { clearStoredSave } from './saveStore'
 import type { AnalysisRecord } from './types'
 import type { WasmApi } from './wasm'
 
@@ -143,6 +144,7 @@ describe('prices UI', () => {
   beforeEach(async () => {
     await clearAnalyses()
     await clearStoredDefs()
+    await clearStoredSave()
     mockBundledDefs()
   })
   afterEach(() => {
@@ -446,6 +448,28 @@ describe('prices UI', () => {
     cleanup()
     render(<App wasmApi={mockApi()} />)
     expect(await screen.findByText(/Using the local development demo blob/)).toBeInTheDocument()
+  })
+
+  it('keeps the last save across a reload and can forget it', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+    expect(screen.getByText('campaign.v3')).toBeInTheDocument()
+
+    cleanup()
+    render(<App wasmApi={mockApi()} />)
+    expect(
+      await screen.findByText(/campaign\.v3 \(kept from a previous visit\)/),
+    ).toBeInTheDocument()
+    expect(await screen.findByText('FRA')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Forget this save' }))
+    await waitFor(() => expect(screen.queryByText(/campaign\.v3/)).not.toBeInTheDocument())
+
+    cleanup()
+    render(<App wasmApi={mockApi()} />)
+    await screen.findByText(/Using the local development demo blob/)
+    expect(screen.queryByText(/campaign\.v3/)).not.toBeInTheDocument()
   })
 
   it('clears a stored blob when Rust rejects its format version', async () => {
