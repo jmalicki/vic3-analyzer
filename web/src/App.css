@@ -231,24 +231,24 @@ section[aria-labelledby] { margin-top: 1rem; }
 .overview-kpis dt, .state-information dt { color: #9ba79d; font-size: .75rem; text-transform: uppercase; }
 .overview-kpis dd, .state-information dd { margin: 0; }
 .need-baskets {
-  display: grid;
-  gap: .65rem;
-  grid-template-columns: repeat(auto-fill, minmax(min(16rem, 100%), 1fr));
+  column-gap: .65rem;
+  column-width: 16rem;
 }
 .need-basket {
   background: #141b16;
   border: 1px solid #37433a;
-  display: grid;
-  align-content: start;
-  gap: .35rem;
-  min-width: 0;
+  break-inside: avoid;
+  display: inline-block;
+  margin: 0 0 .65rem;
   padding: .65rem .75rem;
+  vertical-align: top;
+  width: 100%;
 }
 .need-basket h4 {
   color: #b9c78c;
   font-family: Georgia, serif;
   font-weight: 400;
-  margin: 0;
+  margin: 0 0 .35rem;
 }
 .need-basket table { margin: 0; }
 .need-basket th, .need-basket td { padding: .35rem 0; }
