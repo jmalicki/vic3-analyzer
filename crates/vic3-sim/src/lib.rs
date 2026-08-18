@@ -467,9 +467,7 @@ mod tests {
             countries: vec![WorldCountry {
                 id: 1,
                 tag: "GER".into(),
-                laws: Vec::new(),
-                overlord: None,
-                subject_type: None,
+                ..WorldCountry::default()
             }],
             states: vec![WorldState {
                 id: 1,

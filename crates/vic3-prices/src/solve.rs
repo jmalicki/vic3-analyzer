@@ -6,7 +6,7 @@ use std::convert::Infallible;
 use basin::{
     BoxConstraints, CostFunction, DenseMatrix, Executor, Jacobian, Residual, TerminationReason, Trf,
 };
-use vic3_defs::{GameDefs, GoodIdx, GoodsVec};
+use vic3_defs::{GameDefs, GoodIdx, GoodsVec, NeedIdx};
 
 use crate::consumption::{
     add_pop_from_units, add_wage_bins, consumption, pop_need_baskets, wage_bins_from_pops,
@@ -14,9 +14,9 @@ use crate::consumption::{
 };
 use crate::formula::{effective_mapi, local_price, market_access, price};
 use crate::result::{
-    BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, GoodFlow, GoodPrice,
-    MarketInputs, PopNeedBasket, PricesResult, ProfessionCount, SolveOpts, SolveStatus, StateGood,
-    StateInfo, StateNeed, StatePop, StateQualification,
+    BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CompactNeed, CompactStatePop,
+    CountryInfo, EmitTables, GoodFlow, GoodPrice, MarketInputs, PricesResult, ProfessionCount,
+    SolveOpts, SolveStatus, StateGood, StateInfo, StateNeed, StatePopList, StateQualification,
 };
 use crate::world::{qty_value, World, WorldPop, WorldStatePop};
 use crate::LIMITATIONS;
@@ -229,7 +229,7 @@ struct DetailRows {
     states: Vec<StateInfo>,
     state_goods: Vec<StateGood>,
     buildings: Vec<BuildingEconomics>,
-    state_pops: Vec<StatePop>,
+    state_pops: StatePopList,
     state_qualifications: Vec<StateQualification>,
     state_needs: Vec<StateNeed>,
 }
@@ -390,7 +390,8 @@ fn detail_rows(
             infrastructure_usage: state.infrastructure_usage,
         })
         .collect();
-    let state_pops = collapsed_state_pops(
+    let tables = EmitTables::from_world(world, defs);
+    let compact_pops = collapsed_state_pops(
         world,
         defs,
         &prices,
@@ -399,7 +400,8 @@ fn detail_rows(
         &units,
         snapshot,
     );
-    let state_needs = aggregate_state_needs(&state_pops);
+    let state_needs = aggregate_state_needs(&compact_pops, &tables);
+    let state_pops = StatePopList::compact(tables, compact_pops);
     let state_qualifications = state_qualification_rows(world, defs, &employees_by_building);
     DetailRows {
         states,
@@ -541,7 +543,7 @@ fn collapsed_state_pops(
     shares: &NeedShares,
     units: &UnitBaskets,
     snapshot: Option<&ShopSnapshot>,
-) -> Vec<StatePop> {
+) -> Vec<CompactStatePop> {
     let mut groups: BTreeMap<GroupKey, PopGroup> = BTreeMap::new();
     if world.state_pops.is_empty() {
         for (index, pop) in world.pops.iter().enumerate() {
@@ -581,28 +583,22 @@ fn collapsed_state_pops(
                 .and_then(|snap| snap.local_by_state.get(&pop.state))
                 .unwrap_or(prices);
             let needs = pop_needs_for(&pop, defs, local, base_prices, shares, units);
-            let profession_id = world.name_opt(pop.profession).map(str::to_string);
-            let culture_id = world.name_opt(pop.culture).map(str::to_string);
-            StatePop {
+            CompactStatePop {
                 id: Some(pop.id),
                 state_id: pop.state,
-                profession_name: profession_id
-                    .as_ref()
-                    .and_then(|id| defs.labels.get(id))
-                    .cloned(),
-                profession_id,
+                profession: pop.profession,
                 demand_size: pop.demand_size,
                 workforce: pop.workforce,
                 dependents: pop.dependents,
                 wealth: pop.wealth,
-                culture_name: culture_id
-                    .as_ref()
-                    .and_then(|id| defs.labels.get(id))
-                    .cloned(),
-                culture_id,
+                culture: pop.culture,
                 literate: pop.literate,
                 workplace_id: pop.workplace_id,
-                qualifications: profession_counts(pop.qualifications, world, defs),
+                qualifications: pop
+                    .qualifications
+                    .into_iter()
+                    .filter(|(_, count)| *count > 0.0)
+                    .collect(),
                 needs,
             }
         })
@@ -616,7 +612,7 @@ fn pop_needs_for(
     base_prices: &GoodsVec,
     shares: &NeedShares,
     units: &UnitBaskets,
-) -> Vec<PopNeedBasket> {
+) -> Vec<CompactNeed> {
     let Some(size) = pop.demand_size.filter(|size| *size > 0.0) else {
         return Vec::new();
     };
@@ -636,53 +632,48 @@ fn pop_needs_for(
     };
     pop_need_baskets(&world_pop, prices, base_prices, defs, shares, units)
         .into_iter()
-        .filter_map(|basket| {
-            let need_id = defs.need_by_index(basket.need_idx)?.id.clone();
-            Some(PopNeedBasket {
-                need_name: defs.labels.get(&need_id).cloned(),
-                need_id,
-                package_value: basket.package_value,
-                goods: basket
-                    .goods
-                    .into_iter()
-                    .filter_map(|(idx, quantity)| {
-                        let good_id = defs.good_by_index(idx)?.to_string();
-                        Some(GoodFlow {
-                            value: quantity * prices[idx],
-                            good_id,
-                            quantity,
-                        })
-                    })
-                    .collect(),
-            })
+        .map(|basket| CompactNeed {
+            need_idx: basket.need_idx,
+            package_value: basket.package_value,
+            goods: basket
+                .goods
+                .into_iter()
+                .map(|(idx, quantity)| (idx, quantity, quantity * prices[idx]))
+                .collect(),
         })
         .collect()
 }
 
-fn aggregate_state_needs(pops: &[StatePop]) -> Vec<StateNeed> {
-    let mut by_state: BTreeMap<(u32, String), StateNeed> = BTreeMap::new();
+fn aggregate_state_needs(pops: &[CompactStatePop], tables: &EmitTables) -> Vec<StateNeed> {
+    let mut by_state: BTreeMap<(u32, NeedIdx), StateNeed> = BTreeMap::new();
     for pop in pops {
         for need in &pop.needs {
+            let Some(need_id) = tables.need(need.need_idx).map(str::to_string) else {
+                continue;
+            };
             let entry = by_state
-                .entry((pop.state_id, need.need_id.clone()))
+                .entry((pop.state_id, need.need_idx))
                 .or_insert_with(|| StateNeed {
                     state_id: pop.state_id,
-                    need_id: need.need_id.clone(),
-                    need_name: need.need_name.clone(),
+                    need_name: tables.label(&need_id).map(str::to_string),
+                    need_id,
                     package_value: 0.0,
                     goods: Vec::new(),
                 });
             entry.package_value += need.package_value;
-            for flow in &need.goods {
-                if let Some(existing) = entry
-                    .goods
-                    .iter_mut()
-                    .find(|row| row.good_id == flow.good_id)
-                {
-                    existing.quantity += flow.quantity;
-                    existing.value += flow.value;
+            for &(idx, quantity, value) in &need.goods {
+                let Some(good_id) = tables.good(idx).map(str::to_string) else {
+                    continue;
+                };
+                if let Some(existing) = entry.goods.iter_mut().find(|row| row.good_id == good_id) {
+                    existing.quantity += quantity;
+                    existing.value += value;
                 } else {
-                    entry.goods.push(flow.clone());
+                    entry.goods.push(GoodFlow {
+                        good_id,
+                        quantity,
+                        value,
+                    });
                 }
             }
         }

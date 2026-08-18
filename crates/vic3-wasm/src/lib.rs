@@ -29,7 +29,6 @@ use wasm_bindgen::prelude::*;
 pub use error::WasmError;
 
 struct LoadedAnalysis {
-    save: Save,
     defs: vic3_defs::GameDefs,
     world: World,
     solve_opts: SolveOpts,
@@ -59,8 +58,9 @@ pub fn parse_save(save_bytes: &[u8], tokens_bytes: Option<Vec<u8>>) -> Result<St
 
 /// Load one worker-owned analysis session and solve its baseline prices.
 ///
-/// The decoded save, definitions, and built world remain in wasm for subsequent
-/// prices, what-if, gaps, and plan calls. Loading another save replaces them.
+/// The built world, definitions, and baseline prices remain in wasm for
+/// subsequent prices, what-if, gaps, and plan calls. The save IR is dropped
+/// after [`World::from_save`]. Loading another save replaces the session.
 #[wasm_bindgen]
 pub fn load_analysis(
     save_bytes: &[u8],
@@ -77,7 +77,7 @@ pub fn load_analysis(
     .map_err(to_js)
 }
 
-/// Release the worker-owned save, definitions, world, and baseline prices.
+/// Release the worker-owned definitions, world, and baseline prices.
 #[wasm_bindgen]
 pub fn clear_analysis() {
     LOADED_ANALYSIS.with(|loaded| {
@@ -315,9 +315,9 @@ pub fn load_analysis_json(
         summary: SaveSummary::from(&save),
         prices: &prices,
     })?;
+    drop(save);
     LOADED_ANALYSIS.with(|loaded| {
         loaded.replace(Some(LoadedAnalysis {
-            save,
             defs,
             world,
             solve_opts,
@@ -342,8 +342,8 @@ pub fn loaded_what_if_json(what_if_opts_json: &str) -> Result<String, WasmError>
 pub fn loaded_gaps_json(goal: &str) -> Result<String, WasmError> {
     let goal = vic3_goals::parse(goal)?;
     with_loaded_analysis(|loaded| {
-        let country = country_tag(&loaded.save)?;
-        let state = PlanningState::from_save_with_prices(&loaded.save, country, &loaded.prices)?;
+        let country = country_tag(&loaded.world)?;
+        let state = PlanningState::from_world_with_prices(&loaded.world, country, &loaded.prices)?;
         let result = GapsResult {
             satisfied: vic3_goals::evaluate(&goal, &state),
             gaps: vic3_goals::gaps(&goal, &state),
@@ -357,8 +357,8 @@ pub fn loaded_plan_json(plan_opts_json: &str) -> Result<String, WasmError> {
     let plan_opts: PlanOpts = serde_json::from_str(plan_opts_json)?;
     let goal = vic3_goals::parse(&plan_opts.goal)?;
     with_loaded_analysis(|loaded| {
-        let country = country_tag(&loaded.save)?;
-        let state = PlanningState::from_save_with_prices(&loaded.save, country, &loaded.prices)?;
+        let country = country_tag(&loaded.world)?;
+        let state = PlanningState::from_world_with_prices(&loaded.world, country, &loaded.prices)?;
         let economy =
             EconomyContext::new(loaded.world.clone(), loaded.defs.clone(), loaded.solve_opts);
         let result = vic3_plan::plan_with_economy(
@@ -425,8 +425,9 @@ pub fn plan_json(
     let plan_opts: PlanOpts = serde_json::from_str(plan_opts_json)?;
     let world = World::from_save(&save, &defs);
     let prices = solve(&world, &defs, solve_opts);
-    let country = country_tag(&save)?;
-    let state = PlanningState::from_save_with_prices(&save, country, &prices)?;
+    let country = country_tag(&world)?;
+    drop(save);
+    let state = PlanningState::from_world_with_prices(&world, country, &prices)?;
     let goal = vic3_goals::parse(&plan_opts.goal)?;
     let economy = EconomyContext::new(world, defs, solve_opts);
     let result = vic3_plan::plan_with_economy(
@@ -454,8 +455,9 @@ pub fn gaps_json(
     let opts = parse_solve_opts(solve_opts_json)?;
     let world = World::from_save(&save, &defs);
     let prices = solve(&world, &defs, opts);
-    let country = country_tag(&save)?;
-    let state = PlanningState::from_save_with_prices(&save, country, &prices)?;
+    let country = country_tag(&world)?;
+    drop(save);
+    let state = PlanningState::from_world_with_prices(&world, country, &prices)?;
     let goal = vic3_goals::parse(goal)?;
     let result = GapsResult {
         satisfied: vic3_goals::evaluate(&goal, &state),
@@ -465,15 +467,8 @@ pub fn gaps_json(
     Ok(serde_json::to_string(&result)?)
 }
 
-fn country_tag(save: &Save) -> Result<&str, WasmError> {
-    played_country(save)
-        .map(|(_, country)| country.definition.as_str())
-        .or_else(|| {
-            save.countries()
-                .next()
-                .map(|(_, country)| country.definition.as_str())
-        })
-        .ok_or(WasmError::NoCountry)
+fn country_tag(world: &World) -> Result<&str, WasmError> {
+    world.player_country_tag().ok_or(WasmError::NoCountry)
 }
 
 fn played_country(save: &Save) -> Option<(u32, &vic3_load::Country)> {
@@ -973,5 +968,33 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(required.contains(&"building"));
         assert!(required.contains(&"extra_levels"));
+    }
+
+    #[test]
+    #[ignore = "set VIC3_SAVE, VIC3_TOKENS, and VIC3_GAME or VIC3_DEFS"]
+    fn live_load_analysis_session() {
+        use std::time::Instant;
+
+        let save = std::fs::read(std::env::var("VIC3_SAVE").expect("VIC3_SAVE")).expect("save");
+        let tokens = std::env::var("VIC3_TOKENS")
+            .ok()
+            .map(|path| std::fs::read(path).expect("tokens"));
+        let blob = if let Ok(path) = std::env::var("VIC3_DEFS") {
+            std::fs::read(path).expect("defs blob")
+        } else {
+            let defs =
+                load_from_path(std::env::var("VIC3_GAME").expect("VIC3_GAME")).expect("game defs");
+            encode_blob(&defs).expect("encode blob")
+        };
+        clear_analysis();
+        let started = Instant::now();
+        let json = load_analysis_json(&save, tokens.as_deref(), &blob, "{}").expect("load");
+        eprintln!("load_analysis {:?}", started.elapsed());
+        let payload: Value = serde_json::from_str(&json).expect("payload");
+        assert!(payload["summary"]["tag"].is_string());
+        let started = Instant::now();
+        loaded_gaps_json("research(tech=nitroglycerin)").expect("gaps");
+        eprintln!("loaded_gaps {:?}", started.elapsed());
+        clear_analysis();
     }
 }

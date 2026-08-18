@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use vic3_defs::{GameDefs, GoodIdx, GoodsVec, ProductionMethod};
-use vic3_load::{Building, Pop, Save};
+use vic3_load::{Building, Pop, Save, Vic3Date};
 
 /// Pop size unit for buy packages (Vic3: package values are per 10k working pops).
 pub const POP_SCALE: f64 = 10_000.0;
@@ -69,15 +69,27 @@ pub struct World {
     pub skipped_pops: usize,
     /// Save buildings dropped for a missing type id.
     pub skipped_buildings: usize,
+    /// Saved `meta_data.game_date` when present.
+    pub game_date: Option<Vic3Date>,
+    /// Played country tag from `previous_played`, when it resolves.
+    pub player_tag: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct WorldCountry {
     pub id: u32,
     pub tag: String,
     pub laws: Vec<String>,
     pub overlord: Option<u32>,
     pub subject_type: Option<String>,
+    /// Country-owned state ids from the save, used when state rows omit `country`.
+    pub states: Vec<u32>,
+    pub treasury: f64,
+    pub weekly_balance: Option<f64>,
+    pub debt_principal: Option<f64>,
+    pub credit_limit: Option<f64>,
+    pub credit_headroom: Option<f64>,
+    pub solvent: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -183,6 +195,18 @@ impl World {
         id.and_then(|id| self.names.get(id))
     }
 
+    /// Played tag, or the first live country if the save did not name a player.
+    pub fn player_country_tag(&self) -> Option<&str> {
+        self.player_tag
+            .as_deref()
+            .or_else(|| self.countries.first().map(|country| country.tag.as_str()))
+    }
+
+    /// First country whose `tag` matches.
+    pub fn country_by_tag(&self, tag: &str) -> Option<&WorldCountry> {
+        self.countries.iter().find(|country| country.tag == tag)
+    }
+
     /// Frozen market snapshot from save IR.
     ///
     /// Pops missing household population (or legacy `size`) or `wealth`,
@@ -196,16 +220,30 @@ impl World {
         let countries = save
             .country_manager
             .iter_present()
-            .map(|(id, country)| WorldCountry {
-                id,
-                tag: country.definition.clone(),
-                laws: save
-                    .active_laws(id)
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect(),
-                overlord: country.overlord,
-                subject_type: country.subject_type.clone(),
+            .map(|(id, country)| {
+                let budget = &country.budget;
+                WorldCountry {
+                    id,
+                    tag: country.definition.clone(),
+                    laws: save
+                        .active_laws(id)
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                    overlord: country.overlord,
+                    subject_type: country.subject_type.clone(),
+                    states: country.states.clone(),
+                    treasury: budget.treasury().unwrap_or(0.0),
+                    weekly_balance: budget
+                        .weekly_income
+                        .last()
+                        .copied()
+                        .filter(|value| value.is_finite()),
+                    debt_principal: budget.principal.filter(|value| value.is_finite()),
+                    credit_limit: budget.credit.filter(|value| value.is_finite()),
+                    credit_headroom: budget.credit_headroom(),
+                    solvent: budget.is_solvent(),
+                }
             })
             .collect();
         let states = save
@@ -296,6 +334,8 @@ impl World {
             frozen_buy: GoodsVec::zeros(defs.goods_order.len()),
             frozen_sell: GoodsVec::zeros(defs.goods_order.len()),
             state_trade,
+            game_date: save.meta_data.game_date,
+            player_tag: player_tag(save),
         }
     }
 
@@ -467,6 +507,24 @@ pub(crate) fn resolve_profession_key(key: &str) -> &str {
         }
     }
     key
+}
+
+fn player_tag(save: &Save) -> Option<String> {
+    save.previous_played
+        .iter()
+        .find_map(|player| {
+            let id = player.idtype?;
+            save.country_manager
+                .database
+                .get(&id)
+                .and_then(Option::as_ref)
+                .map(|country| country.definition.clone())
+        })
+        .or_else(|| {
+            save.previous_played
+                .iter()
+                .find_map(|player| player.name.clone())
+        })
 }
 
 fn intern_profession(names: &mut Intern, saved: Option<&str>) -> Option<u16> {

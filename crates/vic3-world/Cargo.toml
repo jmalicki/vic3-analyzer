@@ -17,3 +17,4 @@ vic3-prices = { path = "../vic3-prices" }
 
 [dev-dependencies]
 proptest.workspace = true
+vic3-defs = { path = "../vic3-defs" }

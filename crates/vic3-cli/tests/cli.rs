@@ -189,6 +189,22 @@ fn defs_export_writes_browser_blob_from_game_tree() {
     let blob = std::fs::read(&out).expect("exported defs blob");
     let defs = vic3_defs::decode_blob(&blob).expect("valid postcard defs");
     assert_eq!(defs.goods.len(), 3);
+
+    let assert = bin()
+        .args([
+            "prices",
+            "--save",
+            save_fixture().to_str().expect("utf8 save path"),
+            "--defs",
+            out.to_str().expect("utf8 defs blob"),
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let value: Value = serde_json::from_str(&stdout).expect("PricesResult JSON");
+    assert_prices_json(&value);
+
     std::fs::remove_dir_all(root).unwrap();
 }
 

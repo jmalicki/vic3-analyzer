@@ -11,7 +11,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use vic3_defs::GameDefs;
 use vic3_goals::Atom;
-use vic3_load::{empty_tokens, load_path, load_tokens_path, Save};
+use vic3_load::{empty_tokens, load_path, load_tokens_path};
 use vic3_plan::{compare, AnalysisRecord, PlanOpts, PlanResult};
 use vic3_prices::{solve, what_if, PricesResult, SolveOpts, WhatIfOpts, World};
 use vic3_sim::{EconomyContext, SimConfig};
@@ -95,8 +95,12 @@ struct IoArgs {
     #[arg(long, env = "VIC3_TOKENS")]
     tokens: Option<PathBuf>,
     /// Victoria 3 install, or a fixture tree with `common/` at the root.
+    /// Required unless `--defs` is set.
     #[arg(long, env = "VIC3_GAME")]
-    game: PathBuf,
+    game: Option<PathBuf>,
+    /// Postcard blob from `vic3-cli defs export`. Skips CoA compositing.
+    #[arg(long, env = "VIC3_DEFS")]
+    defs: Option<PathBuf>,
 }
 
 /// Flatten of [`SolveOpts`] — clap wrapper so wasm never links clap.
@@ -224,9 +228,19 @@ struct GapsResult {
     limitations: Vec<String>,
 }
 
+fn load_defs(io: &IoArgs) -> Result<GameDefs> {
+    if let Some(path) = &io.defs {
+        let bytes =
+            fs::read(path).with_context(|| format!("reading defs blob {}", path.display()))?;
+        return vic3_defs::decode_blob(&bytes)
+            .with_context(|| format!("decoding defs blob {}", path.display()));
+    }
+    let game = io.game.as_ref().context("provide --game or --defs")?;
+    vic3_defs::load_from_path(game).with_context(|| format!("loading defs from {}", game.display()))
+}
+
 fn load_world(io: &IoArgs) -> Result<(World, GameDefs)> {
-    let defs = vic3_defs::load_from_path(&io.game)
-        .with_context(|| format!("loading defs from {}", io.game.display()))?;
+    let defs = load_defs(io)?;
     let save = if let Some(tokens) = &io.tokens {
         let tokens = load_tokens_path(tokens)
             .with_context(|| format!("loading tokens from {}", tokens.display()))?;
@@ -238,21 +252,6 @@ fn load_world(io: &IoArgs) -> Result<(World, GameDefs)> {
     let world = World::from_save(&save, &defs);
     drop(save);
     Ok((world, defs))
-}
-
-fn load_inputs(io: &IoArgs) -> Result<(Save, World, GameDefs)> {
-    let defs = vic3_defs::load_from_path(&io.game)
-        .with_context(|| format!("loading defs from {}", io.game.display()))?;
-    let save = if let Some(tokens) = &io.tokens {
-        let tokens = load_tokens_path(tokens)
-            .with_context(|| format!("loading tokens from {}", tokens.display()))?;
-        load_path(&io.save, tokens)
-    } else {
-        load_path(&io.save, empty_tokens())
-    }
-    .with_context(|| format!("loading save from {}", io.save.display()))?;
-    let world = World::from_save(&save, &defs);
-    Ok((save, world, defs))
 }
 
 fn run_defs(cmd: DefsCli) -> Result<()> {
@@ -275,19 +274,12 @@ fn run_defs(cmd: DefsCli) -> Result<()> {
 }
 
 fn run_gaps(cmd: GapsCli) -> Result<()> {
-    let (save, world, defs) = load_inputs(&cmd.io)?;
+    let (world, defs) = load_world(&cmd.io)?;
     let prices = solve(&world, &defs, cmd.solve.into());
-    let country_tag = save
-        .previous_played
-        .iter()
-        .find_map(|player| player.name.as_deref())
-        .or_else(|| {
-            save.countries()
-                .next()
-                .map(|(_, country)| country.definition.as_str())
-        })
+    let country_tag = world
+        .player_country_tag()
         .context("save has no playable country")?;
-    let state = PlanningState::from_save_with_prices(&save, country_tag, &prices)?;
+    let state = PlanningState::from_world_with_prices(&world, country_tag, &prices)?;
     let goal = vic3_goals::parse(&cmd.goal)?;
     let result = GapsResult {
         satisfied: vic3_goals::evaluate(&goal, &state),
@@ -297,26 +289,18 @@ fn run_gaps(cmd: GapsCli) -> Result<()> {
     emit_gaps(&result, cmd.json)
 }
 
-fn country_tag(save: &Save) -> Result<&str> {
-    save.previous_played
-        .iter()
-        .find_map(|player| player.name.as_deref())
-        .or_else(|| {
-            save.countries()
-                .next()
-                .map(|(_, country)| country.definition.as_str())
-        })
-        .context("save has no playable country")
-}
-
 fn run_plan(cmd: PlanCli) -> Result<()> {
     let save_bytes = fs::read(&cmd.io.save)
         .with_context(|| format!("reading save {}", cmd.io.save.display()))?;
-    let (save, world, defs) = load_inputs(&cmd.io)?;
+    let (world, defs) = load_world(&cmd.io)?;
     let solve_opts: SolveOpts = cmd.solve.into();
     let prices = solve(&world, &defs, solve_opts);
-    let country = country_tag(&save)?;
-    let state = PlanningState::from_save_with_prices(&save, country, &prices)?;
+    let country = world
+        .player_country_tag()
+        .context("save has no playable country")?
+        .to_string();
+    let date = world.game_date.map(|date| date.game_fmt().to_string());
+    let state = PlanningState::from_world_with_prices(&world, &country, &prices)?;
     let goal = vic3_goals::parse(&cmd.goal)?;
     let economy = EconomyContext::new(world, defs, solve_opts);
     let result = vic3_plan::plan_with_economy(
@@ -342,11 +326,8 @@ fn run_plan(cmd: PlanCli) -> Result<()> {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect(),
-        date: save
-            .meta_data
-            .game_date
-            .map(|date| date.game_fmt().to_string()),
-        country: Some(country.to_string()),
+        date,
+        country: Some(country),
         filename: cmd
             .io
             .save

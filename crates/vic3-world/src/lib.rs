@@ -6,14 +6,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
-use vic3_prices::PricesResult;
+use vic3_prices::{PricesResult, World, WorldCountry};
 
 pub use vic3_load::{Save, Vic3Date};
 
-/// Failure while projecting a [`PlanningState`] from save IR.
+/// Failure while projecting a [`PlanningState`] from save IR or [`World`].
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum WorldError {
-    /// No live country whose `definition` matches the requested tag.
+    /// No live country whose `definition` / tag matches the requested tag.
     #[error("country tag `{0}` not found in save")]
     UnknownCountry(String),
 }
@@ -194,7 +194,8 @@ fn f64_map_eq(a: &BTreeMap<String, f64>, b: &BTreeMap<String, f64>) -> bool {
             .all(|((ka, va), (kb, vb))| ka == kb && f64_bits_eq(*va, *vb))
 }
 
-/// Something that can supply good id → price for [`PlanningState::from_save`].
+/// Something that can supply good id → price for [`PlanningState::from_save`]
+/// / [`PlanningState::from_world`].
 pub trait IntoPriceMap {
     fn into_price_map(self) -> BTreeMap<String, f64>;
 }
@@ -366,6 +367,67 @@ impl PlanningState {
         Ok(state)
     }
 
+    /// Project the player country from a compact [`World`] plus last prices.
+    ///
+    /// Techs, interest, army power, queued tech, and GDP default to empty / `0`
+    /// / `None`. Population-weighted wealth uses pops in states owned by this
+    /// country. Solvency and budget lines come from [`WorldCountry`].
+    pub fn from_world(
+        world: &World,
+        country_tag: &str,
+        prices: impl IntoPriceMap,
+    ) -> Result<Self, WorldError> {
+        let country = world
+            .country_by_tag(country_tag)
+            .ok_or_else(|| WorldError::UnknownCountry(country_tag.to_string()))?;
+        Ok(Self {
+            date: world.game_date.unwrap_or_else(default_date),
+            country: country.tag.clone(),
+            techs: BTreeSet::new(),
+            good_prices: prices.into_price_map(),
+            solvent: country.solvent,
+            treasury: country.treasury,
+            army_power_projection: 0.0,
+            interest: BTreeSet::new(),
+            queued_tech: None,
+            gdp: 0.0,
+            weekly_balance: country.weekly_balance,
+            population_weighted_wealth: population_weighted_wealth(world, country),
+            debt_principal: country.debt_principal,
+            credit_limit: country.credit_limit,
+            credit_headroom: country.credit_headroom,
+            building_level_deltas: BTreeMap::new(),
+            queued_building: None,
+        })
+    }
+
+    /// Project from a full price result, including modeled GDP.
+    ///
+    /// GDP is gross building output value (`revenue`) in states owned by the
+    /// selected country under the same solved prices.
+    pub fn from_world_with_prices(
+        world: &World,
+        country_tag: &str,
+        prices: &PricesResult,
+    ) -> Result<Self, WorldError> {
+        let country = world
+            .country_by_tag(country_tag)
+            .ok_or_else(|| WorldError::UnknownCountry(country_tag.to_string()))?;
+        let owned_states = owned_state_ids(world, country);
+        let mut state = Self::from_world(world, country_tag, prices)?;
+        state.gdp = prices
+            .buildings
+            .iter()
+            .filter(|building| {
+                building
+                    .state_id
+                    .is_some_and(|state_id| owned_states.contains(&state_id))
+            })
+            .map(|building| building.revenue.max(0.0))
+            .sum();
+        Ok(state)
+    }
+
     /// I8 fingerprint: identical state ⇒ identical `u64`.
     pub fn fingerprint(&self) -> u64 {
         let mut hasher = std::hash::DefaultHasher::new();
@@ -389,6 +451,60 @@ impl PlanningState {
     }
 }
 
+fn owned_state_ids(world: &World, country: &WorldCountry) -> BTreeSet<u32> {
+    let mut owned_states: BTreeSet<u32> = world
+        .states
+        .iter()
+        .filter_map(|state| (state.country == Some(country.id)).then_some(state.id))
+        .collect();
+    if owned_states.is_empty() {
+        owned_states.extend(country.states.iter().copied());
+    }
+    owned_states
+}
+
+fn population_weighted_wealth(world: &World, country: &WorldCountry) -> Option<f64> {
+    let owned_states = owned_state_ids(world, country);
+    let (weighted_sol, population) = if world.state_pops.is_empty() {
+        world
+            .pops
+            .iter()
+            .filter_map(|pop| {
+                let state = pop.state?;
+                if !owned_states.contains(&state) {
+                    return None;
+                }
+                Some((f64::from(pop.wealth) * pop.size, pop.size))
+            })
+            .fold(
+                (0.0, 0.0),
+                |(wealth, population), (next_wealth, next_population)| {
+                    (wealth + next_wealth, population + next_population)
+                },
+            )
+    } else {
+        world
+            .state_pops
+            .iter()
+            .filter_map(|pop| {
+                let state = pop.state?;
+                if !owned_states.contains(&state) {
+                    return None;
+                }
+                let size = pop.demand_size?;
+                let wealth = f64::from(pop.wealth?);
+                Some((wealth * size, size))
+            })
+            .fold(
+                (0.0, 0.0),
+                |(wealth, population), (next_wealth, next_population)| {
+                    (wealth + next_wealth, population + next_population)
+                },
+            )
+    };
+    (population > 0.0).then_some(weighted_sol / population)
+}
+
 /// Crate version from Cargo.
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
@@ -399,7 +515,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use vic3_load::{Budget, Country, Manager, Meta, Pop, Save, State};
-    use vic3_prices::{BuildingEconomics, GoodPrice, PricesResult, SolveStatus};
+    use vic3_prices::{BuildingEconomics, GoodPrice, PricesResult, SolveStatus, World};
 
     fn ger_save(treasury: f64) -> Save {
         ger_budget_save(
@@ -454,7 +570,7 @@ mod tests {
             buildings: Vec::new(),
             building_types: Vec::new(),
             building_groups: Vec::new(),
-            state_pops: Vec::new(),
+            state_pops: Vec::new().into(),
             countries: Vec::new(),
             inputs: Default::default(),
             residual: 0.0,
@@ -666,6 +782,122 @@ mod tests {
     fn from_save_unknown_tag() {
         let save = ger_save(1.0);
         let err = PlanningState::from_save(&save, "FRA", BTreeMap::new()).unwrap_err();
+        assert_eq!(err, WorldError::UnknownCountry("FRA".into()));
+    }
+
+    #[test]
+    fn from_world_matches_from_save_budget_and_date() {
+        let save = ger_save(10_000.0);
+        let world = World::from_save(&save, &vic3_defs::GameDefs::default());
+        let from_save = PlanningState::from_save(&save, "GER", ammo_prices(40.0)).unwrap();
+        let from_world = PlanningState::from_world(&world, "GER", ammo_prices(40.0)).unwrap();
+        assert_eq!(from_save, from_world);
+        assert_eq!(world.player_country_tag(), Some("GER"));
+        assert_eq!(world.game_date, Some(Vic3Date::from_ymdh(1850, 6, 1, 0)));
+    }
+
+    #[test]
+    fn from_world_population_weights_wealth_for_owned_states() {
+        let mut save = ger_save(10_000.0);
+        save.country_manager
+            .database
+            .get_mut(&1)
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .states = vec![20];
+        save.states.database.insert(
+            10,
+            Some(State {
+                country: Some(1),
+                ..State::default()
+            }),
+        );
+        save.states.database.insert(
+            20,
+            Some(State {
+                country: Some(2),
+                ..State::default()
+            }),
+        );
+        save.pops.database.insert(
+            1,
+            Some(Pop {
+                size: Some(1_000.0),
+                wealth: Some(10),
+                state: Some(10),
+                ..Pop::default()
+            }),
+        );
+        save.pops.database.insert(
+            2,
+            Some(Pop {
+                size: Some(3_000.0),
+                wealth: Some(20),
+                state: Some(10),
+                ..Pop::default()
+            }),
+        );
+        save.pops.database.insert(
+            3,
+            Some(Pop {
+                size: Some(10_000.0),
+                wealth: Some(99),
+                state: Some(20),
+                ..Pop::default()
+            }),
+        );
+
+        let world = World::from_save(&save, &vic3_defs::GameDefs::default());
+        let state = PlanningState::from_world(&world, "GER", BTreeMap::new()).unwrap();
+        assert_eq!(state.population_weighted_wealth, Some(17.5));
+    }
+
+    #[test]
+    fn from_world_with_prices_models_gdp_from_owned_building_revenue() {
+        let mut save = ger_save(10_000.0);
+        save.states.database.insert(
+            10,
+            Some(State {
+                country: Some(1),
+                ..State::default()
+            }),
+        );
+        save.states.database.insert(
+            20,
+            Some(State {
+                country: Some(2),
+                ..State::default()
+            }),
+        );
+        let mut prices = ammo_prices(40.0);
+        let building = |id, state_id, revenue| BuildingEconomics {
+            id,
+            state_id: Some(state_id),
+            type_id: "building_factory".into(),
+            level: 1.0,
+            staffing: 1.0,
+            production_method_ids: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            revenue,
+            cost: 0.0,
+            profit: revenue,
+            short_inputs: Vec::new(),
+            employees: Vec::new(),
+        };
+        prices.buildings = vec![building(1, 10, 125.0), building(2, 20, 900.0)];
+
+        let world = World::from_save(&save, &vic3_defs::GameDefs::default());
+        let state = PlanningState::from_world_with_prices(&world, "GER", &prices).unwrap();
+        assert_eq!(state.gdp, 125.0);
+    }
+
+    #[test]
+    fn from_world_unknown_tag() {
+        let save = ger_save(1.0);
+        let world = World::from_save(&save, &vic3_defs::GameDefs::default());
+        let err = PlanningState::from_world(&world, "FRA", BTreeMap::new()).unwrap_err();
         assert_eq!(err, WorldError::UnknownCountry("FRA".into()));
     }
 

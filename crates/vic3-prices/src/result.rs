@@ -1,9 +1,16 @@
 //! Option and result types matching `docs/json-schema.md` (`PricesResult`).
 
+use std::collections::BTreeMap;
 use std::fmt;
+use std::ops::{Deref, Index};
+use std::sync::OnceLock;
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeSeq;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use vic3_defs::{GameDefs, GoodIdx, NeedIdx};
+
+use crate::world::Intern;
 
 /// Solver iteration / residual tolerances.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -263,6 +270,341 @@ impl MarketInputs {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct EmitTables {
+    names: Intern,
+    labels: BTreeMap<String, String>,
+    goods_order: Vec<String>,
+    needs_order: Vec<String>,
+}
+
+impl EmitTables {
+    pub(crate) fn from_world(world: &crate::World, defs: &GameDefs) -> Self {
+        Self {
+            names: world.names.clone(),
+            labels: defs.labels.clone(),
+            goods_order: defs.goods_order.clone(),
+            needs_order: defs.needs_order.clone(),
+        }
+    }
+
+    pub(crate) fn name(&self, id: Option<u16>) -> Option<&str> {
+        id.and_then(|id| self.names.get(id))
+    }
+
+    pub(crate) fn label(&self, id: &str) -> Option<&str> {
+        self.labels.get(id).map(String::as_str)
+    }
+
+    pub(crate) fn good(&self, idx: GoodIdx) -> Option<&str> {
+        self.goods_order.get(idx.as_usize()).map(String::as_str)
+    }
+
+    pub(crate) fn need(&self, idx: NeedIdx) -> Option<&str> {
+        self.needs_order.get(idx.as_usize()).map(String::as_str)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CompactNeed {
+    pub need_idx: NeedIdx,
+    pub package_value: f64,
+    pub goods: Vec<(GoodIdx, f64, f64)>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CompactStatePop {
+    pub state_id: u32,
+    pub id: Option<u32>,
+    pub profession: Option<u16>,
+    pub culture: Option<u16>,
+    pub demand_size: Option<f64>,
+    pub workforce: Option<f64>,
+    pub dependents: Option<f64>,
+    pub wealth: Option<i32>,
+    pub literate: Option<f64>,
+    pub workplace_id: Option<u32>,
+    pub qualifications: Vec<(u16, f64)>,
+    pub needs: Vec<CompactNeed>,
+}
+
+/// JSON `state_pops` array. Solver rows stay interned until serialize / first field access.
+#[derive(Clone, Debug)]
+pub struct StatePopList {
+    inner: StatePopStorage,
+}
+
+#[derive(Debug)]
+enum StatePopStorage {
+    Compact {
+        tables: EmitTables,
+        rows: Vec<CompactStatePop>,
+        cache: OnceLock<Vec<StatePop>>,
+    },
+    Materialized(Vec<StatePop>),
+}
+
+impl Clone for StatePopStorage {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Materialized(rows) => Self::Materialized(rows.clone()),
+            Self::Compact {
+                tables,
+                rows,
+                cache,
+            } => {
+                let next = OnceLock::new();
+                if let Some(rows) = cache.get() {
+                    let _ = next.set(rows.clone());
+                }
+                Self::Compact {
+                    tables: tables.clone(),
+                    rows: rows.clone(),
+                    cache: next,
+                }
+            }
+        }
+    }
+}
+
+impl Default for StatePopList {
+    fn default() -> Self {
+        Self {
+            inner: StatePopStorage::Materialized(Vec::new()),
+        }
+    }
+}
+
+impl PartialEq for StatePopList {
+    fn eq(&self, other: &Self) -> bool {
+        self.deref() == other.deref()
+    }
+}
+
+impl StatePopList {
+    pub(crate) fn compact(tables: EmitTables, rows: Vec<CompactStatePop>) -> Self {
+        Self {
+            inner: StatePopStorage::Compact {
+                tables,
+                rows,
+                cache: OnceLock::new(),
+            },
+        }
+    }
+
+    fn materialize_compact(tables: &EmitTables, rows: &[CompactStatePop]) -> Vec<StatePop> {
+        rows.iter()
+            .map(|row| materialize_state_pop(tables, row))
+            .collect()
+    }
+}
+
+impl Deref for StatePopList {
+    type Target = [StatePop];
+
+    fn deref(&self) -> &[StatePop] {
+        match &self.inner {
+            StatePopStorage::Materialized(rows) => rows,
+            StatePopStorage::Compact {
+                tables,
+                rows,
+                cache,
+            } => cache.get_or_init(|| Self::materialize_compact(tables, rows)),
+        }
+    }
+}
+
+impl Index<usize> for StatePopList {
+    type Output = StatePop;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.deref()[index]
+    }
+}
+
+impl From<Vec<StatePop>> for StatePopList {
+    fn from(rows: Vec<StatePop>) -> Self {
+        Self {
+            inner: StatePopStorage::Materialized(rows),
+        }
+    }
+}
+
+impl Serialize for StatePopList {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match &self.inner {
+            StatePopStorage::Materialized(rows) => rows.serialize(serializer),
+            StatePopStorage::Compact {
+                tables,
+                rows,
+                cache,
+            } => {
+                if let Some(rows) = cache.get() {
+                    return rows.serialize(serializer);
+                }
+                let mut seq = serializer.serialize_seq(Some(rows.len()))?;
+                for row in rows {
+                    seq.serialize_element(&StatePopSer::from_row(tables, row))?;
+                }
+                seq.end()
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for StatePopList {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Vec::<StatePop>::deserialize(deserializer)?.into())
+    }
+}
+
+#[derive(Serialize)]
+struct StatePopSer<'a> {
+    state_id: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<u32>,
+    profession_id: Option<&'a str>,
+    profession_name: Option<&'a str>,
+    demand_size: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workforce: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dependents: Option<f64>,
+    wealth: Option<i32>,
+    culture_id: Option<&'a str>,
+    culture_name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    literate: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workplace_id: Option<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    qualifications: Vec<ProfessionCountSer<'a>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    needs: Vec<NeedSer<'a>>,
+}
+
+#[derive(Serialize)]
+struct ProfessionCountSer<'a> {
+    profession_id: &'a str,
+    profession_name: Option<&'a str>,
+    count: f64,
+}
+
+#[derive(Serialize)]
+struct NeedSer<'a> {
+    need_id: &'a str,
+    need_name: Option<&'a str>,
+    package_value: f64,
+    goods: Vec<GoodFlowSer<'a>>,
+}
+
+#[derive(Serialize)]
+struct GoodFlowSer<'a> {
+    good_id: &'a str,
+    quantity: f64,
+    value: f64,
+}
+
+impl<'a> StatePopSer<'a> {
+    fn from_row(tables: &'a EmitTables, row: &'a CompactStatePop) -> Self {
+        Self {
+            state_id: row.state_id,
+            id: row.id,
+            profession_id: tables.name(row.profession),
+            profession_name: tables.name(row.profession).and_then(|id| tables.label(id)),
+            demand_size: row.demand_size,
+            workforce: row.workforce,
+            dependents: row.dependents,
+            wealth: row.wealth,
+            culture_id: tables.name(row.culture),
+            culture_name: tables.name(row.culture).and_then(|id| tables.label(id)),
+            literate: row.literate,
+            workplace_id: row.workplace_id,
+            qualifications: row
+                .qualifications
+                .iter()
+                .filter(|(_, count)| *count > 0.0)
+                .filter_map(|&(id, count)| {
+                    let profession_id = tables.names.get(id)?;
+                    Some(ProfessionCountSer {
+                        profession_id,
+                        profession_name: tables.label(profession_id),
+                        count,
+                    })
+                })
+                .collect(),
+            needs: row
+                .needs
+                .iter()
+                .filter_map(|need| {
+                    let need_id = tables.need(need.need_idx)?;
+                    Some(NeedSer {
+                        need_id,
+                        need_name: tables.label(need_id),
+                        package_value: need.package_value,
+                        goods: need
+                            .goods
+                            .iter()
+                            .filter_map(|&(idx, quantity, value)| {
+                                Some(GoodFlowSer {
+                                    good_id: tables.good(idx)?,
+                                    quantity,
+                                    value,
+                                })
+                            })
+                            .collect(),
+                    })
+                })
+                .collect(),
+        }
+    }
+}
+
+fn materialize_state_pop(tables: &EmitTables, row: &CompactStatePop) -> StatePop {
+    let ser = StatePopSer::from_row(tables, row);
+    StatePop {
+        state_id: ser.state_id,
+        id: ser.id,
+        profession_id: ser.profession_id.map(str::to_string),
+        profession_name: ser.profession_name.map(str::to_string),
+        demand_size: ser.demand_size,
+        workforce: ser.workforce,
+        dependents: ser.dependents,
+        wealth: ser.wealth,
+        culture_id: ser.culture_id.map(str::to_string),
+        culture_name: ser.culture_name.map(str::to_string),
+        literate: ser.literate,
+        workplace_id: ser.workplace_id,
+        qualifications: ser
+            .qualifications
+            .into_iter()
+            .map(|row| ProfessionCount {
+                profession_id: row.profession_id.to_string(),
+                profession_name: row.profession_name.map(str::to_string),
+                count: row.count,
+            })
+            .collect(),
+        needs: ser
+            .needs
+            .into_iter()
+            .map(|need| PopNeedBasket {
+                need_id: need.need_id.to_string(),
+                need_name: need.need_name.map(str::to_string),
+                package_value: need.package_value,
+                goods: need
+                    .goods
+                    .into_iter()
+                    .map(|flow| GoodFlow {
+                        good_id: flow.good_id.to_string(),
+                        quantity: flow.quantity,
+                        value: flow.value,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
 /// Price-equilibrium output. `limitations` is always the crate [`crate::LIMITATIONS`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PricesResult {
@@ -275,7 +617,8 @@ pub struct PricesResult {
     pub buildings: Vec<BuildingEconomics>,
     pub building_types: Vec<BuildingTypeInfo>,
     pub building_groups: Vec<BuildingGroupInfo>,
-    pub state_pops: Vec<StatePop>,
+    #[schemars(with = "Vec<StatePop>")]
+    pub state_pops: StatePopList,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub state_qualifications: Vec<StateQualification>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
