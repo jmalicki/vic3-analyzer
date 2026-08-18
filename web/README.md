@@ -36,6 +36,8 @@ the next visit, labelled as such, with a button to forget them — otherwise a
 reload would quietly leave the app with no definitions at all. The last `.v3`
 save (and optional token map) is kept the same way (`saveStore.ts`), together
 with the last prices solve so a reload can paint the table before wasm reruns.
+Bump `PRICES_CACHE_VERSION` in `saveStore.ts` when the solver or result shape
+changes so an old table is not restored.
 
 Analysis tools stay greyed out until definitions are available, and long reads
 report progress: a determinate bar over the selected file count and an

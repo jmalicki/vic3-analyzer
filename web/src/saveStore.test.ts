@@ -1,3 +1,4 @@
+import { openDB } from 'idb'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { clearStoredSave, loadStoredSave, storeSave, storeSaveAnalysis } from './saveStore'
 import type { PricesResult, SaveSummary } from './types'
@@ -43,5 +44,17 @@ describe('save store', () => {
     const stored = await loadStoredSave()
     expect(stored?.summary).toEqual(summary)
     expect(stored?.prices?.goods[0]?.id).toBe('iron')
+  })
+
+  it('ignores a prices solve from another cache version', async () => {
+    await storeSave(new File(['campaign'], 'prussia.v3'))
+    await storeSaveAnalysis(summary, prices)
+    const database = await openDB('vic3-analyzer-save', 1)
+    const current = await database.get('saves', 'current')
+    await database.put('saves', { ...current, prices_cache_version: 0 })
+    const stored = await loadStoredSave()
+    expect(stored?.save.name).toBe('prussia.v3')
+    expect(stored?.summary).toEqual(summary)
+    expect(stored?.prices).toBeUndefined()
   })
 })

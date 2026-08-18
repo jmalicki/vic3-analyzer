@@ -2,6 +2,12 @@ import { openDB, type DBSchema } from 'idb'
 import type { PricesResult, SaveSummary } from './types'
 
 /**
+ * Bump when the prices solver or `PricesResult` shape changes so a reload does
+ * not paint a stale table. The save itself is still restored.
+ */
+export const PRICES_CACHE_VERSION = 1
+
+/**
  * The last save a user dropped or picked, plus its last prices solve, so a
  * reload can show the campaign immediately without waiting on wasm.
  */
@@ -15,6 +21,7 @@ export interface StoredSave {
   saved_at: string
   summary?: SaveSummary
   prices?: PricesResult
+  prices_cache_version?: number
 }
 
 interface SaveDb extends DBSchema {
@@ -102,6 +109,7 @@ export async function storeSaveAnalysis(
       ...current,
       summary,
       prices,
+      prices_cache_version: PRICES_CACHE_VERSION,
     })
   })
 }
@@ -116,11 +124,12 @@ export async function loadStoredSave(): Promise<
   const tokens = stored.tokens
     ? await fileFromStored(stored.tokens, stored.tokens_name ?? 'tokens.txt')
     : undefined
+  const pricesFresh = stored.prices_cache_version === PRICES_CACHE_VERSION
   return {
     save,
     tokens,
     summary: stored.summary,
-    prices: stored.prices,
+    prices: pricesFresh ? stored.prices : undefined,
   }
 }
 
