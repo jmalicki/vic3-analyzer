@@ -92,10 +92,21 @@ const nativeImport = Function('url', 'return import(url)') as (
   url: string,
 ) => Promise<Record<string, unknown>>
 
+function wasmCacheBust(): string {
+  return typeof __GIT_REVISION__ === 'string' && __GIT_REVISION__
+    ? __GIT_REVISION__
+    : 'dev'
+}
+
 function defaultModuleUrl(): string {
   const base = import.meta.env.BASE_URL || '/'
   const prefix = base.endsWith('/') ? base : `${base}/`
-  return `${prefix}wasm/vic3_wasm.js`
+  // Unhashed public/wasm/* is otherwise reused from a previous Pages deploy.
+  return `${prefix}wasm/vic3_wasm.js?v=${wasmCacheBust()}`
+}
+
+function defaultWasmUrl(jsUrl: string): string {
+  return new URL(`vic3_wasm_bg.wasm?v=${wasmCacheBust()}`, jsUrl).href
 }
 
 export function loadWasm(options?: LoadWasmOptions): Promise<WasmApi> {
@@ -106,7 +117,9 @@ export function loadWasm(options?: LoadWasmOptions): Promise<WasmApi> {
   cached ??= modulePromise.then(async (module) => {
     if (typeof module.default === 'function') {
       await module.default(
-        options?.moduleOrPath !== undefined ? options.moduleOrPath : undefined,
+        options?.moduleOrPath !== undefined
+          ? options.moduleOrPath
+          : defaultWasmUrl(wasmPath),
       )
     }
     return module as unknown as WasmApi
