@@ -1,10 +1,47 @@
 //! Synthetic (and later IR-backed) market: pops, buildings, frozen orders.
 
+use std::collections::HashMap;
+
 use vic3_defs::{GameDefs, GoodIdx, GoodsVec, ProductionMethod};
 use vic3_load::{Building, Pop, Save};
 
 /// Pop size unit for buy packages (Vic3: package values are per 10k working pops).
 pub const POP_SCALE: f64 = 10_000.0;
+
+/// Script-id intern table (cultures and professions) filled by [`World::from_save`].
+#[derive(Debug, Clone, Default)]
+pub struct Intern {
+    strings: Vec<String>,
+    index: HashMap<String, u16>,
+}
+
+impl PartialEq for Intern {
+    fn eq(&self, other: &Self) -> bool {
+        self.strings == other.strings
+    }
+}
+
+impl Intern {
+    fn intern(&mut self, s: &str) -> u16 {
+        if let Some(&id) = self.index.get(s) {
+            return id;
+        }
+        let id = u16::try_from(self.strings.len()).expect("intern table exceeds u16");
+        self.index.insert(s.to_string(), id);
+        self.strings.push(s.to_string());
+        id
+    }
+
+    /// Script id for an interned handle.
+    pub fn get(&self, id: u16) -> Option<&str> {
+        self.strings.get(usize::from(id)).map(String::as_str)
+    }
+
+    /// Handle for a script id already in the table.
+    pub fn id_of(&self, s: &str) -> Option<u16> {
+        self.index.get(s).copied()
+    }
+}
 
 /// Market snapshot owned by this crate. Can be filled from `vic3-load` IR later.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -15,6 +52,8 @@ pub struct World {
     /// All save pops retained for state detail, including rows that could not
     /// enter the consumption model.
     pub state_pops: Vec<WorldStatePop>,
+    /// Culture / profession strings indexed by the `u16` ids on pops and states.
+    pub names: Intern,
     pub buildings: Vec<WorldBuilding>,
     /// Government / trade / construction buy orders, held fixed during the solve.
     pub frozen_buy: GoodsVec,
@@ -50,9 +89,9 @@ pub struct WorldState {
     pub arable_land: Option<f64>,
     pub infrastructure: Option<f64>,
     pub infrastructure_usage: Option<f64>,
-    pub qualifications: std::collections::BTreeMap<String, f64>,
-    pub employable_qualifications: std::collections::BTreeMap<String, f64>,
-    pub workforce_by_type: std::collections::BTreeMap<String, f64>,
+    pub qualifications: Vec<(u16, f64)>,
+    pub employable_qualifications: Vec<(u16, f64)>,
+    pub workforce_by_type: Vec<(u16, f64)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -72,8 +111,8 @@ pub struct WorldPop {
     pub wealth: u8,
     /// Frozen wage bill. When `≤ 0`, wealth stays at [`Self::wealth`].
     pub wages: f64,
-    pub culture: Option<String>,
-    pub profession: Option<String>,
+    pub culture: Option<u16>,
+    pub profession: Option<u16>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -85,11 +124,11 @@ pub struct WorldStatePop {
     pub dependents: Option<f64>,
     pub wealth: Option<i32>,
     pub wages: Option<f64>,
-    pub culture: Option<String>,
-    pub profession: Option<String>,
+    pub culture: Option<u16>,
+    pub profession: Option<u16>,
     pub literate: Option<f64>,
     pub workplace_id: Option<u32>,
-    pub qualifications: std::collections::BTreeMap<String, f64>,
+    pub qualifications: Vec<(u16, f64)>,
 }
 
 /// A building whose goods IO is reconstructed from defs PMs and then frozen
@@ -134,12 +173,26 @@ pub fn reconstruct_non_pop_orders(world: &World, defs: &GameDefs) -> (GoodsVec, 
 }
 
 impl World {
+    /// Script id for an interned culture or profession handle.
+    pub fn name(&self, id: u16) -> Option<&str> {
+        self.names.get(id)
+    }
+
+    /// Script id when the handle is present.
+    pub fn name_opt(&self, id: Option<u16>) -> Option<&str> {
+        id.and_then(|id| self.names.get(id))
+    }
+
     /// Frozen market snapshot from save IR.
     ///
     /// Pops missing household population (or legacy `size`) or `wealth`,
     /// buildings with an empty type id, and state trade entries with unknown
     /// goods-table indices are skipped.
     pub fn from_save(save: &Save, defs: &GameDefs) -> Self {
+        let mut names = Intern::default();
+        for profession in VANILLA_POP_TYPES {
+            names.intern(profession);
+        }
         let countries = save
             .country_manager
             .iter_present()
@@ -175,16 +228,26 @@ impl World {
                 arable_land: state.arable_land,
                 infrastructure: state.infrastructure,
                 infrastructure_usage: state.infrastructure_usage,
-                qualifications: resolve_qty_map(&state.qualifications.values),
-                employable_qualifications: resolve_qty_map(&state.employable().values),
-                workforce_by_type: resolve_qty_map(&state.workforce_by_profession().values),
+                qualifications: intern_qty_map(&mut names, &state.qualifications.values),
+                employable_qualifications: intern_qty_map(&mut names, &state.employable().values),
+                workforce_by_type: intern_qty_map(
+                    &mut names,
+                    &state.workforce_by_profession().values,
+                ),
             })
             .collect();
-        let saved_pops = save.pops.iter_present().count();
-        let state_pops = save
-            .pops
-            .iter_present()
-            .map(|(id, pop)| WorldStatePop {
+        let mut saved_pops = 0usize;
+        let mut state_pops = Vec::new();
+        let mut pops = Vec::new();
+        for (id, pop) in save.pops.iter_present() {
+            saved_pops += 1;
+            let culture = intern_culture(&mut names, save, pop.culture.as_deref());
+            let profession = intern_profession(&mut names, pop.profession.as_deref());
+            let qualifications = intern_qty_map(&mut names, &pop.qualifications.values);
+            if let Some(world_pop) = WorldPop::from_ir(pop, culture, profession) {
+                pops.push(world_pop);
+            }
+            state_pops.push(WorldStatePop {
                 id,
                 state: pop.state,
                 demand_size: pop.demand_size(),
@@ -192,23 +255,13 @@ impl World {
                 dependents: pop.dependents,
                 wealth: pop.wealth,
                 wages: pop.wages,
-                culture: save.culture_id(pop.culture.as_deref()),
-                profession: pop.profession.clone(),
+                culture,
+                profession,
                 literate: pop.literate,
                 workplace_id: pop.workplace,
-                qualifications: resolve_qty_map(&pop.qualifications.values),
-            })
-            .collect();
-        let pops: Vec<_> = save
-            .pops
-            .iter_present()
-            .filter_map(|(_, pop)| {
-                WorldPop::from_ir(pop).map(|mut world_pop| {
-                    world_pop.culture = save.culture_id(pop.culture.as_deref());
-                    world_pop
-                })
-            })
-            .collect();
+                qualifications,
+            });
+        }
         let saved_buildings = save.building_manager.iter_present().count();
         let buildings: Vec<_> = save
             .building_manager
@@ -238,6 +291,7 @@ impl World {
             states,
             pops,
             state_pops,
+            names,
             buildings,
             frozen_buy: GoodsVec::zeros(defs.goods_order.len()),
             frozen_sell: GoodsVec::zeros(defs.goods_order.len()),
@@ -283,7 +337,7 @@ impl World {
 }
 
 impl WorldPop {
-    fn from_ir(pop: &Pop) -> Option<Self> {
+    fn from_ir(pop: &Pop, culture: Option<u16>, profession: Option<u16>) -> Option<Self> {
         let size = pop.demand_size()?;
         let wealth = pop.wealth?;
         let wealth = u8::try_from(wealth.clamp(1, 99)).ok()?;
@@ -292,8 +346,8 @@ impl WorldPop {
             size,
             wealth,
             wages: pop.wages.filter(|w| *w > 0.0).unwrap_or(0.0),
-            culture: pop.culture.clone(),
-            profession: pop.profession.clone(),
+            culture,
+            profession,
         })
     }
 }
@@ -406,23 +460,52 @@ pub const VANILLA_POP_TYPES: &[&str] = &[
     "soldiers",
 ];
 
-pub(crate) fn resolve_profession_key(key: &str) -> String {
+pub(crate) fn resolve_profession_key(key: &str) -> &str {
     if let Ok(index) = key.parse::<usize>() {
         if let Some(id) = VANILLA_POP_TYPES.get(index) {
-            return (*id).to_string();
+            return id;
         }
     }
-    key.to_string()
+    key
 }
 
-fn resolve_qty_map(
+fn intern_profession(names: &mut Intern, saved: Option<&str>) -> Option<u16> {
+    let saved = saved.filter(|value| !value.is_empty())?;
+    Some(names.intern(resolve_profession_key(saved)))
+}
+
+fn intern_culture(names: &mut Intern, save: &Save, saved: Option<&str>) -> Option<u16> {
+    let saved = saved.filter(|value| !value.is_empty())?;
+    if let Ok(index) = saved.parse::<u32>() {
+        if let Some(culture) = save.cultures.database.get(&index).and_then(Option::as_ref) {
+            if !culture.id.is_empty() {
+                return Some(names.intern(&culture.id));
+            }
+        }
+    }
+    Some(names.intern(saved))
+}
+
+fn intern_qty_map(
+    names: &mut Intern,
     raw: &std::collections::BTreeMap<String, f64>,
-) -> std::collections::BTreeMap<String, f64> {
-    let mut out = std::collections::BTreeMap::new();
+) -> Vec<(u16, f64)> {
+    let mut out = Vec::new();
     for (key, qty) in raw {
-        *out.entry(resolve_profession_key(key)).or_default() += *qty;
+        let id = names.intern(resolve_profession_key(key));
+        if let Some(existing) = out.iter_mut().find(|(stored, _)| *stored == id) {
+            existing.1 += *qty;
+        } else {
+            out.push((id, *qty));
+        }
     }
     out
+}
+
+pub(crate) fn qty_value(rows: &[(u16, f64)], id: u16) -> Option<f64> {
+    rows.iter()
+        .find(|(stored, _)| *stored == id)
+        .map(|(_, qty)| *qty)
 }
 
 fn resolve_saved_goods(
@@ -552,7 +635,7 @@ mod tests {
         let weighted_pop = world
             .pops
             .iter()
-            .find(|pop| pop.culture.as_deref() == Some("weighted_size"))
+            .find(|pop| world.name_opt(pop.culture) == Some("weighted_size"))
             .expect("pop with split size fields");
         assert_eq!(weighted_pop.size, 10_000.0);
         assert_eq!(weighted_pop.wealth, 8);
@@ -740,6 +823,16 @@ mod tests {
         assert_eq!(world.countries[0].laws, ["law_autocracy"]);
         assert_eq!(world.buildings.len(), 1);
         assert_eq!(world.buildings[0].building, "building_rye_farm");
+        assert_eq!(world.name_opt(world.pops[0].profession), Some("farmers"));
+        assert_eq!(world.name_opt(world.pops[0].culture), Some("north_german"));
+        assert!(
+            world.state_pops[0]
+                .qualifications
+                .iter()
+                .any(|&(id, count)| world.name(id) == Some("academics")
+                    && (count - 1.5).abs() < 1e-9),
+            "packed qualification 0 interns as academics"
+        );
         let result = crate::solve(&world, &defs, crate::SolveOpts::default());
         assert!(result.inputs.goods_with_orders > 0);
         assert_eq!(result.inputs.buildings_without_orders, 0);

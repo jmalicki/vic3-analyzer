@@ -21,7 +21,7 @@ pub use result::{
 };
 pub use solve::{solve, what_if};
 pub use world::{
-    reconstruct_non_pop_orders, World, WorldBuilding, WorldCountry, WorldPop, WorldState,
+    reconstruct_non_pop_orders, Intern, World, WorldBuilding, WorldCountry, WorldPop, WorldState,
     WorldStatePop, WorldStateTrade, POP_SCALE,
 };
 

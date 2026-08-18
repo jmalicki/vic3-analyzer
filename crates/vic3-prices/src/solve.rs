@@ -18,7 +18,7 @@ use crate::result::{
     MarketInputs, PopNeedBasket, PricesResult, ProfessionCount, SolveOpts, SolveStatus, StateGood,
     StateInfo, StateNeed, StatePop, StateQualification,
 };
-use crate::world::{World, WorldPop, WorldStatePop};
+use crate::world::{qty_value, World, WorldPop, WorldStatePop};
 use crate::LIMITATIONS;
 
 const WARM_START_ALPHA: f64 = 0.5;
@@ -411,24 +411,31 @@ fn detail_rows(
     }
 }
 
-fn profession_counts(map: &BTreeMap<String, f64>, defs: &GameDefs) -> Vec<ProfessionCount> {
-    map.iter()
-        .filter(|(_, count)| **count > 0.0)
-        .map(|(id, count)| ProfessionCount {
-            profession_id: id.clone(),
-            profession_name: defs.labels.get(id).cloned(),
-            count: *count,
+fn profession_counts<I>(pairs: I, world: &World, defs: &GameDefs) -> Vec<ProfessionCount>
+where
+    I: IntoIterator<Item = (u16, f64)>,
+{
+    pairs
+        .into_iter()
+        .filter(|(_, count)| *count > 0.0)
+        .filter_map(|(id, count)| {
+            let profession_id = world.name(id)?.to_string();
+            Some(ProfessionCount {
+                profession_name: defs.labels.get(&profession_id).cloned(),
+                profession_id,
+                count,
+            })
         })
         .collect()
 }
 
 fn building_employees(world: &World, defs: &GameDefs) -> BTreeMap<u32, Vec<ProfessionCount>> {
-    let mut counts: BTreeMap<u32, BTreeMap<String, f64>> = BTreeMap::new();
+    let mut counts: BTreeMap<u32, BTreeMap<u16, f64>> = BTreeMap::new();
     for pop in &world.state_pops {
         let Some(building_id) = pop.workplace_id else {
             continue;
         };
-        let Some(profession) = pop.profession.as_ref() else {
+        let Some(profession) = pop.profession else {
             continue;
         };
         let workforce = pop.workforce.unwrap_or(0.0);
@@ -438,16 +445,16 @@ fn building_employees(world: &World, defs: &GameDefs) -> BTreeMap<u32, Vec<Profe
         *counts
             .entry(building_id)
             .or_default()
-            .entry(profession.clone())
+            .entry(profession)
             .or_default() += workforce;
     }
     counts
         .into_iter()
-        .map(|(building_id, by_prof)| (building_id, profession_counts(&by_prof, defs)))
+        .map(|(building_id, by_prof)| (building_id, profession_counts(by_prof, world, defs)))
         .collect()
 }
 
-type GroupKey<'a> = (u32, Option<&'a str>, Option<&'a str>, Option<i32>);
+type GroupKey = (u32, Option<u16>, Option<u16>, Option<i32>);
 
 struct PopGroup {
     id: u32,
@@ -457,11 +464,11 @@ struct PopGroup {
     dependents: Option<f64>,
     wealth: Option<i32>,
     wages: Option<f64>,
-    culture: Option<String>,
-    profession: Option<String>,
+    culture: Option<u16>,
+    profession: Option<u16>,
     literate: Option<f64>,
     workplace_id: Option<u32>,
-    qualifications: BTreeMap<String, f64>,
+    qualifications: BTreeMap<u16, f64>,
 }
 
 impl PopGroup {
@@ -474,11 +481,11 @@ impl PopGroup {
             dependents: pop.dependents,
             wealth: pop.wealth,
             wages: pop.wages,
-            culture: pop.culture.clone(),
-            profession: pop.profession.clone(),
+            culture: pop.culture,
+            profession: pop.profession,
             literate: pop.literate,
             workplace_id: pop.workplace_id,
-            qualifications: pop.qualifications.clone(),
+            qualifications: pop.qualifications.iter().copied().collect(),
         }
     }
 
@@ -491,8 +498,8 @@ impl PopGroup {
             dependents: Some(0.0),
             wealth: Some(i32::from(pop.wealth)),
             wages: Some(pop.wages),
-            culture: pop.culture.clone(),
-            profession: pop.profession.clone(),
+            culture: pop.culture,
+            profession: pop.profession,
             literate: None,
             workplace_id: None,
             qualifications: BTreeMap::new(),
@@ -512,8 +519,8 @@ impl PopGroup {
         if self.workplace_id != pop.workplace_id {
             self.workplace_id = None;
         }
-        for (profession, count) in &pop.qualifications {
-            *self.qualifications.entry(profession.clone()).or_default() += *count;
+        for &(profession, count) in &pop.qualifications {
+            *self.qualifications.entry(profession).or_default() += count;
         }
     }
 
@@ -535,7 +542,7 @@ fn collapsed_state_pops(
     units: &UnitBaskets,
     snapshot: Option<&ShopSnapshot>,
 ) -> Vec<StatePop> {
-    let mut groups: BTreeMap<GroupKey<'_>, PopGroup> = BTreeMap::new();
+    let mut groups: BTreeMap<GroupKey, PopGroup> = BTreeMap::new();
     if world.state_pops.is_empty() {
         for (index, pop) in world.pops.iter().enumerate() {
             let Some(state_id) = pop.state else {
@@ -543,8 +550,8 @@ fn collapsed_state_pops(
             };
             let key = (
                 state_id,
-                pop.profession.as_deref(),
-                pop.culture.as_deref(),
+                pop.profession,
+                pop.culture,
                 Some(i32::from(pop.wealth)),
             );
             groups
@@ -559,12 +566,7 @@ fn collapsed_state_pops(
             let Some(state_id) = pop.state else {
                 continue;
             };
-            let key = (
-                state_id,
-                pop.profession.as_deref(),
-                pop.culture.as_deref(),
-                pop.wealth,
-            );
+            let key = (state_id, pop.profession, pop.culture, pop.wealth);
             groups
                 .entry(key)
                 .and_modify(|existing| existing.add_state_pop(pop))
@@ -579,28 +581,28 @@ fn collapsed_state_pops(
                 .and_then(|snap| snap.local_by_state.get(&pop.state))
                 .unwrap_or(prices);
             let needs = pop_needs_for(&pop, defs, local, base_prices, shares, units);
+            let profession_id = world.name_opt(pop.profession).map(str::to_string);
+            let culture_id = world.name_opt(pop.culture).map(str::to_string);
             StatePop {
                 id: Some(pop.id),
                 state_id: pop.state,
-                profession_id: pop.profession.clone(),
-                profession_name: pop
-                    .profession
+                profession_name: profession_id
                     .as_ref()
                     .and_then(|id| defs.labels.get(id))
                     .cloned(),
+                profession_id,
                 demand_size: pop.demand_size,
                 workforce: pop.workforce,
                 dependents: pop.dependents,
                 wealth: pop.wealth,
-                culture_id: pop.culture.clone(),
-                culture_name: pop
-                    .culture
+                culture_name: culture_id
                     .as_ref()
                     .and_then(|id| defs.labels.get(id))
                     .cloned(),
+                culture_id,
                 literate: pop.literate,
                 workplace_id: pop.workplace_id,
-                qualifications: profession_counts(&pop.qualifications, defs),
+                qualifications: profession_counts(pop.qualifications, world, defs),
                 needs,
             }
         })
@@ -693,7 +695,7 @@ fn state_qualification_rows(
     defs: &GameDefs,
     employees_by_building: &BTreeMap<u32, Vec<ProfessionCount>>,
 ) -> Vec<StateQualification> {
-    let mut jobs_by_state: BTreeMap<(u32, String), f64> = BTreeMap::new();
+    let mut jobs_by_state: BTreeMap<(u32, u16), f64> = BTreeMap::new();
     let building_state: BTreeMap<u32, Option<u32>> = world
         .buildings
         .iter()
@@ -704,86 +706,89 @@ fn state_qualification_rows(
             continue;
         };
         for employee in employees {
-            *jobs_by_state
-                .entry((*state_id, employee.profession_id.clone()))
-                .or_default() += employee.count;
+            let Some(profession) = world.names.id_of(&employee.profession_id) else {
+                continue;
+            };
+            *jobs_by_state.entry((*state_id, profession)).or_default() += employee.count;
         }
     }
 
-    let mut employed_by_state: BTreeMap<(u32, String), f64> = BTreeMap::new();
-    let mut qualified_from_pops: BTreeMap<(u32, String), f64> = BTreeMap::new();
+    let mut employed_by_state: BTreeMap<(u32, u16), f64> = BTreeMap::new();
+    let mut qualified_from_pops: BTreeMap<(u32, u16), f64> = BTreeMap::new();
     for pop in &world.state_pops {
         let Some(state_id) = pop.state else {
             continue;
         };
-        if let Some(profession) = &pop.profession {
+        if let Some(profession) = pop.profession {
             let workforce = pop.workforce.unwrap_or(0.0);
             if pop.workplace_id.is_some() && workforce > 0.0 {
-                *employed_by_state
-                    .entry((state_id, profession.clone()))
-                    .or_default() += workforce;
+                *employed_by_state.entry((state_id, profession)).or_default() += workforce;
             }
             if workforce > 0.0 {
                 *qualified_from_pops
-                    .entry((state_id, profession.clone()))
+                    .entry((state_id, profession))
                     .or_default() += workforce;
             }
         }
-        for (profession, count) in &pop.qualifications {
+        for &(profession, count) in &pop.qualifications {
             *qualified_from_pops
-                .entry((state_id, profession.clone()))
-                .or_default() += *count;
+                .entry((state_id, profession))
+                .or_default() += count;
         }
     }
 
     let mut rows = Vec::new();
     for state in &world.states {
-        let mut professions: BTreeMap<String, ()> = BTreeMap::new();
-        for key in state.qualifications.keys() {
-            professions.insert(key.clone(), ());
+        let mut professions: BTreeMap<u16, ()> = BTreeMap::new();
+        for &(id, _) in &state.qualifications {
+            professions.insert(id, ());
         }
-        for key in state.employable_qualifications.keys() {
-            professions.insert(key.clone(), ());
+        for &(id, _) in &state.employable_qualifications {
+            professions.insert(id, ());
         }
-        for key in state.workforce_by_type.keys() {
-            professions.insert(key.clone(), ());
+        for &(id, _) in &state.workforce_by_type {
+            professions.insert(id, ());
         }
-        for (state_id, profession) in employed_by_state.keys().chain(jobs_by_state.keys()) {
-            if *state_id == state.id {
-                professions.insert(profession.clone(), ());
+        for &(state_id, profession) in employed_by_state.keys() {
+            if state_id == state.id {
+                professions.insert(profession, ());
             }
         }
-        for (state_id, profession) in qualified_from_pops.keys() {
-            if *state_id == state.id {
-                professions.insert(profession.clone(), ());
+        for &(state_id, profession) in jobs_by_state.keys() {
+            if state_id == state.id {
+                professions.insert(profession, ());
             }
         }
-        for profession_id in professions.keys() {
-            let qualified = state
-                .qualifications
-                .get(profession_id)
-                .copied()
-                .unwrap_or_else(|| {
-                    qualified_from_pops
-                        .get(&(state.id, profession_id.clone()))
-                        .copied()
-                        .unwrap_or(0.0)
-                });
-            let employable = state.employable_qualifications.get(profession_id).copied();
+        for &(state_id, profession) in qualified_from_pops.keys() {
+            if state_id == state.id {
+                professions.insert(profession, ());
+            }
+        }
+        for profession in professions.keys().copied() {
+            let Some(profession_id) = world.name(profession).map(str::to_string) else {
+                continue;
+            };
+            let qualified = qty_value(&state.qualifications, profession).unwrap_or_else(|| {
+                qualified_from_pops
+                    .get(&(state.id, profession))
+                    .copied()
+                    .unwrap_or(0.0)
+            });
+            let employable = qty_value(&state.employable_qualifications, profession);
             let employed = employed_by_state
-                .get(&(state.id, profession_id.clone()))
+                .get(&(state.id, profession))
                 .copied()
-                .or_else(|| state.workforce_by_type.get(profession_id).copied())
+                .or_else(|| qty_value(&state.workforce_by_type, profession))
                 .unwrap_or(0.0);
             let jobs = jobs_by_state
-                .get(&(state.id, profession_id.clone()))
+                .get(&(state.id, profession))
                 .copied()
                 .unwrap_or(employed);
             let stock = employable.unwrap_or(qualified);
             rows.push(StateQualification {
                 state_id: state.id,
-                profession_name: defs.labels.get(profession_id).cloned(),
-                profession_id: profession_id.clone(),
+                profession_name: defs.labels.get(&profession_id).cloned(),
+                profession_id,
                 qualified,
                 employable,
                 employed,
