@@ -54,7 +54,15 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
         .collect();
     let goods = market_goods(&base_prices);
     if goods.is_empty() {
-        return finished(world, defs, Vec::new(), 0.0, SolveStatus::Converged, None);
+        return finished(
+            world,
+            defs,
+            Vec::new(),
+            0.0,
+            SolveStatus::Converged,
+            None,
+            Vec::new(),
+        );
     }
 
     let bases: Vec<f64> = goods.iter().map(|&idx| base_prices[idx]).collect();
@@ -66,6 +74,7 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
             f64::INFINITY,
             SolveStatus::Failed,
             None,
+            Vec::new(),
         );
     }
 
@@ -105,8 +114,17 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
     };
 
     let mut rel = vec![1.0; n];
-    let warm_iters = opts.max_iters.clamp(1, 16);
-    problem.damp_toward_formula(&mut rel, WARM_START_ALPHA, warm_iters);
+    let mut warm_iters = opts.max_iters.clamp(1, 16);
+    if let Some(warm) = opts.warm_rel.as_ref() {
+        if warm.len() == n {
+            rel.clone_from(warm);
+            problem.clamp_rel(&mut rel);
+            warm_iters = 0;
+        }
+    }
+    if warm_iters > 0 {
+        problem.damp_toward_formula(&mut rel, WARM_START_ALPHA, warm_iters);
+    }
 
     let mut used_max_iters = false;
     let mut failed = false;
@@ -144,7 +162,7 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
         SolveStatus::MaxIters
     };
 
-    finished(world, defs, rows, residual, status, Some(&snapshot))
+    finished(world, defs, rows, residual, status, Some(&snapshot), rel)
 }
 
 /// Apply a building-level delta and re-solve. Employment (`staffing`) stays frozen.
@@ -165,6 +183,7 @@ fn finished(
     residual: f64,
     status: SolveStatus,
     snapshot: Option<&ShopSnapshot>,
+    relative: Vec<f64>,
 ) -> PricesResult {
     let detail = detail_rows(world, defs, &goods, snapshot);
     let countries = country_rows(world, defs);
@@ -227,6 +246,7 @@ fn finished(
         residual,
         status,
         limitations: LIMITATIONS.iter().map(|s| (*s).to_string()).collect(),
+        relative,
     }
 }
 

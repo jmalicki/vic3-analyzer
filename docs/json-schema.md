@@ -12,7 +12,12 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
   "additionalProperties": false,
   "properties": {
     "residual_eps": { "type": "number", "default": 1e-6 },
-    "max_iters": { "type": "integer", "minimum": 1, "default": 100 }
+    "max_iters": { "type": "integer", "minimum": 1, "default": 100 },
+    "warm_rel": {
+      "type": "array",
+      "items": { "type": "number" },
+      "description": "Previous relative prices in goods-with-base-price order. Ignored when length does not match; omitted when unset."
+    }
   }
 }
 ```
@@ -147,7 +152,12 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
     },
     "residual": { "type": "number" },
     "status": { "enum": ["converged", "max_iters", "failed"] },
-    "limitations": { "type": "array", "items": { "type": "string" } }
+    "limitations": { "type": "array", "items": { "type": "string" } },
+    "relative": {
+      "type": "array",
+      "items": { "type": "number" },
+      "description": "Relative prices (price/base) matching goods order; omitted when empty. Feed back as SolveOpts.warm_rel."
+    }
   }
 }
 ```

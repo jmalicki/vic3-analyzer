@@ -556,6 +556,7 @@ mod tests {
             limitations: Vec::new(),
             state_qualifications: Vec::new(),
             state_needs: Vec::new(),
+            relative: Vec::new(),
         }
     }
 

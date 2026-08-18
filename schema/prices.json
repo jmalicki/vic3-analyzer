@@ -742,6 +742,14 @@
       },
       "type": "array"
     },
+    "relative": {
+      "description": "Relative prices `price / base` in the same order as [`Self::goods`].\n\nCallers can feed this back as [`SolveOpts::warm_rel`]. Omitted when empty.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    },
     "residual": {
       "description": "`‖r − r_formula(orders(r))‖₂`. Always present (I5).",
       "format": "double",
