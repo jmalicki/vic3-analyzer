@@ -17,6 +17,10 @@ P5 generates JSON Schema from these structs (schemars) and checks it against [`j
 ```text
 vic3-cli prices --save game.v3 --tokens tokens.txt --game /path/to/Victoria3 --json
 vic3-cli what-if --save game.v3 --building arms_industry --extra-levels 5 --json
+vic3-cli alerts --save game.v3 --game /path/to/Victoria3 --json
+vic3-cli mutate --save game.v3 --game /path/to/Victoria3 --delta-json '{...WorldDelta...}' --json
+vic3-cli optimize-pms --save game.v3 --game /path/to/Victoria3 --axis income --json
+vic3-cli export-save --save game.v3 --delta-json '{...SavePatch...}' --out new.v3
 vic3-cli gaps --save game.v3 --goal 'declare-war(tag=FRA, wargoal=conquer_state, state=alsace)' --json
 vic3-cli plan --save game.v3 --goal research(tech=nitroglycerin) --label 'rush explosives' --json
 vic3-cli archive list
@@ -26,19 +30,23 @@ vic3-cli archive diff <id> <id>
 
 `--json` prints the result object (plus `limitations`). Without it, a short text table and a one-line limitations warning.
 
+`mutate` prints a preview [`PricesResult`](json-schema.md) and does not write a file. `export-save` writes `--out` only; it never overwrites `--save`. `optimize-pms` `--axis` is `income`, `productivity`, or `sol`.
+
 Flatten groups (clap in `vic3-cli` only):
 
-- `SolveOpts` — `residual_eps`, `max_iters`, …
+- `SolveOpts` — `residual_eps`, `max_iters`, `warm_rel`, …
 - `WhatIfOpts` — `building`, `extra_levels`, …
+- `WorldDelta` — `--delta-json` on `mutate` (no `PathBuf` on the inner type)
+- `SavePatch` — `--delta-json` on `export-save`
 - `PlanOpts` — `goal`, `max_days`, `label`, …
 - Paths stay on the outer `*Cli` struct
 
 ## UI
 
-1. Drop a `.v3` (and tokens if binary). Parse in-browser.
-2. Use the task navigation for Prices, What-if, Timeline, Goal gaps, or Archive.
+1. Drop a `.v3` (and tokens if binary). Parse in-browser. Load **solves prices immediately**; there is no separate Analyze prices action.
+2. Use the task navigation for **Prices**, **States**, **Pops**, **Alerts**, **Military**, **Buildings**, What-if, Timeline, Goal gaps, or Archive.
 3. What-if uses building types read from the save; timeline and gaps use a guided goal builder, with the DSL retained as an advanced option.
-4. Every run is saved to IndexedDB. Browse past saves, name alternative plans, and compare them (see [`archive.md`](archive.md)).
+4. Every run is saved to IndexedDB. Browse past saves, name alternative plans, and compare them (see [`archive.md`](archive.md)). Dropped saves also keep origin / timeline / step history so a reload restores the campaign.
 
 ### Default plans
 

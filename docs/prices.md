@@ -127,11 +127,15 @@ fields read from the save.
 - **Basin** (Levenberg–Marquardt / trust-region-reflective / L-BFGS-B). Default backend: `Vec` until profiling says otherwise. wasm-safe (no BLAS).
 - **Successive substitution** `p ← (1-α)p + α P(c(p))` as warm start / fallback inside the same `solve` API.
 
+`SolveOpts.warm_rel` is the previous solve's relative vector (`price / base`, goods-with-base-price order). When its length matches, Basin starts from that vector and skips successive substitution. A length mismatch is ignored (cold start). CLI `mutate` and wasm `loaded_apply_delta` pass the baseline `relative` this way.
+
 **I5:** residual is always reported. If `status = converged` then residual < ε.
 
 ## What-if
 
 Apply a delta (e.g. extra building levels) to the frozen building side, then re-solve. Pop consumption re-equilibrates; employment does not.
+
+A [`WorldDelta`](json-schema.md) can also swap production methods on a building id. That clone **clears the building's saved `input_goods` / `output_goods`**, so `goods_io` falls back to the new PM recipes × staffed levels. Extra levels on a type or instance keep saved IO and scale it with the new level. Subsidy toggles are accepted and ignored.
 
 ## Limitations
 

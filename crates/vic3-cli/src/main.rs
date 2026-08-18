@@ -1,9 +1,9 @@
-//! CLI: prices, what-if, gaps, planning, and the local archive.
+//! CLI: prices, what-if, alerts, mutate, optimize, export, gaps, planning, archive.
 //!
-//! `prices` / `what-if` load `WorldSave` (not the full file-shaped `Save`) and
-//! still `solve` a complete `PricesResult`. The default table only prints goods;
-//! compact pop rows exist for the webapp. Time this path as the UI load
-//! stand-in, not as a hint to skip detail.
+//! `prices` / `what-if` / `alerts` / `mutate` / `optimize-pms` load `WorldSave`
+//! (not the full file-shaped `Save`) and still `solve` a complete `PricesResult`.
+//! The default table only prints goods; compact pop rows exist for the webapp.
+//! Time this path as the UI load stand-in, not as a hint to skip detail.
 
 use std::fs;
 use std::io::{self, Write};
@@ -11,14 +11,17 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use vic3_defs::GameDefs;
 use vic3_goals::Atom;
-use vic3_load::{empty_tokens, load_path_world, load_tokens_path};
+use vic3_load::{empty_tokens, export_save, load_path_world, load_tokens_path, SavePatch};
 use vic3_plan::{compare, AnalysisRecord, PlanOpts, PlanResult};
-use vic3_prices::{solve, what_if, PricesResult, SolveOpts, WhatIfOpts, World};
+use vic3_prices::{
+    alerts, preview, solve, what_if, AlertsResult, PricesResult, ProductionMethodDelta, SolveOpts,
+    WhatIfOpts, World, WorldDelta,
+};
 use vic3_sim::{EconomyContext, SimConfig};
 use vic3_world::PlanningState;
 use vic3save::PdsDate;
@@ -37,6 +40,10 @@ fn main() -> Result<()> {
                 cmd.json,
             )
         }
+        Commands::Alerts(cmd) => run_alerts(cmd),
+        Commands::Mutate(cmd) => run_mutate(cmd),
+        Commands::OptimizePms(cmd) => run_optimize_pms(cmd),
+        Commands::ExportSave(cmd) => run_export_save(cmd),
         Commands::Gaps(cmd) => run_gaps(cmd),
         Commands::Plan(cmd) => run_plan(cmd),
         Commands::Defs(cmd) => run_defs(cmd),
@@ -58,6 +65,14 @@ enum Commands {
     Prices(PricesCli),
     /// Apply extra building levels and re-solve. Employment stays frozen.
     WhatIf(WhatIfCli),
+    /// Diagnose shortages from a solved market (`AlertsResult`).
+    Alerts(AlertsCli),
+    /// Preview a [`WorldDelta`] and re-solve. Does not write a save.
+    Mutate(MutateCli),
+    /// Search production methods along income, productivity, or SoL.
+    OptimizePms(OptimizePmsCli),
+    /// Patch a plaintext `.v3` into a new file. Never overwrites `--save`.
+    ExportSave(ExportSaveCli),
     /// Evaluate a goal and list its currently unsatisfied atoms.
     Gaps(GapsCli),
     /// Find and archive a shortest goal-relevant action sequence.
@@ -174,6 +189,66 @@ struct WhatIfCli {
 }
 
 #[derive(Debug, Args)]
+struct AlertsCli {
+    #[command(flatten)]
+    io: IoArgs,
+    /// Print [`AlertsResult`] JSON.
+    #[arg(long)]
+    json: bool,
+    #[command(flatten)]
+    solve: SolveArgs,
+}
+
+#[derive(Debug, Args)]
+struct MutateCli {
+    #[command(flatten)]
+    io: IoArgs,
+    /// JSON [`WorldDelta`] (extra levels, then production methods).
+    #[arg(long)]
+    delta_json: String,
+    /// Print [`PricesResult`] JSON (includes `limitations` and `residual`).
+    #[arg(long)]
+    json: bool,
+    #[command(flatten)]
+    solve: SolveArgs,
+}
+
+/// Objective for [`Commands::OptimizePms`]. Inner type has no `PathBuf`.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum OptimizeAxis {
+    Income,
+    Productivity,
+    Sol,
+}
+
+#[derive(Debug, Args)]
+struct OptimizePmsCli {
+    #[command(flatten)]
+    io: IoArgs,
+    /// Rank candidate production methods by this axis.
+    #[arg(long, value_enum)]
+    axis: OptimizeAxis,
+    /// Print [`PricesResult`] JSON (includes `limitations` and `residual`).
+    #[arg(long)]
+    json: bool,
+    #[command(flatten)]
+    solve: SolveArgs,
+}
+
+#[derive(Debug, Args)]
+struct ExportSaveCli {
+    /// Path to a `.v3` save (plaintext). Never overwritten.
+    #[arg(long, env = "VIC3_SAVE")]
+    save: PathBuf,
+    /// JSON [`SavePatch`] (production methods and extra levels).
+    #[arg(long)]
+    delta_json: String,
+    /// Destination `.v3`. Must be a different path from `--save`.
+    #[arg(long)]
+    out: PathBuf,
+}
+
+#[derive(Debug, Args)]
 struct GapsCli {
     #[command(flatten)]
     io: IoArgs,
@@ -281,6 +356,158 @@ fn run_defs(cmd: DefsCli) -> Result<()> {
     Ok(())
 }
 
+fn run_alerts(cmd: AlertsCli) -> Result<()> {
+    let (world, defs) = load_world(&cmd.io)?;
+    let prices = solve(&world, &defs, cmd.solve.into());
+    emit_alerts(&alerts(&world, &defs, &prices), cmd.json)
+}
+
+fn run_mutate(cmd: MutateCli) -> Result<()> {
+    let (world, defs) = load_world(&cmd.io)?;
+    let delta: WorldDelta =
+        serde_json::from_str(&cmd.delta_json).context("parsing --delta-json as WorldDelta")?;
+    let mut opts: SolveOpts = cmd.solve.into();
+    let baseline = solve(&world, &defs, opts.clone());
+    if !baseline.relative.is_empty() {
+        opts.warm_rel = Some(baseline.relative);
+    }
+    emit(&preview(&world, &defs, &delta, opts), cmd.json)
+}
+
+fn run_optimize_pms(cmd: OptimizePmsCli) -> Result<()> {
+    let (world, defs) = load_world(&cmd.io)?;
+    emit(
+        &greedy_optimize_pms(&world, &defs, cmd.axis, cmd.solve.into()),
+        cmd.json,
+    )
+}
+
+fn run_export_save(cmd: ExportSaveCli) -> Result<()> {
+    anyhow::ensure!(
+        !same_path(&cmd.save, &cmd.out),
+        "--out must be a new path; refusing to overwrite --save"
+    );
+    let original =
+        fs::read(&cmd.save).with_context(|| format!("reading save {}", cmd.save.display()))?;
+    let patch: SavePatch =
+        serde_json::from_str(&cmd.delta_json).context("parsing --delta-json as SavePatch")?;
+    let patched = export_save(&original, &patch)?;
+    if let Some(parent) = cmd
+        .out
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    fs::write(&cmd.out, &patched).with_context(|| format!("writing {}", cmd.out.display()))?;
+    writeln!(
+        io::stderr(),
+        "wrote {} bytes to {}",
+        patched.len(),
+        cmd.out.display()
+    )?;
+    Ok(())
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (fs::canonicalize(left), fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+/// One-pass greedy PM search via [`preview`].
+///
+/// Prefer `vic3_prices::optimize` when that crate exports it. This CLI crate
+/// cannot add that module; until then each building tries each known method.
+fn greedy_optimize_pms(
+    world: &World,
+    defs: &GameDefs,
+    axis: OptimizeAxis,
+    opts: SolveOpts,
+) -> PricesResult {
+    let mut best = solve(world, defs, opts.clone());
+    let mut best_score = axis_score(&best, axis);
+    let mut accepted = WorldDelta::default();
+    let candidates: Vec<String> = defs.production_methods.keys().cloned().collect();
+    for building in &world.buildings {
+        let mut building_best: Option<(WorldDelta, PricesResult, f64)> = None;
+        for method in &candidates {
+            if building.production_methods == [method.as_str()] {
+                continue;
+            }
+            let mut delta = accepted.clone();
+            delta
+                .production_methods
+                .retain(|item| item.building_id != building.id);
+            delta.production_methods.push(ProductionMethodDelta {
+                building_id: building.id,
+                methods: vec![method.clone()],
+            });
+            let mut preview_opts = opts.clone();
+            if !best.relative.is_empty() {
+                preview_opts.warm_rel = Some(best.relative.clone());
+            }
+            let result = preview(world, defs, &delta, preview_opts);
+            let score = axis_score(&result, axis);
+            let better = building_best
+                .as_ref()
+                .is_none_or(|(_, _, current)| score > *current);
+            if score > best_score && better {
+                building_best = Some((delta, result, score));
+            }
+        }
+        if let Some((delta, result, score)) = building_best {
+            accepted = delta;
+            best = result;
+            best_score = score;
+        }
+    }
+    best
+}
+
+fn axis_score(result: &PricesResult, axis: OptimizeAxis) -> f64 {
+    match axis {
+        OptimizeAxis::Income => result
+            .buildings
+            .iter()
+            .map(|building| building.profit)
+            .sum(),
+        OptimizeAxis::Productivity => {
+            let profit: f64 = result
+                .buildings
+                .iter()
+                .map(|building| building.profit)
+                .sum();
+            let levels: f64 = result.buildings.iter().map(|building| building.level).sum();
+            if levels > 0.0 {
+                profit / levels
+            } else {
+                0.0
+            }
+        }
+        OptimizeAxis::Sol => {
+            let mut weighted = 0.0;
+            let mut weight = 0.0;
+            for pop in result.state_pops.iter() {
+                let size = pop.demand_size.or(pop.workforce).unwrap_or(0.0);
+                if let Some(wealth) = pop.wealth {
+                    weighted += f64::from(wealth) * size;
+                    weight += size;
+                }
+            }
+            if weight > 0.0 {
+                weighted / weight
+            } else {
+                0.0
+            }
+        }
+    }
+}
+
 fn run_gaps(cmd: GapsCli) -> Result<()> {
     let (world, defs) = load_world(&cmd.io)?;
     let prices = solve(&world, &defs, cmd.solve.into());
@@ -302,7 +529,7 @@ fn run_plan(cmd: PlanCli) -> Result<()> {
         .with_context(|| format!("reading save {}", cmd.io.save.display()))?;
     let (world, defs) = load_world(&cmd.io)?;
     let solve_opts: SolveOpts = cmd.solve.into();
-    let prices = solve(&world, &defs, solve_opts);
+    let prices = solve(&world, &defs, solve_opts.clone());
     let country = world
         .player_country_tag()
         .context("save has no playable country")?
@@ -463,6 +690,23 @@ fn ensure_plain_id(id: &str) -> Result<()> {
         Path::new(id).file_name().and_then(|name| name.to_str()) == Some(id),
         "invalid archive id"
     );
+    Ok(())
+}
+
+fn emit_alerts(result: &AlertsResult, json: bool) -> Result<()> {
+    if json {
+        serde_json::to_writer(io::stdout(), result)?;
+        writeln!(io::stdout())?;
+        return Ok(());
+    }
+    if result.alerts.is_empty() {
+        writeln!(io::stdout(), "no alerts")?;
+    } else {
+        for alert in &result.alerts {
+            writeln!(io::stdout(), "{}  {}", alert.title, alert.summary)?;
+        }
+    }
+    writeln!(io::stderr(), "warning: {}", result.limitations.join(" "))?;
     Ok(())
 }
 

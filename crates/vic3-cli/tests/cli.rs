@@ -343,3 +343,51 @@ fn fixtures_exist() {
     assert!(save_fixture().is_file());
     assert!(barren_save_fixture().is_file());
 }
+
+#[test]
+fn help_lists_alerts_mutate_optimize_and_export() {
+    let assert = bin().arg("--help").assert().success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    for command in ["alerts", "mutate", "optimize-pms", "export-save"] {
+        assert!(
+            stdout.contains(command),
+            "expected `{command}` in help:\n{stdout}"
+        );
+    }
+}
+
+#[test]
+fn export_save_writes_a_different_path() {
+    let root = temp_archive();
+    let out = root.join("patched.v3");
+    let save = save_fixture();
+    assert_ne!(out, save);
+
+    bin()
+        .args([
+            "export-save",
+            "--save",
+            save.to_str().expect("utf8 save path"),
+            "--delta-json",
+            r#"{"production_methods":[{"building_id":1,"methods":["pm_soil_enriching_farming"]}]}"#,
+            "--out",
+            out.to_str().expect("utf8 out path"),
+        ])
+        .assert()
+        .success();
+
+    let original = std::fs::read(&save).expect("original save");
+    let patched = std::fs::read(&out).expect("patched save");
+    assert_ne!(patched, original);
+    let patched_text = String::from_utf8_lossy(&patched);
+    assert!(
+        patched_text.contains("pm_soil_enriching_farming"),
+        "patched save should contain the new PM:\n{patched_text}"
+    );
+    let original_text = String::from_utf8_lossy(&original);
+    assert!(
+        !original_text.contains("pm_soil_enriching_farming"),
+        "origin save must stay unchanged"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
