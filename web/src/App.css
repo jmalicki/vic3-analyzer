@@ -323,6 +323,32 @@ section[aria-labelledby] { margin-top: 1rem; }
 .pop-expand { align-items: center; background: transparent; border: 0; color: inherit; display: inline-flex; font: inherit; gap: .4rem; padding: 0; text-align: left; }
 .pop-expand:hover { text-decoration: underline; }
 .pop-detail td { background: #141b16; }
+.pop-groups { display: grid; gap: .65rem; list-style: none; margin: 1rem 0 0; padding: 0; }
+.pop-group {
+  background: #111713;
+  border: 1px solid #3d4a40;
+  padding: .35rem .85rem .85rem;
+}
+.pop-group-toggle {
+  align-items: center;
+  background: transparent;
+  color: inherit;
+  display: flex;
+  flex-wrap: wrap;
+  font: inherit;
+  font-weight: 700;
+  gap: .55rem;
+  padding: .5rem 0;
+  text-align: left;
+  width: 100%;
+}
+.pop-group-toggle:hover { text-decoration: underline; }
+.pop-group-count { color: #9ba79d; font-size: .85rem; font-weight: 400; margin-left: auto; }
+.pop-shortages, .pop-state-needs { margin-top: 1rem; }
+.pop-shortages h3, .pop-state-needs h3 { font-family: Georgia, serif; font-size: 1.15rem; font-weight: 400; margin: .75rem 0 .35rem; }
+.pop-needs-expander { margin: .5rem 0; }
+.pop-needs-expander summary { cursor: pointer; padding: .35rem 0; }
+.pops-table { margin-top: .35rem; }
 .defs-builder { border-top: 1px solid #37433a; display: grid; gap: .65rem; padding-top: 1rem; }
 .defs-builder p { color: #9ba79d; font-size: .88rem; line-height: 1.4; margin: 0; }
 .defs-builder code { color: #d7e6a7; }

@@ -16,6 +16,7 @@ import { GoalBuilder } from './GoalBuilder'
 import { parseDefsIcons } from './GameIcon'
 import { Modal } from './Modal'
 import { PLAN_TEMPLATES, planTemplate } from './planTemplates'
+import { PopsPane } from './PopsPane'
 import { PriceExplorer } from './PriceExplorer'
 import { StatesPane } from './StatesPane'
 import { ProgressBar } from './ProgressBar'
@@ -835,12 +836,13 @@ function App({ wasmApi }: Props) {
       )}
 
       {activeView === 'pops' && (
-        <section
-          className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
-          aria-labelledby="pops-heading"
-        >
-          <h2 id="pops-heading">Pops</h2>
-        </section>
+        <PopsPane
+          result={result}
+          icons={goodIcons}
+          playerCountryId={summary?.country_id}
+          playerMarketId={summary?.market_id}
+          gated={gated}
+        />
       )}
 
       {activeView === 'alerts' && (

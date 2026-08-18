@@ -665,6 +665,16 @@ describe('prices UI', () => {
     expect(await screen.findByRole('link', { name: 'Ile-de-France' })).toBeInTheDocument()
   })
 
+  it('opens the Pops pane from the workbench nav', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+
+    await user.click(screen.getByRole('button', { name: 'Pops' }))
+    expect(screen.getByRole('heading', { name: 'Pops' })).toBeInTheDocument()
+    expect(window.location.hash).toBe('#/pops')
+  })
+
   it('opens a known pane from the location hash', async () => {
     window.location.hash = '#/military/navy'
     render(<App wasmApi={mockApi()} />)

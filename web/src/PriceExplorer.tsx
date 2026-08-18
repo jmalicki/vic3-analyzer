@@ -101,7 +101,7 @@ function GoodFlows({
   )
 }
 
-function NeedBaskets({
+export function NeedBaskets({
   needs,
   goods,
   icons,
@@ -703,7 +703,7 @@ function StatePops({
   )
 }
 
-function QualificationsTable({ rows }: { rows: StateQualification[] }) {
+export function QualificationsTable({ rows }: { rows: StateQualification[] }) {
   return (
     <div className="table-scroll">
       <table>
