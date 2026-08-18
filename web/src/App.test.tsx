@@ -678,6 +678,11 @@ describe('prices UI', () => {
     expect(hud).toHaveTextContent('FRA')
     expect(hud).toHaveTextContent('1840.2.3')
     expect(hud).toHaveTextContent('Victoria 3 1.9.0')
+    expect(hud).toHaveTextContent('GDP')
+    expect(screen.getByText('—', { selector: '.save-summary strong' })).toBeInTheDocument()
+    await waitFor(() => expect(hud).toHaveTextContent('SoL'))
+    expect(hud).toHaveTextContent('12.0')
+    await waitFor(() => expect(hud).toHaveTextContent(/Alerts\s*0/))
 
     for (const name of ['States', 'Pops', 'Alerts', 'Military', 'Buildings']) {
       expect(screen.getByRole('button', { name })).toBeInTheDocument()
@@ -804,5 +809,80 @@ describe('prices UI', () => {
     expect(footer).toHaveTextContent('vic3-analyzer v0.1.0')
     expect(footer).toHaveTextContent('Built')
     expect(footer?.querySelector('time')).toHaveAttribute('dateTime')
+  })
+
+  it('names a downloaded save with origin, date, and step', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:save')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+    await waitFor(async () => {
+      expect((await loadStoredSave())?.save.name).toBe('campaign.v3')
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Download' }))
+    await waitFor(() => expect(click).toHaveBeenCalled())
+    expect(click.mock.instances[0].download).toMatch(/^campaign_analyzer_1840\.2\.3_.+\.v3$/)
+  })
+
+  it('opens confirm from an alert Apply and shows Undo after commit', async () => {
+    const user = userEvent.setup()
+    const api = mockApi()
+    api.loaded_alerts = vi.fn(() =>
+      JSON.stringify({
+        alerts: [
+          {
+            id: 'goods_shortage:grain',
+            kind: 'goods_shortage',
+            severity: 1,
+            title: 'Grain shortage',
+            summary: 'Need more grain.',
+            good_id: 'grain',
+            evidence: [],
+            mitigations: [
+              {
+                id: 'build-rye',
+                title: 'Add rye farm levels',
+                detail: 'Build extra grain.',
+                rank: 1,
+                apply_ready: false,
+                action: { type: 'build', building: 'building_rye_farm', extra_levels: 1 },
+              },
+            ],
+          },
+        ],
+        limitations: [],
+      }),
+    )
+    api.loaded_apply_delta = vi.fn(() =>
+      JSON.stringify({
+        ...JSON.parse(result),
+        residual: 0.4,
+        goods: [{ id: 'iron', base: 40, price: 40, buy: 120, sell: 100 }],
+      }),
+    )
+    render(<App wasmApi={api} />)
+    await selectSave(user)
+    await waitFor(async () => {
+      expect((await loadStoredSave())?.save.name).toBe('campaign.v3')
+    })
+    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Alerts' }))
+    await user.click(await screen.findByText('Grain shortage'))
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Confirm apply' })
+    expect(dialog).toHaveTextContent('0.00001')
+    expect(dialog).toHaveTextContent('0.4')
+    expect(dialog).toHaveTextContent('43.50')
+    expect(dialog).toHaveTextContent('40.00')
+
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+    await waitFor(() => expect(api.export_save).toHaveBeenCalled())
+    expect(await screen.findByRole('button', { name: 'Undo' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Confirm apply' })).not.toBeInTheDocument()
   })
 })

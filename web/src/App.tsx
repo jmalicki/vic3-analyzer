@@ -9,9 +9,26 @@ import {
 } from './archive'
 import { DefsBuilder } from './DefsBuilder'
 import { clearStoredDefs, loadStoredDefs, storeDefs } from './defsStore'
-import { clearStoredSave, loadStoredSave, persistErrorMessage, storeSave, storeSaveAnalysis } from './saveStore'
+import {
+  checkout,
+  clearStoredSave,
+  commitStep,
+  currentPointer,
+  downloadName,
+  listSteps,
+  loadStoredSave,
+  persistErrorMessage,
+  storeSave,
+  storeSaveAnalysis,
+} from './saveStore'
 import { AlertsPane } from './AlertsPane'
 import { BuildingsPane } from './BuildingsPane'
+import {
+  ConfirmApply,
+  deltasFromSteps,
+  mergeDeltas,
+  worldDeltaToSavePatch,
+} from './ConfirmApply'
 import { MilitaryPane } from './MilitaryPane'
 import { FieldHelp } from './FieldHelp'
 import { GoalBuilder } from './GoalBuilder'
@@ -41,6 +58,9 @@ import type {
   PlanResult,
   PricesResult,
   SaveSummary,
+  StatePop,
+  Step,
+  WorldDelta,
 } from './types'
 import type { WasmApi } from './wasm'
 import { loadWasmApi } from './wasmClient'
@@ -122,6 +142,36 @@ async function bytes(file?: File): Promise<Uint8Array | undefined> {
   return file ? new Uint8Array(await file.arrayBuffer()) : undefined
 }
 
+function weightedWealth(pops?: StatePop[]): number | undefined {
+  if (!pops?.length) return undefined
+  let wealthSum = 0
+  let popSum = 0
+  for (const pop of pops) {
+    const size = pop.demand_size ?? (pop.workforce ?? 0) + (pop.dependents ?? 0)
+    if (pop.wealth == null || size <= 0) continue
+    wealthSum += pop.wealth * size
+    popSum += size
+  }
+  return popSum > 0 ? wealthSum / popSum : undefined
+}
+
+function hudGdp(result?: PricesResult): string {
+  if (result && typeof result.gdp === 'number') {
+    if (Math.abs(result.gdp) >= 1_000_000) return `${(result.gdp / 1_000_000).toFixed(1)}M`
+    return result.gdp.toLocaleString()
+  }
+  return '—'
+}
+
+function hudSol(result?: PricesResult): string {
+  if (result && typeof result.sol === 'number') return result.sol.toFixed(1)
+  if (result && typeof result.population_weighted_wealth === 'number') {
+    return result.population_weighted_wealth.toFixed(1)
+  }
+  const weighted = weightedWealth(result?.state_pops)
+  return weighted == null ? '—' : weighted.toFixed(1)
+}
+
 async function fingerprint(data: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', data.slice().buffer)
   return [...new Uint8Array(digest)].map((part) => part.toString(16).padStart(2, '0')).join('')
@@ -175,6 +225,13 @@ function App({ wasmApi }: Props) {
   const [planResult, setPlanResult] = useState<PlanResult>()
   const [alertsResult, setAlertsResult] = useState<AlertsResult>()
   const [militaryResult, setMilitaryResult] = useState<MilitarySnapshot>()
+  const [timelineStep, setTimelineStep] = useState<Step>()
+  const [sessionBytes, setSessionBytes] = useState<Uint8Array>()
+  const [pendingApply, setPendingApply] = useState<{
+    delta: WorldDelta
+    preview: PricesResult
+    error?: string
+  }>()
   const [goal, setGoal] = useState('research(tech=nitroglycerin)')
   const [label, setLabel] = useState('')
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
@@ -207,9 +264,16 @@ function App({ wasmApi }: Props) {
   }
 
   const persistSave = (save: File, tokens?: File) => {
-    void storeSave(save, tokens).catch((error: unknown) => {
-      setError(persistErrorMessage(error))
-    })
+    void storeSave(save, tokens)
+      .then(async () => {
+        const pointer = await currentPointer()
+        if (!pointer) return
+        const steps = await listSteps(pointer.timeline_id)
+        setTimelineStep(steps.find((step) => step.id === pointer.step_id))
+      })
+      .catch((error: unknown) => {
+        setError(persistErrorMessage(error))
+      })
   }
 
   /** Keep the chosen save (and optional token map) across reloads. */
@@ -220,8 +284,12 @@ function App({ wasmApi }: Props) {
     setResult(undefined)
     setGapsResult(undefined)
     setPlanResult(undefined)
+    setAlertsResult(undefined)
     setSummary(undefined)
     setAnalysisReady(false)
+    setSessionBytes(undefined)
+    setTimelineStep(undefined)
+    setPendingApply(undefined)
     if (!file) {
       void clearStoredSave().catch(() => {})
       return
@@ -245,13 +313,20 @@ function App({ wasmApi }: Props) {
   useEffect(() => {
     let cancelled = false
     void loadStoredSave()
-      .then((stored) => {
+      .then(async (stored) => {
         if (!stored || cancelled) return
         setSaveFile(stored.save)
         setTokensFile(stored.tokens)
         setSaveRestored(true)
         if (stored.summary) setSummary(stored.summary)
         if (stored.prices) setResult(stored.prices)
+        const pointer = await currentPointer()
+        if (!pointer || cancelled) return
+        const steps = await listSteps(pointer.timeline_id)
+        const step = steps.find((item) => item.id === pointer.step_id)
+        if (cancelled) return
+        setTimelineStep(step)
+        if (step?.patched_bytes) setSessionBytes(step.patched_bytes)
       })
       .catch(() => {})
     return () => {
@@ -321,7 +396,12 @@ function App({ wasmApi }: Props) {
       .then(async (loaded) => {
         if (effectiveDefs) {
           const [saveBytes, tokenBytes, defsBytes] = loaded
-          const json = await api.load_analysis(saveBytes!, tokenBytes, defsBytes!, '{}')
+          const json = await api.load_analysis(
+            sessionBytes ?? saveBytes!,
+            tokenBytes,
+            defsBytes!,
+            '{}',
+          )
           if (cancelled) return
           const payload = JSON.parse(json) as { summary: SaveSummary; prices: PricesResult }
           setSummary(payload.summary)
@@ -332,7 +412,7 @@ function App({ wasmApi }: Props) {
           })
         } else {
           const [saveBytes, tokenBytes] = loaded
-          const json = await api.parse_save(saveBytes!, tokenBytes)
+          const json = await api.parse_save(sessionBytes ?? saveBytes!, tokenBytes)
           if (!cancelled) setSummary(JSON.parse(json) as SaveSummary)
         }
       })
@@ -345,7 +425,7 @@ function App({ wasmApi }: Props) {
     return () => {
       cancelled = true
     }
-  }, [api, saveFile, tokensFile, effectiveDefs])
+  }, [api, saveFile, tokensFile, effectiveDefs, sessionBytes])
 
   useEffect(() => {
     if (!api || !effectiveDefs) {
@@ -399,7 +479,7 @@ function App({ wasmApi }: Props) {
   }, [])
 
   useEffect(() => {
-    if (activeView !== 'alerts' || !api || !result) return
+    if (!api || !result) return
     let cancelled = false
     void Promise.resolve(api.loaded_alerts())
       .then((json) => {
@@ -411,7 +491,7 @@ function App({ wasmApi }: Props) {
     return () => {
       cancelled = true
     }
-  }, [activeView, api, result])
+  }, [api, result])
 
   useEffect(() => {
     if (activeView !== 'military' || !api || !result) return
@@ -469,6 +549,109 @@ function App({ wasmApi }: Props) {
     } finally {
       setBusy(false)
     }
+  }
+
+  const requestApply = async (delta: WorldDelta) => {
+    if (!api || !result) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      const json = await api.loaded_apply_delta(JSON.stringify(delta))
+      setPendingApply({ delta, preview: JSON.parse(json) as PricesResult })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const confirmPendingApply = async () => {
+    if (!api || !pendingApply || !saveFile || !effectiveDefs || !result) return
+    setBusy(true)
+    setPendingApply((current) => current && { ...current, error: undefined })
+    try {
+      const stored = await loadStoredSave()
+      if (!stored) throw new Error('No origin save to patch')
+      const originBytes = new Uint8Array(await stored.save.arrayBuffer())
+      const pointer = await currentPointer()
+      const steps = pointer ? await listSteps(pointer.timeline_id) : []
+      const merged = mergeDeltas([...deltasFromSteps(steps, pointer?.step_id), pendingApply.delta])
+      const patch = worldDeltaToSavePatch(merged, result.buildings ?? [])
+      if (!patch) throw new Error('This change cannot be written to the save')
+      const patched = await api.export_save(originBytes, JSON.stringify(patch))
+      const [tokenBytes, defsBytes] = await Promise.all([bytes(tokensFile), bytes(effectiveDefs)])
+      const json = await api.load_analysis(patched, tokenBytes, defsBytes!, '{}')
+      const payload = JSON.parse(json) as { summary: SaveSummary; prices: PricesResult }
+      const step = await commitStep({
+        mutations: [pendingApply.delta],
+        summary: payload.summary,
+        prices: payload.prices,
+        patchedBytes: patched,
+      })
+      void storeSaveAnalysis(payload.summary, payload.prices).catch((error: unknown) => {
+        setError(persistErrorMessage(error))
+      })
+      setSummary(payload.summary)
+      setResult(payload.prices)
+      setSessionBytes(patched)
+      setTimelineStep(step)
+      setPendingApply(undefined)
+      setAlertsResult(undefined)
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason)
+      setPendingApply((current) => current && { ...current, error: message })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const undoStep = async () => {
+    if (!api || !effectiveDefs || !timelineStep?.parent_step_id) return
+    const pointer = await currentPointer()
+    if (!pointer) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      const steps = await listSteps(pointer.timeline_id)
+      const parent = steps.find((step) => step.id === timelineStep.parent_step_id)
+      await checkout(pointer.origin_id, pointer.timeline_id, timelineStep.parent_step_id)
+      const stored = await loadStoredSave()
+      const originBytes = stored ? new Uint8Array(await stored.save.arrayBuffer()) : undefined
+      const reload = parent?.patched_bytes ?? originBytes
+      if (!reload) throw new Error('No save bytes to restore')
+      const [tokenBytes, defsBytes] = await Promise.all([bytes(tokensFile), bytes(effectiveDefs)])
+      const json = await api.load_analysis(reload, tokenBytes, defsBytes!, '{}')
+      const payload = JSON.parse(json) as { summary: SaveSummary; prices: PricesResult }
+      setSummary(payload.summary)
+      setResult(payload.prices)
+      setSessionBytes(parent?.patched_bytes)
+      setTimelineStep(parent)
+      setAlertsResult(undefined)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const downloadPatched = async () => {
+    const stored = await loadStoredSave()
+    if (!stored) return
+    const pointer = await currentPointer()
+    const steps = pointer ? await listSteps(pointer.timeline_id) : []
+    const step = steps.find((item) => item.id === pointer?.step_id) ?? timelineStep
+    const blobBytes = step?.patched_bytes ?? new Uint8Array(await stored.save.arrayBuffer())
+    const name = downloadName(
+      stored.save.name,
+      stored.summary?.date ?? summary?.date ?? 'unknown',
+      step?.id ?? 'origin',
+    )
+    const url = URL.createObjectURL(new Blob([blobBytes.slice().buffer as ArrayBuffer]))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = name
+    link.click()
+    URL.revokeObjectURL(url)
   }
 
   const runWhatIf = async () => {
@@ -755,6 +938,18 @@ function App({ wasmApi }: Props) {
         </div>
       </section>
 
+      {pendingApply && result && (
+        <ConfirmApply
+          delta={pendingApply.delta}
+          current={result}
+          preview={pendingApply.preview}
+          error={pendingApply.error}
+          busy={busy}
+          onConfirm={() => void confirmPendingApply()}
+          onCancel={() => setPendingApply(undefined)}
+        />
+      )}
+
       {builderOpen && (
         <Modal
           title="Build definitions from game files"
@@ -786,15 +981,30 @@ function App({ wasmApi }: Props) {
           </div>
           <div>
             <span className="hud-label">GDP</span>
-            <strong>—</strong>
+            <strong>{hudGdp(result)}</strong>
           </div>
           <div>
             <span className="hud-label">SoL</span>
-            <strong>—</strong>
+            <strong>{hudSol(result)}</strong>
           </div>
           <div>
             <span className="hud-label">Alerts</span>
-            <strong>—</strong>
+            <strong>{alertsResult ? String(alertsResult.alerts.length) : '—'}</strong>
+          </div>
+          <div className="hud-actions">
+            <button type="button" disabled={!saveFile} onClick={() => void downloadPatched()}>
+              Download
+            </button>
+            {timelineStep?.parent_step_id ? (
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy}
+                onClick={() => void undoStep()}
+              >
+                Undo
+              </button>
+            ) : null}
           </div>
         </section>
       )}
@@ -875,7 +1085,12 @@ function App({ wasmApi }: Props) {
         >
           <h2 id="alerts-heading">Alerts</h2>
           {alertsResult ? (
-            <AlertsPane result={alertsResult} icons={goodIcons} />
+            <AlertsPane
+              result={alertsResult}
+              icons={goodIcons}
+              buildings={result?.buildings}
+              onApply={(delta) => void requestApply(delta)}
+            />
           ) : (
             <p>Alerts appear after a save is priced.</p>
           )}
@@ -921,6 +1136,7 @@ function App({ wasmApi }: Props) {
           onWhatIf={(building, extraLevels) => {
             void applyWhatIf({ building, extra_levels: extraLevels })
           }}
+          onApply={(delta) => void requestApply(delta)}
         />
       )}
 

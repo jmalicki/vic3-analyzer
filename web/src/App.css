@@ -93,6 +93,20 @@ input, select, textarea { width: 100%; border: 1px solid #4e5c50; background: #1
   text-transform: uppercase;
 }
 .save-summary strong { font-variant-numeric: tabular-nums; }
+.hud-actions {
+  align-items: center;
+  display: flex;
+  gap: .45rem;
+  margin-left: auto;
+}
+.hud-actions button { padding: .45rem .75rem; }
+.confirm-apply h4 { margin: 0 0 .4rem; font-size: .95rem; }
+.confirm-mutations { margin: 0 0 1rem; padding-left: 1.2rem; }
+.confirm-compare { display: grid; gap: .4rem; margin: 0 0 1rem; }
+.confirm-compare div { display: grid; grid-template-columns: 8rem 1fr; gap: .6rem; }
+.confirm-compare dt { color: #9ba79d; }
+.confirm-compare dd { margin: 0; font-variant-numeric: tabular-nums; }
+.confirm-actions { display: flex; gap: .5rem; }
 [role="alert"] { color: #ffb5a9; }
 .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 1rem 0; align-items: start; }
 .actions > button { min-height: 4rem; font-size: 1rem; }

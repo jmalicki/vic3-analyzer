@@ -134,7 +134,7 @@ describe('BuildingsPane', () => {
     const alpaca = screen.getByRole('checkbox', { name: 'Goofy Hammers for Alpaca' })
     expect(alpaca).toBeChecked()
     expect(screen.getByRole('checkbox', { name: 'Simple Farming for Alpaca' })).not.toBeChecked()
-    expect(screen.getAllByText('Preview only — apply comes later.').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Preview uses selected methods/).length).toBeGreaterThan(0)
 
     await user.click(screen.getByRole('checkbox', { name: 'Simple Farming for Alpaca' }))
     const detail = screen.getByRole('link', { name: 'Alpaca' }).closest('tr')
@@ -151,5 +151,24 @@ describe('BuildingsPane', () => {
     await user.type(screen.getByRole('spinbutton', { name: 'Extra levels for Rye Farms' }), '3')
     await user.click(screen.getAllByRole('button', { name: 'Run what-if' })[0])
     expect(onWhatIf).toHaveBeenCalledWith('building_rye_farm', 3)
+  })
+
+  it('applies extra levels and changed production methods', async () => {
+    const user = userEvent.setup()
+    const onApply = vi.fn()
+    render(<BuildingsPane result={result} productionMethods={methods} onApply={onApply} />)
+
+    await user.click(screen.getByRole('button', { name: 'Apply extra levels for Rye Farms' }))
+    expect(onApply).toHaveBeenCalledWith({
+      extra_levels: [{ building: 'building_rye_farm', extra_levels: 1 }],
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Expand Silly Hammer Factory' }))
+    expect(screen.getByRole('button', { name: 'Apply production methods for Alpaca' })).toBeDisabled()
+    await user.click(screen.getByRole('checkbox', { name: 'Simple Farming for Alpaca' }))
+    await user.click(screen.getByRole('button', { name: 'Apply production methods for Alpaca' }))
+    expect(onApply).toHaveBeenCalledWith({
+      production_methods: [{ building_id: 7, methods: ['pm_goofy_hammers', 'pm_simple_farming'] }],
+    })
   })
 })
