@@ -296,3 +296,59 @@ Save bytes are **not** in this JSON when talking to the UI list endpoint; they l
 ```
 
 Empty diff when `left` and `right` are equal (I9).
+
+## OptimizePmsOpts
+
+```json
+{
+  "type": "object",
+  "required": ["axis"],
+  "additionalProperties": false,
+  "properties": {
+    "axis": { "enum": ["income", "productivity", "sol"] }
+  }
+}
+```
+
+## OptimizeResult
+
+Greedy production-method suggestion. `world_delta` is a [`WorldDelta`] for a later apply. `prices` is a compact summary (residual, status, scored income / productivity / SoL), not a full `PricesResult`.
+
+```json
+{
+  "type": "object",
+  "required": ["axis", "changes", "delta", "limitations", "world_delta"],
+  "properties": {
+    "axis": { "enum": ["income", "productivity", "sol"] },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["building_type", "building_id", "from", "to"],
+        "properties": {
+          "building_type": { "type": "string" },
+          "building_id": { "type": "integer", "minimum": 0 },
+          "from": { "type": "array", "items": { "type": "string" } },
+          "to": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "delta": {
+      "type": "object",
+      "required": ["income", "productivity", "sol", "residual"],
+      "properties": {
+        "income": { "type": "number" },
+        "productivity": { "type": "number" },
+        "sol": { "type": "number" },
+        "residual": { "type": "number" }
+      }
+    },
+    "prices": {
+      "type": "object",
+      "description": "Compact last-trial summary; omitted only if serialization skips it."
+    },
+    "limitations": { "type": "array", "items": { "type": "string" } },
+    "world_delta": { "$ref": "#/WorldDelta" }
+  }
+}
+```

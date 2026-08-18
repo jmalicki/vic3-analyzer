@@ -21,8 +21,9 @@ use vic3_goals::Atom;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save, SavePatch};
 use vic3_plan::PlanOpts;
 use vic3_prices::{
-    alerts as diagnose_alerts, preview as solve_preview, solve, what_if as solve_what_if,
-    PricesResult, SolveOpts, WhatIfOpts, World, WorldDelta,
+    alerts as diagnose_alerts, optimize_pms, preview as solve_preview, solve,
+    what_if as solve_what_if, OptimizePmsOpts, PricesResult, SolveOpts, WhatIfOpts, World,
+    WorldDelta,
 };
 use vic3_sim::{EconomyContext, SimConfig};
 use vic3_world::PlanningState;
@@ -123,6 +124,15 @@ pub fn loaded_what_if(what_if_opts_json: &str) -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn loaded_apply_delta(delta_json: &str) -> Result<String, JsError> {
     loaded_apply_delta_json(delta_json).map_err(to_js)
+}
+
+/// Suggest production-method changes for the loaded world (`OptimizeResult` JSON).
+///
+/// `axis_json` is `{"axis":"income"}`, `{"axis":"productivity"}`, or `{"axis":"sol"}`.
+/// Does not replace the loaded world or write a save.
+#[wasm_bindgen]
+pub fn loaded_optimize_pms(axis_json: &str) -> Result<String, JsError> {
+    loaded_optimize_pms_json(axis_json).map_err(to_js)
 }
 
 /// Evaluate goal gaps against the current worker-owned analysis.
@@ -428,6 +438,20 @@ pub fn loaded_apply_delta_json(delta_json: &str) -> Result<String, WasmError> {
             opts.warm_rel = Some(loaded.prices.relative.clone());
         }
         let result = solve_preview(&loaded.world, &loaded.defs, &delta, opts);
+        Ok(serde_json::to_string(&result)?)
+    })
+}
+
+pub fn loaded_optimize_pms_json(axis_json: &str) -> Result<String, WasmError> {
+    let opts: OptimizePmsOpts = serde_json::from_str(axis_json)?;
+    with_loaded_analysis(|loaded| {
+        let result = optimize_pms(
+            &loaded.world,
+            &loaded.defs,
+            &loaded.prices,
+            loaded.solve_opts.clone(),
+            opts.axis,
+        );
         Ok(serde_json::to_string(&result)?)
     })
 }
@@ -1196,6 +1220,23 @@ mod tests {
     }
 
     #[test]
+    fn loaded_optimize_pms_after_load_analysis_returns_axis() {
+        clear_analysis();
+        load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
+        let json = loaded_optimize_pms_json(r#"{"axis":"income"}"#).expect("optimize");
+        let v: Value = serde_json::from_str(&json).expect("OptimizeResult");
+        assert_eq!(v["axis"], "income", "{json}");
+        assert!(v["changes"].is_array(), "{json}");
+        assert!(v["delta"]["income"].is_number(), "{json}");
+        assert!(v["world_delta"].is_object(), "{json}");
+        clear_analysis();
+        assert!(matches!(
+            loaded_optimize_pms_json(r#"{"axis":"income"}"#),
+            Err(WasmError::NoLoadedAnalysis)
+        ));
+    }
+
+    #[test]
     fn loaded_military_json_after_load_has_army_and_navy_arrays() {
         clear_analysis();
         load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
@@ -1286,7 +1327,9 @@ mod tests {
             .iter()
             .find(|pm| pm["id"] == "pm_simple_forestry")
             .expect("forestry");
-        assert!(forestry["outputs"].as_array().is_some_and(|rows| !rows.is_empty()));
+        assert!(forestry["outputs"]
+            .as_array()
+            .is_some_and(|rows| !rows.is_empty()));
         clear_analysis();
         assert!(matches!(
             loaded_production_methods_json(),

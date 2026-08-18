@@ -37,6 +37,10 @@ fn dump_schemas() {
         "world-delta.json",
         &serde_json::to_value(schema_for!(WorldDelta)).unwrap(),
     );
+    write_schema(
+        "optimize.json",
+        &serde_json::to_value(schema_for!(vic3_prices::OptimizeResult)).unwrap(),
+    );
 }
 
 fn read_schema(name: &str) -> Value {
@@ -96,6 +100,17 @@ fn world_delta_schema_matches_checked_in() {
     assert_eq!(
         actual, expected,
         "schema/world-delta.json drifted from schema_for!(WorldDelta)"
+    );
+}
+
+#[test]
+fn optimize_schema_matches_checked_in() {
+    let actual =
+        serde_json::to_value(schema_for!(vic3_prices::OptimizeResult)).expect("serialize schema");
+    let expected = read_schema("optimize.json");
+    assert_eq!(
+        actual, expected,
+        "schema/optimize.json drifted from schema_for!(OptimizeResult)"
     );
 }
 

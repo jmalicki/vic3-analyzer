@@ -7,6 +7,7 @@
 mod alerts;
 mod consumption;
 mod formula;
+mod optimize;
 mod result;
 mod solve;
 mod world;
@@ -17,6 +18,11 @@ pub use alerts::{alerts, Alert, AlertKind, AlertsResult, Evidence, Mitigation, M
 pub use consumption::consumption;
 pub use formula::{
     effective_mapi, local_price, market_access, market_ratio, price, BASE_MAPI, ORDER_EPS,
+};
+pub use optimize::{
+    optimize_pms, OptimizeAxis, OptimizeChange, OptimizeDelta, OptimizePmsOpts,
+    OptimizePricesSummary, OptimizeResult, MAX_PM_TRIALS, PM_SEARCH_HEURISTIC,
+    PM_TECH_GATING_INCOMPLETE,
 };
 pub use result::{
     BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, ExtraLevelsDelta,

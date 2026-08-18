@@ -61,6 +61,7 @@ export function workerWasmApi(local: WasmApi, port: WasmWorkerPort): WasmApi {
     export_save: (originalBytes, deltaJson) => call('export_save', [originalBytes, deltaJson]),
     loaded_what_if: (whatIfOptsJson) => call('loaded_what_if', [whatIfOptsJson]),
     loaded_apply_delta: (deltaJson) => call('loaded_apply_delta', [deltaJson]),
+    loaded_optimize_pms: (axisJson) => call('loaded_optimize_pms', [axisJson]),
     loaded_gaps: (goal) => call('loaded_gaps', [goal]),
     loaded_plan: (planOptsJson) => call('loaded_plan', [planOptsJson]),
     loaded_alerts: () => call('loaded_alerts', []),

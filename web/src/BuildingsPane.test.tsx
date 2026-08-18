@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BuildingsPane } from './BuildingsPane'
 import type { PricesResult, ProductionMethodDef } from './types'
+import type { WasmApi } from './wasm'
 
 const result: PricesResult = {
   goods: [
@@ -118,12 +119,50 @@ describe('BuildingsPane', () => {
     expect(screen.getByText('Workforce')).toBeInTheDocument()
   })
 
-  it('keeps the optimizer disabled', () => {
+  it('keeps the optimizer disabled without an API', () => {
     render(<BuildingsPane result={result} />)
 
     const optimizer = screen.getByRole('button', { name: 'Optimize production methods' })
     expect(optimizer).toBeDisabled()
-    expect(optimizer).toHaveAttribute('title', 'coming in apply track')
+  })
+
+  it('shows grouped optimizer changes from the mock API', async () => {
+    const user = userEvent.setup()
+    const api = {
+      loaded_optimize_pms: vi.fn(() =>
+        JSON.stringify({
+          axis: 'income',
+          changes: [
+            {
+              building_type: 'building_rye_farm',
+              building_id: 9,
+              from: ['pm_simple_farming'],
+              to: ['pm_soil_enriching_farming'],
+            },
+          ],
+          delta: { income: 12.5, productivity: 1.2, sol: 0, residual: -0.001 },
+          limitations: [],
+          world_delta: {
+            production_methods: [{ building_id: 9, methods: ['pm_soil_enriching_farming'] }],
+          },
+        }),
+      ),
+    }
+    render(<BuildingsPane result={result} api={api as unknown as WasmApi} />)
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Optimization axis' }), 'income')
+    await user.click(screen.getByRole('button', { name: 'Optimize production methods' }))
+
+    expect(api.loaded_optimize_pms).toHaveBeenCalledWith('{"axis":"income"}')
+    expect(screen.getByText(/Estimated Δ: income \+12\.50/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Expand Rye Farms changes' }))
+    expect(screen.getByText(/Simple Farming → Soil Enriching Farming/)).toBeInTheDocument()
+    const apply = screen.getAllByRole('button', { name: 'Apply' })
+    expect(apply.length).toBeGreaterThan(0)
+    for (const button of apply) {
+      expect(button).toBeDisabled()
+      expect(button).toHaveAttribute('title', 'coming in apply track')
+    }
   })
 
   it('lists production methods from production_method_ids and previews recipes', async () => {

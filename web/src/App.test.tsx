@@ -150,6 +150,15 @@ function mockApi(): WasmApi {
     export_save: vi.fn(() => new Uint8Array([1, 2, 3])),
     loaded_what_if: vi.fn(() => result),
     loaded_apply_delta: vi.fn(() => result),
+    loaded_optimize_pms: vi.fn(() =>
+      JSON.stringify({
+        axis: 'productivity',
+        changes: [],
+        delta: { income: 0, productivity: 0, sol: 0, residual: 0 },
+        limitations: [],
+        world_delta: {},
+      }),
+    ),
     loaded_gaps: vi.fn(() => gapsResult),
     loaded_plan: vi.fn(() => planResult),
     loaded_alerts: vi.fn(() =>
@@ -760,7 +769,7 @@ describe('prices UI', () => {
     expect(window.location.hash).toBe('#/pops')
   })
 
-  it('shows grouped buildings and a disabled optimizer', async () => {
+  it('shows grouped buildings and an optimizer', async () => {
     const user = userEvent.setup()
     render(<App wasmApi={mockApi()} />)
     await selectSave(user)
@@ -768,7 +777,7 @@ describe('prices UI', () => {
     await user.click(screen.getByRole('button', { name: 'Buildings' }))
     expect(screen.getByRole('heading', { name: 'Buildings' })).toBeInTheDocument()
     expect(screen.getByText('Rye Farms')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Optimize production methods' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Optimize production methods' })).toBeEnabled()
     expect(window.location.hash).toBe('#/buildings')
 
     await user.click(screen.getByRole('button', { name: 'Expand Rye Farms' }))

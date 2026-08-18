@@ -1,0 +1,264 @@
+{
+  "$defs": {
+    "ExtraLevelsDelta": {
+      "additionalProperties": false,
+      "description": "Extra levels on a building type and/or a single instance.\n\nWhen `building_id` is set it wins; otherwise `building` matches\n[`crate::WorldBuilding::building`]. Neither set is a no-op.",
+      "properties": {
+        "building": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "building_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "extra_levels": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "extra_levels"
+      ],
+      "type": "object"
+    },
+    "OptimizeAxis": {
+      "description": "Objective for [`optimize_pms`].",
+      "enum": [
+        "income",
+        "productivity",
+        "sol"
+      ],
+      "type": "string"
+    },
+    "OptimizeChange": {
+      "description": "One suggested production-method swap on a building instance.",
+      "properties": {
+        "building_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "building_type": {
+          "type": "string"
+        },
+        "from": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "to": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "building_type",
+        "building_id",
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "OptimizeDelta": {
+      "description": "Score deltas versus the baseline solve (`new − old`).",
+      "properties": {
+        "income": {
+          "format": "double",
+          "type": "number"
+        },
+        "productivity": {
+          "format": "double",
+          "type": "number"
+        },
+        "residual": {
+          "format": "double",
+          "type": "number"
+        },
+        "sol": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "income",
+        "productivity",
+        "sol",
+        "residual"
+      ],
+      "type": "object"
+    },
+    "OptimizePricesSummary": {
+      "description": "Compact numbers from the last trial solve. Full [`PricesResult`] is omitted\nbecause a late-game dump is huge; these are the values the UI needs.",
+      "properties": {
+        "income": {
+          "format": "double",
+          "type": "number"
+        },
+        "productivity": {
+          "format": "double",
+          "type": "number"
+        },
+        "residual": {
+          "format": "double",
+          "type": "number"
+        },
+        "sol": {
+          "format": "double",
+          "type": "number"
+        },
+        "status": {
+          "$ref": "#/$defs/SolveStatus"
+        }
+      },
+      "required": [
+        "residual",
+        "status",
+        "income",
+        "productivity",
+        "sol"
+      ],
+      "type": "object"
+    },
+    "ProductionMethodDelta": {
+      "additionalProperties": false,
+      "description": "Replace one building's active production methods (clears that building's saved IO).",
+      "properties": {
+        "building_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "methods": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "building_id",
+        "methods"
+      ],
+      "type": "object"
+    },
+    "SolveStatus": {
+      "description": "Why [`crate::solve`] stopped.",
+      "oneOf": [
+        {
+          "const": "converged",
+          "description": "[`PricesResult::residual`] is below [`SolveOpts::residual_eps`] (I5).",
+          "type": "string"
+        },
+        {
+          "const": "max_iters",
+          "description": "Iteration budget exhausted with residual still at or above ε.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "Basin reported failure and successive substitution did not recover.",
+          "type": "string"
+        }
+      ]
+    },
+    "SubsidizeDelta": {
+      "additionalProperties": false,
+      "description": "Subsidy toggle. Ignored until the IR models subsidies.",
+      "properties": {
+        "building_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "building_id",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "WorldDelta": {
+      "additionalProperties": false,
+      "description": "Preview mutation: extra levels, then production methods. Does not write a save.\n\n[`crate::apply_delta`] clones the world; [`crate::preview`] re-solves without\ncommitting. Subsidy entries are accepted and ignored (no IR flag).",
+      "properties": {
+        "extra_levels": {
+          "items": {
+            "$ref": "#/$defs/ExtraLevelsDelta"
+          },
+          "type": "array"
+        },
+        "production_methods": {
+          "items": {
+            "$ref": "#/$defs/ProductionMethodDelta"
+          },
+          "type": "array"
+        },
+        "subsidize": {
+          "items": {
+            "$ref": "#/$defs/SubsidizeDelta"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Suggested PM changes, estimated Δ, and a [`WorldDelta`] for a later apply.",
+  "properties": {
+    "axis": {
+      "$ref": "#/$defs/OptimizeAxis"
+    },
+    "changes": {
+      "items": {
+        "$ref": "#/$defs/OptimizeChange"
+      },
+      "type": "array"
+    },
+    "delta": {
+      "$ref": "#/$defs/OptimizeDelta"
+    },
+    "limitations": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "prices": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OptimizePricesSummary"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "world_delta": {
+      "$ref": "#/$defs/WorldDelta"
+    }
+  },
+  "required": [
+    "axis",
+    "changes",
+    "delta",
+    "limitations",
+    "world_delta"
+  ],
+  "title": "OptimizeResult",
+  "type": "object"
+}

@@ -12,6 +12,9 @@ import type {
   BuildingTypeInfo,
   DefsIcons,
   GoodFlow,
+  OptimizeAxis,
+  OptimizeChange,
+  OptimizeResult,
   PricesResult,
   ProductionMethodDef,
 } from './types'
@@ -79,6 +82,25 @@ function sameIds(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false
   const other = new Set(right)
   return left.every((id) => other.has(id))
+}
+
+function formatDelta(value: number): string {
+  const formatted = value.toFixed(2)
+  if (value > 0) return `+${formatted}`
+  return formatted
+}
+
+function groupOptimizeChanges(changes: OptimizeChange[]): { typeId: string; changes: OptimizeChange[] }[] {
+  const grouped = new Map<string, OptimizeChange[]>()
+  for (const change of changes) {
+    const rows = grouped.get(change.building_type)
+    if (rows) rows.push(change)
+    else grouped.set(change.building_type, [change])
+  }
+  return [...grouped.entries()].map(([typeId, groupedChanges]) => ({
+    typeId,
+    changes: groupedChanges,
+  }))
 }
 
 function previewFlows(
@@ -173,6 +195,11 @@ export function BuildingsPane({
   const [extraLevels, setExtraLevels] = useState<Record<string, number>>({})
   const [selectedPms, setSelectedPms] = useState<Record<number, string[]>>({})
   const [loadedMethods, setLoadedMethods] = useState<ProductionMethodDef[]>([])
+  const [axis, setAxis] = useState<OptimizeAxis>('productivity')
+  const [optimizeResult, setOptimizeResult] = useState<OptimizeResult>()
+  const [optimizeError, setOptimizeError] = useState<string>()
+  const [optimizing, setOptimizing] = useState(false)
+  const [expandedOptimize, setExpandedOptimize] = useState<Set<string>>(() => new Set())
   useEffect(() => {
     const update = () => setHash(window.location.hash)
     window.addEventListener('hashchange', update)
@@ -232,6 +259,36 @@ export function BuildingsPane({
   const selectedFor = (building: BuildingEconomics): string[] =>
     selectedPms[building.id] ?? building.production_method_ids ?? []
 
+  const canOptimize = Boolean(api?.loaded_optimize_pms)
+  const runOptimize = () => {
+    if (!api?.loaded_optimize_pms) return
+    setOptimizing(true)
+    setOptimizeError(undefined)
+    void Promise.resolve(api.loaded_optimize_pms(JSON.stringify({ axis })))
+      .then((json) => {
+        setOptimizeResult(JSON.parse(json) as OptimizeResult)
+      })
+      .catch((reason: unknown) => {
+        setOptimizeResult(undefined)
+        setOptimizeError(reason instanceof Error ? reason.message : String(reason))
+      })
+      .finally(() => {
+        setOptimizing(false)
+      })
+  }
+
+  const toggleOptimizeType = (typeId: string) => {
+    setExpandedOptimize((current) => {
+      const next = new Set(current)
+      if (next.has(typeId)) next.delete(typeId)
+      else next.add(typeId)
+      return next
+    })
+  }
+
+  const typeName = (typeId: string): string =>
+    result?.building_types?.find((type) => type.id === typeId)?.name || displayId(typeId)
+
   return (
     <section
       className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
@@ -239,10 +296,33 @@ export function BuildingsPane({
     >
       <div className="result-heading">
         <h2 id="buildings-heading">Buildings</h2>
-        <button type="button" disabled title="coming in apply track">
-          Optimize production methods
-        </button>
+        <div className="building-what-if">
+          <label>
+            Optimize for
+            <select
+              aria-label="Optimization axis"
+              value={axis}
+              onChange={(event) => setAxis(event.target.value as OptimizeAxis)}
+            >
+              <option value="productivity">Productivity</option>
+              <option value="income">Income</option>
+              <option value="sol">SoL</option>
+            </select>
+          </label>
+          <button type="button" disabled={!canOptimize || optimizing} onClick={runOptimize}>
+            Optimize production methods
+          </button>
+        </div>
       </div>
+      {optimizeError && <p role="alert">{optimizeError}</p>}
+      {optimizeResult && (
+        <OptimizeDiff
+          result={optimizeResult}
+          typeName={typeName}
+          expanded={expandedOptimize}
+          onToggle={toggleOptimizeType}
+        />
+      )}
       {visible.length ? (
         <div className="table-scroll">
           <table className="buildings-table">
@@ -440,5 +520,74 @@ function TypeBlock({
         </tr>
       )}
     </>
+  )
+}
+
+function OptimizeDiff({
+  result,
+  typeName,
+  expanded,
+  onToggle,
+}: {
+  result: OptimizeResult
+  typeName: (typeId: string) => string
+  expanded: Set<string>
+  onToggle: (typeId: string) => void
+}) {
+  const groups = groupOptimizeChanges(result.changes)
+  return (
+    <div className="alert-expander">
+      <p>
+        Estimated Δ: income {formatDelta(result.delta.income)}, productivity{' '}
+        {formatDelta(result.delta.productivity)}, SoL {formatDelta(result.delta.sol)}
+      </p>
+      {groups.length ? (
+        <ul className="alerts-list">
+          {groups.map((group) => {
+            const open = expanded.has(group.typeId)
+            return (
+              <li key={group.typeId}>
+                <div className="alert-mitigation-heading">
+                  <button
+                    type="button"
+                    className="building-expand"
+                    aria-expanded={open}
+                    aria-label={`${open ? 'Collapse' : 'Expand'} ${typeName(group.typeId)} changes`}
+                    onClick={() => onToggle(group.typeId)}
+                  >
+                    {open ? '▼' : '▶'}
+                  </button>
+                  <strong>{typeName(group.typeId)}</strong>
+                  <span className="alert-severity">
+                    {group.changes.length} building{group.changes.length === 1 ? '' : 's'}
+                  </span>
+                  <button type="button" className="alert-apply" disabled title="coming in apply track">
+                    Apply
+                  </button>
+                </div>
+                {open && (
+                  <ul className="archive-list">
+                    {group.changes.map((change) => (
+                      <li key={change.building_id}>
+                        <span>Building {change.building_id}</span>
+                        <span>
+                          {change.from.map(displayId).join(', ') || '—'} →{' '}
+                          {change.to.map(displayId).join(', ') || '—'}
+                        </span>
+                        <button type="button" disabled title="coming in apply track">
+                          Apply
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      ) : (
+        <p>No improving production-method changes found.</p>
+      )}
+    </div>
   )
 }

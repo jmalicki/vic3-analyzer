@@ -189,6 +189,39 @@ export interface WorldDelta {
   subsidize?: SubsidizeDelta[]
 }
 
+export type OptimizeAxis = 'income' | 'productivity' | 'sol'
+
+export interface OptimizeChange {
+  building_type: string
+  building_id: number
+  from: string[]
+  to: string[]
+}
+
+export interface OptimizeDelta {
+  income: number
+  productivity: number
+  sol: number
+  residual: number
+}
+
+export interface OptimizePricesSummary {
+  residual: number
+  status: PricesResult['status']
+  income: number
+  productivity: number
+  sol: number
+}
+
+export interface OptimizeResult {
+  axis: OptimizeAxis
+  changes: OptimizeChange[]
+  delta: OptimizeDelta
+  prices?: OptimizePricesSummary
+  limitations: string[]
+  world_delta: WorldDelta
+}
+
 export type GapAtom = string | Record<string, unknown>
 
 export interface GapsResult {
