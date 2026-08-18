@@ -33,6 +33,11 @@ export interface WasmApi {
   clear_analysis(): void | Promise<void>
   loaded_prices(): string | Promise<string>
   loaded_military(): string | Promise<string>
+  /** Patch origin `.v3` bytes with a SavePatch JSON; returns new bytes. */
+  export_save(
+    originalBytes: Uint8Array,
+    deltaJson: string,
+  ): Uint8Array | Promise<Uint8Array>
   loaded_what_if(whatIfOptsJson: string): string | Promise<string>
   loaded_apply_delta(deltaJson: string): string | Promise<string>
   loaded_gaps(goal: string): string | Promise<string>

@@ -113,6 +113,7 @@ function mockApi(): WasmApi {
         limitations: ['Military IR incomplete; missing managers yield empty lists'],
       }),
     ),
+    export_save: vi.fn(() => new Uint8Array([1, 2, 3])),
     loaded_what_if: vi.fn(() => result),
     loaded_apply_delta: vi.fn(() => result),
     loaded_gaps: vi.fn(() => gapsResult),

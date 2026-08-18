@@ -19,6 +19,7 @@
 //! under ~0.1 s.
 
 mod error;
+mod export;
 mod ir;
 mod maybe;
 
@@ -32,6 +33,7 @@ use jomini::binary::TokenResolver;
 use vic3save::{DeserializeVic3, ReaderAt, Vic3File};
 
 pub use error::LoadError;
+pub use export::{export_save, ExportError, ExtraLevelsPatch, ProductionMethodPatch, SavePatch};
 pub use ir::{
     Budget, Building, BuildingGoods, ConstructionOrder, Country, Culture, IndexQtyMap, Manager,
     Market, Meta, MilitaryFormation, MilitaryHq, MilitaryUnit, MobilizationEntry, Player, Pop,
