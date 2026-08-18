@@ -15,7 +15,8 @@ use vic3save::Vic3Date;
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(bound = "T: Deserialize<'de>")]
 pub struct Manager<T> {
-    #[serde(default, deserialize_with = "maybe_map")]
+    /// 1.13 writes this map as `lod` rather than `database`.
+    #[serde(default, alias = "lod", deserialize_with = "maybe_map")]
     pub database: HashMap<u32, Option<T>>,
 }
 
@@ -80,9 +81,9 @@ pub struct Meta {
 /// A country definition in `country_manager.database`.
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub struct Country {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "flex_str")]
     pub definition: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "optional_flex_str")]
     pub government: Option<String>,
     #[serde(default)]
     pub capital: Option<u32>,
@@ -98,13 +99,13 @@ pub struct Country {
     pub market_capital: Option<u32>,
     #[serde(default)]
     pub is_main_tag: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "optional_flex_str")]
     pub country_type: Option<String>,
     /// Direct overlord country id when this country is a subject.
     #[serde(default)]
     pub overlord: Option<u32>,
     /// Subject type id when present (`puppet`, `dominion`, …).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "optional_flex_str")]
     pub subject_type: Option<String>,
 }
 
@@ -157,7 +158,7 @@ impl Budget {
 /// A state in `states.database`.
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub struct State {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "optional_flex_str")]
     pub region: Option<String>,
     #[serde(default)]
     pub country: Option<u32>,
@@ -230,7 +231,7 @@ pub struct StatePopStatistics {
 /// A building in `building_manager.database`.
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub struct Building {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "flex_str")]
     pub building: String,
     #[serde(default)]
     pub state: Option<u32>,
@@ -240,11 +241,11 @@ pub struct Building {
     #[serde(default)]
     pub staffing: f64,
     /// Active production method when a save records a single id.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "optional_flex_str")]
     pub production_method: Option<String>,
     /// Active production methods, one per PM group. This is the shape a real
     /// save uses; a building runs every listed method at once.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "flex_str_vec")]
     pub production_methods: Vec<String>,
     /// Saved input volumes when present. Keys are good script ids (fixtures) or
     /// the vanilla goods-table index as a decimal string (real saves).
@@ -275,30 +276,36 @@ impl<'de> Deserialize<'de> for IndexQtyMap {
             }
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
                 let mut values = BTreeMap::new();
-                while let Some(key) = map.next_key::<String>()? {
-                    if key == "remainder" {
+                while let Some(key) = map.next_key::<FlexStr>()? {
+                    if key.0 == "remainder" {
                         let _: de::IgnoredAny = map.next_value()?;
                         continue;
                     }
                     let qty = map.next_value::<GoodQty>()?;
-                    values.insert(key, qty.value());
+                    values.insert(key.0, qty.value());
                 }
                 Ok(IndexQtyMap { values })
             }
             fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
                 let mut values = BTreeMap::new();
                 let mut pending: Option<String> = None;
-                while let Some(token) = seq.next_element::<String>()? {
-                    if token == "=" {
-                        let key = pending.take().ok_or_else(|| {
-                            de::Error::custom("qualification assignment missing key")
-                        })?;
-                        let qty = seq.next_element::<f64>()?.ok_or_else(|| {
-                            de::Error::custom("qualification assignment missing value")
-                        })?;
-                        values.insert(key, qty);
-                    } else {
-                        pending = Some(token);
+                while let Some(token) = seq.next_element::<SeqTok>()? {
+                    match token {
+                        SeqTok::Ident(key) if key == "=" => {
+                            let key = pending.take().ok_or_else(|| {
+                                de::Error::custom("qualification assignment missing key")
+                            })?;
+                            let qty = seq.next_element::<f64>()?.ok_or_else(|| {
+                                de::Error::custom("qualification assignment missing value")
+                            })?;
+                            values.insert(key, qty);
+                        }
+                        SeqTok::Ident(key) => pending = Some(key),
+                        SeqTok::Float(qty) => {
+                            if let Some(key) = pending.take() {
+                                values.insert(key, qty);
+                            }
+                        }
                     }
                 }
                 Ok(IndexQtyMap { values })
@@ -319,14 +326,14 @@ impl<'de> Deserialize<'de> for BuildingGoods {
         #[derive(Deserialize)]
         struct Raw {
             #[serde(default)]
-            goods: std::collections::BTreeMap<String, GoodQty>,
+            goods: std::collections::BTreeMap<FlexStr, GoodQty>,
         }
         let raw = Raw::deserialize(deserializer)?;
         Ok(Self {
             goods: raw
                 .goods
                 .into_iter()
-                .map(|(key, qty)| (key, qty.value()))
+                .map(|(key, qty)| (key.0, qty.value()))
                 .filter(|(_, qty)| *qty != 0.0)
                 .collect(),
         })
@@ -368,8 +375,8 @@ impl<'de> Deserialize<'de> for GoodQty {
                 mut map: A,
             ) -> Result<Self::Value, A::Error> {
                 let mut value = None;
-                while let Some(key) = map.next_key::<String>()? {
-                    if key == "value" {
+                while let Some(key) = map.next_key::<FlexStr>()? {
+                    if key.0 == "value" {
                         value = Some(map.next_value::<f64>()?);
                     } else {
                         let _: serde::de::IgnoredAny = map.next_value()?;
@@ -386,25 +393,26 @@ impl<'de> Deserialize<'de> for GoodQty {
                 mut seq: A,
             ) -> Result<Self::Value, A::Error> {
                 let mut value = None;
-                while let Some(key) = seq.next_element::<String>()? {
-                    let operator = seq.next_element::<String>()?.ok_or_else(|| {
-                        serde::de::Error::custom("missing building good operator")
-                    })?;
-                    if operator != "=" {
-                        return Err(serde::de::Error::custom(format!(
-                            "expected building good assignment, found {operator}"
-                        )));
-                    }
-                    if key == "value" {
-                        value = Some(seq.next_element::<f64>()?.ok_or_else(|| {
-                            serde::de::Error::custom("missing building good value")
-                        })?);
-                    } else {
-                        let _ = seq
-                            .next_element::<serde::de::IgnoredAny>()?
-                            .ok_or_else(|| {
-                                serde::de::Error::custom("missing building good field value")
-                            })?;
+                while let Some(token) = seq.next_element::<SeqTok>()? {
+                    match token {
+                        SeqTok::Float(qty) => value = Some(qty),
+                        SeqTok::Ident(key) if key == "=" => {
+                            if let Some(SeqTok::Float(qty)) = seq.next_element::<SeqTok>()? {
+                                value = Some(qty);
+                            }
+                        }
+                        SeqTok::Ident(key) if key == "value" => {
+                            match seq.next_element::<SeqTok>()? {
+                                Some(SeqTok::Ident(op)) if op == "=" => {
+                                    value = seq.next_element::<f64>()?;
+                                }
+                                Some(SeqTok::Float(qty)) => value = Some(qty),
+                                _ => {}
+                            }
+                        }
+                        SeqTok::Ident(_) => {
+                            let _ = seq.next_element::<serde::de::IgnoredAny>()?;
+                        }
                     }
                 }
                 value
@@ -436,14 +444,19 @@ impl Building {
 /// script id. Localization labels are in the defs blob, keyed by that id.
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub struct Culture {
-    #[serde(default, rename = "type")]
+    #[serde(default, rename = "type", deserialize_with = "flex_str")]
     pub id: String,
 }
 
 /// A pop in `pops.database`.
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub struct Pop {
-    #[serde(default, rename = "type", alias = "profession")]
+    #[serde(
+        default,
+        rename = "type",
+        alias = "profession",
+        deserialize_with = "optional_flex_str"
+    )]
     pub profession: Option<String>,
     #[serde(default)]
     pub size: Option<f64>,
@@ -453,7 +466,7 @@ pub struct Pop {
     pub dependents: Option<f64>,
     #[serde(default)]
     pub wealth: Option<i32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "optional_flex_str")]
     pub culture: Option<String>,
     #[serde(default, rename = "location", alias = "state")]
     pub state: Option<u32>,
@@ -469,6 +482,109 @@ pub struct Pop {
     /// Profession-index → people who could work that profession.
     #[serde(default)]
     pub qualifications: IndexQtyMap,
+}
+
+/// Integer or string map key / scalar. Binary saves write culture and goods
+/// indices as integers; plaintext fixtures use script ids or decimal strings.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct FlexStr(String);
+
+impl<'de> Deserialize<'de> for FlexStr {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = FlexStr;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a string or integer")
+            }
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                Ok(FlexStr(value.to_string()))
+            }
+            fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+                Ok(FlexStr(value))
+            }
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(FlexStr(value.to_string()))
+            }
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+                Ok(FlexStr(value.to_string()))
+            }
+        }
+        deserializer.deserialize_any(V)
+    }
+}
+
+enum SeqTok {
+    Ident(String),
+    Float(f64),
+}
+
+impl<'de> Deserialize<'de> for SeqTok {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = SeqTok;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a map key, '=', or quantity")
+            }
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                Ok(SeqTok::Ident(value.to_string()))
+            }
+            fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+                Ok(SeqTok::Ident(value))
+            }
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(SeqTok::Ident(value.to_string()))
+            }
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+                Ok(SeqTok::Ident(value.to_string()))
+            }
+            fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+                Ok(SeqTok::Float(value))
+            }
+        }
+        deserializer.deserialize_any(V)
+    }
+}
+
+fn flex_str<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    FlexStr::deserialize(deserializer).map(|value| value.0)
+}
+
+fn flex_str_vec<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+    Vec::<FlexStr>::deserialize(deserializer)
+        .map(|values| values.into_iter().map(|value| value.0).collect())
+}
+
+fn optional_flex_str<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    struct V;
+    impl<'de> Visitor<'de> for V {
+        type Value = Option<String>;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a string, integer, none, or omission")
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+            Ok(Some(value.to_string()))
+        }
+        fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+            Ok(Some(value))
+        }
+        fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+            Ok(Some(value.to_string()))
+        }
+        fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+            Ok(Some(value.to_string()))
+        }
+    }
+    deserializer.deserialize_any(V)
 }
 
 fn optional_id<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u32>, D::Error> {
@@ -529,7 +645,7 @@ pub struct Market {
 /// One entry in the top-level `laws.database` manager.
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub struct LawEntry {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "flex_str")]
     pub law: String,
     #[serde(default)]
     pub country: Option<u32>,
@@ -635,6 +751,31 @@ mod tests {
         };
 
         assert_eq!(pop.demand_size(), Some(10_000.0));
+    }
+
+    #[test]
+    fn manager_reads_lod_alias_used_by_1_13() {
+        let save = crate::load_slice(
+            br#"SAV01000000000000000000
+country_manager={
+	lod={
+		1=none
+		2={ definition="GER" }
+	}
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("lod manager");
+        assert_eq!(save.country_manager.database.get(&1), Some(&None));
+        assert_eq!(
+            save.country_manager
+                .database
+                .get(&2)
+                .and_then(Option::as_ref)
+                .map(|country| country.definition.as_str()),
+            Some("GER")
+        );
     }
 
     #[test]
