@@ -32,6 +32,7 @@ export interface WasmApi {
   ): string | Promise<string>
   clear_analysis(): void | Promise<void>
   loaded_prices(): string | Promise<string>
+  loaded_military(): string | Promise<string>
   loaded_what_if(whatIfOptsJson: string): string | Promise<string>
   loaded_gaps(goal: string): string | Promise<string>
   loaded_plan(planOptsJson: string): string | Promise<string>

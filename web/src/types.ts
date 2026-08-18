@@ -199,6 +199,37 @@ export interface SaveSummary {
   buildings?: string[]
 }
 
+export interface MilitaryUnitSnapshot {
+  id?: number
+  name?: string
+  type?: string
+  manpower?: number
+}
+
+export interface MilitaryFormationSnapshot {
+  id: number
+  name?: string
+  type?: string
+  country?: number
+  organization?: number
+  current_manpower?: number
+  units: MilitaryUnitSnapshot[]
+}
+
+export interface MobilizationSnapshot {
+  id: number
+  name?: string
+  country?: number
+  type?: string
+}
+
+export interface MilitarySnapshot {
+  armies: MilitaryFormationSnapshot[]
+  navies: MilitaryFormationSnapshot[]
+  mobilization: MobilizationSnapshot[]
+  limitations: string[]
+}
+
 export interface DefsIcons {
   goods?: Record<string, string>
   extra?: Record<string, string>

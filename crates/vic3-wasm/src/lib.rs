@@ -33,6 +33,7 @@ struct LoadedAnalysis {
     world: World,
     solve_opts: SolveOpts,
     prices: PricesResult,
+    save: Save,
 }
 
 thread_local! {
@@ -58,9 +59,9 @@ pub fn parse_save(save_bytes: &[u8], tokens_bytes: Option<Vec<u8>>) -> Result<St
 
 /// Load one worker-owned analysis session and solve its baseline prices.
 ///
-/// The built world, definitions, and baseline prices remain in wasm for
-/// subsequent prices, what-if, gaps, and plan calls. The save IR is dropped
-/// after [`World::from_save`]. Loading another save replaces the session.
+/// The save IR, built world, definitions, and baseline prices remain in wasm
+/// for subsequent prices, what-if, gaps, plan, and military calls. Original
+/// `.v3` bytes stay in JS. Loading another save replaces the session.
 #[wasm_bindgen]
 pub fn load_analysis(
     save_bytes: &[u8],
@@ -77,7 +78,7 @@ pub fn load_analysis(
     .map_err(to_js)
 }
 
-/// Release the worker-owned definitions, world, and baseline prices.
+/// Release the worker-owned save IR, definitions, world, and baseline prices.
 #[wasm_bindgen]
 pub fn clear_analysis() {
     LOADED_ANALYSIS.with(|loaded| {
@@ -89,6 +90,12 @@ pub fn clear_analysis() {
 #[wasm_bindgen]
 pub fn loaded_prices() -> Result<String, JsError> {
     loaded_prices_json().map_err(to_js)
+}
+
+/// Return a conservative military snapshot for the played country.
+#[wasm_bindgen]
+pub fn loaded_military() -> Result<String, JsError> {
+    loaded_military_json().map_err(to_js)
 }
 
 /// Apply a what-if delta to the current worker-owned world.
@@ -319,13 +326,13 @@ pub fn load_analysis_json(
         summary: SaveSummary::from(&save),
         prices: &prices,
     })?;
-    drop(save);
     LOADED_ANALYSIS.with(|loaded| {
         loaded.replace(Some(LoadedAnalysis {
             defs,
             world,
             solve_opts,
             prices,
+            save,
         }));
     });
     Ok(json)
@@ -333,6 +340,16 @@ pub fn load_analysis_json(
 
 pub fn loaded_prices_json() -> Result<String, WasmError> {
     with_loaded_analysis(|loaded| Ok(serde_json::to_string(&loaded.prices)?))
+}
+
+pub fn loaded_military_json() -> Result<String, WasmError> {
+    with_loaded_analysis(|loaded| {
+        let player = played_country(&loaded.save).map(|(id, _)| id);
+        Ok(serde_json::to_string(&military_snapshot(
+            &loaded.save,
+            player,
+        ))?)
+    })
 }
 
 pub fn loaded_what_if_json(what_if_opts_json: &str) -> Result<String, WasmError> {
@@ -483,6 +500,140 @@ fn played_country(save: &Save) -> Option<(u32, &vic3_load::Country)> {
             .get(&id)
             .and_then(Option::as_ref)
             .map(|country| (id, country))
+    })
+}
+
+const MILITARY_INCOMPLETE: &str = "Military IR incomplete; missing managers yield empty lists";
+
+#[derive(Debug, Serialize)]
+struct MilitarySnapshot {
+    armies: Vec<FormationSnap>,
+    navies: Vec<FormationSnap>,
+    mobilization: Vec<MobilizationSnap>,
+    limitations: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct FormationSnap {
+    id: u32,
+    name: Option<String>,
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    country: Option<u32>,
+    organization: Option<f64>,
+    current_manpower: Option<f64>,
+    units: Vec<UnitSnap>,
+}
+
+#[derive(Debug, Serialize)]
+struct UnitSnap {
+    id: Option<u32>,
+    name: Option<String>,
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    manpower: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+struct MobilizationSnap {
+    id: u32,
+    name: Option<String>,
+    country: Option<u32>,
+    #[serde(rename = "type")]
+    kind: Option<String>,
+}
+
+fn military_snapshot(save: &Save, player: Option<u32>) -> MilitarySnapshot {
+    let mut armies = Vec::new();
+    let mut navies = Vec::new();
+    let mut parsed_formations = 0usize;
+
+    let mut push_formation =
+        |id: u32, formation: &vic3_load::MilitaryFormation, force_navy: Option<bool>| {
+            parsed_formations += 1;
+            if !matches_player(formation.country, player) {
+                return;
+            }
+            let snap = FormationSnap {
+                id,
+                name: formation.name.clone(),
+                kind: formation.kind.clone(),
+                country: formation.country,
+                organization: formation.organization,
+                current_manpower: formation.current_manpower,
+                units: formation
+                    .units
+                    .iter()
+                    .map(|unit| UnitSnap {
+                        id: unit.id,
+                        name: unit.name.clone(),
+                        kind: unit.kind.clone(),
+                        manpower: unit.manpower,
+                    })
+                    .collect(),
+            };
+            let navy = force_navy.unwrap_or_else(|| is_navy(formation.kind.as_deref()));
+            if navy {
+                navies.push(snap);
+            } else {
+                armies.push(snap);
+            }
+        };
+
+    for (id, formation) in save.formation_manager.iter_present() {
+        push_formation(id, formation, None);
+    }
+    for (id, formation) in save.military_formations.iter_present() {
+        push_formation(id, formation, None);
+    }
+    for (id, formation) in save.armies.iter_present() {
+        push_formation(id, formation, Some(false));
+    }
+    for (id, formation) in save.navy_manager.iter_present() {
+        push_formation(id, formation, Some(true));
+    }
+
+    let mut mobilization = Vec::new();
+    let mut parsed_mobilization = 0usize;
+    for (id, entry) in save.mobilization.iter_present() {
+        parsed_mobilization += 1;
+        if !matches_player(entry.country, player) {
+            continue;
+        }
+        mobilization.push(MobilizationSnap {
+            id,
+            name: entry.name.clone(),
+            country: entry.country,
+            kind: entry.kind.clone(),
+        });
+    }
+
+    let mut limitations = Vec::new();
+    if parsed_formations == 0 && parsed_mobilization == 0 {
+        limitations.push(MILITARY_INCOMPLETE.to_string());
+    }
+
+    MilitarySnapshot {
+        armies,
+        navies,
+        mobilization,
+        limitations,
+    }
+}
+
+fn matches_player(country: Option<u32>, player: Option<u32>) -> bool {
+    match (country, player) {
+        (Some(country), Some(player)) => country == player,
+        _ => true,
+    }
+}
+
+fn is_navy(kind: Option<&str>) -> bool {
+    kind.is_some_and(|kind| {
+        matches!(
+            kind.to_ascii_lowercase().as_str(),
+            "navy" | "fleet" | "flotilla" | "naval"
+        )
     })
 }
 
@@ -880,6 +1031,28 @@ mod tests {
         assert!(changed.residual.is_finite());
 
         clear_analysis();
+    }
+
+    #[test]
+    fn loaded_military_json_after_load_has_army_and_navy_arrays() {
+        clear_analysis();
+        load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
+        let json = loaded_military_json().expect("military snapshot");
+        let v: Value = serde_json::from_str(&json).expect("military json");
+        assert!(v["armies"].is_array(), "{v}");
+        assert!(v["navies"].is_array(), "{v}");
+        assert!(v["mobilization"].is_array(), "{v}");
+        let limitations = v["limitations"].as_array().expect("limitations array");
+        assert!(
+            limitations.iter().any(|item| item.as_str()
+                == Some("Military IR incomplete; missing managers yield empty lists")),
+            "{v}"
+        );
+        clear_analysis();
+        assert!(matches!(
+            loaded_military_json(),
+            Err(WasmError::NoLoadedAnalysis)
+        ));
     }
 
     #[test]
