@@ -557,6 +557,9 @@ describe('prices UI', () => {
     expect(cached?.prices?.goods[0]?.id).toBe('iron')
     const api = mockApi()
     api.load_analysis = vi.fn(() => new Promise<string>(() => {}))
+    api.loaded_alerts = vi.fn(() => {
+      throw new Error('no analysis is loaded')
+    })
     render(<App wasmApi={api} />)
 
     expect(
@@ -565,6 +568,8 @@ describe('prices UI', () => {
     expect(await screen.findByText('Iron')).toBeInTheDocument()
     expect(await screen.findByText('FRA')).toBeInTheDocument()
     expect(screen.getByText(/Showing the last analysis instantly/)).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(api.loaded_alerts).not.toHaveBeenCalled()
   })
 
   it('clears a stored blob when Rust rejects its format version', async () => {

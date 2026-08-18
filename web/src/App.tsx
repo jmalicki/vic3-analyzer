@@ -411,6 +411,7 @@ function App({ wasmApi }: Props) {
           setSummary(payload.summary)
           setResult(payload.prices)
           setAnalysisReady(true)
+          setError(undefined)
           void storeSaveAnalysis(payload.summary, payload.prices).catch((error: unknown) => {
             setError(persistErrorMessage(error))
           })
@@ -483,7 +484,7 @@ function App({ wasmApi }: Props) {
   }, [])
 
   useEffect(() => {
-    if (!api || !result) return
+    if (!api || !result || !analysisReady) return
     let cancelled = false
     void Promise.resolve(api.loaded_alerts())
       .then((json) => {
@@ -495,10 +496,10 @@ function App({ wasmApi }: Props) {
     return () => {
       cancelled = true
     }
-  }, [api, result])
+  }, [api, result, analysisReady])
 
   useEffect(() => {
-    if (activeView !== 'military' || !api || !result) return
+    if (activeView !== 'military' || !api || !result || !analysisReady) return
     let cancelled = false
     void Promise.resolve(api.loaded_military())
       .then((json) => {
@@ -510,7 +511,7 @@ function App({ wasmApi }: Props) {
     return () => {
       cancelled = true
     }
-  }, [activeView, api, result])
+  }, [activeView, api, result, analysisReady])
 
   const archiveResult = async (
     kind: AnalysisKind,
