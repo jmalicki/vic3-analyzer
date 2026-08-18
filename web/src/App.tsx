@@ -10,6 +10,7 @@ import {
 import { DefsBuilder } from './DefsBuilder'
 import { clearStoredDefs, loadStoredDefs, storeDefs } from './defsStore'
 import { clearStoredSave, loadStoredSave, persistErrorMessage, storeSave, storeSaveAnalysis } from './saveStore'
+import { AlertsPane } from './AlertsPane'
 import { FieldHelp } from './FieldHelp'
 import { GoalBuilder } from './GoalBuilder'
 import { parseDefsIcons } from './GameIcon'
@@ -26,6 +27,7 @@ import type {
   AnalysisKind,
   AnalysisRecord,
   AnalysisResult,
+  AlertsResult,
   DefsIcons,
   DefsSummary,
   GapAtom,
@@ -166,6 +168,7 @@ function App({ wasmApi }: Props) {
   const [result, setResult] = useState<PricesResult>()
   const [gapsResult, setGapsResult] = useState<GapsResult>()
   const [planResult, setPlanResult] = useState<PlanResult>()
+  const [alertsResult, setAlertsResult] = useState<AlertsResult>()
   const [goal, setGoal] = useState('research(tech=nitroglycerin)')
   const [label, setLabel] = useState('')
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
@@ -388,6 +391,21 @@ function App({ wasmApi }: Props) {
     window.addEventListener('hashchange', sync)
     return () => window.removeEventListener('hashchange', sync)
   }, [])
+
+  useEffect(() => {
+    if (activeView !== 'alerts' || !api || !result) return
+    let cancelled = false
+    void Promise.resolve(api.loaded_alerts())
+      .then((json) => {
+        if (!cancelled) setAlertsResult(JSON.parse(json) as AlertsResult)
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeView, api, result])
 
   const archiveResult = async (
     kind: AnalysisKind,
@@ -830,6 +848,11 @@ function App({ wasmApi }: Props) {
           aria-labelledby="alerts-heading"
         >
           <h2 id="alerts-heading">Alerts</h2>
+          {alertsResult ? (
+            <AlertsPane result={alertsResult} icons={goodIcons} />
+          ) : (
+            <p>Alerts appear after a save is priced.</p>
+          )}
         </section>
       )}
 

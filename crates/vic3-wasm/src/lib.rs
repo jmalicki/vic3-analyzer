@@ -20,7 +20,10 @@ use std::collections::BTreeSet;
 use vic3_goals::Atom;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save};
 use vic3_plan::PlanOpts;
-use vic3_prices::{solve, what_if as solve_what_if, PricesResult, SolveOpts, WhatIfOpts, World};
+use vic3_prices::{
+    alerts as diagnose_alerts, solve, what_if as solve_what_if, PricesResult, SolveOpts,
+    WhatIfOpts, World,
+};
 use vic3_sim::{EconomyContext, SimConfig};
 use vic3_world::PlanningState;
 use vic3save::PdsDate;
@@ -114,6 +117,12 @@ pub fn loaded_gaps(goal: &str) -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn loaded_plan(plan_opts_json: &str) -> Result<String, JsError> {
     loaded_plan_json(plan_opts_json).map_err(to_js)
+}
+
+/// Diagnose shortages from the current worker-owned analysis (`AlertsResult` JSON).
+#[wasm_bindgen]
+pub fn loaded_alerts() -> Result<String, JsError> {
+    loaded_alerts_json().map_err(to_js)
 }
 
 /// Build a postcard definitions blob from browser-selected Victoria 3 files.
@@ -291,6 +300,23 @@ pub fn gaps(
     .map_err(to_js)
 }
 
+/// Diagnose shortages from a save without retaining a worker session.
+#[wasm_bindgen]
+pub fn alerts(
+    save_bytes: &[u8],
+    tokens_bytes: Option<Vec<u8>>,
+    defs_blob: &[u8],
+    solve_opts_json: &str,
+) -> Result<String, JsError> {
+    alerts_json(
+        save_bytes,
+        tokens_bytes.as_deref(),
+        defs_blob,
+        solve_opts_json,
+    )
+    .map_err(to_js)
+}
+
 /// Native/test entry: same JSON as [`parse_save`].
 pub fn parse_save_json(
     save_bytes: &[u8],
@@ -395,6 +421,13 @@ pub fn loaded_plan_json(plan_opts_json: &str) -> Result<String, WasmError> {
     })
 }
 
+pub fn loaded_alerts_json() -> Result<String, WasmError> {
+    with_loaded_analysis(|loaded| {
+        let result = diagnose_alerts(&loaded.world, &loaded.defs, &loaded.prices);
+        Ok(serde_json::to_string(&result)?)
+    })
+}
+
 fn with_loaded_analysis<T>(
     run: impl FnOnce(&LoadedAnalysis) -> Result<T, WasmError>,
 ) -> Result<T, WasmError> {
@@ -485,6 +518,22 @@ pub fn gaps_json(
         gaps: vic3_goals::gaps(&goal, &state),
         limitations: prices.limitations,
     };
+    Ok(serde_json::to_string(&result)?)
+}
+
+/// Native/test entry: same `AlertsResult` JSON as a future CLI `alerts` command.
+pub fn alerts_json(
+    save_bytes: &[u8],
+    tokens_bytes: Option<&[u8]>,
+    defs_blob: &[u8],
+    solve_opts_json: &str,
+) -> Result<String, WasmError> {
+    let save = load_save(save_bytes, tokens_bytes)?;
+    let defs = vic3_defs::decode_blob(defs_blob)?;
+    let opts = parse_solve_opts(solve_opts_json)?;
+    let world = World::from_save(&save, &defs);
+    let prices = solve(&world, &defs, opts);
+    let result = diagnose_alerts(&world, &defs, &prices);
     Ok(serde_json::to_string(&result)?)
 }
 
@@ -1053,6 +1102,20 @@ mod tests {
             loaded_military_json(),
             Err(WasmError::NoLoadedAnalysis)
         ));
+    }
+
+    #[test]
+    fn loaded_alerts_after_load_analysis() {
+        clear_analysis();
+        load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
+        let json = loaded_alerts_json().expect("loaded alerts");
+        let result: vic3_prices::AlertsResult = serde_json::from_str(&json).expect("AlertsResult");
+        assert!(json.contains("\"alerts\""));
+        assert!(
+            result.limitations.iter().any(|line| !line.is_empty())
+                || json.contains("\"limitations\"")
+        );
+        clear_analysis();
     }
 
     #[test]
