@@ -71,6 +71,8 @@ Pop `culture` is a numeric index into `cultures.database` (`0={ type=north_germa
 That table is not `common/cultures` file order. The defs blob already has
 English labels keyed by script id (`cultures_l_english.yml`); resolving the
 index is what lets the Population tab show "North German" instead of `0`.
+Profession names in `pop_types_l_english.yml` are `@academics! $academics_no_icon$`;
+labels expand the `$key$` and drop `@icon!` so States/Pops show "Academics".
 
 Pop **needs** on the Population tab are the same package-ladder + substitution
 path as the residual, valued at each pop's **local** prices. They are model

@@ -38,7 +38,9 @@ pub fn decode_blob(bytes: &[u8]) -> Result<GameDefs, DefsError> {
             expected: BLOB_VERSION,
         });
     }
-    postcard::from_bytes(payload).map_err(DefsError::BlobDecode)
+    let mut defs: GameDefs = postcard::from_bytes(payload).map_err(DefsError::BlobDecode)?;
+    crate::loc::polish_labels(&mut defs.labels);
+    Ok(defs)
 }
 
 #[cfg(test)]

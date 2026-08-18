@@ -18,7 +18,9 @@ pub struct GameDefs {
     pub needs_order: Vec<String>,
     pub goods: BTreeMap<String, Good>,
     /// Localized display labels keyed by script id. Empty when localization
-    /// was not included in the selected game files.
+    /// was not included in the selected game files. `$key$` substitutions and
+    /// `@icon!` markers are resolved, so pop types show "Academics" rather than
+    /// `@academics! $academics_no_icon$`.
     pub labels: BTreeMap<String, String>,
     /// Good id → PNG icon decoded from the install's DDS textures. Empty when
     /// the icon folder was not part of the selected game files.

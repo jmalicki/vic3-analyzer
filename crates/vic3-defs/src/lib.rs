@@ -34,6 +34,7 @@ mod error;
 mod goods;
 mod icons;
 mod load;
+mod loc;
 mod needs;
 mod path_rules;
 mod staging;

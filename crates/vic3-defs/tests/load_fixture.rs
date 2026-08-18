@@ -16,6 +16,35 @@ fn load_fixture() -> vic3_defs::GameDefs {
 }
 
 #[test]
+fn pop_type_labels_resolve_icon_markup() {
+    let defs = load_from_files([
+        (
+            "game/common/goods/00_goods.txt".to_string(),
+            b"grain = { cost = 20 }\n".to_vec(),
+        ),
+        (
+            "game/localization/english/pop_types_l_english.yml".to_string(),
+            br#"l_english:
+ academics:0 "@academics! $academics_no_icon$"
+ academics_no_icon:0 "Academics"
+ farmers:0 "@farmers! $farmers_no_icon$"
+ farmers_no_icon:0 "Farmers"
+"#
+            .to_vec(),
+        ),
+    ])
+    .expect("pop type loc");
+    assert_eq!(
+        defs.labels.get("academics").map(String::as_str),
+        Some("Academics")
+    );
+    assert_eq!(
+        defs.labels.get("farmers").map(String::as_str),
+        Some("Farmers")
+    );
+}
+
+#[test]
 fn fixture_goods_have_known_base_prices() {
     let defs = load_fixture();
     assert_eq!(defs.base_price("grain"), Some(20.0));

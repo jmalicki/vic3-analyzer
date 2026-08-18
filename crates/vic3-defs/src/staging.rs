@@ -108,6 +108,7 @@ impl StagingDefs {
             package_ladder: Vec::new(),
             obsessions: BTreeMap::new(),
         };
+        crate::loc::polish_labels(&mut defs.labels);
         let good_index: HashMap<String, GoodIdx> = defs
             .goods_order
             .iter()
