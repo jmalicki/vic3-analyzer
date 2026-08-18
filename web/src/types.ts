@@ -199,6 +199,14 @@ export interface SaveSummary {
   buildings?: string[]
 }
 
+export interface DefsIcons {
+  goods?: Record<string, string>
+  extra?: Record<string, string>
+  [key: string]: string | Record<string, string> | undefined
+}
+
+export type GameIconKind = 'good' | 'building' | 'pm' | 'pop' | 'alert' | 'military'
+
 export interface DefsSummary {
   blob_version: number
   goods: number

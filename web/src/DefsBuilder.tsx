@@ -9,6 +9,7 @@ import {
 import {
   enumerateDroppedDefsFiles,
   isGfxDefsPath,
+  isExtraIconDefsPath,
   neededGfxFile,
   packDefsFiles,
   selectedDefsFiles,
@@ -114,7 +115,9 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
 
       const needed = new Set(JSON.parse(builder.neededGfxNames()) as string[])
       const art = sources.filter(
-        (source) => isGfxDefsPath(source.path) && neededGfxFile(source.path, needed),
+        (source) =>
+          isGfxDefsPath(source.path) &&
+          (isExtraIconDefsPath(source.path) || neededGfxFile(source.path, needed)),
       )
       total = text.length + art.length
       setProgress({ label, done: accepted, total })

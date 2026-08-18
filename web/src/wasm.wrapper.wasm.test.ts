@@ -103,6 +103,10 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     expect(api.classify_defs_path('game/gfx/interface/icons/goods_icons/grain.dds', false)).toBe(
       'read',
     )
+    expect(
+      api.classify_defs_path('game/gfx/interface/icons/building_icons/building_rye_farm.dds', false),
+    ).toBe('read')
+    expect(api.classify_defs_path('game/gfx/interface/icons/country_icons', true)).toBe('prune')
   })
 
   /**
@@ -123,6 +127,8 @@ describe('wasm wrapper (real wasm-pack build)', () => {
   it('decodes the fixture DDS icon into a PNG data URL', async () => {
     const icons = JSON.parse(await api.defs_icons(defs))
     expect(icons.grain).toMatch(/^data:image\/png;base64,iVBOR/)
+    expect(icons.goods.grain).toBe(icons.grain)
+    expect(icons.extra['building:building_rye_farm']).toMatch(/^data:image\/png;base64,iVBOR/)
   })
 
   it('loads and reuses a worker-style analysis session', async () => {

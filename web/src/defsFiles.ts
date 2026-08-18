@@ -144,6 +144,22 @@ export function neededGfxFile(path: string, needed: ReadonlySet<string>): boolea
 }
 
 /**
+ * True for allowlisted extra icon leaf dirs (buildings, PMs, pops, …).
+ * Goods icons stay filtered by `neededGfxNames`; CoA stays filtered too.
+ */
+export function isExtraIconDefsPath(path: string): boolean {
+  const parts = path
+    .replace(/\\/g, '/')
+    .toLowerCase()
+    .split('/')
+    .filter(Boolean)
+  const icons = parts.indexOf('icons')
+  if (icons < 0 || !parts.includes('gfx')) return false
+  const leaf = parts[icons + 1]
+  return Boolean(leaf) && leaf !== 'goods_icons'
+}
+
+/**
  * Upper bounds per wasm handoff. The byte cap prevents a group of unusually
  * large textures from producing the old roughly 30 MB payload peak.
  */

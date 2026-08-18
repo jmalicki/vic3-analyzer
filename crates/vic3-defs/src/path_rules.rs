@@ -14,13 +14,31 @@ pub const COMMON_DIRS: &[&str] = &[
     "coat_of_arms",
     "flag_definitions",
     "named_colors",
+    "pop_types",
 ];
 
-/// The only route into `gfx` we walk: goods icons and coat-of-arms textures.
-const ICON_DIR: &[&str] = &["gfx", "interface", "icons", "goods_icons"];
+/// Prefix of every interface-icon path. Only [`ICON_LEAFS`] under it are walked.
+const ICONS_PREFIX: &[&str] = &["gfx", "interface", "icons"];
+/// Leaf folders under `gfx/interface/icons` that we read `.dds` from.
+/// `gfx/interface/icons` itself is not fully opened — country_icons and the rest prune.
+pub(crate) const ICON_LEAFS: &[&str] = &[
+    "goods_icons",
+    "building_icons",
+    "production_methods_icons",
+    "production_method_icons",
+    "production_method_groups_icons",
+    "popup_icon",
+    "alert_icons",
+    "pops",
+    "pop_types",
+    "pop_types_icons",
+    "unit_types",
+    "battalions",
+    "military_unit_icons",
+];
 const COA_GFX_DIR: &[&str] = &["gfx", "coat_of_arms"];
 const COA_GFX_LEAFS: &[&str] = &["patterns", "colored_emblems", "textured_emblems"];
-const LOCALIZATION_PREFIXES: &[&str] = &[
+pub(crate) const LOCALIZATION_PREFIXES: &[&str] = &[
     "goods_l_",
     "countries_l_",
     "buildings_l_",
@@ -28,6 +46,12 @@ const LOCALIZATION_PREFIXES: &[&str] = &[
     "pop_types_l_",
     "cultures_l_",
     "state_regions_l_",
+    "production_methods_l_",
+    "production_method_groups_l_",
+    "pop_needs_l_",
+    "military_units_l_",
+    "unit_types_l_",
+    "alerts_l_",
 ];
 
 const PRUNED_DIRS: &[&str] = &[
@@ -67,8 +91,8 @@ pub fn classify_defs_path(path: &str, is_directory: bool) -> DefsPathClass {
 
     if !is_directory {
         if segments.contains(&"gfx") {
-            let inside_icons =
-                icon_route(&segments).is_some_and(|index| segments.len() > index + ICON_DIR.len());
+            let inside_icons = icon_route(&segments)
+                .is_some_and(|index| segments.len() > index + ICONS_PREFIX.len());
             let inside_coa = coa_gfx_route(&segments).is_some_and(|index| {
                 segments.len() > index + COA_GFX_DIR.len()
                     && segments
@@ -144,15 +168,53 @@ pub fn classify_defs_path(path: &str, is_directory: bool) -> DefsPathClass {
     DefsPathClass::Descend
 }
 
-/// Index of the `gfx` segment, but only while the path still leads to the
-/// goods icons. Any other branch of `gfx` returns `None` so it can be pruned.
+/// Index of the `gfx` segment, but only while the path still leads to an
+/// allowed icon leaf. Any other branch of `gfx` returns `None` so it can be pruned.
 fn icon_route(segments: &[&str]) -> Option<usize> {
     let index = segments.iter().position(|segment| *segment == "gfx")?;
-    segments[index..]
+    let tail = &segments[index..];
+    if tail.len() < ICONS_PREFIX.len() {
+        return tail
+            .iter()
+            .zip(ICONS_PREFIX)
+            .all(|(segment, expected)| segment == expected)
+            .then_some(index);
+    }
+    if !tail
         .iter()
-        .zip(ICON_DIR)
+        .zip(ICONS_PREFIX)
         .all(|(segment, expected)| segment == expected)
-        .then_some(index)
+    {
+        return None;
+    }
+    match tail.get(ICONS_PREFIX.len()) {
+        None => Some(index),
+        Some(leaf) if ICON_LEAFS.contains(leaf) => Some(index),
+        Some(_) => None,
+    }
+}
+
+/// Namespace for [`crate::GameDefs::extra_icons`], or `None` for goods icons
+/// (those stay keyed by good id in [`crate::GameDefs::icons`]).
+pub(crate) fn extra_icon_kind(path: &str) -> Option<&'static str> {
+    let normalized = path.replace('\\', "/").to_lowercase();
+    let segments = normalized
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    let icons = segments.iter().position(|segment| *segment == "icons")?;
+    let leaf = segments.get(icons + 1).copied()?;
+    match leaf {
+        "goods_icons" => None,
+        "building_icons" => Some("building"),
+        "production_methods_icons"
+        | "production_method_icons"
+        | "production_method_groups_icons" => Some("pm"),
+        "popup_icon" | "alert_icons" => Some("alert"),
+        "pops" | "pop_types" | "pop_types_icons" => Some("pop"),
+        "unit_types" | "battalions" | "military_unit_icons" => Some("military"),
+        _ => None,
+    }
 }
 
 fn coa_gfx_route(segments: &[&str]) -> Option<usize> {
@@ -207,13 +269,24 @@ mod tests {
             DefsPathClass::Read
         );
         assert_eq!(
+            classify_defs_path("game/common/pop_types/00_pop_types.txt", false),
+            DefsPathClass::Read
+        );
+        assert_eq!(
+            classify_defs_path(
+                "game/localization/english/production_methods_l_english.yml",
+                false
+            ),
+            DefsPathClass::Read
+        );
+        assert_eq!(
             classify_defs_path("game/localization/french/goods_l_french.yml", false),
             DefsPathClass::Skip
         );
     }
 
     #[test]
-    fn walks_gfx_only_as_far_as_the_goods_icons() {
+    fn walks_gfx_only_as_far_as_allowed_icon_leafs() {
         assert_eq!(classify_defs_path("game/gfx", true), DefsPathClass::Descend);
         assert_eq!(
             classify_defs_path("game/gfx/interface/icons/goods_icons", true),
@@ -224,12 +297,27 @@ mod tests {
             DefsPathClass::Read
         );
         assert_eq!(
+            classify_defs_path("game/gfx/interface/icons/building_icons", true),
+            DefsPathClass::Descend
+        );
+        assert_eq!(
+            classify_defs_path(
+                "game/gfx/interface/icons/building_icons/building_rye_farm.dds",
+                false
+            ),
+            DefsPathClass::Read
+        );
+        assert_eq!(
             classify_defs_path("game/gfx/models", true),
             DefsPathClass::Prune
         );
         assert_eq!(
             classify_defs_path("game/gfx/interface/icons/country_icons", true),
             DefsPathClass::Prune
+        );
+        assert_eq!(
+            classify_defs_path("game/gfx/interface/icons/country_icons/flag.dds", false),
+            DefsPathClass::Skip
         );
         assert_eq!(
             classify_defs_path("game/gfx/coat_of_arms/patterns", true),

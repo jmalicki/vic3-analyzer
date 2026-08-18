@@ -1,9 +1,11 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
+import { GameIcon } from './GameIcon'
 import type {
   BuildingEconomics,
   BuildingGroupInfo,
   BuildingTypeInfo,
   CountryInfo,
+  DefsIcons,
   GoodFlow,
   GoodPrice,
   MarketInputs,
@@ -56,13 +58,11 @@ function goodName(good: GoodPrice): string {
   return good.name || displayId(good.id)
 }
 
-/** Good id → PNG data URL, absent when the blob was built without game icons. */
-type Icons = Record<string, string>
+/** Game icons from a defs blob; goods may be nested or a flat id → URL map. */
+type Icons = DefsIcons
 
 function GoodIcon({ id, icons }: { id: string; icons: Icons }) {
-  const src = icons[id]
-  if (!src) return null
-  return <img className="good-icon" src={src} alt="" width={24} height={24} />
+  return <GameIcon kind="good" id={id} icons={icons} />
 }
 
 function GoodFlows({

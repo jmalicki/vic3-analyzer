@@ -23,6 +23,10 @@ pub struct GameDefs {
     /// Good id → PNG icon decoded from the install's DDS textures. Empty when
     /// the icon folder was not part of the selected game files.
     pub icons: BTreeMap<String, Vec<u8>>,
+    /// Namespaced PNG icons (`building:id`, `pm:id`, `pop:id`, `alert:id`,
+    /// `military:id`) from other `gfx/interface/icons` leaf folders.
+    #[serde(default)]
+    pub extra_icons: BTreeMap<String, Vec<u8>>,
     /// Coat-of-arms id → rendered PNG flag (small). Empty when CoA assets were
     /// not part of the selected game files.
     pub flags: BTreeMap<String, Vec<u8>>,
@@ -55,6 +59,7 @@ impl Default for GameDefs {
             goods: BTreeMap::new(),
             labels: BTreeMap::new(),
             icons: BTreeMap::new(),
+            extra_icons: BTreeMap::new(),
             flags: BTreeMap::new(),
             flag_defs: BTreeMap::new(),
             production_methods: BTreeMap::new(),

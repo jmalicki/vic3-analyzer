@@ -374,6 +374,46 @@ describe('DefsBuilder', () => {
     ])
   })
 
+  it('reads extra interface icons even when they are not in neededGfxNames', async () => {
+    const artClassify: DefsPathClassifier = (path, isDirectory) =>
+      isDirectory ? 'descend' : path.endsWith('.txt') || path.endsWith('.dds') ? 'read' : 'skip'
+    const wasm = api({ neededGfxNames: ['grain'] })
+    wasm.classify_defs_path = vi.fn(artClassify)
+    render(<DefsBuilder api={wasm} onBuilt={vi.fn()} />)
+
+    const reads: string[] = []
+    const trackedFile = (name: string): DefsDropEntry => ({
+      isFile: true,
+      isDirectory: false,
+      name,
+      file: (resolve: (file: File) => void) => {
+        reads.push(name)
+        resolve(new File(['x'], name))
+      },
+    })
+    const game = dirEntry('game', [
+      dirEntry('common', [dirEntry('goods', [fileEntry('00_goods.txt', 'grain = { cost = 20 }')])]),
+      dirEntry('gfx', [
+        dirEntry('interface', [
+          dirEntry('icons', [
+            dirEntry('goods_icons', [trackedFile('grain.dds'), trackedFile('wood.dds')]),
+            dirEntry('building_icons', [trackedFile('building_rye_farm.dds')]),
+          ]),
+        ]),
+        dirEntry('coat_of_arms', [
+          dirEntry('colored_emblems', [trackedFile('unused.dds')]),
+        ]),
+      ]),
+    ])
+
+    fireEvent.drop(screen.getByLabelText('Drop the Victoria 3 game folder'), {
+      dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => game }] },
+    })
+
+    await waitFor(() => expect(wasm.builder.finish).toHaveBeenCalled())
+    expect(reads.sort()).toEqual(['building_rye_farm.dds', 'grain.dds'])
+  })
+
   it('explains an empty drop instead of failing silently', async () => {
     render(<DefsBuilder api={api()} onBuilt={vi.fn()} />)
 

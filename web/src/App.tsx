@@ -12,6 +12,7 @@ import { clearStoredDefs, loadStoredDefs, storeDefs } from './defsStore'
 import { clearStoredSave, loadStoredSave, persistErrorMessage, storeSave, storeSaveAnalysis } from './saveStore'
 import { FieldHelp } from './FieldHelp'
 import { GoalBuilder } from './GoalBuilder'
+import { parseDefsIcons } from './GameIcon'
 import { Modal } from './Modal'
 import { PLAN_TEMPLATES, planTemplate } from './planTemplates'
 import { PriceExplorer } from './PriceExplorer'
@@ -25,6 +26,7 @@ import type {
   AnalysisKind,
   AnalysisRecord,
   AnalysisResult,
+  DefsIcons,
   DefsSummary,
   GapAtom,
   GapsResult,
@@ -160,7 +162,7 @@ function App({ wasmApi }: Props) {
   )
   const [summary, setSummary] = useState<SaveSummary>()
   const [defsSummary, setDefsSummary] = useState<DefsSummary>()
-  const [goodIcons, setGoodIcons] = useState<Record<string, string>>({})
+  const [goodIcons, setGoodIcons] = useState<DefsIcons>({})
   const [result, setResult] = useState<PricesResult>()
   const [gapsResult, setGapsResult] = useState<GapsResult>()
   const [planResult, setPlanResult] = useState<PlanResult>()
@@ -349,7 +351,7 @@ function App({ wasmApi }: Props) {
         setDefsSummary(JSON.parse(json) as DefsSummary)
         // Icons are optional: a blob built without the gfx folder still prices.
         const icons = await Promise.resolve(api.defs_icons(defsBytes!)).catch(() => '{}')
-        if (!cancelled) setGoodIcons(JSON.parse(icons) as Record<string, string>)
+        if (!cancelled) setGoodIcons(parseDefsIcons(JSON.parse(icons)))
       })
       .catch((reason: unknown) => {
         if (cancelled) return
