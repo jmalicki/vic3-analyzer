@@ -13,7 +13,7 @@ use vic3_defs::{GameDefs, GoodIdx, NeedIdx};
 use crate::world::Intern;
 
 /// Solver iteration / residual tolerances.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SolveOpts {
     /// Residual threshold for [`SolveStatus::Converged`] (I5). Default `1e-6`.
@@ -23,6 +23,13 @@ pub struct SolveOpts {
     #[serde(default = "default_max_iters")]
     #[schemars(range(min = 1))]
     pub max_iters: u32,
+    /// Previous relative prices (`price / base`) in goods-with-base-price order.
+    ///
+    /// When present and the length matches the internal goods vector, the
+    /// successive-substitution warm start is skipped and Basin starts from this
+    /// vector (clamped to bounds). A length mismatch is ignored (cold start).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warm_rel: Option<Vec<f64>>,
 }
 
 fn default_residual_eps() -> f64 {
@@ -38,6 +45,7 @@ impl Default for SolveOpts {
         Self {
             residual_eps: default_residual_eps(),
             max_iters: default_max_iters(),
+            warm_rel: None,
         }
     }
 }
@@ -634,4 +642,9 @@ pub struct PricesResult {
     pub residual: f64,
     pub status: SolveStatus,
     pub limitations: Vec<String>,
+    /// Relative prices `price / base` in the same order as [`Self::goods`].
+    ///
+    /// Callers can feed this back as [`SolveOpts::warm_rel`]. Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relative: Vec<f64>,
 }

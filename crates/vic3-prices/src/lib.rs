@@ -361,6 +361,27 @@ mod tests {
         let result = solve(&world, &defs, SolveOpts::default());
         assert_eq!(result.status, SolveStatus::Converged);
         assert!(result.residual < SolveOpts::default().residual_eps);
+        assert_eq!(result.relative.len(), result.goods.len());
+        for (row, &rel) in result.goods.iter().zip(&result.relative) {
+            assert!((row.price - row.base * rel).abs() < 1e-9);
+        }
+        let warm = solve(
+            &world,
+            &defs,
+            SolveOpts {
+                warm_rel: Some(result.relative.clone()),
+                ..SolveOpts::default()
+            },
+        );
+        for (left, right) in result.goods.iter().zip(&warm.goods) {
+            assert!(
+                (left.price - right.price).abs() < 1e-4,
+                "{} cold {} vs warm {}",
+                left.id,
+                left.price,
+                right.price
+            );
+        }
         for row in &result.goods {
             let scale = 1e-6_f64.max(1e-6 * row.base.abs());
             assert!(
@@ -750,13 +771,89 @@ mod tests {
                 ..World::default()
             };
             let opts = SolveOpts::default();
-            let result = solve(&world, &defs, opts);
+            let result = solve(&world, &defs, opts.clone());
             prop_assert!(result.residual.is_finite());
             prop_assert!(result.residual >= 0.0);
             if result.status == SolveStatus::Converged {
                 prop_assert!(result.residual < opts.residual_eps);
             }
             prop_assert_eq!(result.limitations.len(), LIMITATIONS.len());
+        }
+
+        /// Warm-starting from a previous solve's relative vector matches a cold start.
+        #[test]
+        fn warm_start_matches_cold_start_prices(
+            wood_sell in 1.0f64..=200.0,
+            coal_sell in 1.0f64..=200.0,
+            size_a in 1_000.0f64..=20_000.0,
+            size_b in 1_000.0f64..=20_000.0,
+        ) {
+            let defs = heating_defs();
+            let mut frozen_sell = GoodsVec::zeros(defs.goods_order.len());
+            frozen_sell[GoodIdx::from_usize(1)] = wood_sell;
+            frozen_sell[GoodIdx::from_usize(2)] = coal_sell;
+            let world = World {
+                pops: vec![
+                    WorldPop {
+                        state: None,
+                        size: size_a,
+                        wealth: 1,
+                        wages: 0.0,
+                        culture: None,
+                        profession: None,
+                    },
+                    WorldPop {
+                        state: None,
+                        size: size_b,
+                        wealth: 1,
+                        wages: 0.0,
+                        culture: None,
+                        profession: None,
+                    },
+                ],
+                frozen_sell,
+                ..World::default()
+            };
+            let cold = solve(&world, &defs, SolveOpts::default());
+            prop_assert!(!cold.relative.is_empty());
+            prop_assert_eq!(cold.relative.len(), cold.goods.len());
+            let warm = solve(
+                &world,
+                &defs,
+                SolveOpts {
+                    warm_rel: Some(cold.relative.clone()),
+                    ..SolveOpts::default()
+                },
+            );
+            prop_assert_eq!(cold.goods.len(), warm.goods.len());
+            let tol = 1e-4_f64.max(SolveOpts::default().residual_eps);
+            for (left, right) in cold.goods.iter().zip(&warm.goods) {
+                prop_assert!(
+                    (left.price - right.price).abs() < tol,
+                    "{} cold {} vs warm {}",
+                    left.id,
+                    left.price,
+                    right.price
+                );
+            }
+            let mismatch = solve(
+                &world,
+                &defs,
+                SolveOpts {
+                    warm_rel: Some(vec![1.0]),
+                    ..SolveOpts::default()
+                },
+            );
+            prop_assert_eq!(mismatch.goods.len(), cold.goods.len());
+            for (left, right) in cold.goods.iter().zip(&mismatch.goods) {
+                prop_assert!(
+                    (left.price - right.price).abs() < tol,
+                    "length-mismatch warm_rel should cold-start: {} {} vs {}",
+                    left.id,
+                    left.price,
+                    right.price
+                );
+            }
         }
     }
 }

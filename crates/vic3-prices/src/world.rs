@@ -430,9 +430,32 @@ impl World {
         }
         next
     }
+
+    /// Clone this world and replace one building's production methods.
+    ///
+    /// Saved IO is cleared on that building so [`WorldBuilding::goods_io`] falls
+    /// back to PM recipes × [`WorldBuilding::staffed_levels`]. Other buildings
+    /// (and their saved IO) stay frozen. Unknown `building_id` is a no-op clone.
+    pub fn with_production_methods(&self, building_id: u32, methods: Vec<String>) -> Self {
+        let mut next = self.clone();
+        if let Some(building) = next.buildings.iter_mut().find(|b| b.id == building_id) {
+            *building = building.with_methods(methods);
+        }
+        next
+    }
 }
 
 impl WorldBuilding {
+    /// Replace active PMs and drop saved IO so [`Self::goods_io`] uses recipes.
+    pub fn with_methods(&self, methods: Vec<String>) -> Self {
+        Self {
+            production_methods: methods,
+            saved_inputs: Vec::new(),
+            saved_outputs: Vec::new(),
+            ..self.clone()
+        }
+    }
+
     fn from_ir(id: u32, building: &Building, defs: &GameDefs) -> Option<Self> {
         if building.building.is_empty() {
             return None;
@@ -912,6 +935,78 @@ mod tests {
         let (buy, sell) = reconstruct_non_pop_orders(&world, &defs);
         assert_eq!(buy.as_slice(), &[32.5, 0.0]);
         assert_eq!(sell.as_slice(), &[0.0, 130.0]);
+    }
+
+    #[test]
+    fn production_method_change_rebuilds_io_from_recipes() {
+        let wood = GoodIdx::from_usize(0);
+        let grain = GoodIdx::from_usize(1);
+        let mut defs = defs_with_goods(&["wood", "grain"]);
+        defs.production_methods = BTreeMap::from([
+            (
+                "pm_wood".into(),
+                ProductionMethod {
+                    id: "pm_wood".into(),
+                    inputs: Vec::new(),
+                    outputs: vec![(wood, 10.0)],
+                },
+            ),
+            (
+                "pm_grain".into(),
+                ProductionMethod {
+                    id: "pm_grain".into(),
+                    inputs: Vec::new(),
+                    outputs: vec![(grain, 7.0)],
+                },
+            ),
+        ]);
+        let world = World {
+            buildings: vec![
+                WorldBuilding {
+                    id: 1,
+                    state: Some(1),
+                    building: "building_farm".into(),
+                    level: 2.0,
+                    staffing: 2.0,
+                    production_methods: vec!["pm_wood".into()],
+                    saved_inputs: Vec::new(),
+                    saved_outputs: vec![(wood, 99.0)],
+                },
+                WorldBuilding {
+                    id: 2,
+                    state: Some(1),
+                    building: "building_logging_camp".into(),
+                    level: 1.0,
+                    staffing: 1.0,
+                    production_methods: vec!["pm_wood".into()],
+                    saved_inputs: vec![(grain, 1.0)],
+                    saved_outputs: vec![(wood, 40.0)],
+                },
+            ],
+            ..World::default()
+        };
+
+        let (_, before) = world.buildings[0].goods_io(&defs);
+        assert_eq!(before[wood], 99.0);
+        assert_eq!(before[grain], 0.0);
+
+        let next = world.with_production_methods(1, vec!["pm_grain".into()]);
+        assert_eq!(
+            world.buildings[0].saved_outputs,
+            [(wood, 99.0)],
+            "source world is immutable"
+        );
+        assert_eq!(
+            next.buildings[1], world.buildings[1],
+            "unrelated building stays frozen"
+        );
+        assert_eq!(next.buildings[0].production_methods, ["pm_grain"]);
+        assert!(next.buildings[0].saved_inputs.is_empty());
+        assert!(next.buildings[0].saved_outputs.is_empty());
+
+        let (_, after) = next.buildings[0].goods_io(&defs);
+        assert_eq!(after[grain], 14.0, "recipe × staffed levels");
+        assert_eq!(after[wood], 0.0, "saved wood IO must not survive a PM swap");
     }
 
     #[test]
