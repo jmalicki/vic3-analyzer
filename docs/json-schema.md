@@ -355,7 +355,7 @@ Greedy production-method suggestion. `world_delta` is a [`WorldDelta`] for a lat
 
 ## AlertsResult
 
-Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent; underemployed buildings are `2`. Mitigations may include a tagged `action` used by Apply.
+Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent; underemployed buildings are `2`. Mitigations may include a tagged `action` used by Apply. Shortage interventions include an `effect` from a local IO perturbation (pop demand held, closed-form price step). PM advice names a specific method already in use on that building type.
 
 ```json
 {
@@ -409,7 +409,8 @@ Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent;
                 "detail": { "type": "string" },
                 "rank": { "type": "integer", "minimum": 0 },
                 "apply_ready": { "type": "boolean" },
-                "action": { "type": "object" }
+                "action": { "type": "object" },
+                "effect": { "type": "string" }
               }
             }
           }

@@ -117,6 +117,13 @@
         "detail": {
           "type": "string"
         },
+        "effect": {
+          "description": "Estimated impact on the short good from current building IO or the\ngood's `traded_quantity`. Not a market re-solve. Omitted outside\nshortage alerts.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -179,6 +186,13 @@
               "format": "uint32",
               "minimum": 0,
               "type": "integer"
+            },
+            "methods": {
+              "description": "Full method list for Apply. Empty means “this one id only.”",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             },
             "production_method": {
               "type": "string"

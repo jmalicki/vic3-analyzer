@@ -22,6 +22,11 @@ function actionGood(action?: MitigationAction): string | undefined {
   return undefined
 }
 
+function actionPm(action?: MitigationAction): string | undefined {
+  if (action?.type === 'pm') return action.production_method
+  return undefined
+}
+
 function alertIconId(kind: AlertKind): string {
   switch (kind) {
     case 'electricity_shortage':
@@ -114,6 +119,9 @@ function AlertExpander({
                 {actionGood(mitigation.action) && (
                   <GameIcon kind="good" id={actionGood(mitigation.action)!} icons={icons} />
                 )}
+                {actionPm(mitigation.action) && (
+                  <GameIcon kind="pm" id={actionPm(mitigation.action)!} icons={icons} />
+                )}
                 <strong>
                   {mitigation.rank}. {mitigation.title}
                 </strong>
@@ -130,6 +138,9 @@ function AlertExpander({
                 </button>
               </div>
               <p>{mitigation.detail}</p>
+              {mitigation.effect && (
+                <p className="alert-mitigation-effect">Estimated effect: {mitigation.effect}</p>
+              )}
             </li>
           )
         })}

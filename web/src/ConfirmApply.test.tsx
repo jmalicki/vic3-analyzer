@@ -79,9 +79,19 @@ describe('ConfirmApply', () => {
       deltaForMitigation({ type: 'build', building: 'building_rye_farm', extra_levels: 1 }, [rye]),
     ).toEqual({ extra_levels: [{ building_id: 9, extra_levels: 1 }] })
     expect(
-      deltaForMitigation({ type: 'pm', building_id: 9, production_method: 'pm_automatic' }, [rye]),
+      deltaForMitigation(
+        {
+          type: 'pm',
+          building_id: 9,
+          production_method: 'pm_automatic',
+          methods: ['pm_soil_enriching_farming', 'pm_automatic'],
+        },
+        [rye],
+      ),
     ).toEqual({
-      production_methods: [{ building_id: 9, methods: ['pm_automatic'] }],
+      production_methods: [
+        { building_id: 9, methods: ['pm_soil_enriching_farming', 'pm_automatic'] },
+      ],
     })
     expect(
       deltaForMitigation(

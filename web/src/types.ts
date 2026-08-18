@@ -280,7 +280,7 @@ export interface AlertEvidence {
 
 export type MitigationAction =
   | { type: 'build'; building: string; state_id?: number; extra_levels?: number }
-  | { type: 'pm'; building_id: number; production_method: string }
+  | { type: 'pm'; building_id: number; production_method: string; methods?: string[] }
   | { type: 'subsidize'; building_id: number }
   | { type: 'trade_alloc'; state_id: number; good_id: string }
   | { type: 'feeder_job'; building: string; profession: string; state_id?: number }
@@ -293,6 +293,8 @@ export interface AlertMitigation {
   rank: number
   action?: MitigationAction
   apply_ready: boolean
+  /** Estimated impact on the short good; omitted outside shortage alerts. */
+  effect?: string
 }
 
 export interface Alert {

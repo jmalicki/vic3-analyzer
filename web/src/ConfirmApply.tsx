@@ -70,10 +70,10 @@ export function deltaForMitigation(
       return undefined
     case 'pm': {
       if (!action.building_id || !action.production_method) return undefined
+      const methods =
+        action.methods && action.methods.length > 0 ? action.methods : [action.production_method]
       return {
-        production_methods: [
-          { building_id: action.building_id, methods: [action.production_method] },
-        ],
+        production_methods: [{ building_id: action.building_id, methods }],
       }
     }
     case 'build': {

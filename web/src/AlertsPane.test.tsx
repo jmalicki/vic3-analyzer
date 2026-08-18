@@ -35,6 +35,7 @@ const result: AlertsResult = {
           detail: 'electricity is non-tradeable.',
           rank: 1,
           apply_ready: false,
+          effect: '0 extra electricity from imports (local-only good).',
         },
         {
           id: 'goods:electricity:build',
@@ -43,6 +44,8 @@ const result: AlertsResult = {
           rank: 2,
           apply_ready: false,
           action: { type: 'build', building: 'building_rye_farm', extra_levels: 1 },
+          effect:
+            '~+10 grain sell, covering 25% of the 40 gap. Assumes the new level is staffed at current productivity.',
         },
         {
           id: 'goods:electricity:trade',
@@ -51,6 +54,7 @@ const result: AlertsResult = {
           rank: 3,
           apply_ready: false,
           action: { type: 'trade_alloc', state_id: 1, good_id: 'electricity' },
+          effect: '0 extra electricity in this model (trade volumes are frozen).',
         },
       ],
     },
@@ -89,5 +93,14 @@ describe('AlertsPane', () => {
     expect(apply[1]).toBeEnabled()
     await user.click(apply[1])
     expect(onApply).toHaveBeenCalledWith({ extra_levels: [{ building_id: 9, extra_levels: 1 }] })
+  })
+
+  it('shows estimated effect on each shortage intervention', async () => {
+    const user = userEvent.setup()
+    render(<AlertsPane result={result} />)
+    await user.click(screen.getByText('Electricity shortage'))
+    expect(screen.getByText(/Estimated effect: 0 extra electricity from imports/)).toBeInTheDocument()
+    expect(screen.getByText(/Estimated effect: ~\+10 grain sell/)).toBeInTheDocument()
+    expect(screen.getByText(/Estimated effect: 0 extra electricity in this model/)).toBeInTheDocument()
   })
 })

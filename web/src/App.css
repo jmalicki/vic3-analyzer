@@ -197,6 +197,7 @@ section[aria-labelledby] { margin-top: 1rem; }
 .alert-mitigations { list-style: none; padding: 0; margin: 0; display: grid; gap: .75rem; }
 .alert-mitigation-heading { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .alert-mitigation-heading p, .alert-mitigations p { margin: .35rem 0 0; color: #c8ccc5; }
+.alert-mitigation-effect { color: #d4e8c4; font-variant-numeric: tabular-nums; }
 .alert-apply:disabled {
   background: #314033;
   color: #9ba79d;

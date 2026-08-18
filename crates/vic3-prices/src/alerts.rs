@@ -14,8 +14,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use vic3_defs::GameDefs;
 
-use crate::result::BuildingEconomics;
-use crate::{market_access, GoodPrice, PricesResult, StateNeed, World, WorldBuilding, ORDER_EPS};
+use crate::result::{BuildingEconomics, ExtraLevelsDelta, ProductionMethodDelta, WorldDelta};
+use crate::{
+    apply_delta, market_access, price, GoodPrice, PricesResult, StateNeed, World, WorldBuilding,
+    ORDER_EPS,
+};
 
 /// Market access at or below this ratio is a [`AlertKind::LowMarketAccess`].
 const ACCESS_ALERT: f64 = 0.95;
@@ -82,6 +85,11 @@ pub struct Mitigation {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<MitigationAction>,
     pub apply_ready: bool,
+    /// Estimated impact on the short good from current building IO or the
+    /// good's `traded_quantity`. Not a market re-solve. Omitted outside
+    /// shortage alerts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect: Option<String>,
 }
 
 /// Suggested follow-up. Internally tagged with `type`.
@@ -98,6 +106,9 @@ pub enum MitigationAction {
     Pm {
         building_id: u32,
         production_method: String,
+        /// Full method list for Apply. Empty means “this one id only.”
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        methods: Vec<String>,
     },
     Subsidize {
         building_id: u32,
@@ -225,10 +236,15 @@ fn collect_goods_alerts(
             });
         }
         let mitigations = goods_mitigations(
-            world,
-            defs,
-            prices,
-            &good_id,
+            &ShortageEffect {
+                world,
+                defs,
+                prices,
+                good_id: &good_id,
+                buy: hint.buy,
+                sell: hint.sell,
+                base: hint.base,
+            },
             hint.state_id,
             tradeable,
             limitations,
@@ -322,41 +338,54 @@ fn is_tradeable(good_id: &str, defs: &GameDefs) -> bool {
 }
 
 fn goods_mitigations(
-    world: &World,
-    defs: &GameDefs,
-    prices: &PricesResult,
-    good_id: &str,
+    ctx: &ShortageEffect<'_>,
     state_id: Option<u32>,
     tradeable: bool,
     limitations: &mut BTreeSet<String>,
 ) -> Vec<Mitigation> {
+    limitations.insert(
+        "Shortage intervention effects hold pop demand fixed and revalue building IO after the suggested delta (a local price-formula step, not a full re-solve)."
+            .into(),
+    );
+    let world = ctx.world;
+    let defs = ctx.defs;
+    let prices = ctx.prices;
+    let good_id = ctx.good_id;
     let mut items = Vec::new();
     let alert_id = format!("goods:{good_id}");
     if !tradeable {
-        items.push(plain(
-            format!("{alert_id}:local"),
-            "Local-only good",
-            format!(
-                "{good_id} is non-tradeable; skip import allocation and produce it in the state."
+        items.push(with_effect(
+            plain(
+                format!("{alert_id}:local"),
+                "Local-only good",
+                format!(
+                    "{good_id} is non-tradeable; skip import allocation and produce it in the state."
+                ),
             ),
+            format!("0 extra {good_id} from imports (local-only good)."),
         ));
-        push_local_producer(&mut items, prices, good_id, state_id, &alert_id);
+        push_local_producer(&mut items, ctx, state_id, &alert_id);
+        push_best_pm(&mut items, ctx, state_id, &alert_id);
         return rank(items);
     }
 
     let centers = trade_centers(prices, world, state_id);
     if centers.is_empty() {
-        items.push(action_mit(
-            format!("{alert_id}:build-tc"),
-            "Build a trade center",
-            format!("No trade center in this state/market. Compare a new trade center against a local {good_id} producer."),
-            MitigationAction::Build {
-                building: "building_trade_center".into(),
-                state_id,
-                extra_levels: Some(1),
-            },
+        items.push(with_effect(
+            action_mit(
+                format!("{alert_id}:build-tc"),
+                "Build a trade center",
+                format!("No trade center in this state/market. Compare a new trade center against a local {good_id} producer."),
+                MitigationAction::Build {
+                    building: "building_trade_center".into(),
+                    state_id,
+                    extra_levels: Some(1),
+                },
+            ),
+            ctx.extra_levels("building_trade_center", state_id, 1),
         ));
-        push_local_producer(&mut items, prices, good_id, state_id, &alert_id);
+        push_local_producer(&mut items, ctx, state_id, &alert_id);
+        push_best_pm(&mut items, ctx, state_id, &alert_id);
         return rank(items);
     }
 
@@ -364,65 +393,63 @@ fn goods_mitigations(
         let employed = center.staffing + ORDER_EPS >= center.level && center.level > 0.0;
         if !employed {
             if !center.short_inputs.is_empty() {
-                items.push(plain(
-                    format!("{alert_id}:tc-inputs-{}", center.id),
-                    "Feed the trade center",
-                    format!(
-                        "Trade center {} is short on {}.",
-                        center.id,
-                        center.short_inputs.join(", ")
+                items.push(with_effect(
+                    plain(
+                        format!("{alert_id}:tc-inputs-{}", center.id),
+                        "Feed the trade center",
+                        format!(
+                            "Trade center {} is short on {}.",
+                            center.id,
+                            center.short_inputs.join(", ")
+                        ),
                     ),
+                    ctx.effect_from_staffing(center.id),
                 ));
             }
             if center.profit < 0.0 {
-                items.push(action_mit(
-                    format!("{alert_id}:tc-subsidy-{}", center.id),
-                    "Subsidize the trade center",
-                    format!(
-                        "Trade center {} is unprofitable and not fully employed.",
-                        center.id
+                items.push(with_effect(
+                    action_mit(
+                        format!("{alert_id}:tc-subsidy-{}", center.id),
+                        "Subsidize the trade center",
+                        format!(
+                            "Trade center {} is unprofitable and not fully employed.",
+                            center.id
+                        ),
+                        MitigationAction::Subsidize {
+                            building_id: center.id,
+                        },
                     ),
-                    MitigationAction::Subsidize {
-                        building_id: center.id,
-                    },
+                    ctx.effect_from_staffing(center.id),
                 ));
             } else {
-                items.push(plain(
-                    format!("{alert_id}:tc-employ-{}", center.id),
-                    "Staff the trade center",
-                    format!(
-                        "Trade center {} is at {} / {} levels. Raise employment before adding levels.",
-                        center.id,
-                        format_num(center.staffing),
-                        format_num(center.level)
+                items.push(with_effect(
+                    plain(
+                        format!("{alert_id}:tc-employ-{}", center.id),
+                        "Staff the trade center",
+                        format!(
+                            "Trade center {} is at {} / {} levels. Raise employment before adding levels.",
+                            center.id,
+                            format_num(center.staffing),
+                            format_num(center.level)
+                        ),
                     ),
+                    ctx.effect_from_staffing(center.id),
                 ));
             }
         } else {
-            items.push(action_mit(
-                format!("{alert_id}:tc-levels-{}", center.id),
-                "Add trade-center levels",
-                format!("Trade center {} is fully employed; extra levels or a better PM can move more {good_id}.", center.id),
-                MitigationAction::Build {
-                    building: center.type_id.clone(),
-                    state_id: center.state_id,
-                    extra_levels: Some(1),
-                },
-            ));
-            if let Some(pm) = center.production_method_ids.first() {
-                items.push(action_mit(
-                    format!("{alert_id}:tc-pm-{}", center.id),
-                    "Upgrade trade-center PM",
-                    format!(
-                        "Consider a higher-throughput production method on trade center {}.",
-                        center.id
-                    ),
-                    MitigationAction::Pm {
-                        building_id: center.id,
-                        production_method: pm.clone(),
+            items.push(with_effect(
+                action_mit(
+                    format!("{alert_id}:tc-levels-{}", center.id),
+                    "Add trade-center levels",
+                    format!("Trade center {} is fully employed; extra levels can raise throughput if this center moves {good_id}.", center.id),
+                    MitigationAction::Build {
+                        building: center.type_id.clone(),
+                        state_id: center.state_id,
+                        extra_levels: Some(1),
                     },
-                ));
-            }
+                ),
+                ctx.extra_levels(&center.type_id, center.state_id.or(state_id), 1),
+            ));
         }
         if let Some(state) = center.state_id.or(state_id) {
             if !state_imports(world, defs, state, good_id) {
@@ -430,45 +457,328 @@ fn goods_mitigations(
                     "Trade volumes are frozen in this model; import reallocation cannot be applied yet."
                         .into(),
                 );
-                items.push(action_mit(
-                    format!("{alert_id}:reallocate-{state}"),
-                    "Reallocate trade-center imports",
-                    format!("State {state} is not importing {good_id}. Reallocation is advice only (frozen trade)."),
-                    MitigationAction::TradeAlloc {
-                        state_id: state,
-                        good_id: good_id.into(),
-                    },
+                items.push(with_effect(
+                    action_mit(
+                        format!("{alert_id}:reallocate-{state}"),
+                        "Reallocate trade-center imports",
+                        format!("State {state} is not importing {good_id}. Reallocation is advice only (frozen trade)."),
+                        MitigationAction::TradeAlloc {
+                            state_id: state,
+                            good_id: good_id.into(),
+                        },
+                    ),
+                    format!(
+                        "0 extra {} in this model (trade volumes are frozen).",
+                        ctx.good_id
+                    ),
                 ));
             }
         }
     }
+    push_best_pm(&mut items, ctx, state_id, &alert_id);
     rank(items)
 }
 
 fn push_local_producer(
     items: &mut Vec<Mitigation>,
-    prices: &PricesResult,
-    good_id: &str,
+    ctx: &ShortageEffect<'_>,
     state_id: Option<u32>,
     alert_id: &str,
 ) {
-    let producer = prices.buildings.iter().find(|building| {
+    let producer = ctx.prices.buildings.iter().find(|building| {
         state_id.is_none_or(|sid| building.state_id == Some(sid))
-            && building.outputs.iter().any(|flow| flow.good_id == good_id)
+            && building
+                .outputs
+                .iter()
+                .any(|flow| flow.good_id == ctx.good_id)
+    });
+    let from_world = ctx.world.buildings.iter().find_map(|row| {
+        if state_id.is_some_and(|sid| row.state != Some(sid)) {
+            return None;
+        }
+        let idx = ctx.defs.index_of(ctx.good_id)?;
+        let (inputs, outputs) = row.goods_io(ctx.defs);
+        (outputs[idx] > ORDER_EPS || inputs[idx] > ORDER_EPS).then(|| row.building.clone())
     });
     let building = producer
         .map(|row| row.type_id.clone())
-        .unwrap_or_else(|| format!("building_{good_id}_producer"));
-    items.push(action_mit(
-        format!("{alert_id}:local-producer"),
-        "Expand a local producer",
-        format!("Raise local {good_id} output as an alternative to trade."),
-        MitigationAction::Build {
-            building,
-            state_id,
-            extra_levels: Some(1),
-        },
+        .or(from_world)
+        .unwrap_or_else(|| format!("building_{}_producer", ctx.good_id));
+    items.push(with_effect(
+        action_mit(
+            format!("{alert_id}:local-producer"),
+            "Expand a local producer",
+            format!(
+                "Raise local {} output as an alternative to trade.",
+                ctx.good_id
+            ),
+            MitigationAction::Build {
+                building: building.clone(),
+                state_id,
+                extra_levels: Some(1),
+            },
+        ),
+        ctx.extra_levels(&building, state_id, 1),
     ));
+}
+
+fn push_best_pm(
+    items: &mut Vec<Mitigation>,
+    ctx: &ShortageEffect<'_>,
+    state_id: Option<u32>,
+    alert_id: &str,
+) {
+    let Some(pick) = best_pm_upgrade(ctx.world, ctx.defs, ctx.good_id, state_id) else {
+        return;
+    };
+    let label = pm_label(ctx.defs, &pick.new_pm);
+    let from = pick
+        .from
+        .iter()
+        .map(|id| pm_label(ctx.defs, id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let to = pick
+        .to
+        .iter()
+        .map(|id| pm_label(ctx.defs, id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let delta = WorldDelta {
+        production_methods: vec![ProductionMethodDelta {
+            building_id: pick.building_id,
+            methods: pick.to.clone(),
+        }],
+        ..WorldDelta::default()
+    };
+    items.push(with_effect(
+        action_mit(
+            format!("{alert_id}:pm-{}", pick.building_id),
+            format!("Switch to {label}"),
+            format!(
+                "On {} #{}, change production methods from [{from}] to [{to}].",
+                pick.type_id, pick.building_id
+            ),
+            MitigationAction::Pm {
+                building_id: pick.building_id,
+                production_method: pick.new_pm,
+                methods: pick.to,
+            },
+        ),
+        ctx.effect_from_delta(&delta),
+    ));
+}
+
+struct PmPick {
+    building_id: u32,
+    type_id: String,
+    from: Vec<String>,
+    to: Vec<String>,
+    new_pm: String,
+}
+
+fn best_pm_upgrade(
+    world: &World,
+    defs: &GameDefs,
+    good_id: &str,
+    state_id: Option<u32>,
+) -> Option<PmPick> {
+    let idx = defs.index_of(good_id)?;
+    let mut best: Option<PmPick> = None;
+    let mut best_score = ORDER_EPS;
+    for building in &world.buildings {
+        if state_id.is_some_and(|sid| building.state != Some(sid)) {
+            continue;
+        }
+        let current = &building.production_methods;
+        if current.is_empty() {
+            continue;
+        }
+        let candidates = type_pm_candidates(world, &building.building);
+        if candidates.len() < 2 {
+            continue;
+        }
+        let (in0, out0) = building.goods_io(defs);
+        for slot in 0..current.len() {
+            for candidate in &candidates {
+                if current[slot] == *candidate {
+                    continue;
+                }
+                let mut methods = current.clone();
+                methods[slot] = candidate.clone();
+                let trial = building.with_methods(methods.clone());
+                let (in1, out1) = trial.goods_io(defs);
+                let score = (out1[idx] - in1[idx]) - (out0[idx] - in0[idx]);
+                if score > best_score {
+                    best_score = score;
+                    best = Some(PmPick {
+                        building_id: building.id,
+                        type_id: building.building.clone(),
+                        from: current.clone(),
+                        to: methods,
+                        new_pm: candidate.clone(),
+                    });
+                }
+            }
+        }
+    }
+    best
+}
+
+fn type_pm_candidates(world: &World, type_id: &str) -> Vec<String> {
+    let mut ids = BTreeSet::new();
+    for building in &world.buildings {
+        if building.building == type_id {
+            ids.extend(building.production_methods.iter().cloned());
+        }
+    }
+    ids.into_iter().collect()
+}
+
+fn pm_label(defs: &GameDefs, id: &str) -> String {
+    defs.labels
+        .get(id)
+        .cloned()
+        .unwrap_or_else(|| id.to_string())
+}
+
+struct ShortageEffect<'a> {
+    world: &'a World,
+    defs: &'a GameDefs,
+    prices: &'a PricesResult,
+    good_id: &'a str,
+    buy: f64,
+    sell: f64,
+    base: f64,
+}
+
+impl ShortageEffect<'_> {
+    fn gap(&self) -> f64 {
+        (self.buy - self.sell).max(0.0)
+    }
+
+    fn extra_levels(&self, type_id: &str, state_id: Option<u32>, extra: u32) -> String {
+        self.effect_from_delta(&extra_levels_on_type(self.world, type_id, state_id, extra))
+    }
+
+    fn effect_from_staffing(&self, building_id: u32) -> String {
+        let mut next = self.world.clone();
+        if let Some(building) = next.buildings.iter_mut().find(|b| b.id == building_id) {
+            building.staffing = building.level.max(building.staffing);
+        }
+        self.effect_from_world(&next)
+    }
+
+    fn effect_from_delta(&self, delta: &WorldDelta) -> String {
+        self.effect_from_world(&apply_delta(self.world, delta))
+    }
+
+    fn effect_from_world(&self, next: &World) -> String {
+        let (buy0, sell0) = good_io_total(self.world, self.defs, self.good_id);
+        let (buy1, sell1) = good_io_total(next, self.defs, self.good_id);
+        let dbuy = buy1 - buy0;
+        let dsell = sell1 - sell0;
+        let new_buy = (self.buy + dbuy).max(0.0);
+        let new_sell = (self.sell + dsell).max(0.0);
+        let old_price = price(self.base, self.buy, self.sell, self.defs.price_range);
+        let new_price = price(self.base, new_buy, new_sell, self.defs.price_range);
+        format_local_effect(
+            self.good_id,
+            dsell,
+            dbuy,
+            old_price,
+            new_price,
+            self.gap(),
+            (new_buy - new_sell).max(0.0),
+        )
+    }
+}
+
+fn extra_levels_on_type(
+    world: &World,
+    type_id: &str,
+    state_id: Option<u32>,
+    extra: u32,
+) -> WorldDelta {
+    let extra_levels = world
+        .buildings
+        .iter()
+        .filter(|building| {
+            building.building == type_id && state_id.is_none_or(|sid| building.state == Some(sid))
+        })
+        .map(|building| ExtraLevelsDelta {
+            building: None,
+            building_id: Some(building.id),
+            extra_levels: extra,
+        })
+        .collect();
+    WorldDelta {
+        extra_levels,
+        ..WorldDelta::default()
+    }
+}
+
+fn good_io_total(world: &World, defs: &GameDefs, good_id: &str) -> (f64, f64) {
+    let Some(idx) = defs.index_of(good_id) else {
+        return (0.0, 0.0);
+    };
+    let mut buy = 0.0;
+    let mut sell = 0.0;
+    for building in &world.buildings {
+        let (inputs, outputs) = building.goods_io(defs);
+        buy += inputs[idx];
+        sell += outputs[idx];
+    }
+    (buy, sell)
+}
+
+fn format_local_effect(
+    good_id: &str,
+    dsell: f64,
+    dbuy: f64,
+    old_price: f64,
+    new_price: f64,
+    old_gap: f64,
+    new_gap: f64,
+) -> String {
+    let orders = if dsell.abs() <= ORDER_EPS && dbuy.abs() <= ORDER_EPS {
+        format!("0 change to {good_id} building orders")
+    } else {
+        format!(
+            "{} {good_id} sell, {} {good_id} buy",
+            signed(dsell),
+            signed(dbuy)
+        )
+    };
+    let gap = if (new_gap - old_gap).abs() > ORDER_EPS {
+        format!(
+            "; gap {} → {}",
+            format_num(old_gap),
+            format_num(new_gap.max(0.0))
+        )
+    } else {
+        String::new()
+    };
+    let price_bit = if (new_price - old_price).abs() > 1e-6 {
+        format!(
+            "; price {} → {}",
+            format_num(old_price),
+            format_num(new_price)
+        )
+    } else {
+        "; price unchanged".into()
+    };
+    format!("{orders}{gap}{price_bit} (pop demand held).")
+}
+
+fn signed(value: f64) -> String {
+    if value > ORDER_EPS {
+        format!("+{}", format_num(value))
+    } else if value < -ORDER_EPS {
+        format!("-{}", format_num(-value))
+    } else {
+        "+0".into()
+    }
 }
 
 fn collect_needs_unmet(
@@ -1275,6 +1585,7 @@ fn plain(id: String, title: impl Into<String>, detail: impl Into<String>) -> Mit
         rank: 0,
         action: None,
         apply_ready: false,
+        effect: None,
     }
 }
 
@@ -1291,7 +1602,13 @@ fn action_mit(
         rank: 0,
         action: Some(action),
         apply_ready: false,
+        effect: None,
     }
+}
+
+fn with_effect(mut item: Mitigation, effect: impl Into<String>) -> Mitigation {
+    item.effect = Some(effect.into());
+    item
 }
 
 fn rank(mut items: Vec<Mitigation>) -> Vec<Mitigation> {
@@ -1310,7 +1627,7 @@ mod tests {
         StateGood, StateInfo, StateNeed, StatePop, StateQualification, WorldBuilding, WorldState,
         WorldStateTrade,
     };
-    use vic3_defs::{GameDefs, Good};
+    use vic3_defs::{GameDefs, Good, GoodIdx, ProductionMethod};
 
     fn defs() -> GameDefs {
         let mut defs = GameDefs {
@@ -1341,6 +1658,27 @@ mod tests {
                 },
             );
         }
+        let grain = GoodIdx::from_usize(0);
+        defs.production_methods.insert(
+            "pm_simple_farming".into(),
+            ProductionMethod {
+                id: "pm_simple_farming".into(),
+                inputs: Vec::new(),
+                outputs: vec![(grain, 10.0)],
+            },
+        );
+        defs.production_methods.insert(
+            "pm_soil_enriching_farming".into(),
+            ProductionMethod {
+                id: "pm_soil_enriching_farming".into(),
+                inputs: Vec::new(),
+                outputs: vec![(grain, 25.0)],
+            },
+        );
+        defs.labels.insert(
+            "pm_soil_enriching_farming".into(),
+            "Soil Enriching Farming".into(),
+        );
         defs
     }
 
@@ -1391,13 +1729,24 @@ mod tests {
     }
 
     fn world_building(id: u32, state: u32, kind: &str, level: f64, staffing: f64) -> WorldBuilding {
+        world_building_pm(id, state, kind, level, staffing, &["pm_default"])
+    }
+
+    fn world_building_pm(
+        id: u32,
+        state: u32,
+        kind: &str,
+        level: f64,
+        staffing: f64,
+        methods: &[&str],
+    ) -> WorldBuilding {
         WorldBuilding {
             id,
             state: Some(state),
             building: kind.into(),
             level,
             staffing,
-            production_methods: vec!["pm_default".into()],
+            production_methods: methods.iter().map(|id| (*id).to_string()).collect(),
             saved_inputs: Vec::new(),
             saved_outputs: Vec::new(),
         }
@@ -1417,8 +1766,16 @@ mod tests {
             buildings: vec![
                 world_building(1, 1, "building_trade_center", 2.0, 2.0),
                 world_building(2, 1, "building_university", 1.0, 0.0),
-                world_building(3, 1, "building_rye_farm", 3.0, 1.0),
+                world_building_pm(3, 1, "building_rye_farm", 3.0, 1.0, &["pm_simple_farming"]),
                 world_building(4, 1, "building_tooling_workshop", 2.0, 0.5),
+                world_building_pm(
+                    5,
+                    1,
+                    "building_rye_farm",
+                    1.0,
+                    1.0,
+                    &["pm_soil_enriching_farming"],
+                ),
             ],
             state_trade: vec![WorldStateTrade {
                 state: 1,
@@ -1471,16 +1828,24 @@ mod tests {
                     &[],
                     -1.0,
                 ),
-                econ(
-                    3,
-                    1,
-                    "building_rye_farm",
-                    3.0,
-                    1.0,
-                    &[("farmers", 4000.0)],
-                    &[],
-                    5.0,
-                ),
+                {
+                    let mut farm = econ(
+                        3,
+                        1,
+                        "building_rye_farm",
+                        3.0,
+                        1.0,
+                        &[("farmers", 4000.0)],
+                        &[],
+                        5.0,
+                    );
+                    farm.outputs.push(GoodFlow {
+                        good_id: "grain".into(),
+                        quantity: 30.0,
+                        value: 600.0,
+                    });
+                    farm
+                },
                 econ(
                     4,
                     1,
@@ -1707,5 +2072,101 @@ mod tests {
             .expect("unfilled pops on farm");
         assert_eq!(pops.mitigations[0].rank, 1);
         assert!(pops.evidence.iter().any(|row| row.label == "In-migration"));
+    }
+
+    #[test]
+    fn shortage_mitigations_include_estimated_effect() {
+        let (world, defs, prices) = fixture();
+        let result = alerts(&world, &defs, &prices);
+        assert!(result.limitations.iter().any(|line| {
+            line.to_ascii_lowercase().contains("pop demand")
+                && line.to_ascii_lowercase().contains("building io")
+        }));
+        let grain = result
+            .alerts
+            .iter()
+            .find(|alert| {
+                alert.kind == AlertKind::GoodsShortage && alert.good_id.as_deref() == Some("grain")
+            })
+            .expect("grain shortage");
+        assert!(
+            grain
+                .mitigations
+                .iter()
+                .all(|mit| mit.effect.as_ref().is_some_and(|text| !text.is_empty())),
+            "every grain mitigation needs an effect, got {:?}",
+            grain
+                .mitigations
+                .iter()
+                .map(|mit| (&mit.title, &mit.effect))
+                .collect::<Vec<_>>()
+        );
+        let levels = grain
+            .mitigations
+            .iter()
+            .find(|mit| mit.title.to_ascii_lowercase().contains("trade-center"))
+            .expect("trade-center levels");
+        let effect = levels.effect.as_deref().expect("effect");
+        assert!(
+            effect.contains("0 change to grain") && effect.contains("pop demand held"),
+            "trade-center extra levels should not invent grain via traded_quantity, got {effect}"
+        );
+        let pm = grain
+            .mitigations
+            .iter()
+            .find(|mit| matches!(mit.action, Some(MitigationAction::Pm { .. })))
+            .expect("specific PM upgrade");
+        assert_eq!(pm.title, "Switch to Soil Enriching Farming");
+        match &pm.action {
+            Some(MitigationAction::Pm {
+                building_id,
+                production_method,
+                methods,
+            }) => {
+                assert_eq!(*building_id, 3);
+                assert_eq!(production_method, "pm_soil_enriching_farming");
+                assert_eq!(methods, &vec!["pm_soil_enriching_farming".to_string()]);
+            }
+            other => panic!("expected Pm action, got {other:?}"),
+        }
+        let pm_effect = pm.effect.as_deref().expect("pm effect");
+        assert!(
+            pm_effect.contains("+15 grain sell") && pm_effect.contains("pop demand held"),
+            "PM local solve should add recipe grain, got {pm_effect}"
+        );
+        let realloc = grain
+            .mitigations
+            .iter()
+            .find(|mit| matches!(mit.action, Some(MitigationAction::TradeAlloc { .. })))
+            .expect("reallocate");
+        assert!(
+            realloc
+                .effect
+                .as_deref()
+                .is_some_and(|text| text.contains("0 extra grain")),
+            "reallocate should be zero in this model, got {:?}",
+            realloc.effect
+        );
+
+        let power = result
+            .alerts
+            .iter()
+            .find(|alert| alert.kind == AlertKind::ElectricityShortage)
+            .expect("electricity");
+        assert!(power
+            .mitigations
+            .iter()
+            .all(|mit| mit.effect.as_ref().is_some_and(|text| !text.is_empty())));
+        assert!(power.mitigations.iter().any(|mit| mit
+            .effect
+            .as_deref()
+            .is_some_and(|text| text.contains("local-only"))));
+        assert!(
+            !power
+                .mitigations
+                .iter()
+                .any(|mit| matches!(mit.action, Some(MitigationAction::Pm { .. }))),
+            "electricity should not get a generic/unrelated PM"
+        );
     }
 }
