@@ -5,12 +5,14 @@
 //! - [`UnitNeedBaskets`] — per-need goods for the population tab.
 //!
 //! The price loop does not need per-need rows. The webapp JSON does, so
-//! [`pop_need_baskets`] still returns a scaled copy per collapsed group rather
-//! than omitting baskets. Rebuilding shares per group was the old cost; after
-//! the cache, `finished` is mostly grouping and those copies.
+//! [`pop_compact_needs`] / [`UnitNeedBaskets::compact_for`] still emit a scaled
+//! copy per collapsed group rather than omitting baskets. Rebuilding shares
+//! per group was the old cost; after the cache, `finished` is grouping and
+//! those copies.
 
 use vic3_defs::{substitution_shares, GameDefs, GoodIdx, GoodsVec, NeedIdx, NeedsVec, PopNeed};
 
+use crate::result::CompactNeed;
 use crate::world::{WorldPop, POP_SCALE};
 
 /// One need's goods after package interpolation and substitution.
@@ -60,7 +62,7 @@ pub(crate) struct UnitBaskets {
 
 /// Per-need goods for a pop of size [`POP_SCALE`] at each integer wealth.
 ///
-/// [`pop_need_baskets`] scales and, for continuous Laspeyres wealth, lerps these
+/// [`pop_compact_needs`] scales and, for continuous Laspeyres wealth, lerps these
 /// unit rows so UI need baskets match the residual's [`UnitBaskets`]. Building
 /// the 99-row table is cheap next to walking every pop group; each call still
 /// allocates the scaled `Vec` because that is the JSON payload.
@@ -158,6 +160,7 @@ impl UnitNeedBaskets {
         &self.by_wealth[(wealth as usize).clamp(1, max)]
     }
 
+    #[cfg(test)]
     fn scaled_for(&self, wealth: f64, scale: f64) -> Vec<NeedBasket> {
         if scale == 0.0 {
             return Vec::new();
@@ -171,6 +174,30 @@ impl UnitNeedBaskets {
             return scale_need_baskets(self.at(i_lo), scale);
         }
         lerp_need_baskets(self.at(i_lo), self.at(i_hi), w - lo, scale)
+    }
+
+    /// Scale/lerp unit need rows into UI compact needs, including spend.
+    ///
+    /// One allocation per need/goods vec (the JSON payload) instead of
+    /// [`NeedBasket`] then a second copy with `qty * price`.
+    pub(crate) fn compact_for(
+        &self,
+        wealth: f64,
+        scale: f64,
+        prices: &GoodsVec,
+    ) -> Vec<CompactNeed> {
+        if scale == 0.0 {
+            return Vec::new();
+        }
+        let w = wealth.clamp(1.0, self.max_wealth());
+        let lo = w.floor();
+        let hi = w.ceil();
+        let i_lo = lo as u8;
+        let i_hi = hi as u8;
+        if i_lo == i_hi {
+            return compact_need_baskets(self.at(i_lo), scale, prices);
+        }
+        compact_lerp_need_baskets(self.at(i_lo), self.at(i_hi), w - lo, scale, prices)
     }
 }
 
@@ -286,8 +313,9 @@ pub(crate) fn add_wage_bins(
 
 /// Per-need goods basket for one pop at the given prices / cached unit needs.
 ///
-/// Output matches rebuilding from [`NeedShares`] + package lerp. Do not skip
-/// this for CLI table output: the webapp serializes these baskets.
+/// Output matches rebuilding from [`NeedShares`] + package lerp. Used by unit
+/// tests to check the wealth ladder against a direct rebuild.
+#[cfg(test)]
 pub(crate) fn pop_need_baskets(
     pop: &WorldPop,
     prices: &GoodsVec,
@@ -298,12 +326,41 @@ pub(crate) fn pop_need_baskets(
     if pop.size <= 0.0 {
         return Vec::new();
     }
-    let wealth = if pop.wages <= 0.0 {
+    need_units.scaled_for(
+        pop_wealth(pop, prices, base_prices, units),
+        pop.size / POP_SCALE,
+    )
+}
+
+/// Same quantities as [`pop_need_baskets`], with spend filled for compact UI rows.
+pub(crate) fn pop_compact_needs(
+    pop: &WorldPop,
+    prices: &GoodsVec,
+    base_prices: &GoodsVec,
+    units: &UnitBaskets,
+    need_units: &UnitNeedBaskets,
+) -> Vec<CompactNeed> {
+    if pop.size <= 0.0 {
+        return Vec::new();
+    }
+    need_units.compact_for(
+        pop_wealth(pop, prices, base_prices, units),
+        pop.size / POP_SCALE,
+        prices,
+    )
+}
+
+fn pop_wealth(
+    pop: &WorldPop,
+    prices: &GoodsVec,
+    base_prices: &GoodsVec,
+    units: &UnitBaskets,
+) -> f64 {
+    if pop.wages <= 0.0 {
         f64::from(pop.wealth).clamp(1.0, units.max_wealth())
     } else {
         units.continuous_wealth(pop.wealth, prices, base_prices)
-    };
-    need_units.scaled_for(wealth, pop.size / POP_SCALE)
+    }
 }
 
 fn need_baskets_at(
@@ -341,6 +398,7 @@ fn need_baskets_at(
     baskets
 }
 
+#[cfg(test)]
 fn scale_need_baskets(unit: &[NeedBasket], scale: f64) -> Vec<NeedBasket> {
     if scale == 1.0 {
         return unit.to_vec();
@@ -350,6 +408,7 @@ fn scale_need_baskets(unit: &[NeedBasket], scale: f64) -> Vec<NeedBasket> {
         .collect()
 }
 
+#[cfg(test)]
 fn scale_need_basket(basket: &NeedBasket, scale: f64) -> NeedBasket {
     NeedBasket {
         need_idx: basket.need_idx,
@@ -362,6 +421,7 @@ fn scale_need_basket(basket: &NeedBasket, scale: f64) -> NeedBasket {
     }
 }
 
+#[cfg(test)]
 fn lerp_need_baskets(lo: &[NeedBasket], hi: &[NeedBasket], t: f64, scale: f64) -> Vec<NeedBasket> {
     let mut out = Vec::new();
     let mut i = 0;
@@ -395,12 +455,110 @@ fn lerp_need_baskets(lo: &[NeedBasket], hi: &[NeedBasket], t: f64, scale: f64) -
     out
 }
 
+#[cfg(test)]
 fn lerp_need_basket(lo: &NeedBasket, hi: &NeedBasket, t: f64, scale: f64) -> NeedBasket {
     NeedBasket {
         need_idx: lo.need_idx,
         package_value: (1.0 - t) * lo.package_value + t * hi.package_value,
         goods: lerp_need_goods(&lo.goods, &hi.goods, t, scale),
     }
+}
+
+fn compact_need_baskets(unit: &[NeedBasket], scale: f64, prices: &GoodsVec) -> Vec<CompactNeed> {
+    unit.iter()
+        .map(|basket| compact_need_basket(basket, scale, prices))
+        .collect()
+}
+
+fn compact_need_basket(basket: &NeedBasket, scale: f64, prices: &GoodsVec) -> CompactNeed {
+    CompactNeed {
+        need_idx: basket.need_idx,
+        package_value: basket.package_value,
+        goods: basket
+            .goods
+            .iter()
+            .map(|(good, qty)| {
+                let quantity = qty * scale;
+                (*good, quantity, quantity * prices[*good])
+            })
+            .collect(),
+    }
+}
+
+fn compact_lerp_need_baskets(
+    lo: &[NeedBasket],
+    hi: &[NeedBasket],
+    t: f64,
+    scale: f64,
+    prices: &GoodsVec,
+) -> Vec<CompactNeed> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    let mut j = 0;
+    while i < lo.len() || j < hi.len() {
+        match (lo.get(i), hi.get(j)) {
+            (Some(a), Some(b)) if a.need_idx == b.need_idx => {
+                out.push(compact_lerp_need_basket(a, b, t, scale, prices));
+                i += 1;
+                j += 1;
+            }
+            (Some(a), Some(b)) if a.need_idx < b.need_idx => {
+                out.push(compact_need_basket(a, scale * (1.0 - t), prices));
+                i += 1;
+            }
+            (Some(a), None) => {
+                out.push(compact_need_basket(a, scale * (1.0 - t), prices));
+                i += 1;
+            }
+            (Some(_), Some(b)) => {
+                out.push(compact_need_basket(b, scale * t, prices));
+                j += 1;
+            }
+            (None, Some(b)) => {
+                out.push(compact_need_basket(b, scale * t, prices));
+                j += 1;
+            }
+            (None, None) => break,
+        }
+    }
+    out
+}
+
+fn compact_lerp_need_basket(
+    lo: &NeedBasket,
+    hi: &NeedBasket,
+    t: f64,
+    scale: f64,
+    prices: &GoodsVec,
+) -> CompactNeed {
+    CompactNeed {
+        need_idx: lo.need_idx,
+        package_value: (1.0 - t) * lo.package_value + t * hi.package_value,
+        goods: compact_lerp_need_goods(&lo.goods, &hi.goods, t, scale, prices),
+    }
+}
+
+fn compact_lerp_need_goods(
+    lo: &[(GoodIdx, f64)],
+    hi: &[(GoodIdx, f64)],
+    t: f64,
+    scale: f64,
+    prices: &GoodsVec,
+) -> Vec<(GoodIdx, f64, f64)> {
+    if lo.len() == hi.len() && lo.iter().zip(hi).all(|(a, b)| a.0 == b.0) {
+        return lo
+            .iter()
+            .zip(hi)
+            .map(|((good, a), (_, b))| {
+                let quantity = scale * ((1.0 - t) * a + t * b);
+                (*good, quantity, quantity * prices[*good])
+            })
+            .collect();
+    }
+    lerp_need_goods(lo, hi, t, scale)
+        .into_iter()
+        .map(|(good, quantity)| (good, quantity, quantity * prices[good]))
+        .collect()
 }
 
 fn lerp_need_goods(
@@ -718,6 +876,20 @@ mod tests {
             };
             let direct = need_baskets_at(wealth_f, size / POP_SCALE, &defs, &base, &shares);
             assert_baskets_close(&cached, &direct);
+            let compact = need_units.compact_for(wealth_f, size / POP_SCALE, &local);
+            assert_eq!(compact.len(), cached.len());
+            for (row, basket) in compact.iter().zip(&cached) {
+                assert_eq!(row.need_idx, basket.need_idx);
+                assert!((row.package_value - basket.package_value).abs() < 1e-9);
+                assert_eq!(row.goods.len(), basket.goods.len());
+                for (&(good, quantity, value), &(expected_good, expected_qty)) in
+                    row.goods.iter().zip(&basket.goods)
+                {
+                    assert_eq!(good, expected_good);
+                    assert!((quantity - expected_qty).abs() < 1e-9);
+                    assert!((value - expected_qty * local[good]).abs() < 1e-9);
+                }
+            }
         }
     }
 }
