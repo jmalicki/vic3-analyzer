@@ -59,6 +59,11 @@ fn fixture_goods_icons_are_decoded_to_png() {
     assert_eq!(&grain[1..4], b"PNG");
     // Only goods whose texture resolves get an icon.
     assert_eq!(defs.icons.len(), 1);
+    let farm = defs
+        .extra_icons
+        .get("building:building_rye_farm")
+        .expect("building icon is keyed by stem");
+    assert_eq!(&farm[1..4], b"PNG");
 }
 
 #[test]

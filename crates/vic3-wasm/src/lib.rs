@@ -16,7 +16,7 @@ mod schema;
 
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use vic3_goals::Atom;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save};
 use vic3_plan::PlanOpts;
@@ -186,7 +186,10 @@ pub fn defs_summary(defs_blob: &[u8]) -> Result<String, JsError> {
     defs_summary_json(defs_blob).map_err(to_js)
 }
 
-/// Goods icons as PNG data URLs keyed by good id, ready for an `img` tag.
+/// Goods and extra icons as PNG data URLs, ready for an `img` tag.
+///
+/// Shape: `{ grain: url, goods: { grain: url }, extra: { "building:foo": url } }`.
+/// Goods are nested and also flattened at the top level for older UI.
 #[wasm_bindgen]
 pub fn defs_icons(defs_blob: &[u8]) -> Result<String, JsError> {
     defs_icons_json(defs_blob).map_err(to_js)
@@ -308,6 +311,7 @@ pub fn load_analysis_json(
     // The UI extracts icons separately. They are never consulted by World or
     // the solver, so do not retain their PNG bytes in the worker session too.
     defs.icons.clear();
+    defs.extra_icons.clear();
     let solve_opts = parse_solve_opts(solve_opts_json)?;
     let world = World::from_save(&save, &defs);
     let prices = solve(&world, &defs, solve_opts);
@@ -570,7 +574,7 @@ pub fn defs_summary_json(defs_blob: &[u8]) -> Result<String, WasmError> {
         blob_version: vic3_defs::BLOB_VERSION,
         goods: defs.goods.len(),
         labels: defs.labels.len(),
-        icons: defs.icons.len(),
+        icons: defs.icons.len() + defs.extra_icons.len(),
         production_methods: defs.production_methods.len(),
         pop_needs: defs.pop_needs.len(),
         buy_packages: defs.buy_packages.len(),
@@ -581,12 +585,22 @@ pub fn defs_summary_json(defs_blob: &[u8]) -> Result<String, WasmError> {
 /// Native/test entry for [`defs_icons`].
 pub fn defs_icons_json(defs_blob: &[u8]) -> Result<String, WasmError> {
     let defs = vic3_defs::decode_blob(defs_blob)?;
-    let urls = defs
-        .icons
+    let png_url = |png: &[u8]| format!("data:image/png;base64,{}", base64(png));
+    let mut urls = serde_json::Map::new();
+    let mut goods = serde_json::Map::new();
+    for (id, png) in &defs.icons {
+        let url = serde_json::Value::String(png_url(png));
+        goods.insert(id.clone(), url.clone());
+        urls.insert(id.clone(), url);
+    }
+    let extra = defs
+        .extra_icons
         .iter()
-        .map(|(id, png)| (id, format!("data:image/png;base64,{}", base64(png))))
-        .collect::<BTreeMap<_, _>>();
-    Ok(serde_json::to_string(&urls)?)
+        .map(|(id, png)| (id.clone(), serde_json::Value::String(png_url(png))))
+        .collect();
+    urls.insert("goods".into(), serde_json::Value::Object(goods));
+    urls.insert("extra".into(), serde_json::Value::Object(extra));
+    Ok(serde_json::Value::Object(urls).to_string())
 }
 
 /// Standard base64, used only to hand PNG bytes to an `img` element.
@@ -726,7 +740,7 @@ mod tests {
         assert_eq!(v["blob_version"], vic3_defs::BLOB_VERSION);
         assert_eq!(v["goods"], 3);
         assert_eq!(v["labels"], 8);
-        assert_eq!(v["icons"], 1);
+        assert_eq!(v["icons"], 2);
         assert!(v["price_range"].as_f64().is_some_and(|range| range > 0.0));
     }
 
@@ -736,6 +750,15 @@ mod tests {
         let v: Value = serde_json::from_str(&json).expect("icons json");
         let grain = v["grain"].as_str().expect("grain icon");
         assert!(grain.starts_with("data:image/png;base64,iVBOR"), "{grain}");
+        let nested = v["goods"]["grain"].as_str().expect("nested goods grain");
+        assert_eq!(nested, grain);
+        let building = v["extra"]["building:building_rye_farm"]
+            .as_str()
+            .expect("building extra icon");
+        assert!(
+            building.starts_with("data:image/png;base64,iVBOR"),
+            "{building}"
+        );
     }
 
     fn schema_properties(schema_json: &str) -> serde_json::Map<String, Value> {
@@ -760,6 +783,17 @@ mod tests {
         assert_eq!(
             classify_defs_path("game/gfx/interface/icons/goods_icons/grain.dds", false),
             "read"
+        );
+        assert_eq!(
+            classify_defs_path(
+                "game/gfx/interface/icons/building_icons/building_rye_farm.dds",
+                false
+            ),
+            "read"
+        );
+        assert_eq!(
+            classify_defs_path("game/gfx/interface/icons/country_icons", true),
+            "prune"
         );
         assert_eq!(classify_defs_path("game/gfx/models", true), "prune");
     }

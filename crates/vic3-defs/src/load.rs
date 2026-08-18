@@ -8,6 +8,7 @@ use serde::Deserialize;
 
 use crate::{
     classify_defs_path, icons,
+    path_rules::{extra_icon_kind, ICON_LEAFS, LOCALIZATION_PREFIXES},
     staging::{StagingBuyPackage, StagingDefs, StagingNeed, StagingNeedEntry, StagingPm},
     BuildingGroup, BuildingType, DefsError, DefsPathClass, GameDefs, Good, DEFAULT_PRICE_RANGE,
 };
@@ -40,7 +41,9 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
     };
     (defs.goods_order, defs.goods) = load_goods(&data_root)?;
     defs.labels = load_labels(&data_root)?;
-    attach_icons(&mut defs, load_icons(&data_root)?);
+    let (goods_icons, extra_icons) = load_icons(&data_root)?;
+    attach_icons(&mut defs, goods_icons);
+    attach_extra_icons(&mut defs, extra_icons);
     load_coa_into(&mut defs, &data_root)?;
     defs.production_methods = load_production_methods(&data_root)?;
     defs.buildings = load_buildings(&data_root)?;
@@ -80,6 +83,7 @@ pub struct DefsBuilder {
     parsed: Option<ParsedTexts>,
     coa_textures: BTreeMap<String, crate::coa::RgbaImage>,
     icons: BTreeMap<String, Vec<u8>>,
+    extra_icons: BTreeMap<String, Vec<u8>>,
 }
 
 #[derive(Debug)]
@@ -117,7 +121,11 @@ impl DefsBuilder {
                 }
             } else if relative.ends_with(".dds") {
                 if let (Some(stem), Some(png)) = (icon_stem(&relative), icons::dds_to_png(&bytes)) {
-                    self.icons.insert(stem, png);
+                    if let Some(kind) = extra_icon_kind(&relative) {
+                        self.extra_icons.insert(format!("{kind}:{stem}"), png);
+                    } else {
+                        self.icons.insert(stem, png);
+                    }
                 }
             }
         }
@@ -162,6 +170,14 @@ impl DefsBuilder {
                 .and_then(icon_stem)
                 .unwrap_or_else(|| good.id.to_lowercase())
         }));
+        names.extend(parsed.defs.buildings.keys().map(|id| id.to_lowercase()));
+        names.extend(
+            parsed
+                .defs
+                .production_methods
+                .keys()
+                .map(|id| id.to_lowercase()),
+        );
         Ok(names)
     }
 
@@ -170,6 +186,7 @@ impl DefsBuilder {
         let ParsedTexts { mut defs, library } = self.parsed.take().expect("parsed above");
         let mut library = library;
         attach_icons(&mut defs, self.icons);
+        attach_extra_icons(&mut defs, self.extra_icons);
         crate::coa::render_library_scaled(&mut library, &self.coa_textures);
         finish_coa(&mut defs, library);
         defs.resolve()
@@ -293,19 +310,33 @@ fn parse_defs_text(
     Ok(())
 }
 
-fn load_icons(data_root: &Path) -> Result<BTreeMap<String, Vec<u8>>, DefsError> {
-    let mut icons = BTreeMap::new();
-    for path in files_with_extension(&data_root.join("gfx/interface/icons/goods_icons"), "dds")? {
-        let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
-        if let (Some(stem), Some(png)) = (icon_stem(&name), icons::dds_to_png(&bytes)) {
-            icons.insert(stem, png);
+fn load_icons(
+    data_root: &Path,
+) -> Result<(BTreeMap<String, Vec<u8>>, BTreeMap<String, Vec<u8>>), DefsError> {
+    let mut goods = BTreeMap::new();
+    let mut extra = BTreeMap::new();
+    let icons_root = data_root.join("gfx/interface/icons");
+    for leaf in ICON_LEAFS {
+        for path in files_with_extension(&icons_root.join(leaf), "dds")? {
+            let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
+                path: path.clone(),
+                source,
+            })?;
+            let relative = path.to_string_lossy();
+            let Some(stem) = icon_stem(&relative) else {
+                continue;
+            };
+            let Some(png) = icons::dds_to_png(&bytes) else {
+                continue;
+            };
+            if let Some(kind) = extra_icon_kind(&relative) {
+                extra.insert(format!("{kind}:{stem}"), png);
+            } else {
+                goods.insert(stem, png);
+            }
         }
     }
-    Ok(icons)
+    Ok((goods, extra))
 }
 
 /// Key icons by texture file stem, which is how `common/goods` refers to them.
@@ -334,6 +365,28 @@ fn attach_icons(defs: &mut StagingDefs, decoded: BTreeMap<String, Vec<u8>>) {
         })
         .collect::<Vec<_>>();
     defs.icons.extend(wanted);
+}
+
+/// Store namespaced extra icons and alias building stems onto building type ids.
+fn attach_extra_icons(defs: &mut StagingDefs, decoded: BTreeMap<String, Vec<u8>>) {
+    if decoded.is_empty() {
+        return;
+    }
+    defs.extra_icons.extend(decoded);
+    let aliases = defs
+        .buildings
+        .keys()
+        .filter_map(|id| {
+            let key = format!("building:{id}");
+            if defs.extra_icons.contains_key(&key) {
+                return None;
+            }
+            let stem = id.strip_prefix("building_").unwrap_or(id);
+            let png = defs.extra_icons.get(&format!("building:{stem}")).cloned()?;
+            Some((key, png))
+        })
+        .collect::<Vec<_>>();
+    defs.extra_icons.extend(aliases);
 }
 
 fn load_coa_into(defs: &mut StagingDefs, data_root: &Path) -> Result<(), DefsError> {
@@ -544,17 +597,9 @@ fn is_english_localization(path: &str) -> bool {
     path.contains("localization/")
         && path.split('/').any(|segment| segment == "english")
         && path.rsplit('/').next().is_some_and(|name| {
-            [
-                "goods_l_",
-                "countries_l_",
-                "buildings_l_",
-                "building_groups_l_",
-                "pop_types_l_",
-                "cultures_l_",
-                "state_regions_l_",
-            ]
-            .iter()
-            .any(|prefix| name.starts_with(prefix))
+            LOCALIZATION_PREFIXES
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
                 && name.ends_with(".yml")
         })
 }

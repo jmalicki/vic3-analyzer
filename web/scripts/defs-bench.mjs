@@ -91,6 +91,10 @@ for (let start = 0; start < text.length; start += batchSize) {
 const needed = new Set(JSON.parse(builder.neededGfxNames()))
 const wanted = files.filter((file) => {
   if (!isGfx(file)) return false
+  const parts = file.path.replace(/\\/g, '/').toLowerCase().split('/')
+  const icons = parts.indexOf('icons')
+  const extraIcon = icons >= 0 && parts[icons + 1] && parts[icons + 1] !== 'goods_icons'
+  if (extraIcon) return true
   const name = file.path.split('/').pop().toLowerCase()
   return needed.has(name) || needed.has(name.replace(/\.[^.]+$/, ''))
 })

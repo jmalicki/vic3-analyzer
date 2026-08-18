@@ -17,6 +17,7 @@
 //! - `common/cultures` (obsessions; may be empty)
 //! - `common/coat_of_arms`, `common/flag_definitions`, `common/named_colors`
 //! - `gfx/coat_of_arms/{patterns,colored_emblems,textured_emblems}`
+//! - `gfx/interface/icons/{goods_icons,building_icons,...}` (allowlisted leaf dirs)
 //! - `localization/english/goods_l_*.yml` and `countries_l_*.yml`
 //!
 //! Clausewitz text is parsed with **jomini** (`Deserialize` / `JominiDeserialize`).
