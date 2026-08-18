@@ -425,19 +425,26 @@ impl<'de> Deserialize<'de> for IndexQtyMap {
                 let mut pending: Option<String> = None;
                 while let Some(token) = seq.next_element::<SeqTok>()? {
                     match token {
+                        SeqTok::Skip => {}
                         SeqTok::Ident(key) if key == "=" => {
                             let key = pending.take().ok_or_else(|| {
                                 de::Error::custom("qualification assignment missing key")
                             })?;
-                            let qty = seq.next_element::<f64>()?.ok_or_else(|| {
+                            if key == "remainder" {
+                                let _: Option<de::IgnoredAny> = seq.next_element()?;
+                                continue;
+                            }
+                            let qty = seq.next_element::<GoodQty>()?.ok_or_else(|| {
                                 de::Error::custom("qualification assignment missing value")
                             })?;
-                            values.insert(key, qty);
+                            values.insert(key, qty.value());
                         }
                         SeqTok::Ident(key) => pending = Some(key),
                         SeqTok::Float(qty) => {
                             if let Some(key) = pending.take() {
-                                values.insert(key, qty);
+                                if key != "remainder" {
+                                    values.insert(key, qty);
+                                }
                             }
                         }
                     }
@@ -547,6 +554,7 @@ impl<'de> Deserialize<'de> for GoodQty {
                         SeqTok::Ident(_) => {
                             let _ = seq.next_element::<serde::de::IgnoredAny>()?;
                         }
+                        SeqTok::Skip => {}
                     }
                 }
                 value
@@ -651,6 +659,7 @@ impl<'de> Deserialize<'de> for FlexStr {
 enum SeqTok {
     Ident(String),
     Float(f64),
+    Skip,
 }
 
 impl<'de> Deserialize<'de> for SeqTok {
@@ -675,6 +684,41 @@ impl<'de> Deserialize<'de> for SeqTok {
             }
             fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
                 Ok(SeqTok::Float(value))
+            }
+            fn visit_bool<E: de::Error>(self, _value: bool) -> Result<Self::Value, E> {
+                Ok(SeqTok::Skip)
+            }
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(SeqTok::Skip)
+            }
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(SeqTok::Skip)
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut value = None;
+                while let Some(key) = map.next_key::<FlexStr>()? {
+                    if key.0 == "value" {
+                        value = Some(map.next_value::<f64>()?);
+                    } else {
+                        let _: de::IgnoredAny = map.next_value()?;
+                    }
+                }
+                Ok(value.map(SeqTok::Float).unwrap_or(SeqTok::Skip))
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut value = None;
+                while let Some(token) = seq.next_element::<SeqTok>()? {
+                    match token {
+                        SeqTok::Float(qty) => value = Some(qty),
+                        SeqTok::Ident(key) if key == "value" || key == "=" => {
+                            if let Some(SeqTok::Float(qty)) = seq.next_element::<SeqTok>()? {
+                                value = Some(qty);
+                            }
+                        }
+                        SeqTok::Ident(_) | SeqTok::Skip => {}
+                    }
+                }
+                Ok(value.map(SeqTok::Float).unwrap_or(SeqTok::Skip))
             }
         }
         deserializer.deserialize_any(V)
@@ -892,7 +936,7 @@ impl<'de> Deserialize<'de> for FlexUnit {
                                 Some(SeqTok::Float(value)) => {
                                     apply_unit_float(&mut unit, &key, value)
                                 }
-                                None => {}
+                                Some(SeqTok::Skip) | None => {}
                             }
                         }
                         SeqTok::Ident(key) => pending = Some(key),
@@ -903,6 +947,7 @@ impl<'de> Deserialize<'de> for FlexUnit {
                                 unit.id = unit.id.or(u32::try_from(value as i64).ok());
                             }
                         }
+                        SeqTok::Skip => {}
                     }
                 }
                 Ok(FlexUnit(Some(unit)))
@@ -1277,6 +1322,24 @@ pops={
         assert_eq!(pop.qualifications.values.get("2"), Some(&2.76406));
         assert_eq!(pop.qualifications.values.get("7"), Some(&6.73474));
         assert!(!pop.qualifications.values.contains_key("15"));
+
+        let nested = crate::load_slice(
+            br#"SAV01000000000000000000
+pops={
+	database={
+		1={
+			qualifications={ 15 remainder={ 1 2 3 } 0={ value=1.64121 } 7=6.73474 }
+		}
+	}
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("nested qualification quantities");
+        let pop = nested.pops.iter_present().next().unwrap().1;
+        assert_eq!(pop.qualifications.values.get("0"), Some(&1.64121));
+        assert_eq!(pop.qualifications.values.get("7"), Some(&6.73474));
+        assert!(!pop.qualifications.values.contains_key("remainder"));
 
         let named = crate::load_slice(
             br#"SAV01000000000000000000
