@@ -7,6 +7,7 @@ import type {
   BuildingEconomics,
   DefsIcons,
   MitigationAction,
+  StateInfo,
   WorldDelta,
 } from './types'
 import { hashForBuilding, hashForGood, hashForState } from './workspaceNav'
@@ -38,6 +39,44 @@ function buildingIdsForAlert(alert: Alert): number[] {
     }
   }
   return [...ids]
+}
+
+function stateIdsForAlert(
+  alert: Alert,
+  buildingsById: Map<number, BuildingEconomics>,
+): number[] {
+  const ids = new Set<number>()
+  if (alert.state_id != null) ids.add(alert.state_id)
+  for (const buildingId of buildingIdsForAlert(alert)) {
+    const stateId = buildingsById.get(buildingId)?.state_id
+    if (stateId != null) ids.add(stateId)
+  }
+  for (const mitigation of alert.mitigations) {
+    const action = mitigation.action
+    if (
+      action?.type === 'build' ||
+      action?.type === 'feeder_job' ||
+      action?.type === 'sol_goods' ||
+      action?.type === 'trade_alloc'
+    ) {
+      if (action.state_id != null) ids.add(action.state_id)
+    }
+  }
+  return [...ids]
+}
+
+function stateLabel(state?: StateInfo, stateId?: number): string {
+  if (state?.region_name) return state.region_name
+  const region = state?.region_id
+  if (region) {
+    return region
+      .replace(/^STATE_/, '')
+      .split('_')
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ')
+  }
+  return stateId != null ? `State ${stateId}` : 'State'
 }
 
 export function alertIconId(kind: AlertKind): string {
@@ -166,13 +205,19 @@ export function alertsForPops(alerts: Alert[]): Alert[] {
 export function AlertsPane({
   result,
   icons,
+  states = [],
+  buildings = [],
 }: {
   result: AlertsResult
   icons?: DefsIcons
+  states?: StateInfo[]
+  buildings?: BuildingEconomics[]
 }) {
   if (result.alerts.length === 0) {
     return <p>No shortages detected in the current solve.</p>
   }
+  const statesById = new Map(states.map((state) => [state.id, state]))
+  const buildingsById = new Map(buildings.map((building) => [building.id, building]))
   const groups = GROUP_ORDER.flatMap((id) => {
     const items = result.alerts.filter((alert) => alertGroup(alert.kind).id === id)
     if (!items.length) return []
@@ -195,7 +240,12 @@ export function AlertsPane({
             <ul className="alerts-list">
               {group.items.map((alert) => (
                 <li key={alert.id}>
-                  <AlertIndexRow alert={alert} icons={icons} />
+                  <AlertIndexRow
+                    alert={alert}
+                    icons={icons}
+                    statesById={statesById}
+                    buildingsById={buildingsById}
+                  />
                 </li>
               ))}
             </ul>
@@ -206,12 +256,21 @@ export function AlertsPane({
   )
 }
 
-function AlertIndexRow({ alert, icons }: { alert: Alert; icons?: DefsIcons }) {
+function AlertIndexRow({
+  alert,
+  icons,
+  statesById,
+  buildingsById,
+}: {
+  alert: Alert
+  icons?: DefsIcons
+  statesById: Map<number, StateInfo>
+  buildingsById: Map<number, BuildingEconomics>
+}) {
   const href = hrefForAlert(alert)
-  const stateHref = alert.state_id != null ? hashForState(alert.state_id) : undefined
-  const buildingHrefs = buildingIdsForAlert(alert)
-    .map((id) => hashForBuilding(id))
-    .filter((buildingHref) => buildingHref !== href)
+  const places = stateIdsForAlert(alert, buildingsById).filter(
+    (stateId) => hashForState(stateId) !== href,
+  )
   return (
     <div className="alert-index-row">
       <a className="alert-index-link" href={href}>
@@ -220,16 +279,11 @@ function AlertIndexRow({ alert, icons }: { alert: Alert; icons?: DefsIcons }) {
         <strong>{alert.title}</strong>
         <span className="alert-severity">severity {alert.severity}</span>
       </a>
-      {buildingHrefs.map((buildingHref) => (
-        <a key={buildingHref} className="alert-index-place" href={buildingHref}>
-          Building
+      {places.map((stateId) => (
+        <a key={stateId} className="alert-index-place" href={hashForState(stateId)}>
+          {stateLabel(statesById.get(stateId), stateId)}
         </a>
       ))}
-      {stateHref && stateHref !== href && (
-        <a className="alert-index-place" href={stateHref}>
-          State
-        </a>
-      )}
     </div>
   )
 }

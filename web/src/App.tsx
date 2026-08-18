@@ -1094,7 +1094,12 @@ function App({ wasmApi }: Props) {
         >
           <h2 id="alerts-heading">Alerts</h2>
           {alertsResult ? (
-            <AlertsPane result={alertsResult} icons={goodIcons} />
+            <AlertsPane
+              result={alertsResult}
+              icons={goodIcons}
+              states={result?.states}
+              buildings={result?.buildings}
+            />
           ) : (
             <p>Alerts appear after a save is priced.</p>
           )}

@@ -18,6 +18,9 @@ const rye: BuildingEconomics = {
   short_inputs: [],
 }
 
+const alpaca = { id: 1, region_id: 'STATE_ALPACA', region_name: 'Alpaca' }
+const zebra = { id: 2, region_id: 'STATE_ZEBRA', region_name: 'Zebra' }
+
 const result: AlertsResult = {
   alerts: [
     {
@@ -69,18 +72,74 @@ afterEach(() => {
 
 describe('AlertsPane', () => {
   it('lists grouped links without embedding Apply on the index', () => {
-    render(<AlertsPane result={result} />)
+    render(<AlertsPane result={result} states={[alpaca]} buildings={[rye]} />)
 
     expect(screen.getByRole('link', { name: /Electricity shortage/ })).toHaveAttribute(
       'href',
       '#/prices/good/electricity',
     )
-    expect(screen.getByRole('link', { name: 'Building' })).toHaveAttribute(
-      'href',
-      '#/buildings/building/9',
-    )
+    expect(screen.getByRole('link', { name: 'Alpaca' })).toHaveAttribute('href', '#/states/1')
+    expect(screen.queryByRole('link', { name: 'Building' })).not.toBeInTheDocument()
     expect(document.querySelector('details.alert-expander')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument()
+  })
+
+  it('names unique states instead of repeating Building for each mitigation', () => {
+    const building = (id: number, stateId: number): BuildingEconomics => ({
+      ...rye,
+      id,
+      state_id: stateId,
+    })
+    render(
+      <AlertsPane
+        result={{
+          alerts: [
+            {
+              id: 'goods_shortage:artillery',
+              kind: 'goods_shortage',
+              severity: 1,
+              title: 'Artillery shortage',
+              summary: 'Buy exceeds sell.',
+              good_id: 'artillery',
+              evidence: [],
+              mitigations: [
+                {
+                  id: 'tc-1',
+                  title: 'Subsidize trade center 1',
+                  detail: 'Unprofitable.',
+                  rank: 1,
+                  apply_ready: false,
+                  action: { type: 'subsidize', building_id: 1 },
+                },
+                {
+                  id: 'tc-2',
+                  title: 'Subsidize trade center 2',
+                  detail: 'Unprofitable.',
+                  rank: 2,
+                  apply_ready: false,
+                  action: { type: 'subsidize', building_id: 2 },
+                },
+                {
+                  id: 'tc-3',
+                  title: 'Subsidize trade center 3',
+                  detail: 'Unprofitable.',
+                  rank: 3,
+                  apply_ready: false,
+                  action: { type: 'subsidize', building_id: 3 },
+                },
+              ],
+            },
+          ],
+          limitations: [],
+        }}
+        states={[alpaca, zebra]}
+        buildings={[building(1, 1), building(2, 1), building(3, 2)]}
+      />,
+    )
+    expect(screen.getByRole('link', { name: 'Alpaca' })).toHaveAttribute('href', '#/states/1')
+    expect(screen.getByRole('link', { name: 'Zebra' })).toHaveAttribute('href', '#/states/2')
+    expect(screen.queryByRole('link', { name: 'Building' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'State' })).not.toBeInTheDocument()
   })
 
   it('groups alerts by type so a shortage group can collapse', async () => {
