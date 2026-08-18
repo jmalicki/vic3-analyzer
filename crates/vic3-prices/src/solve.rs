@@ -260,17 +260,26 @@ fn detail_rows(
     let mut state_buy = BTreeMap::<(u32, GoodIdx), f64>::new();
     let mut state_sell = BTreeMap::<(u32, GoodIdx), f64>::new();
 
+    let pops_by_state = snapshot.is_none().then(|| {
+        let mut index = BTreeMap::<u32, Vec<usize>>::new();
+        for (i, pop) in world.pops.iter().enumerate() {
+            if let Some(state) = pop.state {
+                index.entry(state).or_default().push(i);
+            }
+        }
+        index
+    });
+
     for state in &world.states {
         let pop_buy = snapshot
             .and_then(|snap| snap.pop_buy_by_state.get(&state.id))
             .cloned()
             .unwrap_or_else(|| {
-                let pops: Vec<_> = world
-                    .pops
-                    .iter()
-                    .filter(|pop| pop.state == Some(state.id))
-                    .cloned()
-                    .collect();
+                let pops: Vec<_> = pops_by_state
+                    .as_ref()
+                    .and_then(|index| index.get(&state.id))
+                    .map(|indices| indices.iter().map(|&i| world.pops[i].clone()).collect())
+                    .unwrap_or_default();
                 consumption(&pops, &prices, &base_prices, defs, &frozen_sell)
             });
         for (good, quantity) in pop_buy.iter_indexed() {
@@ -903,6 +912,22 @@ fn access_scaled_non_pop_orders(
     (buy, sell)
 }
 
+struct SettleScratch {
+    local: GoodsVec,
+    pop_buy: GoodsVec,
+    next: GoodsVec,
+}
+
+impl SettleScratch {
+    fn new(n: usize) -> Self {
+        Self {
+            local: GoodsVec::zeros(n),
+            pop_buy: GoodsVec::zeros(n),
+            next: GoodsVec::zeros(n),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct StateShop {
     id: u32,
@@ -1062,17 +1087,16 @@ impl PriceResidual<'_> {
         prices
     }
 
-    fn settle_state(&self, shop: &StateShop, market: &GoodsVec) -> (GoodsVec, GoodsVec) {
+    fn settle_state(&self, shop: &StateShop, market: &GoodsVec, scratch: &mut SettleScratch) {
         let n = self.base_prices.len();
-        let mut local = market.clone();
-        let mut pop_buy = shop.frozen_pop_buy.clone();
-        let mut next = GoodsVec::zeros(n);
+        scratch.local.copy_from(market);
+        scratch.pop_buy.copy_from(&shop.frozen_pop_buy);
         for _ in 0..LOCAL_ITERS {
-            pop_buy.copy_from(&shop.frozen_pop_buy);
+            scratch.pop_buy.copy_from(&shop.frozen_pop_buy);
             add_wage_bins(
-                &mut pop_buy,
+                &mut scratch.pop_buy,
                 &shop.wage_bins,
-                &local,
+                &scratch.local,
                 &self.base_prices,
                 &self.units,
                 1.0,
@@ -1080,22 +1104,21 @@ impl PriceResidual<'_> {
             let mut delta = 0.0_f64;
             for i in 0..n {
                 let good = GoodIdx::from_usize(i);
-                let buy = shop.frozen_buy[good] + pop_buy[good];
+                let buy = shop.frozen_buy[good] + scratch.pop_buy[good];
                 let sell = shop.frozen_sell[good];
                 let state_price = price(self.base_prices[good], buy, sell, self.price_range);
                 let price = local_price(shop.mapi, market[good], state_price);
-                delta = delta.max((price - local[good]).abs());
-                next[good] = price;
+                delta = delta.max((price - scratch.local[good]).abs());
+                scratch.next[good] = price;
             }
-            local.copy_from(&next);
+            scratch.local.copy_from(&scratch.next);
             if delta < LOCAL_EPS {
                 break;
             }
         }
-        (local, pop_buy)
     }
 
-    fn world_pop_buy_at(&self, market: &GoodsVec) -> GoodsVec {
+    fn world_pop_buy_at(&self, market: &GoodsVec, scratch: &mut SettleScratch) -> GoodsVec {
         let mut buy = self.frozen_pop_buy.clone();
         add_wage_bins(
             &mut buy,
@@ -1109,15 +1132,15 @@ impl PriceResidual<'_> {
             if shop.wage_bins.is_empty() {
                 continue;
             }
-            let (_, pop_buy) = self.settle_state(shop, market);
-            for (good, quantity) in pop_buy.iter_indexed() {
+            self.settle_state(shop, market, scratch);
+            for (good, quantity) in scratch.pop_buy.iter_indexed() {
                 buy.add(good, shop.access * (quantity - shop.frozen_pop_buy[good]));
             }
         }
         buy
     }
 
-    fn snapshot_at(&self, market: &GoodsVec) -> ShopSnapshot {
+    fn snapshot_at(&self, market: &GoodsVec, scratch: &mut SettleScratch) -> ShopSnapshot {
         let mut world_pop_buy = self.frozen_pop_buy.clone();
         add_wage_bins(
             &mut world_pop_buy,
@@ -1130,12 +1153,12 @@ impl PriceResidual<'_> {
         let mut local_by_state = BTreeMap::new();
         let mut pop_buy_by_state = BTreeMap::new();
         for shop in &self.shops {
-            let (local, pop_buy) = self.settle_state(shop, market);
-            for (good, quantity) in pop_buy.iter_indexed() {
+            self.settle_state(shop, market, scratch);
+            for (good, quantity) in scratch.pop_buy.iter_indexed() {
                 world_pop_buy.add(good, shop.access * (quantity - shop.frozen_pop_buy[good]));
             }
-            local_by_state.insert(shop.id, local);
-            pop_buy_by_state.insert(shop.id, pop_buy);
+            local_by_state.insert(shop.id, scratch.local.clone());
+            pop_buy_by_state.insert(shop.id, scratch.pop_buy.clone());
         }
         ShopSnapshot {
             world_pop_buy,
@@ -1144,13 +1167,13 @@ impl PriceResidual<'_> {
         }
     }
 
-    fn pop_buy_at(&self, prices: &GoodsVec) -> GoodsVec {
-        self.world_pop_buy_at(prices)
+    fn pop_buy_at(&self, prices: &GoodsVec, scratch: &mut SettleScratch) -> GoodsVec {
+        self.world_pop_buy_at(prices, scratch)
     }
 
-    fn formula_rel(&self, rel: &[f64]) -> Vec<f64> {
+    fn formula_rel(&self, rel: &[f64], scratch: &mut SettleScratch) -> Vec<f64> {
         let prices = self.prices_from_rel(rel);
-        let pop_buy = self.pop_buy_at(&prices);
+        let pop_buy = self.pop_buy_at(&prices, scratch);
         self.goods
             .iter()
             .zip(self.bases)
@@ -1162,8 +1185,8 @@ impl PriceResidual<'_> {
             .collect()
     }
 
-    fn residual_at(&self, rel: &[f64]) -> Vec<f64> {
-        self.formula_rel(rel)
+    fn residual_at(&self, rel: &[f64], scratch: &mut SettleScratch) -> Vec<f64> {
+        self.formula_rel(rel, scratch)
             .into_iter()
             .zip(rel)
             .map(|(formula, r)| r - formula)
@@ -1177,8 +1200,9 @@ impl PriceResidual<'_> {
     }
 
     fn damp_toward_formula(&self, rel: &mut [f64], alpha: f64, iters: u32) {
+        let mut scratch = SettleScratch::new(self.base_prices.len());
         for _ in 0..iters {
-            let formula = self.formula_rel(rel);
+            let formula = self.formula_rel(rel, &mut scratch);
             for (r, f) in rel.iter_mut().zip(formula) {
                 *r = (1.0 - alpha) * *r + alpha * f;
             }
@@ -1187,8 +1211,9 @@ impl PriceResidual<'_> {
     }
 
     fn evaluate(&self, rel: &[f64]) -> (Vec<GoodPrice>, f64, ShopSnapshot) {
+        let mut scratch = SettleScratch::new(self.base_prices.len());
         let prices = self.prices_from_rel(rel);
-        let snapshot = self.snapshot_at(&prices);
+        let snapshot = self.snapshot_at(&prices, &mut scratch);
         let pop_buy = &snapshot.world_pop_buy;
         let residual = self
             .goods
@@ -1231,7 +1256,13 @@ impl CostFunction for PriceResidual<'_> {
     type Error = Infallible;
 
     fn cost(&self, param: &Vec<f64>) -> Result<f64, Infallible> {
-        Ok(0.5 * self.residual_at(param).iter().map(|x| x * x).sum::<f64>())
+        let mut scratch = SettleScratch::new(self.base_prices.len());
+        Ok(0.5
+            * self
+                .residual_at(param, &mut scratch)
+                .iter()
+                .map(|x| x * x)
+                .sum::<f64>())
     }
 }
 
@@ -1241,7 +1272,8 @@ impl Residual for PriceResidual<'_> {
     type Error = Infallible;
 
     fn residual(&self, param: &Vec<f64>) -> Result<Vec<f64>, Infallible> {
-        Ok(self.residual_at(param))
+        let mut scratch = SettleScratch::new(self.base_prices.len());
+        Ok(self.residual_at(param, &mut scratch))
     }
 }
 
@@ -1249,7 +1281,8 @@ impl Jacobian for PriceResidual<'_> {
     type Jacobian = DenseMatrix<f64>;
 
     fn jacobian(&self, param: &Vec<f64>) -> Result<DenseMatrix<f64>, Infallible> {
-        let r0 = self.residual_at(param);
+        let mut scratch = SettleScratch::new(self.base_prices.len());
+        let r0 = self.residual_at(param, &mut scratch);
         let n = param.len();
         let m = r0.len();
         let mut data = vec![0.0; m * n];
@@ -1258,10 +1291,10 @@ impl Jacobian for PriceResidual<'_> {
             let mut stepped = param.clone();
             let (x1, denom) = if param[j] + h <= self.upper[j] {
                 stepped[j] = param[j] + h;
-                (self.residual_at(&stepped), h)
+                (self.residual_at(&stepped, &mut scratch), h)
             } else {
                 stepped[j] = param[j] - h;
-                (self.residual_at(&stepped), -h)
+                (self.residual_at(&stepped, &mut scratch), -h)
             };
             for i in 0..m {
                 data[i * n + j] = (x1[i] - r0[i]) / denom;

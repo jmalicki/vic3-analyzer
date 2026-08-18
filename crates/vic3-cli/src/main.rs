@@ -22,11 +22,11 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Prices(cmd) => {
-            let (_, world, defs) = load_inputs(&cmd.io)?;
+            let (world, defs) = load_world(&cmd.io)?;
             emit(&solve(&world, &defs, cmd.solve.into()), cmd.json)
         }
         Commands::WhatIf(cmd) => {
-            let (_, world, defs) = load_inputs(&cmd.io)?;
+            let (world, defs) = load_world(&cmd.io)?;
             emit(
                 &what_if(&world, &defs, &cmd.what_if.into(), cmd.solve.into()),
                 cmd.json,
@@ -222,6 +222,22 @@ struct GapsResult {
     satisfied: bool,
     gaps: Vec<Atom>,
     limitations: Vec<String>,
+}
+
+fn load_world(io: &IoArgs) -> Result<(World, GameDefs)> {
+    let defs = vic3_defs::load_from_path(&io.game)
+        .with_context(|| format!("loading defs from {}", io.game.display()))?;
+    let save = if let Some(tokens) = &io.tokens {
+        let tokens = load_tokens_path(tokens)
+            .with_context(|| format!("loading tokens from {}", tokens.display()))?;
+        load_path(&io.save, tokens)
+    } else {
+        load_path(&io.save, empty_tokens())
+    }
+    .with_context(|| format!("loading save from {}", io.save.display()))?;
+    let world = World::from_save(&save, &defs);
+    drop(save);
+    Ok((world, defs))
 }
 
 fn load_inputs(io: &IoArgs) -> Result<(Save, World, GameDefs)> {
