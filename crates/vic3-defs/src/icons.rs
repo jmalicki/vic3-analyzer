@@ -122,8 +122,8 @@ fn mip_dims(width: u32, height: u32, level: u32) -> (u32, u32) {
 fn mip_byte_len(width: u32, height: u32, format: &Format) -> usize {
     match format {
         Format::Block { bytes, .. } => {
-            let blocks_w = (width as usize + 3) / 4;
-            let blocks_h = (height as usize + 3) / 4;
+            let blocks_w = (width as usize).div_ceil(4);
+            let blocks_h = (height as usize).div_ceil(4);
             blocks_w * blocks_h * bytes
         }
         Format::Rgba32 { .. } => width as usize * height as usize * 4,

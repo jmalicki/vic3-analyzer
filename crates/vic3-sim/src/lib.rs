@@ -492,11 +492,11 @@ mod tests {
             ..World::default()
         };
         let solve_opts = SolveOpts::default();
-        let baseline = solve(&world, &defs, solve_opts);
+        let baseline = solve(&world, &defs, solve_opts.clone());
         let bumped = solve(
             &world.with_extra_levels("building_logging_camp", 1),
             &defs,
-            solve_opts,
+            solve_opts.clone(),
         );
         let initial_price = baseline.goods[0].price;
         let next_price = bumped.goods[0].price;

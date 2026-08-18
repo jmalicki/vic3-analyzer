@@ -310,9 +310,9 @@ fn parse_defs_text(
     Ok(())
 }
 
-fn load_icons(
-    data_root: &Path,
-) -> Result<(BTreeMap<String, Vec<u8>>, BTreeMap<String, Vec<u8>>), DefsError> {
+type IconPngs = BTreeMap<String, Vec<u8>>;
+
+fn load_icons(data_root: &Path) -> Result<(IconPngs, IconPngs), DefsError> {
     let mut goods = BTreeMap::new();
     let mut extra = BTreeMap::new();
     let icons_root = data_root.join("gfx/interface/icons");

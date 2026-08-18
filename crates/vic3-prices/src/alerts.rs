@@ -1,4 +1,4 @@
-//! Read-only shortage alerts and ranked mitigations (apply track is later).
+//! Shortage alerts and ranked mitigations.
 //!
 //! Detection uses an existing [`PricesResult`] plus the [`World`] it came from.
 //! Heuristics are documented next to each detector; they are not a full Vic3
@@ -1355,6 +1355,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn econ(
         id: u32,
         state: u32,
@@ -1671,7 +1672,7 @@ mod tests {
         assert!(farm_rank < uni_rank.unwrap_or(u32::MAX));
         assert!(mine_rank < uni_rank.unwrap_or(u32::MAX));
         assert!(
-            !edu.mitigations.iter().any(|mit| is_university_build(mit)),
+            !edu.mitigations.iter().any(is_university_build),
             "unstaffed university must not recommend another campus: {:?}",
             edu.mitigations
         );

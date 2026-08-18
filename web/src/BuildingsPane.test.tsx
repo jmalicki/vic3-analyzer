@@ -161,8 +161,40 @@ describe('BuildingsPane', () => {
     expect(apply.length).toBeGreaterThan(0)
     for (const button of apply) {
       expect(button).toBeDisabled()
-      expect(button).toHaveAttribute('title', 'coming in apply track')
     }
+  })
+
+  it('applies optimizer world_delta when onApply is set', async () => {
+    const user = userEvent.setup()
+    const onApply = vi.fn()
+    const api = {
+      loaded_optimize_pms: vi.fn(() =>
+        JSON.stringify({
+          axis: 'income',
+          changes: [
+            {
+              building_type: 'building_rye_farm',
+              building_id: 9,
+              from: ['pm_simple_farming'],
+              to: ['pm_soil_enriching_farming'],
+            },
+          ],
+          delta: { income: 12.5, productivity: 1.2, sol: 0, residual: -0.001 },
+          limitations: [],
+          world_delta: {
+            production_methods: [{ building_id: 9, methods: ['pm_soil_enriching_farming'] }],
+          },
+        }),
+      ),
+    }
+    render(
+      <BuildingsPane result={result} api={api as unknown as WasmApi} onApply={onApply} />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Optimize production methods' }))
+    await user.click(screen.getByRole('button', { name: 'Apply all' }))
+    expect(onApply).toHaveBeenCalledWith({
+      production_methods: [{ building_id: 9, methods: ['pm_soil_enriching_farming'] }],
+    })
   })
 
   it('lists production methods from production_method_ids and previews recipes', async () => {

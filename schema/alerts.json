@@ -1,0 +1,315 @@
+{
+  "$defs": {
+    "Alert": {
+      "description": "One shortage (or underemployment) expander in the Alerts pane.",
+      "properties": {
+        "building_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "type": "array"
+        },
+        "good_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/AlertKind"
+        },
+        "mitigations": {
+          "items": {
+            "$ref": "#/$defs/Mitigation"
+          },
+          "type": "array"
+        },
+        "severity": {
+          "description": "`1` is urgent; [`AlertKind::Underemployed`] is `2`.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "severity",
+        "title",
+        "summary",
+        "evidence",
+        "mitigations"
+      ],
+      "type": "object"
+    },
+    "AlertKind": {
+      "description": "Detector kind. Snake-case in JSON.",
+      "enum": [
+        "electricity_shortage",
+        "transportation_shortage",
+        "goods_shortage",
+        "needs_unmet",
+        "low_market_access",
+        "unfilled_education",
+        "unfilled_pops",
+        "underemployed"
+      ],
+      "type": "string"
+    },
+    "Evidence": {
+      "description": "Labelled observation shown under an expander.",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Mitigation": {
+      "description": "Ranked advice. `apply_ready` is always false in this track.",
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MitigationAction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "apply_ready": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "rank": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "detail",
+        "rank",
+        "apply_ready"
+      ],
+      "type": "object"
+    },
+    "MitigationAction": {
+      "description": "Suggested follow-up. Internally tagged with `type`.",
+      "oneOf": [
+        {
+          "properties": {
+            "building": {
+              "type": "string"
+            },
+            "extra_levels": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "state_id": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "build",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "building"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "building_id": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "production_method": {
+              "type": "string"
+            },
+            "type": {
+              "const": "pm",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "building_id",
+            "production_method"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "building_id": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "subsidize",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "building_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "good_id": {
+              "type": "string"
+            },
+            "state_id": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "trade_alloc",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "state_id",
+            "good_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "building": {
+              "type": "string"
+            },
+            "profession": {
+              "type": "string"
+            },
+            "state_id": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "feeder_job",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "building",
+            "profession"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "good_id": {
+              "type": "string"
+            },
+            "state_id": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "sol_goods",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "good_id"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Alerts payload for wasm / CLI JSON.",
+  "properties": {
+    "alerts": {
+      "items": {
+        "$ref": "#/$defs/Alert"
+      },
+      "type": "array"
+    },
+    "limitations": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "alerts",
+    "limitations"
+  ],
+  "title": "AlertsResult",
+  "type": "object"
+}

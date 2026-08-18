@@ -1,9 +1,10 @@
 //! Bound-constrained NLS (`basin::Trf`) plus successive-substitution warm start.
 //!
-//! The NLS / settle loop is cheap (~0.08 s on a late autosave). [`finished`]
-//! still builds the full UI payload (compact pop rows, need baskets,
-//! qualifications) so CLI `prices` times the same work as wasm `load_analysis`.
-//! Do not add a goods-only solve because the default table omits pops.
+//! The NLS / settle loop is ~1 ms on a late autosave; building shops is ~80 ms.
+//! [`finished`] still builds the full UI payload (compact pop rows, need baskets,
+//! qualifications) and dominates (~250 ms). CLI `prices` times the same work as
+//! wasm `load_analysis`. Do not add a goods-only solve because the default table
+//! omits pops.
 
 use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;

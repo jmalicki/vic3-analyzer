@@ -19,8 +19,8 @@ use vic3_goals::Atom;
 use vic3_load::{empty_tokens, export_save, load_path_world, load_tokens_path, SavePatch};
 use vic3_plan::{compare, AnalysisRecord, PlanOpts, PlanResult};
 use vic3_prices::{
-    alerts, preview, solve, what_if, AlertsResult, PricesResult, ProductionMethodDelta, SolveOpts,
-    WhatIfOpts, World, WorldDelta,
+    alerts, optimize_pms, preview, solve, what_if, AlertsResult, OptimizeAxis as PriceOptimizeAxis,
+    OptimizeResult, PricesResult, SolveOpts, WhatIfOpts, World, WorldDelta,
 };
 use vic3_sim::{EconomyContext, SimConfig};
 use vic3_world::PlanningState;
@@ -228,7 +228,7 @@ struct OptimizePmsCli {
     /// Rank candidate production methods by this axis.
     #[arg(long, value_enum)]
     axis: OptimizeAxis,
-    /// Print [`PricesResult`] JSON (includes `limitations` and `residual`).
+    /// Print [`OptimizeResult`] JSON (grouped PM changes plus a compact score delta).
     #[arg(long)]
     json: bool,
     #[command(flatten)]
@@ -376,8 +376,15 @@ fn run_mutate(cmd: MutateCli) -> Result<()> {
 
 fn run_optimize_pms(cmd: OptimizePmsCli) -> Result<()> {
     let (world, defs) = load_world(&cmd.io)?;
-    emit(
-        &greedy_optimize_pms(&world, &defs, cmd.axis, cmd.solve.into()),
+    let opts: SolveOpts = cmd.solve.into();
+    let baseline = solve(&world, &defs, opts.clone());
+    let axis = match cmd.axis {
+        OptimizeAxis::Income => PriceOptimizeAxis::Income,
+        OptimizeAxis::Productivity => PriceOptimizeAxis::Productivity,
+        OptimizeAxis::Sol => PriceOptimizeAxis::Sol,
+    };
+    emit_optimize(
+        &optimize_pms(&world, &defs, &baseline, opts, axis),
         cmd.json,
     )
 }
@@ -416,95 +423,6 @@ fn same_path(left: &Path, right: &Path) -> bool {
     match (fs::canonicalize(left), fs::canonicalize(right)) {
         (Ok(left), Ok(right)) => left == right,
         _ => false,
-    }
-}
-
-/// One-pass greedy PM search via [`preview`].
-///
-/// Prefer `vic3_prices::optimize` when that crate exports it. This CLI crate
-/// cannot add that module; until then each building tries each known method.
-fn greedy_optimize_pms(
-    world: &World,
-    defs: &GameDefs,
-    axis: OptimizeAxis,
-    opts: SolveOpts,
-) -> PricesResult {
-    let mut best = solve(world, defs, opts.clone());
-    let mut best_score = axis_score(&best, axis);
-    let mut accepted = WorldDelta::default();
-    let candidates: Vec<String> = defs.production_methods.keys().cloned().collect();
-    for building in &world.buildings {
-        let mut building_best: Option<(WorldDelta, PricesResult, f64)> = None;
-        for method in &candidates {
-            if building.production_methods == [method.as_str()] {
-                continue;
-            }
-            let mut delta = accepted.clone();
-            delta
-                .production_methods
-                .retain(|item| item.building_id != building.id);
-            delta.production_methods.push(ProductionMethodDelta {
-                building_id: building.id,
-                methods: vec![method.clone()],
-            });
-            let mut preview_opts = opts.clone();
-            if !best.relative.is_empty() {
-                preview_opts.warm_rel = Some(best.relative.clone());
-            }
-            let result = preview(world, defs, &delta, preview_opts);
-            let score = axis_score(&result, axis);
-            let better = building_best
-                .as_ref()
-                .is_none_or(|(_, _, current)| score > *current);
-            if score > best_score && better {
-                building_best = Some((delta, result, score));
-            }
-        }
-        if let Some((delta, result, score)) = building_best {
-            accepted = delta;
-            best = result;
-            best_score = score;
-        }
-    }
-    best
-}
-
-fn axis_score(result: &PricesResult, axis: OptimizeAxis) -> f64 {
-    match axis {
-        OptimizeAxis::Income => result
-            .buildings
-            .iter()
-            .map(|building| building.profit)
-            .sum(),
-        OptimizeAxis::Productivity => {
-            let profit: f64 = result
-                .buildings
-                .iter()
-                .map(|building| building.profit)
-                .sum();
-            let levels: f64 = result.buildings.iter().map(|building| building.level).sum();
-            if levels > 0.0 {
-                profit / levels
-            } else {
-                0.0
-            }
-        }
-        OptimizeAxis::Sol => {
-            let mut weighted = 0.0;
-            let mut weight = 0.0;
-            for pop in result.state_pops.iter() {
-                let size = pop.demand_size.or(pop.workforce).unwrap_or(0.0);
-                if let Some(wealth) = pop.wealth {
-                    weighted += f64::from(wealth) * size;
-                    weight += size;
-                }
-            }
-            if weight > 0.0 {
-                weighted / weight
-            } else {
-                0.0
-            }
-        }
     }
 }
 
@@ -690,6 +608,39 @@ fn ensure_plain_id(id: &str) -> Result<()> {
         Path::new(id).file_name().and_then(|name| name.to_str()) == Some(id),
         "invalid archive id"
     );
+    Ok(())
+}
+
+fn emit_optimize(result: &OptimizeResult, json: bool) -> Result<()> {
+    if json {
+        serde_json::to_writer(io::stdout(), result)?;
+        writeln!(io::stdout())?;
+        return Ok(());
+    }
+    writeln!(
+        io::stdout(),
+        "axis {:?}  Δ income {:.4}  productivity {:.4}  SoL {:.4}  residual {:.6}",
+        result.axis,
+        result.delta.income,
+        result.delta.productivity,
+        result.delta.sol,
+        result.delta.residual
+    )?;
+    if result.changes.is_empty() {
+        writeln!(io::stdout(), "no improving production-method changes")?;
+    } else {
+        for change in &result.changes {
+            writeln!(
+                io::stdout(),
+                "- {} #{} {:?} → {:?}",
+                change.building_type,
+                change.building_id,
+                change.from,
+                change.to
+            )?;
+        }
+    }
+    writeln!(io::stderr(), "warning: {}", result.limitations.join(" "))?;
     Ok(())
 }
 

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use schemars::schema_for;
 use serde_json::Value;
-use vic3_prices::{PricesResult, SolveOpts, WhatIfOpts, WorldDelta};
+use vic3_prices::{AlertsResult, PricesResult, SolveOpts, WhatIfOpts, WorldDelta};
 
 fn schema_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schema")
@@ -40,6 +40,10 @@ fn dump_schemas() {
     write_schema(
         "optimize.json",
         &serde_json::to_value(schema_for!(vic3_prices::OptimizeResult)).unwrap(),
+    );
+    write_schema(
+        "alerts.json",
+        &serde_json::to_value(schema_for!(AlertsResult)).unwrap(),
     );
 }
 
@@ -111,6 +115,16 @@ fn optimize_schema_matches_checked_in() {
     assert_eq!(
         actual, expected,
         "schema/optimize.json drifted from schema_for!(OptimizeResult)"
+    );
+}
+
+#[test]
+fn alerts_schema_matches_checked_in() {
+    let actual = serde_json::to_value(schema_for!(AlertsResult)).expect("serialize schema");
+    let expected = read_schema("alerts.json");
+    assert_eq!(
+        actual, expected,
+        "schema/alerts.json drifted from schema_for!(AlertsResult)"
     );
 }
 

@@ -352,3 +352,71 @@ Greedy production-method suggestion. `world_delta` is a [`WorldDelta`] for a lat
   }
 }
 ```
+
+## AlertsResult
+
+Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent; underemployed buildings are `2`. Mitigations may include a tagged `action` used by Apply.
+
+```json
+{
+  "type": "object",
+  "required": ["alerts", "limitations"],
+  "properties": {
+    "alerts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "severity", "title", "summary", "evidence", "mitigations"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": {
+            "enum": [
+              "electricity_shortage",
+              "transportation_shortage",
+              "goods_shortage",
+              "needs_unmet",
+              "low_market_access",
+              "unfilled_education",
+              "unfilled_pops",
+              "underemployed"
+            ]
+          },
+          "severity": { "type": "integer", "minimum": 1 },
+          "title": { "type": "string" },
+          "summary": { "type": "string" },
+          "state_id": { "type": "integer", "minimum": 0 },
+          "building_id": { "type": "integer", "minimum": 0 },
+          "good_id": { "type": "string" },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["label", "value"],
+              "properties": {
+                "label": { "type": "string" },
+                "value": { "type": "string" }
+              }
+            }
+          },
+          "mitigations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "title", "detail", "rank", "apply_ready"],
+              "properties": {
+                "id": { "type": "string" },
+                "title": { "type": "string" },
+                "detail": { "type": "string" },
+                "rank": { "type": "integer", "minimum": 0 },
+                "apply_ready": { "type": "boolean" },
+                "action": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "limitations": { "type": "array", "items": { "type": "string" } }
+  }
+}
+```

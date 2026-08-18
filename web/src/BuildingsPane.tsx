@@ -324,6 +324,7 @@ export function BuildingsPane({
           typeName={typeName}
           expanded={expandedOptimize}
           onToggle={toggleOptimizeType}
+          onApply={onApply}
         />
       )}
       {visible.length ? (
@@ -562,13 +563,17 @@ function OptimizeDiff({
   typeName,
   expanded,
   onToggle,
+  onApply,
 }: {
   result: OptimizeResult
   typeName: (typeId: string) => string
   expanded: Set<string>
   onToggle: (typeId: string) => void
+  onApply?: (delta: WorldDelta) => void
 }) {
   const groups = groupOptimizeChanges(result.changes)
+  const methodsFor = (ids: number[]) =>
+    (result.world_delta.production_methods ?? []).filter((item) => ids.includes(item.building_id))
   return (
     <div className="alert-expander">
       <p>
@@ -576,49 +581,73 @@ function OptimizeDiff({
         {formatDelta(result.delta.productivity)}, SoL {formatDelta(result.delta.sol)}
       </p>
       {groups.length ? (
-        <ul className="alerts-list">
-          {groups.map((group) => {
-            const open = expanded.has(group.typeId)
-            return (
-              <li key={group.typeId}>
-                <div className="alert-mitigation-heading">
-                  <button
-                    type="button"
-                    className="building-expand"
-                    aria-expanded={open}
-                    aria-label={`${open ? 'Collapse' : 'Expand'} ${typeName(group.typeId)} changes`}
-                    onClick={() => onToggle(group.typeId)}
-                  >
-                    {open ? '▼' : '▶'}
-                  </button>
-                  <strong>{typeName(group.typeId)}</strong>
-                  <span className="alert-severity">
-                    {group.changes.length} building{group.changes.length === 1 ? '' : 's'}
-                  </span>
-                  <button type="button" className="alert-apply" disabled title="coming in apply track">
-                    Apply
-                  </button>
-                </div>
-                {open && (
-                  <ul className="archive-list">
-                    {group.changes.map((change) => (
-                      <li key={change.building_id}>
-                        <span>Building {change.building_id}</span>
-                        <span>
-                          {change.from.map(displayId).join(', ') || '—'} →{' '}
-                          {change.to.map(displayId).join(', ') || '—'}
-                        </span>
-                        <button type="button" disabled title="coming in apply track">
-                          Apply
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            )
-          })}
-        </ul>
+        <>
+          <button
+            type="button"
+            className="alert-apply"
+            disabled={!onApply}
+            onClick={() => onApply?.(result.world_delta)}
+          >
+            Apply all
+          </button>
+          <ul className="alerts-list">
+            {groups.map((group) => {
+              const open = expanded.has(group.typeId)
+              const groupIds = group.changes.map((change) => change.building_id)
+              return (
+                <li key={group.typeId}>
+                  <div className="alert-mitigation-heading">
+                    <button
+                      type="button"
+                      className="building-expand"
+                      aria-expanded={open}
+                      aria-label={`${open ? 'Collapse' : 'Expand'} ${typeName(group.typeId)} changes`}
+                      onClick={() => onToggle(group.typeId)}
+                    >
+                      {open ? '▼' : '▶'}
+                    </button>
+                    <strong>{typeName(group.typeId)}</strong>
+                    <span className="alert-severity">
+                      {group.changes.length} building{group.changes.length === 1 ? '' : 's'}
+                    </span>
+                    <button
+                      type="button"
+                      className="alert-apply"
+                      disabled={!onApply}
+                      onClick={() => onApply?.({ production_methods: methodsFor(groupIds) })}
+                    >
+                      Apply
+                    </button>
+                  </div>
+                  {open && (
+                    <ul className="archive-list">
+                      {group.changes.map((change) => (
+                        <li key={change.building_id}>
+                          <span>Building {change.building_id}</span>
+                          <span>
+                            {change.from.map(displayId).join(', ') || '—'} →{' '}
+                            {change.to.map(displayId).join(', ') || '—'}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={!onApply}
+                            onClick={() =>
+                              onApply?.({
+                                production_methods: methodsFor([change.building_id]),
+                              })
+                            }
+                          >
+                            Apply
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </>
       ) : (
         <p>No improving production-method changes found.</p>
       )}
