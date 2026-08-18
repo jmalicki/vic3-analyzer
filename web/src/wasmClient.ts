@@ -57,6 +57,7 @@ export function workerWasmApi(local: WasmApi, port: WasmWorkerPort): WasmApi {
       call('load_analysis', [save, tokens, defs, solveOptsJson]),
     clear_analysis: () => call('clear_analysis', []),
     loaded_prices: () => call('loaded_prices', []),
+    loaded_military: () => call('loaded_military', []),
     loaded_what_if: (whatIfOptsJson) => call('loaded_what_if', [whatIfOptsJson]),
     loaded_gaps: (goal) => call('loaded_gaps', [goal]),
     loaded_plan: (planOptsJson) => call('loaded_plan', [planOptsJson]),

@@ -95,6 +95,14 @@ function mockApi(): WasmApi {
     ),
     clear_analysis: vi.fn(),
     loaded_prices: vi.fn(() => result),
+    loaded_military: vi.fn(() =>
+      JSON.stringify({
+        armies: [],
+        navies: [],
+        mobilization: [],
+        limitations: ['Military IR incomplete; missing managers yield empty lists'],
+      }),
+    ),
     loaded_what_if: vi.fn(() => result),
     loaded_gaps: vi.fn(() => gapsResult),
     loaded_plan: vi.fn(() => planResult),

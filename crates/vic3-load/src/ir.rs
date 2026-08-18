@@ -64,6 +64,24 @@ pub struct Save {
     pub building_constructions: Manager<ConstructionOrder>,
     #[serde(default, alias = "gov_constructions")]
     pub government_constructions: Manager<ConstructionOrder>,
+    /// Per-country researched techs. Real 1.5+ saves use this top-level
+    /// manager (`acquired_technologies.value`, `research_technology`).
+    #[serde(default)]
+    pub technology: Manager<TechnologyEntry>,
+    /// Formations when the save uses this key (1.5+ also writes
+    /// `military_formation_manager`).
+    #[serde(default, alias = "military_formation_manager")]
+    pub formation_manager: Manager<MilitaryFormation>,
+    #[serde(default)]
+    pub military_formations: Manager<MilitaryFormation>,
+    #[serde(default)]
+    pub armies: Manager<MilitaryFormation>,
+    #[serde(default)]
+    pub navy_manager: Manager<MilitaryFormation>,
+    #[serde(default)]
+    pub hq_manager: Manager<MilitaryHq>,
+    #[serde(default)]
+    pub mobilization: Manager<MobilizationEntry>,
     #[serde(default)]
     pub previous_played: Vec<Player>,
 }
@@ -192,6 +210,37 @@ pub struct Country {
     /// Subject type id when present (`puppet`, `dominion`, …).
     #[serde(default, deserialize_with = "optional_flex_str")]
     pub subject_type: Option<String>,
+    /// Researched technology ids when the save stores them on the country.
+    ///
+    /// Real saves usually keep techs in the top-level [`Save::technology`]
+    /// manager; [`Save::hydrate_country_techs`] copies those onto this field.
+    #[serde(default, deserialize_with = "deserialize_tech_ids")]
+    pub techs: Vec<String>,
+    #[serde(default, deserialize_with = "optional_flex_str")]
+    pub currently_researching: Option<String>,
+    /// Nested `technology={ acquired=… }` / list of ids, when present.
+    #[serde(default, deserialize_with = "deserialize_tech_ids")]
+    pub technology: Vec<String>,
+    #[serde(default, deserialize_with = "deserialize_tech_ids")]
+    pub research: Vec<String>,
+}
+
+impl Country {
+    /// Researched ids from every country-level tech field we know.
+    pub fn researched_techs(&self) -> Vec<String> {
+        let mut ids = Vec::new();
+        for id in self
+            .techs
+            .iter()
+            .chain(self.technology.iter())
+            .chain(self.research.iter())
+        {
+            if !id.is_empty() && !ids.iter().any(|seen| seen == id) {
+                ids.push(id.clone());
+            }
+        }
+        ids
+    }
 }
 
 /// Treasury / credit lines when present on a country.
@@ -641,6 +690,245 @@ fn flex_str_vec<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<String
         .map(|values| values.into_iter().map(|value| value.0).collect())
 }
 
+/// Clausewitz list of tech ids, or `{ value = { id id } }` (real 1.5+ saves).
+fn deserialize_tech_ids<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<String>, D::Error> {
+    TechIds::deserialize(deserializer).map(|ids| ids.0)
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+struct TechIds(Vec<String>);
+
+impl<'de> Deserialize<'de> for TechIds {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = TechIds;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a list of technology ids or { value = { … } }")
+            }
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(TechIds(Vec::new()))
+            }
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(TechIds(Vec::new()))
+            }
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                if value.is_empty() || value.eq_ignore_ascii_case("none") {
+                    Ok(TechIds(Vec::new()))
+                } else {
+                    Ok(TechIds(vec![value.to_string()]))
+                }
+            }
+            fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+                self.visit_str(&value)
+            }
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(TechIds(vec![value.to_string()]))
+            }
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+                Ok(TechIds(vec![value.to_string()]))
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut ids = Vec::new();
+                while let Some(item) = seq.next_element::<TechIds>()? {
+                    for id in item.0 {
+                        if !id.is_empty() && !ids.iter().any(|seen| seen == &id) {
+                            ids.push(id);
+                        }
+                    }
+                }
+                Ok(TechIds(ids))
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut ids = Vec::new();
+                while let Some(key) = map.next_key::<FlexStr>()? {
+                    match key.0.as_str() {
+                        "value"
+                        | "acquired"
+                        | "acquired_technologies"
+                        | "researched"
+                        | "techs"
+                        | "discovered" => {
+                            for id in map.next_value::<TechIds>()?.0 {
+                                if !id.is_empty() && !ids.iter().any(|seen| seen == &id) {
+                                    ids.push(id);
+                                }
+                            }
+                        }
+                        _ => {
+                            let _: de::IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+                Ok(TechIds(ids))
+            }
+        }
+        deserializer.deserialize_any(V)
+    }
+}
+
+/// Units listed as a vec, a `{ database = … }` manager, or a map of ids.
+fn deserialize_units<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<MilitaryUnit>, D::Error> {
+    struct V;
+    impl<'de> Visitor<'de> for V {
+        type Value = Vec<MilitaryUnit>;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a list or database of military units")
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(Vec::new())
+        }
+        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(Vec::new())
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            let mut units = Vec::new();
+            while let Some(unit) = seq.next_element::<FlexUnit>()? {
+                if let Some(unit) = unit.0 {
+                    units.push(unit);
+                }
+            }
+            Ok(units)
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut units = Vec::new();
+            while let Some(key) = map.next_key::<FlexStr>()? {
+                if key.0 == "database" || key.0 == "lod" {
+                    let UnitDatabase(database) = map.next_value()?;
+                    for (id, slot) in database {
+                        if let Some(mut unit) = slot {
+                            unit.id = unit.id.or(Some(id));
+                            units.push(unit);
+                        }
+                    }
+                    continue;
+                }
+                if let Ok(id) = key.0.parse::<u32>() {
+                    let crate::maybe::NoneOr(slot): crate::maybe::NoneOr<MilitaryUnit> =
+                        map.next_value()?;
+                    if let Some(mut unit) = slot {
+                        unit.id = unit.id.or(Some(id));
+                        units.push(unit);
+                    }
+                    continue;
+                }
+                let _: de::IgnoredAny = map.next_value()?;
+            }
+            Ok(units)
+        }
+    }
+    deserializer.deserialize_any(V)
+}
+
+struct UnitDatabase(HashMap<u32, Option<MilitaryUnit>>);
+
+impl<'de> Deserialize<'de> for UnitDatabase {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        maybe_map(deserializer).map(UnitDatabase)
+    }
+}
+
+struct FlexUnit(Option<MilitaryUnit>);
+
+impl<'de> Deserialize<'de> for FlexUnit {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = FlexUnit;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a military unit object, id, or none")
+            }
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(FlexUnit(None))
+            }
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(FlexUnit(None))
+            }
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                if value.is_empty() || value.eq_ignore_ascii_case("none") {
+                    return Ok(FlexUnit(None));
+                }
+                Ok(FlexUnit(Some(MilitaryUnit {
+                    kind: Some(value.to_string()),
+                    name: Some(value.to_string()),
+                    ..MilitaryUnit::default()
+                })))
+            }
+            fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+                self.visit_str(&value)
+            }
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(FlexUnit(Some(MilitaryUnit {
+                    id: u32::try_from(value).ok(),
+                    ..MilitaryUnit::default()
+                })))
+            }
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+                Ok(FlexUnit(Some(MilitaryUnit {
+                    id: u32::try_from(value).ok(),
+                    ..MilitaryUnit::default()
+                })))
+            }
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                MilitaryUnit::deserialize(de::value::MapAccessDeserializer::new(map))
+                    .map(|unit| FlexUnit(Some(unit)))
+            }
+            // Jomini often exposes nested `{ type=infantry … }` as a sequence.
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut unit = MilitaryUnit::default();
+                let mut pending: Option<String> = None;
+                while let Some(token) = seq.next_element::<SeqTok>()? {
+                    match token {
+                        SeqTok::Ident(key) if key == "=" => {
+                            let key = pending.take().unwrap_or_default();
+                            match seq.next_element::<SeqTok>()? {
+                                Some(SeqTok::Ident(value)) => {
+                                    apply_unit_ident(&mut unit, &key, value)
+                                }
+                                Some(SeqTok::Float(value)) => {
+                                    apply_unit_float(&mut unit, &key, value)
+                                }
+                                None => {}
+                            }
+                        }
+                        SeqTok::Ident(key) => pending = Some(key),
+                        SeqTok::Float(value) => {
+                            if let Some(key) = pending.take() {
+                                apply_unit_float(&mut unit, &key, value);
+                            } else {
+                                unit.id = unit.id.or(u32::try_from(value as i64).ok());
+                            }
+                        }
+                    }
+                }
+                Ok(FlexUnit(Some(unit)))
+            }
+        }
+        deserializer.deserialize_any(V)
+    }
+}
+
+fn apply_unit_ident(unit: &mut MilitaryUnit, key: &str, value: String) {
+    match key {
+        "type" | "unit_type" => unit.kind = Some(value),
+        "name" => unit.name = Some(value),
+        "id" => unit.id = value.parse().ok(),
+        _ => {}
+    }
+}
+
+fn apply_unit_float(unit: &mut MilitaryUnit, key: &str, value: f64) {
+    match key {
+        "manpower" | "current_manpower" => unit.manpower = Some(value),
+        "id" => unit.id = u32::try_from(value as i64).ok(),
+        _ => {}
+    }
+}
+
 fn optional_flex_str<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<String>, D::Error> {
@@ -719,6 +1007,93 @@ impl Pop {
 
 /// Dependents count as full household members for goods demand.
 pub const DEPENDENT_DEMAND_WEIGHT: f64 = 1.0;
+
+/// One entry in the top-level `technology.database` manager.
+///
+/// Garibaldi / melted 1.5+ saves store researched ids at
+/// `acquired_technologies.value` and the queued tech at `research_technology`.
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+pub struct TechnologyEntry {
+    #[serde(default)]
+    pub country: Option<u32>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_tech_ids",
+        alias = "acquired",
+        alias = "researched",
+        alias = "techs"
+    )]
+    pub acquired_technologies: Vec<String>,
+    #[serde(
+        default,
+        deserialize_with = "optional_flex_str",
+        alias = "currently_researching",
+        alias = "researching"
+    )]
+    pub research_technology: Option<String>,
+}
+
+/// An army or navy formation (`formation_manager` / `military_formations`).
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+pub struct MilitaryFormation {
+    #[serde(default, deserialize_with = "optional_flex_str")]
+    pub name: Option<String>,
+    #[serde(
+        default,
+        rename = "type",
+        alias = "formation_type",
+        deserialize_with = "optional_flex_str"
+    )]
+    pub kind: Option<String>,
+    #[serde(default, alias = "owner")]
+    pub country: Option<u32>,
+    #[serde(default)]
+    pub organization: Option<f64>,
+    #[serde(default, alias = "manpower")]
+    pub current_manpower: Option<f64>,
+    #[serde(default, deserialize_with = "deserialize_units")]
+    pub units: Vec<MilitaryUnit>,
+}
+
+/// One unit listed on a formation. Fields are best-effort.
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+pub struct MilitaryUnit {
+    #[serde(default)]
+    pub id: Option<u32>,
+    #[serde(default, deserialize_with = "optional_flex_str")]
+    pub name: Option<String>,
+    #[serde(
+        default,
+        rename = "type",
+        alias = "unit_type",
+        deserialize_with = "optional_flex_str"
+    )]
+    pub kind: Option<String>,
+    #[serde(default, alias = "current_manpower")]
+    pub manpower: Option<f64>,
+}
+
+/// Headquarters row when `hq_manager` is present.
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+pub struct MilitaryHq {
+    #[serde(default, deserialize_with = "optional_flex_str")]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub country: Option<u32>,
+    #[serde(default, deserialize_with = "optional_flex_str")]
+    pub region: Option<String>,
+}
+
+/// Mobilization option / order when `mobilization` is present.
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+pub struct MobilizationEntry {
+    #[serde(default, deserialize_with = "optional_flex_str")]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub country: Option<u32>,
+    #[serde(default, rename = "type", deserialize_with = "optional_flex_str")]
+    pub kind: Option<String>,
+}
 
 /// A market in `market_manager.database`.
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
@@ -802,6 +1177,33 @@ impl Save {
     /// Active law ids belonging to `country_id`.
     pub fn active_laws(&self, country_id: u32) -> Vec<&str> {
         WorldSnapshot::active_laws(self, country_id)
+    }
+
+    /// Copy researched ids from nested country fields and the top-level
+    /// [`Self::technology`] manager onto each [`Country::techs`].
+    pub fn hydrate_country_techs(&mut self) {
+        for country in self.country_manager.database.values_mut().flatten() {
+            country.techs = country.researched_techs();
+        }
+        let extra: Vec<(u32, Vec<String>)> = self
+            .technology
+            .iter_present()
+            .filter_map(|(_, entry)| {
+                entry
+                    .country
+                    .map(|country_id| (country_id, entry.acquired_technologies.clone()))
+            })
+            .collect();
+        for (country_id, techs) in extra {
+            let Some(Some(country)) = self.country_manager.database.get_mut(&country_id) else {
+                continue;
+            };
+            for tech in techs {
+                if !tech.is_empty() && !country.techs.iter().any(|seen| seen == &tech) {
+                    country.techs.push(tech);
+                }
+            }
+        }
     }
 }
 
@@ -981,5 +1383,105 @@ pops={
         };
         assert_eq!(unknown.credit_headroom(), None);
         assert!(!unknown.is_solvent());
+    }
+
+    #[test]
+    fn technology_manager_hydrates_country_techs() {
+        let save = crate::load_slice(
+            br#"SAV01000000000000000000
+country_manager={
+	database={
+		16777216={ definition="GER" techs={ railways } }
+	}
+}
+technology={
+	database={
+		1={
+			country=16777216
+			acquired_technologies={ value={ nitroglycerin urban_planning } }
+			research_technology=atmospheric_engine
+		}
+	}
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("technology manager");
+        let ger = save.country_by_tag("GER").expect("GER");
+        assert!(ger.techs.iter().any(|tech| tech == "railways"));
+        assert!(ger.techs.iter().any(|tech| tech == "nitroglycerin"));
+        assert!(ger.techs.iter().any(|tech| tech == "urban_planning"));
+        let entry = save.technology.iter_present().next().unwrap().1;
+        assert_eq!(
+            entry.research_technology.as_deref(),
+            Some("atmospheric_engine")
+        );
+    }
+
+    #[test]
+    fn formation_manager_deserializes_army_and_navy() {
+        let save = crate::load_slice(
+            br#"SAV01000000000000000000
+formation_manager={
+	database={
+		10={
+			name="Army of the Elbe"
+			type=army
+			country=16777216
+			organization=80
+			current_manpower=12000
+			units={ { type=infantry manpower=4000 } { type=artillery manpower=2000 } }
+		}
+		11=none
+	}
+}
+navy_manager={
+	database={
+		20={ name="High Seas Fleet" type=navy country=16777216 organization=90 }
+	}
+}
+hq_manager={
+	database={
+		1={ name="Berlin HQ" country=16777216 region=sr:north_german_plain }
+	}
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("formation manager");
+        let army = save
+            .formation_manager
+            .iter_present()
+            .find(|(_, formation)| formation.kind.as_deref() == Some("army"))
+            .map(|(_, formation)| formation)
+            .expect("army formation");
+        assert_eq!(army.name.as_deref(), Some("Army of the Elbe"));
+        assert_eq!(army.country, Some(16777216));
+        assert_eq!(army.organization, Some(80.0));
+        assert_eq!(army.current_manpower, Some(12000.0));
+        assert_eq!(army.units.len(), 2);
+        assert_eq!(army.units[0].kind.as_deref(), Some("infantry"));
+        let navy = save.navy_manager.iter_present().next().unwrap().1;
+        assert_eq!(navy.name.as_deref(), Some("High Seas Fleet"));
+        assert_eq!(save.hq_manager.iter_present().count(), 1);
+    }
+
+    #[test]
+    fn unknown_military_keys_do_not_fail_save_deserialize() {
+        let save = crate::load_slice(
+            br#"SAV01000000000000000000
+military_gizmos={
+	database={ 1={ nonsense=yes } }
+}
+country_manager={
+	database={ 1={ definition="GER" } }
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("unknown military keys");
+        assert_eq!(save.country_by_tag("GER").unwrap().definition, "GER");
+        assert_eq!(save.formation_manager.iter_present().count(), 0);
+        assert_eq!(save.military_formations.iter_present().count(), 0);
     }
 }

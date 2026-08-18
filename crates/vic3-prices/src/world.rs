@@ -102,6 +102,8 @@ pub struct WorldCountry {
     pub credit_limit: Option<f64>,
     pub credit_headroom: Option<f64>,
     pub solvent: bool,
+    /// Researched technology ids. Empty when the save did not yield any.
+    pub techs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -298,6 +300,7 @@ impl World {
                     credit_limit: budget.credit.filter(|value| value.is_finite()),
                     credit_headroom: budget.credit_headroom(),
                     solvent: budget.is_solvent(),
+                    techs: country.researched_techs(),
                 }
             })
             .collect();

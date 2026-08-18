@@ -34,8 +34,8 @@ use vic3save::{DeserializeVic3, ReaderAt, Vic3File};
 pub use error::LoadError;
 pub use ir::{
     Budget, Building, BuildingGoods, ConstructionOrder, Country, Culture, IndexQtyMap, Manager,
-    Market, Meta, Player, Pop, Save, State, StatePopStatistics, TradeRoute, WorldSave,
-    WorldSnapshot,
+    Market, Meta, MilitaryFormation, MilitaryHq, MilitaryUnit, MobilizationEntry, Player, Pop,
+    Save, State, StatePopStatistics, TechnologyEntry, TradeRoute, WorldSave, WorldSnapshot,
 };
 pub use vic3save::{BasicTokenResolver, Vic3Date};
 
@@ -70,7 +70,9 @@ pub fn load_tokens_reader(reader: impl BufRead) -> Result<BasicTokenResolver, Lo
 /// Pass [`empty_tokens`] for plaintext. Binary saves with an empty resolver
 /// return [`LoadError::MissingTokens`].
 pub fn load_slice(data: &[u8], tokens: impl TokenResolver) -> Result<Save, LoadError> {
-    load_slice_as(data, tokens)
+    let mut save: Save = load_slice_as(data, tokens)?;
+    save.hydrate_country_techs();
+    Ok(save)
 }
 
 /// Load only the managers [`WorldSnapshot`] needs.
@@ -83,7 +85,9 @@ pub fn load_slice_world(data: &[u8], tokens: impl TokenResolver) -> Result<World
 
 /// Load a `.v3` from a filesystem path (`VIC3_SAVE`).
 pub fn load_path(path: impl AsRef<Path>, tokens: impl TokenResolver) -> Result<Save, LoadError> {
-    load_path_as(path, tokens)
+    let mut save: Save = load_path_as(path, tokens)?;
+    save.hydrate_country_techs();
+    Ok(save)
 }
 
 /// [`load_path`] into [`WorldSave`]: skip construction / market / trade-route IR.
