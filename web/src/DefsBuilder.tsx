@@ -243,6 +243,9 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
         >
           Choose game folder
         </button>
+        {!api && (
+          <small role="status">Waiting for the analysis engine…</small>
+        )}
         <input
           {...directoryProps}
           ref={folderInputRef}

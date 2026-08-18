@@ -340,8 +340,12 @@ function App({ wasmApi }: Props) {
       .then((loaded) => {
         setApi(loaded)
       })
-      .catch(() => {
-        if (wasmApi) setError('Could not load the analysis engine.')
+      .catch((reason: unknown) => {
+        setError(
+          reason instanceof Error
+            ? `Could not load the analysis engine. ${reason.message}`
+            : 'Could not load the analysis engine.',
+        )
       })
   }, [wasmApi])
 

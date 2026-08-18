@@ -98,32 +98,33 @@ function wasmCacheBust(): string {
     : 'dev'
 }
 
-function defaultModuleUrl(): string {
+/** Root-relative public/wasm URL. `new URL(file, relativeJsUrl)` throws. */
+export function wasmPublicUrl(file: string): string {
   const base = import.meta.env.BASE_URL || '/'
   const prefix = base.endsWith('/') ? base : `${base}/`
-  // Unhashed public/wasm/* is otherwise reused from a previous Pages deploy.
-  return `${prefix}wasm/vic3_wasm.js?v=${wasmCacheBust()}`
-}
-
-function defaultWasmUrl(jsUrl: string): string {
-  return new URL(`vic3_wasm_bg.wasm?v=${wasmCacheBust()}`, jsUrl).href
+  return `${prefix}wasm/${file}?v=${wasmCacheBust()}`
 }
 
 export function loadWasm(options?: LoadWasmOptions): Promise<WasmApi> {
-  const wasmPath = options?.moduleUrl ?? defaultModuleUrl()
+  const wasmPath = options?.moduleUrl ?? wasmPublicUrl('vic3_wasm.js')
   const modulePromise = options?.moduleUrl
     ? import(/* @vite-ignore */ wasmPath)
     : nativeImport(wasmPath)
-  cached ??= modulePromise.then(async (module) => {
-    if (typeof module.default === 'function') {
-      await module.default(
-        options?.moduleOrPath !== undefined
-          ? options.moduleOrPath
-          : defaultWasmUrl(wasmPath),
-      )
-    }
-    return module as unknown as WasmApi
-  })
+  cached ??= modulePromise
+    .then(async (module) => {
+      if (typeof module.default === 'function') {
+        await module.default(
+          options?.moduleOrPath !== undefined
+            ? options.moduleOrPath
+            : wasmPublicUrl('vic3_wasm_bg.wasm'),
+        )
+      }
+      return module as unknown as WasmApi
+    })
+    .catch((error) => {
+      cached = undefined
+      throw error
+    })
   return cached
 }
 
