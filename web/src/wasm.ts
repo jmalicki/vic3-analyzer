@@ -82,6 +82,8 @@ export type LoadWasmOptions = {
   moduleUrl?: string
   /** Bytes or URL passed to wasm-bindgen's default init (skips fetch of `.wasm`). */
   moduleOrPath?: BufferSource | string | URL
+  /** Glue-module import; tests stub this so init never hits the network. */
+  importModule?: (url: string) => Promise<Record<string, unknown>>
 }
 
 let cached: Promise<WasmApi> | undefined
@@ -107,9 +109,11 @@ export function wasmPublicUrl(file: string): string {
 
 export function loadWasm(options?: LoadWasmOptions): Promise<WasmApi> {
   const wasmPath = options?.moduleUrl ?? wasmPublicUrl('vic3_wasm.js')
-  const modulePromise = options?.moduleUrl
-    ? import(/* @vite-ignore */ wasmPath)
-    : nativeImport(wasmPath)
+  const modulePromise = options?.importModule
+    ? options.importModule(wasmPath)
+    : options?.moduleUrl
+      ? import(/* @vite-ignore */ wasmPath)
+      : nativeImport(wasmPath)
   cached ??= modulePromise
     .then(async (module) => {
       if (typeof module.default === 'function') {

@@ -424,6 +424,12 @@ describe('DefsBuilder', () => {
     expect(await screen.findByText(/no supported definitions/)).toBeInTheDocument()
   })
 
+  it('keeps Choose game folder disabled until the analysis engine is ready', () => {
+    render(<DefsBuilder onBuilt={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Choose game folder' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Waiting for the analysis engine')
+  })
+
   it('opens the folder input from the visible button', async () => {
     const user = userEvent.setup()
     render(<DefsBuilder api={api()} onBuilt={vi.fn()} />)

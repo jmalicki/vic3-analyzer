@@ -2,11 +2,16 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { loadWasmApi } from './wasmClient'
 import { clearAnalyses, listAnalyses, saveAnalysis } from './archive'
 import { clearStoredDefs, storeDefs } from './defsStore'
 import { clearStoredSave, loadStoredSave, storeSave, storeSaveAnalysis } from './saveStore'
 import type { AnalysisRecord, PricesResult } from './types'
 import type { WasmApi } from './wasm'
+
+vi.mock('./wasmClient', () => ({
+  loadWasmApi: vi.fn(),
+}))
 
 /** Test-only blobs; silly names so they never look like a real install export. */
 const result = JSON.stringify({
@@ -646,6 +651,20 @@ describe('prices UI', () => {
 
     await user.click(screen.getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('reports a failed engine load and keeps Choose game folder disabled', async () => {
+    vi.mocked(loadWasmApi).mockRejectedValueOnce(new Error("Failed to construct 'URL'"))
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /Could not load the analysis engine.*Failed to construct/,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Build definitions from game files/ }))
+    expect(screen.getByRole('button', { name: 'Choose game folder' })).toBeDisabled()
+    expect(screen.getByText('Waiting for the analysis engine…')).toBeInTheDocument()
   })
 
   it('greys out analysis tools and names every missing input', async () => {
