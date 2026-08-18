@@ -4,12 +4,14 @@
 //! prices, via Basin **trust-region-reflective** (`Trf`, Vec backend) and
 //! successive substitution as warm start / fallback.
 
+mod alerts;
 mod consumption;
 mod formula;
 mod result;
 mod solve;
 mod world;
 
+pub use alerts::{alerts, Alert, AlertKind, AlertsResult, Evidence, Mitigation, MitigationAction};
 pub use consumption::consumption;
 pub use formula::{
     effective_mapi, local_price, market_access, market_ratio, price, BASE_MAPI, ORDER_EPS,

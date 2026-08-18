@@ -98,6 +98,12 @@ function mockApi(): WasmApi {
     loaded_what_if: vi.fn(() => result),
     loaded_gaps: vi.fn(() => gapsResult),
     loaded_plan: vi.fn(() => planResult),
+    loaded_alerts: vi.fn(() =>
+      JSON.stringify({
+        alerts: [],
+        limitations: ['Apply is disabled until the apply track.'],
+      }),
+    ),
     prices: vi.fn(() => result),
     what_if: vi.fn(() => result),
     gaps: vi.fn(() => gapsResult),

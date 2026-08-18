@@ -188,6 +188,56 @@ export interface PlanResult {
   limitations: string[]
 }
 
+export type AlertKind =
+  | 'electricity_shortage'
+  | 'transportation_shortage'
+  | 'goods_shortage'
+  | 'needs_unmet'
+  | 'low_market_access'
+  | 'unfilled_education'
+  | 'unfilled_pops'
+  | 'underemployed'
+
+export interface AlertEvidence {
+  label: string
+  value: string
+}
+
+export type MitigationAction =
+  | { type: 'build'; building: string; state_id?: number; extra_levels?: number }
+  | { type: 'pm'; building_id: number; production_method: string }
+  | { type: 'subsidize'; building_id: number }
+  | { type: 'trade_alloc'; state_id: number; good_id: string }
+  | { type: 'feeder_job'; building: string; profession: string; state_id?: number }
+  | { type: 'sol_goods'; good_id: string; state_id?: number }
+
+export interface AlertMitigation {
+  id: string
+  title: string
+  detail: string
+  rank: number
+  action?: MitigationAction
+  apply_ready: boolean
+}
+
+export interface Alert {
+  id: string
+  kind: AlertKind
+  severity: 1 | 2
+  title: string
+  summary: string
+  state_id?: number
+  building_id?: number
+  good_id?: string
+  evidence: AlertEvidence[]
+  mitigations: AlertMitigation[]
+}
+
+export interface AlertsResult {
+  alerts: Alert[]
+  limitations: string[]
+}
+
 export type AnalysisResult = PricesResult | GapsResult | PlanResult
 
 export interface SaveSummary {

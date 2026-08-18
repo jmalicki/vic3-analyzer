@@ -35,6 +35,7 @@ export interface WasmApi {
   loaded_what_if(whatIfOptsJson: string): string | Promise<string>
   loaded_gaps(goal: string): string | Promise<string>
   loaded_plan(planOptsJson: string): string | Promise<string>
+  loaded_alerts(): string | Promise<string>
   prices(
     save: Uint8Array,
     tokens: Uint8Array | undefined,
