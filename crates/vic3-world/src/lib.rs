@@ -465,43 +465,21 @@ fn owned_state_ids(world: &World, country: &WorldCountry) -> BTreeSet<u32> {
 
 fn population_weighted_wealth(world: &World, country: &WorldCountry) -> Option<f64> {
     let owned_states = owned_state_ids(world, country);
-    let (weighted_sol, population) = if world.state_pops.is_empty() {
-        world
-            .pops
-            .iter()
-            .filter_map(|pop| {
-                let state = pop.state?;
-                if !owned_states.contains(&state) {
-                    return None;
-                }
-                Some((f64::from(pop.wealth) * pop.size, pop.size))
-            })
-            .fold(
-                (0.0, 0.0),
-                |(wealth, population), (next_wealth, next_population)| {
-                    (wealth + next_wealth, population + next_population)
-                },
-            )
-    } else {
-        world
-            .state_pops
-            .iter()
-            .filter_map(|pop| {
-                let state = pop.state?;
-                if !owned_states.contains(&state) {
-                    return None;
-                }
-                let size = pop.demand_size?;
-                let wealth = f64::from(pop.wealth?);
-                Some((wealth * size, size))
-            })
-            .fold(
-                (0.0, 0.0),
-                |(wealth, population), (next_wealth, next_population)| {
-                    (wealth + next_wealth, population + next_population)
-                },
-            )
-    };
+    let (weighted_sol, population) = world
+        .iter_pops()
+        .filter_map(|pop| {
+            let state = pop.state?;
+            if !owned_states.contains(&state) {
+                return None;
+            }
+            Some((f64::from(pop.wealth) * pop.size, pop.size))
+        })
+        .fold(
+            (0.0, 0.0),
+            |(wealth, population), (next_wealth, next_population)| {
+                (wealth + next_wealth, population + next_population)
+            },
+        );
     (population > 0.0).then_some(weighted_sol / population)
 }
 

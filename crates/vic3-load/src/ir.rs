@@ -68,6 +68,91 @@ pub struct Save {
     pub previous_played: Vec<Player>,
 }
 
+/// Save fields the market projection needs.
+///
+/// Unknown top-level keys (markets, trade routes, construction queues, …) are
+/// skipped without allocating IR. That cuts peak RSS and `drop` time; it does
+/// **not** skip zlib inflate of a single-member `gamestate` zip. Keep [`Save`]
+/// when those extra managers are part of the answer (`parse_save` counts).
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+pub struct WorldSave {
+    #[serde(default)]
+    pub meta_data: Meta,
+    #[serde(default)]
+    pub country_manager: Manager<Country>,
+    #[serde(default)]
+    pub states: Manager<State>,
+    #[serde(default)]
+    pub building_manager: Manager<Building>,
+    #[serde(default)]
+    pub pops: Manager<Pop>,
+    #[serde(default)]
+    pub cultures: Manager<Culture>,
+    #[serde(default)]
+    pub laws: Manager<LawEntry>,
+    #[serde(default)]
+    pub previous_played: Vec<Player>,
+}
+
+/// Subset of [`Save`] / [`WorldSave`] that [`vic3_prices::World::from_save`] reads.
+///
+/// One projection API so prices code never takes a dependency on unused
+/// managers. Implementations stay field-shaped; layout/skipping is the
+/// deserialize backend.
+pub trait WorldSnapshot {
+    fn meta_data(&self) -> &Meta;
+    fn country_manager(&self) -> &Manager<Country>;
+    fn states(&self) -> &Manager<State>;
+    fn building_manager(&self) -> &Manager<Building>;
+    fn pops(&self) -> &Manager<Pop>;
+    fn cultures(&self) -> &Manager<Culture>;
+    fn previous_played(&self) -> &[Player];
+    fn active_laws(&self, country_id: u32) -> Vec<&str>;
+}
+
+fn active_laws_in(laws: &Manager<LawEntry>, country_id: u32) -> Vec<&str> {
+    laws.iter_present()
+        .filter(|(_, entry)| {
+            entry.country == Some(country_id) && entry.active == Some(true) && !entry.law.is_empty()
+        })
+        .map(|(_, entry)| entry.law.as_str())
+        .collect()
+}
+
+macro_rules! impl_world_snapshot {
+    ($ty:ty) => {
+        impl WorldSnapshot for $ty {
+            fn meta_data(&self) -> &Meta {
+                &self.meta_data
+            }
+            fn country_manager(&self) -> &Manager<Country> {
+                &self.country_manager
+            }
+            fn states(&self) -> &Manager<State> {
+                &self.states
+            }
+            fn building_manager(&self) -> &Manager<Building> {
+                &self.building_manager
+            }
+            fn pops(&self) -> &Manager<Pop> {
+                &self.pops
+            }
+            fn cultures(&self) -> &Manager<Culture> {
+                &self.cultures
+            }
+            fn previous_played(&self) -> &[Player] {
+                &self.previous_played
+            }
+            fn active_laws(&self, country_id: u32) -> Vec<&str> {
+                active_laws_in(&self.laws, country_id)
+            }
+        }
+    };
+}
+
+impl_world_snapshot!(Save);
+impl_world_snapshot!(WorldSave);
+
 /// Save metadata (`meta_data`).
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub struct Meta {
@@ -716,15 +801,7 @@ impl Save {
 
     /// Active law ids belonging to `country_id`.
     pub fn active_laws(&self, country_id: u32) -> Vec<&str> {
-        self.laws
-            .iter_present()
-            .filter(|(_, entry)| {
-                entry.country == Some(country_id)
-                    && entry.active == Some(true)
-                    && !entry.law.is_empty()
-            })
-            .map(|(_, entry)| entry.law.as_str())
-            .collect()
+        WorldSnapshot::active_laws(self, country_id)
     }
 }
 

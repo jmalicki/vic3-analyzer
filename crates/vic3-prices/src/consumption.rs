@@ -1,4 +1,13 @@
 //! Pop consumption from buy packages, substitution, and relaxed wealth.
+//!
+//! Two caches share substitution shares and the 1..=99 wealth ladder:
+//! - [`UnitBaskets`] — dense goods totals for the residual (scale/lerp).
+//! - [`UnitNeedBaskets`] — per-need goods for the population tab.
+//!
+//! The price loop does not need per-need rows. The webapp JSON does, so
+//! [`pop_need_baskets`] still returns a scaled copy per collapsed group rather
+//! than omitting baskets. Rebuilding shares per group was the old cost; after
+//! the cache, `finished` is mostly grouping and those copies.
 
 use vic3_defs::{substitution_shares, GameDefs, GoodIdx, GoodsVec, NeedIdx, NeedsVec, PopNeed};
 
@@ -47,6 +56,18 @@ impl NeedShares {
 pub(crate) struct UnitBaskets {
     /// Index 0 unused; `1..=max_wealth` are integer-wealth unit vectors.
     by_wealth: Vec<GoodsVec>,
+}
+
+/// Per-need goods for a pop of size [`POP_SCALE`] at each integer wealth.
+///
+/// [`pop_need_baskets`] scales and, for continuous Laspeyres wealth, lerps these
+/// unit rows so UI need baskets match the residual's [`UnitBaskets`]. Building
+/// the 99-row table is cheap next to walking every pop group; each call still
+/// allocates the scaled `Vec` because that is the JSON payload.
+#[derive(Debug, Clone)]
+pub(crate) struct UnitNeedBaskets {
+    /// Index 0 unused; `1..=max_wealth` are integer-wealth need lists.
+    by_wealth: Vec<Vec<NeedBasket>>,
 }
 
 impl UnitBaskets {
@@ -104,6 +125,52 @@ impl UnitBaskets {
         let t = w - lo;
         buy.add_scaled(self.at(i_lo), scale * (1.0 - t));
         buy.add_scaled(self.at(i_hi), scale * t);
+    }
+}
+
+impl UnitNeedBaskets {
+    pub(crate) fn from_shares(
+        defs: &GameDefs,
+        base_prices: &GoodsVec,
+        shares: &NeedShares,
+    ) -> Self {
+        let max_wealth = defs.package_ladder.len().max(1);
+        let mut by_wealth = Vec::with_capacity(max_wealth + 1);
+        by_wealth.push(Vec::new());
+        for wealth in 1..=max_wealth {
+            by_wealth.push(need_baskets_at(
+                wealth as f64,
+                1.0,
+                defs,
+                base_prices,
+                shares,
+            ));
+        }
+        Self { by_wealth }
+    }
+
+    fn max_wealth(&self) -> f64 {
+        (self.by_wealth.len().saturating_sub(1) as f64).max(1.0)
+    }
+
+    fn at(&self, wealth: u8) -> &[NeedBasket] {
+        let max = self.by_wealth.len().saturating_sub(1).max(1);
+        &self.by_wealth[(wealth as usize).clamp(1, max)]
+    }
+
+    fn scaled_for(&self, wealth: f64, scale: f64) -> Vec<NeedBasket> {
+        if scale == 0.0 {
+            return Vec::new();
+        }
+        let w = wealth.clamp(1.0, self.max_wealth());
+        let lo = w.floor();
+        let hi = w.ceil();
+        let i_lo = lo as u8;
+        let i_hi = hi as u8;
+        if i_lo == i_hi {
+            return scale_need_baskets(self.at(i_lo), scale);
+        }
+        lerp_need_baskets(self.at(i_lo), self.at(i_hi), w - lo, scale)
     }
 }
 
@@ -217,14 +284,16 @@ pub(crate) fn add_wage_bins(
     }
 }
 
-/// Per-need goods basket for one pop at the given prices / cached shares.
+/// Per-need goods basket for one pop at the given prices / cached unit needs.
+///
+/// Output matches rebuilding from [`NeedShares`] + package lerp. Do not skip
+/// this for CLI table output: the webapp serializes these baskets.
 pub(crate) fn pop_need_baskets(
     pop: &WorldPop,
     prices: &GoodsVec,
     base_prices: &GoodsVec,
-    defs: &GameDefs,
-    shares: &NeedShares,
     units: &UnitBaskets,
+    need_units: &UnitNeedBaskets,
 ) -> Vec<NeedBasket> {
     if pop.size <= 0.0 {
         return Vec::new();
@@ -234,8 +303,17 @@ pub(crate) fn pop_need_baskets(
     } else {
         units.continuous_wealth(pop.wealth, prices, base_prices)
     };
+    need_units.scaled_for(wealth, pop.size / POP_SCALE)
+}
+
+fn need_baskets_at(
+    wealth: f64,
+    scale: f64,
+    defs: &GameDefs,
+    base_prices: &GoodsVec,
+    shares: &NeedShares,
+) -> Vec<NeedBasket> {
     let needs = package_needs(wealth, defs);
-    let scale = pop.size / POP_SCALE;
     let mut baskets = Vec::new();
     for (need_idx, package_value) in needs.iter_indexed() {
         if package_value == 0.0 {
@@ -250,9 +328,8 @@ pub(crate) fn pop_need_baskets(
         if qty == 0.0 {
             continue;
         }
-        let need_shares = shares.get(need_idx);
         let mut goods = Vec::new();
-        apply_need_shares_into(&mut goods, need, qty, need_shares);
+        apply_need_shares_into(&mut goods, need, qty, shares.get(need_idx));
         if !goods.is_empty() {
             baskets.push(NeedBasket {
                 need_idx,
@@ -262,6 +339,113 @@ pub(crate) fn pop_need_baskets(
         }
     }
     baskets
+}
+
+fn scale_need_baskets(unit: &[NeedBasket], scale: f64) -> Vec<NeedBasket> {
+    if scale == 1.0 {
+        return unit.to_vec();
+    }
+    unit.iter()
+        .map(|basket| scale_need_basket(basket, scale))
+        .collect()
+}
+
+fn scale_need_basket(basket: &NeedBasket, scale: f64) -> NeedBasket {
+    NeedBasket {
+        need_idx: basket.need_idx,
+        package_value: basket.package_value,
+        goods: basket
+            .goods
+            .iter()
+            .map(|(good, qty)| (*good, qty * scale))
+            .collect(),
+    }
+}
+
+fn lerp_need_baskets(lo: &[NeedBasket], hi: &[NeedBasket], t: f64, scale: f64) -> Vec<NeedBasket> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    let mut j = 0;
+    while i < lo.len() || j < hi.len() {
+        match (lo.get(i), hi.get(j)) {
+            (Some(a), Some(b)) if a.need_idx == b.need_idx => {
+                out.push(lerp_need_basket(a, b, t, scale));
+                i += 1;
+                j += 1;
+            }
+            (Some(a), Some(b)) if a.need_idx < b.need_idx => {
+                out.push(scale_need_basket(a, scale * (1.0 - t)));
+                i += 1;
+            }
+            (Some(a), None) => {
+                out.push(scale_need_basket(a, scale * (1.0 - t)));
+                i += 1;
+            }
+            (Some(_), Some(b)) => {
+                out.push(scale_need_basket(b, scale * t));
+                j += 1;
+            }
+            (None, Some(b)) => {
+                out.push(scale_need_basket(b, scale * t));
+                j += 1;
+            }
+            (None, None) => break,
+        }
+    }
+    out
+}
+
+fn lerp_need_basket(lo: &NeedBasket, hi: &NeedBasket, t: f64, scale: f64) -> NeedBasket {
+    NeedBasket {
+        need_idx: lo.need_idx,
+        package_value: (1.0 - t) * lo.package_value + t * hi.package_value,
+        goods: lerp_need_goods(&lo.goods, &hi.goods, t, scale),
+    }
+}
+
+fn lerp_need_goods(
+    lo: &[(GoodIdx, f64)],
+    hi: &[(GoodIdx, f64)],
+    t: f64,
+    scale: f64,
+) -> Vec<(GoodIdx, f64)> {
+    if lo.len() == hi.len() && lo.iter().zip(hi).all(|(a, b)| a.0 == b.0) {
+        return lo
+            .iter()
+            .zip(hi)
+            .map(|((good, a), (_, b))| (*good, scale * ((1.0 - t) * a + t * b)))
+            .collect();
+    }
+    let mut out = Vec::new();
+    let mut i = 0;
+    let mut j = 0;
+    while i < lo.len() || j < hi.len() {
+        match (lo.get(i), hi.get(j)) {
+            (Some(&(g, a)), Some(&(h, b))) if g == h => {
+                out.push((g, scale * ((1.0 - t) * a + t * b)));
+                i += 1;
+                j += 1;
+            }
+            (Some(&(g, a)), Some(&(h, _))) if g < h => {
+                out.push((g, scale * (1.0 - t) * a));
+                i += 1;
+            }
+            (Some(&(g, a)), None) => {
+                out.push((g, scale * (1.0 - t) * a));
+                i += 1;
+            }
+            (Some(_), Some(&(h, b))) => {
+                out.push((h, scale * t * b));
+                j += 1;
+            }
+            (None, Some(&(h, b))) => {
+                out.push((h, scale * t * b));
+                j += 1;
+            }
+            (None, None) => break,
+        }
+    }
+    out
 }
 
 fn apply_need_shares_into(
@@ -493,6 +677,47 @@ mod tests {
         add_wage_bins(&mut binned, &bins, &local, &base, &units, 1.0);
         for (left, right) in per_pop.as_slice().iter().zip(binned.as_slice()) {
             assert!((left - right).abs() < 1e-9);
+        }
+    }
+
+    fn assert_baskets_close(left: &[NeedBasket], right: &[NeedBasket]) {
+        assert_eq!(left.len(), right.len());
+        for (a, b) in left.iter().zip(right) {
+            assert_eq!(a.need_idx, b.need_idx);
+            assert!((a.package_value - b.package_value).abs() < 1e-9);
+            assert_eq!(a.goods.len(), b.goods.len());
+            for ((g0, q0), (g1, q1)) in a.goods.iter().zip(&b.goods) {
+                assert_eq!(g0, g1);
+                assert!((q0 - q1).abs() < 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn unit_need_baskets_match_direct_integer_and_lerp() {
+        let defs = heating_defs();
+        let base = GoodsVec::from_vec(vec![20.0, 20.0, 30.0]);
+        let local = GoodsVec::from_vec(vec![20.0, 40.0, 30.0]);
+        let sell = GoodsVec::from_vec(vec![0.0, 10.0, 10.0]);
+        let shares = NeedShares::from_sell(&defs, &sell);
+        let units = UnitBaskets::from_shares(&defs, &base, &shares);
+        let need_units = UnitNeedBaskets::from_shares(&defs, &base, &shares);
+        for (size, wealth, wages) in [
+            (POP_SCALE, 1u8, 0.0),
+            (2.0 * POP_SCALE, 1, 0.0),
+            (POP_SCALE, 2, 0.0),
+            (POP_SCALE, 1, 1.0),
+            (1.5 * POP_SCALE, 2, 1.0),
+        ] {
+            let household = pop(size, wealth, wages);
+            let cached = pop_need_baskets(&household, &local, &base, &units, &need_units);
+            let wealth_f = if wages <= 0.0 {
+                f64::from(wealth)
+            } else {
+                units.continuous_wealth(wealth, &local, &base)
+            };
+            let direct = need_baskets_at(wealth_f, size / POP_SCALE, &defs, &base, &shares);
+            assert_baskets_close(&cached, &direct);
         }
     }
 }

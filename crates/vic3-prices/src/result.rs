@@ -328,7 +328,12 @@ pub(crate) struct CompactStatePop {
     pub needs: Vec<CompactNeed>,
 }
 
-/// JSON `state_pops` array. Solver rows stay interned until serialize / first field access.
+/// JSON `state_pops` array.
+///
+/// Solver rows stay interned (`u16` / [`GoodIdx`]) until serialize or first
+/// field access. CLI default output never walks this list; wasm / `--json`
+/// does. Skipping construction would make the CLI look fast while the webapp
+/// still paid the cost.
 #[derive(Clone, Debug)]
 pub struct StatePopList {
     inner: StatePopStorage,

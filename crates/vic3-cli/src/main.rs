@@ -1,4 +1,9 @@
 //! CLI: prices, what-if, gaps, planning, and the local archive.
+//!
+//! `prices` / `what-if` load `WorldSave` (not the full file-shaped `Save`) and
+//! still `solve` a complete `PricesResult`. The default table only prints goods;
+//! compact pop rows exist for the webapp. Time this path as the UI load
+//! stand-in, not as a hint to skip detail.
 
 use std::fs;
 use std::io::{self, Write};
@@ -11,7 +16,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use vic3_defs::GameDefs;
 use vic3_goals::Atom;
-use vic3_load::{empty_tokens, load_path, load_tokens_path};
+use vic3_load::{empty_tokens, load_path_world, load_tokens_path};
 use vic3_plan::{compare, AnalysisRecord, PlanOpts, PlanResult};
 use vic3_prices::{solve, what_if, PricesResult, SolveOpts, WhatIfOpts, World};
 use vic3_sim::{EconomyContext, SimConfig};
@@ -241,12 +246,14 @@ fn load_defs(io: &IoArgs) -> Result<GameDefs> {
 
 fn load_world(io: &IoArgs) -> Result<(World, GameDefs)> {
     let defs = load_defs(io)?;
+    // WorldSave skips markets / trade routes / construction queues. Unknown
+    // keys in a one-member `gamestate` zip still inflate; this only avoids IR.
     let save = if let Some(tokens) = &io.tokens {
         let tokens = load_tokens_path(tokens)
             .with_context(|| format!("loading tokens from {}", tokens.display()))?;
-        load_path(&io.save, tokens)
+        load_path_world(&io.save, tokens)
     } else {
-        load_path(&io.save, empty_tokens())
+        load_path_world(&io.save, empty_tokens())
     }
     .with_context(|| format!("loading save from {}", io.save.display()))?;
     let world = World::from_save(&save, &defs);
@@ -476,6 +483,8 @@ fn emit_gaps(result: &GapsResult, json: bool) -> Result<()> {
 }
 
 fn emit(result: &PricesResult, json: bool) -> Result<()> {
+    // `solve` already built `state_pops` / need baskets. JSON emits them;
+    // the table does not. Skipping that work here would not speed the webapp.
     if json {
         serde_json::to_writer(io::stdout(), result)?;
         writeln!(io::stdout())?;

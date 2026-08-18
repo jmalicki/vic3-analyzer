@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use vic3_defs::{GameDefs, GoodIdx, GoodsVec, ProductionMethod};
-use vic3_load::{Building, Pop, Save, Vic3Date};
+use vic3_load::{Building, Vic3Date, WorldSnapshot};
 
 /// Pop size unit for buy packages (Vic3: package values are per 10k working pops).
 pub const POP_SCALE: f64 = 10_000.0;
@@ -44,13 +44,25 @@ impl Intern {
 }
 
 /// Market snapshot owned by this crate. Can be filled from `vic3-load` IR later.
+///
+/// After [`World::from_save`], callers keep this type (not `Save`). Pops are
+/// stored once as [`WorldStatePop`]; [`WorldPop`] is a `Copy` view for the
+/// residual (`pop.size`, `pop.wealth`). A second modeled `pops` table was
+/// dropped to avoid dual alloc on late-game saves.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct World {
     pub states: Vec<WorldState>,
     pub countries: Vec<WorldCountry>,
+    /// Consumption-model pops for **synthetic** worlds and tests.
+    ///
+    /// [`World::from_save`] leaves this empty. Save loads live in
+    /// [`Self::state_pops`]. Use [`Self::iter_pops`] so residual and UI share
+    /// one source.
     pub pops: Vec<WorldPop>,
-    /// All save pops retained for state detail, including rows that could not
-    /// enter the consumption model.
+    /// One row per save pop, including households that cannot enter consumption.
+    ///
+    /// This is the owned table after `from_save`. Grouping for the population
+    /// tab walks it; [`WorldStatePop::consumption_pop`] is the price-loop view.
     pub state_pops: Vec<WorldStatePop>,
     /// Culture / profession strings indexed by the `u16` ids on pops and states.
     pub names: Intern,
@@ -115,7 +127,10 @@ pub struct WorldStateTrade {
 }
 
 /// A pop whose consumption sits in the price loop.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// `Copy` so shops and residuals can pass views without cloning a second table.
+/// Qualifications and workplace stay on [`WorldStatePop`].
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WorldPop {
     pub state: Option<u32>,
     pub size: f64,
@@ -141,6 +156,26 @@ pub struct WorldStatePop {
     pub literate: Option<f64>,
     pub workplace_id: Option<u32>,
     pub qualifications: Vec<(u16, f64)>,
+}
+
+impl WorldStatePop {
+    /// View used by the price loop when size and wealth are present.
+    ///
+    /// Cheap `Copy` struct; does not clone qualifications. `None` if the row
+    /// cannot consume (missing size or wealth), matching the old dual table.
+    pub fn consumption_pop(&self) -> Option<WorldPop> {
+        let size = self.demand_size.filter(|size| *size > 0.0)?;
+        let wealth = self.wealth?;
+        let wealth = u8::try_from(wealth.clamp(1, 99)).ok()?;
+        Some(WorldPop {
+            state: self.state,
+            size,
+            wealth,
+            wages: self.wages.filter(|w| *w > 0.0).unwrap_or(0.0),
+            culture: self.culture,
+            profession: self.profession,
+        })
+    }
 }
 
 /// A building whose goods IO is reconstructed from defs PMs and then frozen
@@ -207,18 +242,38 @@ impl World {
         self.countries.iter().find(|country| country.tag == tag)
     }
 
+    /// Pops that enter the consumption model.
+    ///
+    /// Save loads: [`WorldStatePop::consumption_pop`] views (no extra `Vec`).
+    /// Tests/synthetics: [`Self::pops`] when `state_pops` is empty.
+    pub fn iter_pops(&self) -> impl Iterator<Item = WorldPop> + '_ {
+        let from_detail = self
+            .state_pops
+            .iter()
+            .filter_map(WorldStatePop::consumption_pop);
+        let from_model = self.pops.iter().copied();
+        from_detail.chain(from_model.filter(|_| self.state_pops.is_empty()))
+    }
+
+    /// Number of pops that enter the consumption model.
+    pub fn pop_count(&self) -> usize {
+        self.iter_pops().count()
+    }
+
     /// Frozen market snapshot from save IR.
     ///
-    /// Pops missing household population (or legacy `size`) or `wealth`,
-    /// buildings with an empty type id, and state trade entries with unknown
-    /// goods-table indices are skipped.
-    pub fn from_save(save: &Save, defs: &GameDefs) -> Self {
+    /// Accepts [`vic3_load::WorldSave`] or [`vic3_load::Save`]. The CLI prices
+    /// path uses `WorldSave` so unused managers are never built. Pops missing
+    /// household population (or legacy `size`) or `wealth`, buildings with an
+    /// empty type id, and state trade entries with unknown goods-table indices
+    /// are skipped.
+    pub fn from_save(save: &impl WorldSnapshot, defs: &GameDefs) -> Self {
         let mut names = Intern::default();
         for profession in VANILLA_POP_TYPES {
             names.intern(profession);
         }
         let countries = save
-            .country_manager
+            .country_manager()
             .iter_present()
             .map(|(id, country)| {
                 let budget = &country.budget;
@@ -247,7 +302,7 @@ impl World {
             })
             .collect();
         let states = save
-            .states
+            .states()
             .iter_present()
             .map(|(id, state)| WorldState {
                 id,
@@ -256,7 +311,7 @@ impl World {
                 market: state
                     .country
                     .and_then(|country_id| {
-                        save.country_manager
+                        save.country_manager()
                             .database
                             .get(&country_id)
                             .and_then(Option::as_ref)
@@ -275,17 +330,14 @@ impl World {
             })
             .collect();
         let mut saved_pops = 0usize;
+        let mut modeled_pops = 0usize;
         let mut state_pops = Vec::new();
-        let mut pops = Vec::new();
-        for (id, pop) in save.pops.iter_present() {
+        for (id, pop) in save.pops().iter_present() {
             saved_pops += 1;
             let culture = intern_culture(&mut names, save, pop.culture.as_deref());
             let profession = intern_profession(&mut names, pop.profession.as_deref());
             let qualifications = intern_qty_map(&mut names, &pop.qualifications.values);
-            if let Some(world_pop) = WorldPop::from_ir(pop, culture, profession) {
-                pops.push(world_pop);
-            }
-            state_pops.push(WorldStatePop {
+            let row = WorldStatePop {
                 id,
                 state: pop.state,
                 demand_size: pop.demand_size(),
@@ -298,16 +350,20 @@ impl World {
                 literate: pop.literate,
                 workplace_id: pop.workplace,
                 qualifications,
-            });
+            };
+            if row.consumption_pop().is_some() {
+                modeled_pops += 1;
+            }
+            state_pops.push(row);
         }
-        let saved_buildings = save.building_manager.iter_present().count();
+        let saved_buildings = save.building_manager().iter_present().count();
         let buildings: Vec<_> = save
-            .building_manager
+            .building_manager()
             .iter_present()
             .filter_map(|(id, building)| WorldBuilding::from_ir(id, building, defs))
             .collect();
         let state_trade = save
-            .states
+            .states()
             .iter_present()
             .flat_map(|(state_id, state)| {
                 resolve_saved_goods(&state.trade.goods, defs)
@@ -323,18 +379,18 @@ impl World {
             })
             .collect();
         Self {
-            skipped_pops: saved_pops - pops.len(),
+            skipped_pops: saved_pops - modeled_pops,
             skipped_buildings: saved_buildings - buildings.len(),
             countries,
             states,
-            pops,
+            pops: Vec::new(),
             state_pops,
             names,
             buildings,
             frozen_buy: GoodsVec::zeros(defs.goods_order.len()),
             frozen_sell: GoodsVec::zeros(defs.goods_order.len()),
             state_trade,
-            game_date: save.meta_data.game_date,
+            game_date: save.meta_data().game_date,
             player_tag: player_tag(save),
         }
     }
@@ -373,22 +429,6 @@ impl World {
             }
         }
         next
-    }
-}
-
-impl WorldPop {
-    fn from_ir(pop: &Pop, culture: Option<u16>, profession: Option<u16>) -> Option<Self> {
-        let size = pop.demand_size()?;
-        let wealth = pop.wealth?;
-        let wealth = u8::try_from(wealth.clamp(1, 99)).ok()?;
-        Some(Self {
-            state: pop.state,
-            size,
-            wealth,
-            wages: pop.wages.filter(|w| *w > 0.0).unwrap_or(0.0),
-            culture,
-            profession,
-        })
     }
 }
 
@@ -509,19 +549,19 @@ pub(crate) fn resolve_profession_key(key: &str) -> &str {
     key
 }
 
-fn player_tag(save: &Save) -> Option<String> {
-    save.previous_played
+fn player_tag(save: &impl WorldSnapshot) -> Option<String> {
+    save.previous_played()
         .iter()
         .find_map(|player| {
             let id = player.idtype?;
-            save.country_manager
+            save.country_manager()
                 .database
                 .get(&id)
                 .and_then(Option::as_ref)
                 .map(|country| country.definition.clone())
         })
         .or_else(|| {
-            save.previous_played
+            save.previous_played()
                 .iter()
                 .find_map(|player| player.name.clone())
         })
@@ -532,10 +572,19 @@ fn intern_profession(names: &mut Intern, saved: Option<&str>) -> Option<u16> {
     Some(names.intern(resolve_profession_key(saved)))
 }
 
-fn intern_culture(names: &mut Intern, save: &Save, saved: Option<&str>) -> Option<u16> {
+fn intern_culture(
+    names: &mut Intern,
+    save: &impl WorldSnapshot,
+    saved: Option<&str>,
+) -> Option<u16> {
     let saved = saved.filter(|value| !value.is_empty())?;
     if let Ok(index) = saved.parse::<u32>() {
-        if let Some(culture) = save.cultures.database.get(&index).and_then(Option::as_ref) {
+        if let Some(culture) = save
+            .cultures()
+            .database
+            .get(&index)
+            .and_then(Option::as_ref)
+        {
             if !culture.id.is_empty() {
                 return Some(names.intern(&culture.id));
             }
@@ -689,10 +738,9 @@ mod tests {
             .expect("grain definition")
             .traded_quantity = 12.0;
         let world = World::from_save(&save, &defs);
-        assert_eq!(world.pops.len(), 2);
+        assert_eq!(world.pop_count(), 2);
         let weighted_pop = world
-            .pops
-            .iter()
+            .iter_pops()
             .find(|pop| world.name_opt(pop.culture) == Some("weighted_size"))
             .expect("pop with split size fields");
         assert_eq!(weighted_pop.size, 10_000.0);
@@ -875,14 +923,15 @@ mod tests {
             .join("../vic3-defs/tests/fixtures");
         let defs = vic3_defs::load_from_path(defs_root).expect("defs fixture");
         let world = World::from_save(&save, &defs);
-        assert_eq!(world.pops.len(), 1);
-        assert_eq!(world.pops[0].wealth, 8);
+        let pops: Vec<_> = world.iter_pops().collect();
+        assert_eq!(pops.len(), 1);
+        assert_eq!(pops[0].wealth, 8);
         assert_eq!(world.states[0].market, Some(1));
         assert_eq!(world.countries[0].laws, ["law_autocracy"]);
         assert_eq!(world.buildings.len(), 1);
         assert_eq!(world.buildings[0].building, "building_rye_farm");
-        assert_eq!(world.name_opt(world.pops[0].profession), Some("farmers"));
-        assert_eq!(world.name_opt(world.pops[0].culture), Some("north_german"));
+        assert_eq!(world.name_opt(pops[0].profession), Some("farmers"));
+        assert_eq!(world.name_opt(pops[0].culture), Some("north_german"));
         assert!(
             world.state_pops[0]
                 .qualifications

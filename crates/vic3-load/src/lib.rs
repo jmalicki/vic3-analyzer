@@ -6,6 +6,17 @@
 //!
 //! Binary (ironman) saves need a **user-supplied** token map
 //! ([`BasicTokenResolver`]). Text saves do not. Tokens are never redistributed.
+//!
+//! Two deserialize targets:
+//! - [`Save`] — file-shaped; markets, trade routes, and construction queues
+//!   included. Used by `parse_save` and tests.
+//! - [`WorldSave`] — managers the price projection reads. Other top-level keys
+//!   are skipped so their IR is never allocated.
+//!
+//! Ironman `.v3` files are typically **one** zip member (`gamestate`). Skipping
+//! unknown keys still inflates that blob; [`WorldSave`] only avoids building
+//! unused maps. Interning inside jomini is not worth it while Pop IR stays
+//! under ~0.1 s.
 
 mod error;
 mod ir;
@@ -23,7 +34,8 @@ use vic3save::{DeserializeVic3, ReaderAt, Vic3File};
 pub use error::LoadError;
 pub use ir::{
     Budget, Building, BuildingGoods, ConstructionOrder, Country, Culture, IndexQtyMap, Manager,
-    Market, Meta, Player, Pop, Save, State, StatePopStatistics, TradeRoute,
+    Market, Meta, Player, Pop, Save, State, StatePopStatistics, TradeRoute, WorldSave,
+    WorldSnapshot,
 };
 pub use vic3save::{BasicTokenResolver, Vic3Date};
 
@@ -58,21 +70,51 @@ pub fn load_tokens_reader(reader: impl BufRead) -> Result<BasicTokenResolver, Lo
 /// Pass [`empty_tokens`] for plaintext. Binary saves with an empty resolver
 /// return [`LoadError::MissingTokens`].
 pub fn load_slice(data: &[u8], tokens: impl TokenResolver) -> Result<Save, LoadError> {
-    let file = Vic3File::from_slice(data)?;
-    deserialize_save(&file, tokens)
+    load_slice_as(data, tokens)
+}
+
+/// Load only the managers [`WorldSnapshot`] needs.
+///
+/// Prefer this on the prices / `World::from_save` path. [`load_slice`] still
+/// exists for summaries that count markets and trade routes.
+pub fn load_slice_world(data: &[u8], tokens: impl TokenResolver) -> Result<WorldSave, LoadError> {
+    load_slice_as(data, tokens)
 }
 
 /// Load a `.v3` from a filesystem path (`VIC3_SAVE`).
 pub fn load_path(path: impl AsRef<Path>, tokens: impl TokenResolver) -> Result<Save, LoadError> {
-    let file = File::open(path.as_ref())?;
-    let file = Vic3File::from_file(file)?;
-    deserialize_save(&file, tokens)
+    load_path_as(path, tokens)
 }
 
-fn deserialize_save<R: ReaderAt>(
+/// [`load_path`] into [`WorldSave`]: skip construction / market / trade-route IR.
+pub fn load_path_world(
+    path: impl AsRef<Path>,
+    tokens: impl TokenResolver,
+) -> Result<WorldSave, LoadError> {
+    load_path_as(path, tokens)
+}
+
+fn load_slice_as<T: serde::de::DeserializeOwned>(
+    data: &[u8],
+    tokens: impl TokenResolver,
+) -> Result<T, LoadError> {
+    let file = Vic3File::from_slice(data)?;
+    deserialize_as(&file, tokens)
+}
+
+fn load_path_as<T: serde::de::DeserializeOwned>(
+    path: impl AsRef<Path>,
+    tokens: impl TokenResolver,
+) -> Result<T, LoadError> {
+    let file = File::open(path.as_ref())?;
+    let file = Vic3File::from_file(file)?;
+    deserialize_as(&file, tokens)
+}
+
+fn deserialize_as<T: serde::de::DeserializeOwned, R: ReaderAt>(
     file: &Vic3File<R>,
     tokens: impl TokenResolver,
-) -> Result<Save, LoadError> {
+) -> Result<T, LoadError> {
     if file.header().kind().is_binary() && tokens.is_empty() {
         return Err(LoadError::MissingTokens);
     }

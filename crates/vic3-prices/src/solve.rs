@@ -1,4 +1,9 @@
 //! Bound-constrained NLS (`basin::Trf`) plus successive-substitution warm start.
+//!
+//! The NLS / settle loop is cheap (~0.08 s on a late autosave). [`finished`]
+//! still builds the full UI payload (compact pop rows, need baskets,
+//! qualifications) so CLI `prices` times the same work as wasm `load_analysis`.
+//! Do not add a goods-only solve because the default table omits pops.
 
 use std::collections::BTreeMap;
 use std::convert::Infallible;
@@ -10,7 +15,7 @@ use vic3_defs::{GameDefs, GoodIdx, GoodsVec, NeedIdx};
 
 use crate::consumption::{
     add_pop_from_units, add_wage_bins, consumption, pop_need_baskets, wage_bins_from_pops,
-    NeedShares, UnitBaskets, WealthBin,
+    NeedShares, UnitBaskets, UnitNeedBaskets, WealthBin,
 };
 use crate::formula::{effective_mapi, local_price, market_access, price};
 use crate::result::{
@@ -187,7 +192,7 @@ fn finished(
         })
         .collect();
     let inputs = MarketInputs {
-        pops: world.pops.len(),
+        pops: world.pop_count(),
         skipped_pops: world.skipped_pops,
         buildings: world.buildings.len(),
         skipped_buildings: world.skipped_buildings,
@@ -257,14 +262,15 @@ fn detail_rows(
     let frozen_sell = world.frozen_sell.aligned(defs.goods_order.len());
     let shares = NeedShares::from_sell(defs, &sell_orders);
     let units = UnitBaskets::from_shares(defs, &base_prices, &shares);
+    let need_units = UnitNeedBaskets::from_shares(defs, &base_prices, &shares);
     let mut state_buy = BTreeMap::<(u32, GoodIdx), f64>::new();
     let mut state_sell = BTreeMap::<(u32, GoodIdx), f64>::new();
 
     let pops_by_state = snapshot.is_none().then(|| {
-        let mut index = BTreeMap::<u32, Vec<usize>>::new();
-        for (i, pop) in world.pops.iter().enumerate() {
+        let mut index = BTreeMap::<u32, Vec<WorldPop>>::new();
+        for pop in world.iter_pops() {
             if let Some(state) = pop.state {
-                index.entry(state).or_default().push(i);
+                index.entry(state).or_default().push(pop);
             }
         }
         index
@@ -275,12 +281,13 @@ fn detail_rows(
             .and_then(|snap| snap.pop_buy_by_state.get(&state.id))
             .cloned()
             .unwrap_or_else(|| {
-                let pops: Vec<_> = pops_by_state
+                let empty: &[WorldPop] = &[];
+                let pops = pops_by_state
                     .as_ref()
                     .and_then(|index| index.get(&state.id))
-                    .map(|indices| indices.iter().map(|&i| world.pops[i].clone()).collect())
-                    .unwrap_or_default();
-                consumption(&pops, &prices, &base_prices, defs, &frozen_sell)
+                    .map(Vec::as_slice)
+                    .unwrap_or(empty);
+                consumption(pops, &prices, &base_prices, defs, &frozen_sell)
             });
         for (good, quantity) in pop_buy.iter_indexed() {
             if quantity.abs() > crate::ORDER_EPS {
@@ -391,15 +398,8 @@ fn detail_rows(
         })
         .collect();
     let tables = EmitTables::from_world(world, defs);
-    let compact_pops = collapsed_state_pops(
-        world,
-        defs,
-        &prices,
-        &base_prices,
-        &shares,
-        &units,
-        snapshot,
-    );
+    let compact_pops =
+        collapsed_state_pops(world, &prices, &base_prices, &units, &need_units, snapshot);
     let state_needs = aggregate_state_needs(&compact_pops, &tables);
     let state_pops = StatePopList::compact(tables, compact_pops);
     let state_qualifications = state_qualification_rows(world, defs, &employees_by_building);
@@ -537,16 +537,19 @@ impl PopGroup {
 
 fn collapsed_state_pops(
     world: &World,
-    defs: &GameDefs,
     prices: &GoodsVec,
     base_prices: &GoodsVec,
-    shares: &NeedShares,
     units: &UnitBaskets,
+    need_units: &UnitNeedBaskets,
     snapshot: Option<&ShopSnapshot>,
 ) -> Vec<CompactStatePop> {
+    // BTreeMap keeps JSON `state_pops` order stable (state, profession, culture,
+    // wealth). HashMap insert is faster on samples but would shuffle the array
+    // unless we sort afterward; keep ordered insert until grouping dominates
+    // a profile enough to pay for HashMap + sort.
     let mut groups: BTreeMap<GroupKey, PopGroup> = BTreeMap::new();
     if world.state_pops.is_empty() {
-        for (index, pop) in world.pops.iter().enumerate() {
+        for (index, pop) in world.iter_pops().enumerate() {
             let Some(state_id) = pop.state else {
                 continue;
             };
@@ -558,9 +561,9 @@ fn collapsed_state_pops(
             );
             groups
                 .entry(key)
-                .and_modify(|existing| existing.add_world_pop(pop))
+                .and_modify(|existing| existing.add_world_pop(&pop))
                 .or_insert_with(|| {
-                    PopGroup::from_world_pop(u32::try_from(index).unwrap_or(0), pop, state_id)
+                    PopGroup::from_world_pop(u32::try_from(index).unwrap_or(0), &pop, state_id)
                 });
         }
     } else {
@@ -582,7 +585,7 @@ fn collapsed_state_pops(
             let local = snapshot
                 .and_then(|snap| snap.local_by_state.get(&pop.state))
                 .unwrap_or(prices);
-            let needs = pop_needs_for(&pop, defs, local, base_prices, shares, units);
+            let needs = pop_needs_for(&pop, local, base_prices, units, need_units);
             CompactStatePop {
                 id: Some(pop.id),
                 state_id: pop.state,
@@ -607,11 +610,10 @@ fn collapsed_state_pops(
 
 fn pop_needs_for(
     pop: &PopGroup,
-    defs: &GameDefs,
     prices: &GoodsVec,
     base_prices: &GoodsVec,
-    shares: &NeedShares,
     units: &UnitBaskets,
+    need_units: &UnitNeedBaskets,
 ) -> Vec<CompactNeed> {
     let Some(size) = pop.demand_size.filter(|size| *size > 0.0) else {
         return Vec::new();
@@ -630,7 +632,7 @@ fn pop_needs_for(
         culture: None,
         profession: None,
     };
-    pop_need_baskets(&world_pop, prices, base_prices, defs, shares, units)
+    pop_need_baskets(&world_pop, prices, base_prices, units, need_units)
         .into_iter()
         .map(|basket| CompactNeed {
             need_idx: basket.need_idx,
@@ -950,12 +952,13 @@ fn state_shops(
     base_prices: &GoodsVec,
     units: &UnitBaskets,
 ) -> Vec<StateShop> {
+    let pops: Vec<WorldPop> = world.iter_pops().collect();
     let mut ids: BTreeMap<u32, f64> = access_by_state.clone();
     for state in &world.states {
         ids.entry(state.id)
             .or_insert_with(|| market_access(state.infrastructure, state.infrastructure_usage));
     }
-    for pop in &world.pops {
+    for pop in &pops {
         if let Some(state) = pop.state {
             ids.entry(state).or_insert(1.0);
         }
@@ -991,7 +994,7 @@ fn state_shops(
             }
             let mut frozen_pop_buy = GoodsVec::zeros(n);
             let mut wage_pops = Vec::new();
-            for pop in &world.pops {
+            for pop in &pops {
                 if pop.state != Some(id) {
                     continue;
                 }
@@ -1032,7 +1035,7 @@ fn split_pop_buy(
 ) -> (Vec<WealthBin>, GoodsVec) {
     let mut frozen_pop_buy = GoodsVec::zeros(n);
     let mut stateless = Vec::new();
-    for pop in &world.pops {
+    for pop in world.iter_pops() {
         if pop.state.is_some() {
             continue;
         }
@@ -1041,7 +1044,7 @@ fn split_pop_buy(
         } else {
             add_pop_from_units(
                 &mut frozen_pop_buy,
-                pop,
+                &pop,
                 base_prices,
                 base_prices,
                 units,
@@ -1054,7 +1057,7 @@ fn split_pop_buy(
             frozen_pop_buy.add(good, quantity * shop.access);
         }
     }
-    (wage_bins_from_pops(stateless), frozen_pop_buy)
+    (wage_bins_from_pops(&stateless), frozen_pop_buy)
 }
 
 #[derive(Clone)]

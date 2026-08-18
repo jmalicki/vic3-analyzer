@@ -1,7 +1,10 @@
 //! Integration tests for `vic3-load`.
 
 use std::path::PathBuf;
-use vic3_load::{empty_tokens, load_path, load_slice, load_tokens_path, LoadError};
+use vic3_load::{
+    empty_tokens, load_path, load_path_world, load_slice, load_tokens_path, LoadError,
+    WorldSnapshot,
+};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -127,6 +130,14 @@ fn plaintext_fixture_loads() {
         order.building.as_deref(),
         Some("building_construction_sector")
     );
+}
+
+#[test]
+fn plaintext_world_save_skips_market_ir() {
+    let save = load_path_world(fixture("plaintext.txt"), empty_tokens()).expect("world save");
+    assert_eq!(save.pops.iter_present().count(), 1);
+    assert_eq!(save.active_laws(16777216), ["law_autocracy"]);
+    assert_eq!(WorldSnapshot::previous_played(&save).len(), 1);
 }
 
 /// Real saves list the active method of every PM group under the plural key.
