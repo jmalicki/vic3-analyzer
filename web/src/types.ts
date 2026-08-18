@@ -276,3 +276,41 @@ export interface JsonSchema {
   $ref?: string
   $defs?: Record<string, JsonSchema>
 }
+
+export interface Origin {
+  id: string
+  name: string
+  bytes?: Uint8Array
+  blob?: Blob
+  tokens?: Uint8Array | Blob
+  tokens_name?: string
+  fingerprint?: string
+  saved_at: string
+}
+
+export interface Timeline {
+  id: string
+  origin_id: string
+  label: string
+  created_at: string
+}
+
+export interface Step {
+  id: string
+  timeline_id: string
+  parent_step_id?: string | null
+  mutations: unknown[]
+  summary?: SaveSummary
+  prices?: PricesResult
+  prices_cache_version?: number
+  patched_bytes?: Uint8Array
+  created_at: string
+  label?: string
+}
+
+export interface CurrentPointer {
+  id: 'current'
+  origin_id: string
+  timeline_id: string
+  step_id: string
+}

@@ -1,6 +1,20 @@
 import { openDB } from 'idb'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { clearStoredSave, loadStoredSave, storeSave, storeSaveAnalysis } from './saveStore'
+import {
+  SAVE_DB_NAME,
+  SAVE_DB_VERSION,
+  checkout,
+  clearStoredSave,
+  commitStep,
+  currentPointer,
+  downloadName,
+  listOrigins,
+  listSteps,
+  loadStoredSave,
+  savePoint,
+  storeSave,
+  storeSaveAnalysis,
+} from './saveStore'
 import type { PricesResult, SaveSummary } from './types'
 
 const summary: SaveSummary = {
@@ -49,12 +63,50 @@ describe('save store', () => {
   it('ignores a prices solve from another cache version', async () => {
     await storeSave(new File(['campaign'], 'prussia.v3'))
     await storeSaveAnalysis(summary, prices)
-    const database = await openDB('vic3-analyzer-save', 1)
-    const current = await database.get('saves', 'current')
-    await database.put('saves', { ...current, prices_cache_version: 0 })
+    const pointer = await currentPointer()
+    const database = await openDB(SAVE_DB_NAME, SAVE_DB_VERSION)
+    const step = await database.get('steps', pointer!.step_id)
+    await database.put('steps', { ...step, prices_cache_version: 0 })
     const stored = await loadStoredSave()
     expect(stored?.save.name).toBe('prussia.v3')
     expect(stored?.summary).toEqual(summary)
     expect(stored?.prices).toBeUndefined()
+  })
+
+  it('keeps prior origins and restores the first file on checkout', async () => {
+    await storeSave(new File(['first'], 'a.v3'))
+    const first = await currentPointer()
+    await storeSave(new File(['second'], 'b.v3'))
+    expect((await listOrigins()).map((origin) => origin.name).sort()).toEqual(['a.v3', 'b.v3'])
+    await checkout(first!.origin_id, first!.timeline_id, first!.step_id)
+    const stored = await loadStoredSave()
+    expect(stored?.save.name).toBe('a.v3')
+    expect(await stored?.save.text()).toBe('first')
+  })
+
+  it('commitStep keeps origin bytes and records mutations on the new step', async () => {
+    await storeSave(new File(['campaign'], 'prussia.v3'))
+    const mutations = [{ kind: 'set', path: 'foo', value: 1 }]
+    await commitStep({ mutations })
+    const stored = await loadStoredSave()
+    expect(await stored?.save.text()).toBe('campaign')
+    const pointer = await currentPointer()
+    const current = (await listSteps(pointer!.timeline_id)).find((step) => step.id === pointer!.step_id)
+    expect(current?.mutations).toEqual(mutations)
+    expect(current?.parent_step_id).toBeTruthy()
+  })
+
+  it('savePoint labels the current step', async () => {
+    await storeSave(new File(['campaign'], 'prussia.v3'))
+    await savePoint('before tax reform')
+    const pointer = await currentPointer()
+    const current = (await listSteps(pointer!.timeline_id)).find((step) => step.id === pointer!.step_id)
+    expect(current?.label).toBe('before tax reform')
+  })
+
+  it('formats a patched download name from origin, date, and step', () => {
+    expect(downloadName('prussia.v3', '1873.6.29', 'step-0')).toBe(
+      'prussia_analyzer_1873.6.29_step-0.v3',
+    )
   })
 })
