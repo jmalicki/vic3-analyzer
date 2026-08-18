@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use schemars::schema_for;
 use serde_json::Value;
-use vic3_prices::{PricesResult, SolveOpts, WhatIfOpts};
+use vic3_prices::{PricesResult, SolveOpts, WhatIfOpts, WorldDelta};
 
 fn schema_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schema")
@@ -32,6 +32,10 @@ fn dump_schemas() {
     write_schema(
         "what-if.json",
         &serde_json::to_value(schema_for!(WhatIfOpts)).unwrap(),
+    );
+    write_schema(
+        "world-delta.json",
+        &serde_json::to_value(schema_for!(WorldDelta)).unwrap(),
     );
 }
 
@@ -86,6 +90,16 @@ fn what_if_schema_matches_checked_in() {
 }
 
 #[test]
+fn world_delta_schema_matches_checked_in() {
+    let actual = serde_json::to_value(schema_for!(WorldDelta)).expect("serialize schema");
+    let expected = read_schema("world-delta.json");
+    assert_eq!(
+        actual, expected,
+        "schema/world-delta.json drifted from schema_for!(WorldDelta)"
+    );
+}
+
+#[test]
 fn prices_schema_required_fields_match_json_schema_md() {
     let schema = serde_json::to_value(schema_for!(PricesResult)).unwrap();
     let req = required(&schema);
@@ -107,6 +121,29 @@ fn what_if_schema_required_fields_match_json_schema_md() {
         assert!(
             req.iter().any(|f| f == field),
             "{field} must be required in WhatIfOpts schema, got {req:?}"
+        );
+    }
+    assert_eq!(
+        schema.get("additionalProperties"),
+        Some(&Value::Bool(false))
+    );
+}
+
+#[test]
+fn world_delta_schema_fields_are_optional() {
+    let schema = serde_json::to_value(schema_for!(WorldDelta)).unwrap();
+    let props = properties(&schema);
+    for field in ["production_methods", "extra_levels", "subsidize"] {
+        assert!(
+            props.contains_key(field),
+            "{field} must be in WorldDelta schema, got {props:?}"
+        );
+    }
+    let req = required(&schema);
+    for field in ["production_methods", "extra_levels", "subsidize"] {
+        assert!(
+            !req.iter().any(|f| f == field),
+            "{field} must not be required in WorldDelta schema, got {req:?}"
         );
     }
     assert_eq!(

@@ -61,6 +61,65 @@ pub struct WhatIfOpts {
     pub extra_levels: u32,
 }
 
+/// Preview mutation: extra levels, then production methods. Does not write a save.
+///
+/// [`crate::apply_delta`] clones the world; [`crate::preview`] re-solves without
+/// committing. Subsidy entries are accepted and ignored (no IR flag).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorldDelta {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub production_methods: Vec<ProductionMethodDelta>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_levels: Vec<ExtraLevelsDelta>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subsidize: Vec<SubsidizeDelta>,
+}
+
+/// Replace one building's active production methods (clears that building's saved IO).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProductionMethodDelta {
+    pub building_id: u32,
+    pub methods: Vec<String>,
+}
+
+/// Extra levels on a building type and/or a single instance.
+///
+/// When `building_id` is set it wins; otherwise `building` matches
+/// [`crate::WorldBuilding::building`]. Neither set is a no-op.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExtraLevelsDelta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub building: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub building_id: Option<u32>,
+    #[schemars(range(min = 0))]
+    pub extra_levels: u32,
+}
+
+/// Subsidy toggle. Ignored until the IR models subsidies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SubsidizeDelta {
+    pub building_id: u32,
+    pub enabled: bool,
+}
+
+impl From<WhatIfOpts> for WorldDelta {
+    fn from(opts: WhatIfOpts) -> Self {
+        Self {
+            extra_levels: vec![ExtraLevelsDelta {
+                building: Some(opts.building),
+                building_id: None,
+                extra_levels: opts.extra_levels,
+            }],
+            ..Self::default()
+        }
+    }
+}
+
 /// Why [`crate::solve`] stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

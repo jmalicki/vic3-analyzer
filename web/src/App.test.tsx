@@ -114,6 +114,7 @@ function mockApi(): WasmApi {
       }),
     ),
     loaded_what_if: vi.fn(() => result),
+    loaded_apply_delta: vi.fn(() => result),
     loaded_gaps: vi.fn(() => gapsResult),
     loaded_plan: vi.fn(() => planResult),
     loaded_alerts: vi.fn(() =>

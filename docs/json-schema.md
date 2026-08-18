@@ -36,6 +36,56 @@ Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are
 }
 ```
 
+## WorldDelta
+
+Preview mutation applied to a cloned world (extra levels, then production methods). Does not write a save. Subsidy entries are accepted and ignored.
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "production_methods": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["building_id", "methods"],
+        "additionalProperties": false,
+        "properties": {
+          "building_id": { "type": "integer", "minimum": 0 },
+          "methods": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "extra_levels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["extra_levels"],
+        "additionalProperties": false,
+        "properties": {
+          "building": { "type": "string", "description": "Building type id; used when building_id is omitted." },
+          "building_id": { "type": "integer", "minimum": 0, "description": "Single instance; wins over building when both are set." },
+          "extra_levels": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "subsidize": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["building_id", "enabled"],
+        "additionalProperties": false,
+        "properties": {
+          "building_id": { "type": "integer", "minimum": 0 },
+          "enabled": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
+```
+
 ## PlanOpts
 
 ```json

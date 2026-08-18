@@ -156,6 +156,28 @@ export interface PricesResult {
   limitations: string[]
 }
 
+export interface ProductionMethodDelta {
+  building_id: number
+  methods: string[]
+}
+
+export interface ExtraLevelsDelta {
+  building?: string
+  building_id?: number
+  extra_levels: number
+}
+
+export interface SubsidizeDelta {
+  building_id: number
+  enabled: boolean
+}
+
+export interface WorldDelta {
+  production_methods?: ProductionMethodDelta[]
+  extra_levels?: ExtraLevelsDelta[]
+  subsidize?: SubsidizeDelta[]
+}
+
 export type GapAtom = string | Record<string, unknown>
 
 export interface GapsResult {

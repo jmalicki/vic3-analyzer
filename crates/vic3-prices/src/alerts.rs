@@ -1557,6 +1557,7 @@ mod tests {
                 "Employment, wages, and trade volumes are frozen except explicit what-if deltas."
                     .into(),
             ],
+            relative: Vec::new(),
         };
         (world, defs, prices)
     }

@@ -34,6 +34,7 @@ export interface WasmApi {
   loaded_prices(): string | Promise<string>
   loaded_military(): string | Promise<string>
   loaded_what_if(whatIfOptsJson: string): string | Promise<string>
+  loaded_apply_delta(deltaJson: string): string | Promise<string>
   loaded_gaps(goal: string): string | Promise<string>
   loaded_plan(planOptsJson: string): string | Promise<string>
   loaded_alerts(): string | Promise<string>

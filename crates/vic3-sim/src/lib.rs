@@ -372,7 +372,11 @@ pub fn apply_action_with_economy(
                 .building_level_deltas
                 .entry(building.clone())
                 .or_default() += 1;
-            let prices = solve(&economy.world_for(&next), &economy.defs, economy.solve_opts);
+            let prices = solve(
+                &economy.world_for(&next),
+                &economy.defs,
+                economy.solve_opts.clone(),
+            );
             next.gdp = economy.modeled_gdp(&next, &prices);
             next.good_prices = prices
                 .goods

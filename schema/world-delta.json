@@ -1,0 +1,99 @@
+{
+  "$defs": {
+    "ExtraLevelsDelta": {
+      "additionalProperties": false,
+      "description": "Extra levels on a building type and/or a single instance.\n\nWhen `building_id` is set it wins; otherwise `building` matches\n[`crate::WorldBuilding::building`]. Neither set is a no-op.",
+      "properties": {
+        "building": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "building_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "extra_levels": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "extra_levels"
+      ],
+      "type": "object"
+    },
+    "ProductionMethodDelta": {
+      "additionalProperties": false,
+      "description": "Replace one building's active production methods (clears that building's saved IO).",
+      "properties": {
+        "building_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "methods": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "building_id",
+        "methods"
+      ],
+      "type": "object"
+    },
+    "SubsidizeDelta": {
+      "additionalProperties": false,
+      "description": "Subsidy toggle. Ignored until the IR models subsidies.",
+      "properties": {
+        "building_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "building_id",
+        "enabled"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Preview mutation: extra levels, then production methods. Does not write a save.\n\n[`crate::apply_delta`] clones the world; [`crate::preview`] re-solves without\ncommitting. Subsidy entries are accepted and ignored (no IR flag).",
+  "properties": {
+    "extra_levels": {
+      "items": {
+        "$ref": "#/$defs/ExtraLevelsDelta"
+      },
+      "type": "array"
+    },
+    "production_methods": {
+      "items": {
+        "$ref": "#/$defs/ProductionMethodDelta"
+      },
+      "type": "array"
+    },
+    "subsidize": {
+      "items": {
+        "$ref": "#/$defs/SubsidizeDelta"
+      },
+      "type": "array"
+    }
+  },
+  "title": "WorldDelta",
+  "type": "object"
+}

@@ -11,15 +11,18 @@ mod result;
 mod solve;
 mod world;
 
+use vic3_defs::GameDefs;
+
 pub use alerts::{alerts, Alert, AlertKind, AlertsResult, Evidence, Mitigation, MitigationAction};
 pub use consumption::consumption;
 pub use formula::{
     effective_mapi, local_price, market_access, market_ratio, price, BASE_MAPI, ORDER_EPS,
 };
 pub use result::{
-    BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, GoodFlow, GoodPrice,
-    MarketInputs, PopNeedBasket, PricesResult, ProfessionCount, SolveOpts, SolveStatus, StateGood,
-    StateInfo, StateNeed, StatePop, StateQualification, WhatIfOpts,
+    BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, ExtraLevelsDelta,
+    GoodFlow, GoodPrice, MarketInputs, PopNeedBasket, PricesResult, ProductionMethodDelta,
+    ProfessionCount, SolveOpts, SolveStatus, StateGood, StateInfo, StateNeed, StatePop,
+    StateQualification, SubsidizeDelta, WhatIfOpts, WorldDelta,
 };
 pub use solve::{solve, what_if};
 pub use world::{
@@ -41,6 +44,51 @@ pub const LIMITATIONS: &[&str] = &[
     "Pops shop at each state's MAPI-blended local prices; state orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, and extra MAPI modifiers and overseas convoy constraints are not modeled.",
     "The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.",
 ];
+
+/// Appended to [`PricesResult::limitations`] when a [`WorldDelta`] asks to subsidize.
+pub const SUBSIDY_NOT_MODELED: &str = "Subsidies are not modeled; subsidy toggles were ignored.";
+
+/// Clone `world` and apply extra levels, then production methods.
+///
+/// Subsidy entries are accepted and ignored (no IR subsidy flag). Unknown
+/// building ids are no-ops. Does not mutate `world`.
+pub fn apply_delta(world: &World, delta: &WorldDelta) -> World {
+    let mut next = world.clone();
+    for extra in &delta.extra_levels {
+        if let Some(id) = extra.building_id {
+            if let Some(building) = next.buildings.iter_mut().find(|b| b.id == id) {
+                building.add_extra_levels(extra.extra_levels);
+            }
+        } else if let Some(kind) = extra.building.as_deref() {
+            for building in &mut next.buildings {
+                if building.building == kind {
+                    building.add_extra_levels(extra.extra_levels);
+                }
+            }
+        }
+    }
+    for pm in &delta.production_methods {
+        if let Some(building) = next.buildings.iter_mut().find(|b| b.id == pm.building_id) {
+            *building = building.with_methods(pm.methods.clone());
+        }
+    }
+    next
+}
+
+/// Apply [`WorldDelta`] to a clone of `world` and re-solve. `world` is unchanged.
+pub fn preview(
+    world: &World,
+    defs: &GameDefs,
+    delta: &WorldDelta,
+    opts: SolveOpts,
+) -> PricesResult {
+    let next = apply_delta(world, delta);
+    let mut result = solve(&next, defs, opts);
+    if !delta.subsidize.is_empty() {
+        result.limitations.push(SUBSIDY_NOT_MODELED.to_string());
+    }
+    result
+}
 
 /// Crate version from Cargo.
 pub fn version() -> &'static str {
@@ -733,6 +781,161 @@ mod tests {
             wood0.price
         );
         assert_eq!(bumped.limitations, baseline.limitations);
+    }
+
+    #[test]
+    fn preview_pm_swap_changes_io_and_prices_source_world_unchanged() {
+        let mut defs = two_good_defs();
+        defs.production_methods.insert(
+            "pm_grain".into(),
+            ProductionMethod {
+                id: "pm_grain".into(),
+                inputs: Vec::new(),
+                outputs: vec![(GoodIdx::from_usize(0), 30.0)],
+            },
+        );
+        let wood = GoodIdx::from_usize(1);
+        let grain = GoodIdx::from_usize(0);
+        let world = World {
+            pops: two_pops(),
+            buildings: vec![WorldBuilding {
+                id: 7,
+                state: None,
+                building: "farm".into(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: vec!["pm_simple_forestry".into()],
+                saved_inputs: Vec::new(),
+                saved_outputs: vec![(wood, 99.0)],
+            }],
+            frozen_sell: GoodsVec::zeros(defs.goods_order.len()),
+            ..World::default()
+        };
+        let baseline = solve(&world, &defs, SolveOpts::default());
+        let delta = WorldDelta {
+            production_methods: vec![ProductionMethodDelta {
+                building_id: 7,
+                methods: vec!["pm_grain".into()],
+            }],
+            ..WorldDelta::default()
+        };
+        let previewed = preview(&world, &defs, &delta, SolveOpts::default());
+
+        assert_eq!(
+            world.buildings[0].production_methods,
+            ["pm_simple_forestry"]
+        );
+        assert_eq!(world.buildings[0].saved_outputs, [(wood, 99.0)]);
+
+        let applied = apply_delta(&world, &delta);
+        let (_, sell) = applied.buildings[0].goods_io(&defs);
+        assert_eq!(sell[grain], 30.0, "PM recipe × staffed levels");
+        assert_eq!(sell[wood], 0.0, "saved wood IO must not survive a PM swap");
+
+        let wood0 = baseline
+            .goods
+            .iter()
+            .find(|g| g.id == "wood")
+            .expect("wood");
+        let wood1 = previewed
+            .goods
+            .iter()
+            .find(|g| g.id == "wood")
+            .expect("wood");
+        let grain0 = baseline
+            .goods
+            .iter()
+            .find(|g| g.id == "grain")
+            .expect("grain");
+        let grain1 = previewed
+            .goods
+            .iter()
+            .find(|g| g.id == "grain")
+            .expect("grain");
+        assert!(
+            wood1.sell < wood0.sell,
+            "dropping saved wood IO should lower wood sell ({} vs {})",
+            wood1.sell,
+            wood0.sell
+        );
+        assert!(
+            grain1.sell > grain0.sell,
+            "grain PM should raise grain sell ({} vs {})",
+            grain1.sell,
+            grain0.sell
+        );
+    }
+
+    #[test]
+    fn preview_extra_levels_on_type_matches_what_if() {
+        let defs = two_good_defs();
+        let world = balanced_world(&defs);
+        let opts = WhatIfOpts {
+            building: "logging_camp".into(),
+            extra_levels: 1,
+        };
+        let via_what_if = what_if(&world, &defs, &opts, SolveOpts::default());
+        let via_delta = preview(&world, &defs, &WorldDelta::from(opts), SolveOpts::default());
+        assert_eq!(via_delta.goods, via_what_if.goods);
+        assert_eq!(via_delta.residual, via_what_if.residual);
+        assert_eq!(via_delta.status, via_what_if.status);
+        assert_eq!(world.buildings[0].level, 0.0, "source world is immutable");
+    }
+
+    #[test]
+    fn preview_extra_levels_on_trade_center_type() {
+        let wood = GoodIdx::from_usize(1);
+        let world = World {
+            buildings: vec![WorldBuilding {
+                id: 3,
+                state: Some(1),
+                building: "building_trade_center".into(),
+                level: 2.0,
+                staffing: 1.0,
+                production_methods: Vec::new(),
+                saved_inputs: Vec::new(),
+                saved_outputs: vec![(wood, 40.0)],
+            }],
+            ..World::default()
+        };
+        let delta = WorldDelta {
+            extra_levels: vec![ExtraLevelsDelta {
+                building: Some("building_trade_center".into()),
+                building_id: None,
+                extra_levels: 2,
+            }],
+            ..WorldDelta::default()
+        };
+        let next = apply_delta(&world, &delta);
+        assert_eq!(world.buildings[0].level, 2.0, "source world is immutable");
+        assert_eq!(next.buildings[0].level, 4.0);
+        assert_eq!(next.buildings[0].staffing, 2.0);
+        assert_eq!(next.buildings[0].saved_outputs, [(wood, 80.0)]);
+    }
+
+    #[test]
+    fn preview_subsidy_is_noop_with_limitation() {
+        let defs = two_good_defs();
+        let world = balanced_world(&defs);
+        let baseline = solve(&world, &defs, SolveOpts::default());
+        let delta = WorldDelta {
+            subsidize: vec![SubsidizeDelta {
+                building_id: 1,
+                enabled: true,
+            }],
+            ..WorldDelta::default()
+        };
+        let previewed = preview(&world, &defs, &delta, SolveOpts::default());
+        assert_eq!(apply_delta(&world, &delta), world);
+        assert_eq!(previewed.goods, baseline.goods);
+        assert!(
+            previewed
+                .limitations
+                .iter()
+                .any(|line| line == SUBSIDY_NOT_MODELED),
+            "subsidy limitation: {:?}",
+            previewed.limitations
+        );
     }
 
     proptest! {

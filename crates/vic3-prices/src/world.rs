@@ -405,31 +405,21 @@ impl World {
     /// employment, wages, and trade volumes remain frozen.
     pub fn with_extra_levels(&self, building: &str, extra_levels: u32) -> Self {
         let mut next = self.clone();
-        let extra = f64::from(extra_levels);
         for b in &mut next.buildings {
             if b.building == building {
-                let old_level = b.level.max(0.0);
-                let new_level = old_level + extra;
-                if extra > 0.0 {
-                    if old_level > 0.0 {
-                        let ratio = new_level / old_level;
-                        b.staffing *= ratio;
-                        for quantity in b
-                            .saved_inputs
-                            .iter_mut()
-                            .map(|(_, quantity)| quantity)
-                            .chain(b.saved_outputs.iter_mut().map(|(_, quantity)| quantity))
-                        {
-                            *quantity *= ratio;
-                        }
-                    } else {
-                        // Synthetic/empty buildings have no saved per-level
-                        // ratio; added capacity starts fully staffed.
-                        b.staffing = new_level;
-                    }
-                }
-                b.level = new_level;
+                b.add_extra_levels(extra_levels);
             }
+        }
+        next
+    }
+
+    /// Clone this world and add `extra_levels` to the building with `building_id`.
+    ///
+    /// Unknown id is a no-op clone. Scaling matches [`Self::with_extra_levels`].
+    pub fn with_extra_levels_on_id(&self, building_id: u32, extra_levels: u32) -> Self {
+        let mut next = self.clone();
+        if let Some(building) = next.buildings.iter_mut().find(|b| b.id == building_id) {
+            building.add_extra_levels(extra_levels);
         }
         next
     }
@@ -449,6 +439,32 @@ impl World {
 }
 
 impl WorldBuilding {
+    /// Scale level, staffing, and saved IO by `extra_levels` (see [`World::with_extra_levels`]).
+    pub(crate) fn add_extra_levels(&mut self, extra_levels: u32) {
+        let extra = f64::from(extra_levels);
+        let old_level = self.level.max(0.0);
+        let new_level = old_level + extra;
+        if extra > 0.0 {
+            if old_level > 0.0 {
+                let ratio = new_level / old_level;
+                self.staffing *= ratio;
+                for quantity in self
+                    .saved_inputs
+                    .iter_mut()
+                    .map(|(_, quantity)| quantity)
+                    .chain(self.saved_outputs.iter_mut().map(|(_, quantity)| quantity))
+                {
+                    *quantity *= ratio;
+                }
+            } else {
+                // Synthetic/empty buildings have no saved per-level
+                // ratio; added capacity starts fully staffed.
+                self.staffing = new_level;
+            }
+        }
+        self.level = new_level;
+    }
+
     /// Replace active PMs and drop saved IO so [`Self::goods_io`] uses recipes.
     pub fn with_methods(&self, methods: Vec<String>) -> Self {
         Self {
@@ -867,6 +883,44 @@ mod tests {
         assert_eq!(bumped.buildings[0].staffing, 2.0);
         assert_eq!(bumped.buildings[0].saved_inputs, [(tools, 4.0)]);
         assert_eq!(bumped.buildings[0].saved_outputs, [(wood, 80.0)]);
+    }
+
+    #[test]
+    fn extra_levels_on_id_scales_only_that_building() {
+        let wood = GoodIdx::from_usize(1);
+        let world = World {
+            buildings: vec![
+                WorldBuilding {
+                    id: 1,
+                    state: Some(7),
+                    building: "building_logging_camp".into(),
+                    level: 2.0,
+                    staffing: 1.0,
+                    production_methods: Vec::new(),
+                    saved_inputs: Vec::new(),
+                    saved_outputs: vec![(wood, 40.0)],
+                },
+                WorldBuilding {
+                    id: 2,
+                    state: Some(7),
+                    building: "building_logging_camp".into(),
+                    level: 2.0,
+                    staffing: 1.0,
+                    production_methods: Vec::new(),
+                    saved_inputs: Vec::new(),
+                    saved_outputs: vec![(wood, 40.0)],
+                },
+            ],
+            ..World::default()
+        };
+
+        let bumped = world.with_extra_levels_on_id(2, 2);
+        assert_eq!(world.buildings[1].level, 2.0, "source world is immutable");
+        assert_eq!(bumped.buildings[0].level, 2.0);
+        assert_eq!(bumped.buildings[0].saved_outputs, [(wood, 40.0)]);
+        assert_eq!(bumped.buildings[1].level, 4.0);
+        assert_eq!(bumped.buildings[1].staffing, 2.0);
+        assert_eq!(bumped.buildings[1].saved_outputs, [(wood, 80.0)]);
     }
 
     #[test]

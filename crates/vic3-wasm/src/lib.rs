@@ -21,8 +21,8 @@ use vic3_goals::Atom;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save};
 use vic3_plan::PlanOpts;
 use vic3_prices::{
-    alerts as diagnose_alerts, solve, what_if as solve_what_if, PricesResult, SolveOpts,
-    WhatIfOpts, World,
+    alerts as diagnose_alerts, preview as solve_preview, solve, what_if as solve_what_if,
+    PricesResult, SolveOpts, WhatIfOpts, World, WorldDelta,
 };
 use vic3_sim::{EconomyContext, SimConfig};
 use vic3_world::PlanningState;
@@ -105,6 +105,14 @@ pub fn loaded_military() -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn loaded_what_if(what_if_opts_json: &str) -> Result<String, JsError> {
     loaded_what_if_json(what_if_opts_json).map_err(to_js)
+}
+
+/// Apply a [`WorldDelta`] to a clone of the loaded world and re-solve (preview).
+///
+/// Does not replace the loaded world or baseline prices, and does not write a save.
+#[wasm_bindgen]
+pub fn loaded_apply_delta(delta_json: &str) -> Result<String, JsError> {
+    loaded_apply_delta_json(delta_json).map_err(to_js)
 }
 
 /// Evaluate goal gaps against the current worker-owned analysis.
@@ -347,7 +355,7 @@ pub fn load_analysis_json(
     defs.extra_icons.clear();
     let solve_opts = parse_solve_opts(solve_opts_json)?;
     let world = World::from_save(&save, &defs);
-    let prices = solve(&world, &defs, solve_opts);
+    let prices = solve(&world, &defs, solve_opts.clone());
     let json = serde_json::to_string(&LoadedAnalysisPayload {
         summary: SaveSummary::from(&save),
         prices: &prices,
@@ -381,7 +389,24 @@ pub fn loaded_military_json() -> Result<String, WasmError> {
 pub fn loaded_what_if_json(what_if_opts_json: &str) -> Result<String, WasmError> {
     let delta: WhatIfOpts = serde_json::from_str(what_if_opts_json)?;
     with_loaded_analysis(|loaded| {
-        let result = solve_what_if(&loaded.world, &loaded.defs, &delta, loaded.solve_opts);
+        let result = solve_what_if(
+            &loaded.world,
+            &loaded.defs,
+            &delta,
+            loaded.solve_opts.clone(),
+        );
+        Ok(serde_json::to_string(&result)?)
+    })
+}
+
+pub fn loaded_apply_delta_json(delta_json: &str) -> Result<String, WasmError> {
+    let delta: WorldDelta = serde_json::from_str(delta_json)?;
+    with_loaded_analysis(|loaded| {
+        let mut opts = loaded.solve_opts.clone();
+        if !loaded.prices.relative.is_empty() {
+            opts.warm_rel = Some(loaded.prices.relative.clone());
+        }
+        let result = solve_preview(&loaded.world, &loaded.defs, &delta, opts);
         Ok(serde_json::to_string(&result)?)
     })
 }
@@ -406,8 +431,11 @@ pub fn loaded_plan_json(plan_opts_json: &str) -> Result<String, WasmError> {
     with_loaded_analysis(|loaded| {
         let country = country_tag(&loaded.world)?;
         let state = PlanningState::from_world_with_prices(&loaded.world, country, &loaded.prices)?;
-        let economy =
-            EconomyContext::new(loaded.world.clone(), loaded.defs.clone(), loaded.solve_opts);
+        let economy = EconomyContext::new(
+            loaded.world.clone(),
+            loaded.defs.clone(),
+            loaded.solve_opts.clone(),
+        );
         let result = vic3_plan::plan_with_economy(
             state,
             goal,
@@ -478,7 +506,7 @@ pub fn plan_json(
     let solve_opts = parse_solve_opts(solve_opts_json)?;
     let plan_opts: PlanOpts = serde_json::from_str(plan_opts_json)?;
     let world = World::from_save(&save, &defs);
-    let prices = solve(&world, &defs, solve_opts);
+    let prices = solve(&world, &defs, solve_opts.clone());
     let country = country_tag(&world)?;
     drop(save);
     let state = PlanningState::from_world_with_prices(&world, country, &prices)?;
@@ -1079,6 +1107,23 @@ mod tests {
         .expect("PricesResult");
         assert!(changed.residual.is_finite());
 
+        clear_analysis();
+    }
+
+    #[test]
+    fn loaded_apply_delta_does_not_change_subsequent_loaded_prices() {
+        clear_analysis();
+        load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
+        let baseline = loaded_prices_json().expect("cached prices");
+        let previewed = loaded_apply_delta_json(
+            r#"{"extra_levels":[{"building":"building_rye_farm","extra_levels":5}]}"#,
+        )
+        .expect("preview delta");
+        let after = loaded_prices_json().expect("prices after preview");
+        assert_eq!(after, baseline, "preview must not commit loaded prices");
+        let previewed_result: PricesResult =
+            serde_json::from_str(&previewed).expect("preview PricesResult");
+        assert!(previewed_result.residual.is_finite());
         clear_analysis();
     }
 
