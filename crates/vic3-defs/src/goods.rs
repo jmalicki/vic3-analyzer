@@ -109,6 +109,25 @@ impl GoodsVec {
     pub fn add(&mut self, idx: GoodIdx, qty: f64) {
         self.data[idx.as_usize()] += qty;
     }
+
+    /// `self += other * scale`. Lengths must match.
+    #[inline]
+    pub fn add_scaled(&mut self, other: &Self, scale: f64) {
+        if scale == 0.0 {
+            return;
+        }
+        debug_assert_eq!(self.data.len(), other.data.len());
+        for (dst, src) in self.data.iter_mut().zip(&other.data) {
+            *dst += *src * scale;
+        }
+    }
+
+    /// Overwrite from `other`. Lengths must match.
+    #[inline]
+    pub fn copy_from(&mut self, other: &Self) {
+        debug_assert_eq!(self.data.len(), other.data.len());
+        self.data.copy_from_slice(&other.data);
+    }
 }
 
 impl Index<GoodIdx> for GoodsVec {

@@ -9,7 +9,8 @@ use basin::{
 use vic3_defs::{GameDefs, GoodIdx, GoodsVec};
 
 use crate::consumption::{
-    add_pop_consumption, add_pop_consumption_scaled, consumption, pop_need_baskets,
+    add_pop_from_units, add_wage_bins, consumption, pop_need_baskets, wage_bins_from_pops,
+    NeedShares, UnitBaskets, WealthBin,
 };
 use crate::formula::{effective_mapi, local_price, market_access, price};
 use crate::result::{
@@ -77,18 +78,12 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
         .collect::<BTreeMap<_, _>>();
     let (frozen_buy, frozen_sell) = access_scaled_non_pop_orders(world, defs, &access_by_state);
     let n_goods = defs.goods_order.len();
-    let shops = state_shops(
-        world,
-        defs,
-        &access_by_state,
-        n_goods,
-        &base_prices,
-        &frozen_sell,
-    );
-    let (stateless_wage_idxs, frozen_pop_buy) =
-        split_pop_buy(world, defs, &base_prices, &frozen_sell, &shops);
+    let shares = NeedShares::from_sell(defs, &frozen_sell);
+    let units = UnitBaskets::from_shares(defs, &base_prices, &shares);
+    let shops = state_shops(world, defs, &access_by_state, n_goods, &base_prices, &units);
+    let (stateless_wage_bins, frozen_pop_buy) =
+        split_pop_buy(world, n_goods, &base_prices, &units, &shops);
     let problem = PriceResidual {
-        world,
         defs,
         goods: &goods,
         bases: &bases,
@@ -98,8 +93,9 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
         upper: vec![1.0 + price_range; n],
         frozen_buy,
         frozen_sell,
+        units,
         shops,
-        stateless_wage_idxs,
+        stateless_wage_bins,
         frozen_pop_buy,
     };
 
@@ -259,6 +255,8 @@ fn detail_rows(
         .filter_map(|good| Some((defs.index_of(&good.id)?, good)))
         .collect::<BTreeMap<_, _>>();
     let frozen_sell = world.frozen_sell.aligned(defs.goods_order.len());
+    let shares = NeedShares::from_sell(defs, &sell_orders);
+    let units = UnitBaskets::from_shares(defs, &base_prices, &shares);
     let mut state_buy = BTreeMap::<(u32, GoodIdx), f64>::new();
     let mut state_sell = BTreeMap::<(u32, GoodIdx), f64>::new();
 
@@ -267,12 +265,12 @@ fn detail_rows(
             .and_then(|snap| snap.pop_buy_by_state.get(&state.id))
             .cloned()
             .unwrap_or_else(|| {
-                let pops = world
+                let pops: Vec<_> = world
                     .pops
                     .iter()
                     .filter(|pop| pop.state == Some(state.id))
                     .cloned()
-                    .collect::<Vec<_>>();
+                    .collect();
                 consumption(&pops, &prices, &base_prices, defs, &frozen_sell)
             });
         for (good, quantity) in pop_buy.iter_indexed() {
@@ -383,8 +381,15 @@ fn detail_rows(
             infrastructure_usage: state.infrastructure_usage,
         })
         .collect();
-    let state_pops =
-        collapsed_state_pops(world, defs, &prices, &base_prices, &sell_orders, snapshot);
+    let state_pops = collapsed_state_pops(
+        world,
+        defs,
+        &prices,
+        &base_prices,
+        &shares,
+        &units,
+        snapshot,
+    );
     let state_needs = aggregate_state_needs(&state_pops);
     let state_qualifications = state_qualification_rows(world, defs, &employees_by_building);
     DetailRows {
@@ -433,96 +438,141 @@ fn building_employees(world: &World, defs: &GameDefs) -> BTreeMap<u32, Vec<Profe
         .collect()
 }
 
-type PopGroupKey = (u32, Option<String>, Option<String>, Option<i32>);
+type GroupKey<'a> = (u32, Option<&'a str>, Option<&'a str>, Option<i32>);
+
+struct PopGroup {
+    id: u32,
+    state: u32,
+    demand_size: Option<f64>,
+    workforce: Option<f64>,
+    dependents: Option<f64>,
+    wealth: Option<i32>,
+    wages: Option<f64>,
+    culture: Option<String>,
+    profession: Option<String>,
+    literate: Option<f64>,
+    workplace_id: Option<u32>,
+    qualifications: BTreeMap<String, f64>,
+}
+
+impl PopGroup {
+    fn from_state_pop(pop: &WorldStatePop, state: u32) -> Self {
+        Self {
+            id: pop.id,
+            state,
+            demand_size: pop.demand_size,
+            workforce: pop.workforce,
+            dependents: pop.dependents,
+            wealth: pop.wealth,
+            wages: pop.wages,
+            culture: pop.culture.clone(),
+            profession: pop.profession.clone(),
+            literate: pop.literate,
+            workplace_id: pop.workplace_id,
+            qualifications: pop.qualifications.clone(),
+        }
+    }
+
+    fn from_world_pop(id: u32, pop: &WorldPop, state: u32) -> Self {
+        Self {
+            id,
+            state,
+            demand_size: Some(pop.size),
+            workforce: Some(pop.size),
+            dependents: Some(0.0),
+            wealth: Some(i32::from(pop.wealth)),
+            wages: Some(pop.wages),
+            culture: pop.culture.clone(),
+            profession: pop.profession.clone(),
+            literate: None,
+            workplace_id: None,
+            qualifications: BTreeMap::new(),
+        }
+    }
+
+    fn add_state_pop(&mut self, pop: &WorldStatePop) {
+        self.demand_size = Some(self.demand_size.unwrap_or(0.0) + pop.demand_size.unwrap_or(0.0));
+        self.workforce = Some(self.workforce.unwrap_or(0.0) + pop.workforce.unwrap_or(0.0));
+        self.dependents = Some(self.dependents.unwrap_or(0.0) + pop.dependents.unwrap_or(0.0));
+        self.literate = match (self.literate, pop.literate) {
+            (Some(left), Some(right)) => Some(left + right),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            (None, None) => None,
+        };
+        if self.workplace_id != pop.workplace_id {
+            self.workplace_id = None;
+        }
+        for (profession, count) in &pop.qualifications {
+            *self.qualifications.entry(profession.clone()).or_default() += *count;
+        }
+    }
+
+    fn add_world_pop(&mut self, pop: &WorldPop) {
+        self.demand_size = Some(self.demand_size.unwrap_or(0.0) + pop.size);
+        self.workforce = Some(self.workforce.unwrap_or(0.0) + pop.size);
+        if self.workplace_id.is_some() {
+            self.workplace_id = None;
+        }
+    }
+}
 
 fn collapsed_state_pops(
     world: &World,
     defs: &GameDefs,
     prices: &GoodsVec,
     base_prices: &GoodsVec,
-    sell_orders: &GoodsVec,
+    shares: &NeedShares,
+    units: &UnitBaskets,
     snapshot: Option<&ShopSnapshot>,
 ) -> Vec<StatePop> {
-    let source: Vec<WorldStatePop> = if world.state_pops.is_empty() {
-        world
-            .pops
-            .iter()
-            .enumerate()
-            .filter_map(|(index, pop)| {
-                Some(WorldStatePop {
-                    id: u32::try_from(index).ok()?,
-                    state: pop.state,
-                    demand_size: Some(pop.size),
-                    workforce: Some(pop.size),
-                    dependents: Some(0.0),
-                    wealth: Some(i32::from(pop.wealth)),
-                    wages: Some(pop.wages),
-                    culture: pop.culture.clone(),
-                    profession: pop.profession.clone(),
-                    literate: None,
-                    workplace_id: None,
-                    qualifications: BTreeMap::new(),
-                })
-            })
-            .collect()
+    let mut groups: BTreeMap<GroupKey<'_>, PopGroup> = BTreeMap::new();
+    if world.state_pops.is_empty() {
+        for (index, pop) in world.pops.iter().enumerate() {
+            let Some(state_id) = pop.state else {
+                continue;
+            };
+            let key = (
+                state_id,
+                pop.profession.as_deref(),
+                pop.culture.as_deref(),
+                Some(i32::from(pop.wealth)),
+            );
+            groups
+                .entry(key)
+                .and_modify(|existing| existing.add_world_pop(pop))
+                .or_insert_with(|| {
+                    PopGroup::from_world_pop(u32::try_from(index).unwrap_or(0), pop, state_id)
+                });
+        }
     } else {
-        world.state_pops.clone()
-    };
-
-    let mut groups: BTreeMap<PopGroupKey, WorldStatePop> = BTreeMap::new();
-    for pop in source {
-        let Some(state_id) = pop.state else {
-            continue;
-        };
-        let key = (
-            state_id,
-            pop.profession.clone(),
-            pop.culture.clone(),
-            pop.wealth,
-        );
-        groups
-            .entry(key)
-            .and_modify(|existing| {
-                existing.demand_size =
-                    Some(existing.demand_size.unwrap_or(0.0) + pop.demand_size.unwrap_or(0.0));
-                existing.workforce =
-                    Some(existing.workforce.unwrap_or(0.0) + pop.workforce.unwrap_or(0.0));
-                existing.dependents =
-                    Some(existing.dependents.unwrap_or(0.0) + pop.dependents.unwrap_or(0.0));
-                existing.literate = match (existing.literate, pop.literate) {
-                    (Some(left), Some(right)) => Some(left + right),
-                    (Some(left), None) => Some(left),
-                    (None, Some(right)) => Some(right),
-                    (None, None) => None,
-                };
-                if existing.workplace_id != pop.workplace_id {
-                    existing.workplace_id = None;
-                }
-                for (profession, count) in &pop.qualifications {
-                    *existing
-                        .qualifications
-                        .entry(profession.clone())
-                        .or_default() += *count;
-                }
-            })
-            .or_insert(pop);
+        for pop in &world.state_pops {
+            let Some(state_id) = pop.state else {
+                continue;
+            };
+            let key = (
+                state_id,
+                pop.profession.as_deref(),
+                pop.culture.as_deref(),
+                pop.wealth,
+            );
+            groups
+                .entry(key)
+                .and_modify(|existing| existing.add_state_pop(pop))
+                .or_insert_with(|| PopGroup::from_state_pop(pop, state_id));
+        }
     }
 
     groups
         .into_values()
         .map(|pop| {
-            let needs = pop_needs_for(
-                &pop,
-                defs,
-                pop.state
-                    .and_then(|state| snapshot.and_then(|snap| snap.local_by_state.get(&state)))
-                    .unwrap_or(prices),
-                base_prices,
-                sell_orders,
-            );
+            let local = snapshot
+                .and_then(|snap| snap.local_by_state.get(&pop.state))
+                .unwrap_or(prices);
+            let needs = pop_needs_for(&pop, defs, local, base_prices, shares, units);
             StatePop {
                 id: Some(pop.id),
-                state_id: pop.state.unwrap_or(0),
+                state_id: pop.state,
                 profession_id: pop.profession.clone(),
                 profession_name: pop
                     .profession
@@ -549,11 +599,12 @@ fn collapsed_state_pops(
 }
 
 fn pop_needs_for(
-    pop: &WorldStatePop,
+    pop: &PopGroup,
     defs: &GameDefs,
     prices: &GoodsVec,
     base_prices: &GoodsVec,
-    sell_orders: &GoodsVec,
+    shares: &NeedShares,
+    units: &UnitBaskets,
 ) -> Vec<PopNeedBasket> {
     let Some(size) = pop.demand_size.filter(|size| *size > 0.0) else {
         return Vec::new();
@@ -565,14 +616,14 @@ fn pop_needs_for(
         return Vec::new();
     };
     let world_pop = WorldPop {
-        state: pop.state,
+        state: Some(pop.state),
         size,
         wealth,
         wages: pop.wages.filter(|wages| *wages > 0.0).unwrap_or(0.0),
-        culture: pop.culture.clone(),
-        profession: pop.profession.clone(),
+        culture: None,
+        profession: None,
     };
-    pop_need_baskets(&world_pop, prices, base_prices, defs, sell_orders)
+    pop_need_baskets(&world_pop, prices, base_prices, defs, shares, units)
         .into_iter()
         .filter_map(|basket| {
             let need_id = defs.need_by_index(basket.need_idx)?.id.clone();
@@ -860,7 +911,7 @@ struct StateShop {
     frozen_buy: GoodsVec,
     frozen_sell: GoodsVec,
     frozen_pop_buy: GoodsVec,
-    wage_idxs: Vec<usize>,
+    wage_bins: Vec<WealthBin>,
 }
 
 #[derive(Clone, Default)]
@@ -876,7 +927,7 @@ fn state_shops(
     access_by_state: &BTreeMap<u32, f64>,
     n: usize,
     base_prices: &GoodsVec,
-    world_sell: &GoodsVec,
+    units: &UnitBaskets,
 ) -> Vec<StateShop> {
     let mut ids: BTreeMap<u32, f64> = access_by_state.clone();
     for state in &world.states {
@@ -918,21 +969,21 @@ fn state_shops(
                 }
             }
             let mut frozen_pop_buy = GoodsVec::zeros(n);
-            let mut wage_idxs = Vec::new();
-            for (i, pop) in world.pops.iter().enumerate() {
+            let mut wage_pops = Vec::new();
+            for pop in &world.pops {
                 if pop.state != Some(id) {
                     continue;
                 }
                 if pop.wages > 0.0 {
-                    wage_idxs.push(i);
+                    wage_pops.push(pop);
                 } else {
-                    add_pop_consumption(
+                    add_pop_from_units(
                         &mut frozen_pop_buy,
                         pop,
                         base_prices,
                         base_prices,
-                        defs,
-                        world_sell,
+                        units,
+                        1.0,
                     );
                 }
             }
@@ -943,7 +994,7 @@ fn state_shops(
                 frozen_buy,
                 frozen_sell,
                 frozen_pop_buy,
-                wage_idxs,
+                wage_bins: wage_bins_from_pops(wage_pops),
             }
         })
         .collect()
@@ -953,27 +1004,26 @@ fn state_shops(
 /// access-scaled frozen pop buy (stateless + every state's frozen pops).
 fn split_pop_buy(
     world: &World,
-    defs: &GameDefs,
+    n: usize,
     base_prices: &GoodsVec,
-    world_sell: &GoodsVec,
+    units: &UnitBaskets,
     shops: &[StateShop],
-) -> (Vec<usize>, GoodsVec) {
-    let mut stateless_wage_idxs = Vec::new();
-    let mut frozen_pop_buy = GoodsVec::zeros(defs.goods_order.len());
-    for (i, pop) in world.pops.iter().enumerate() {
+) -> (Vec<WealthBin>, GoodsVec) {
+    let mut frozen_pop_buy = GoodsVec::zeros(n);
+    let mut stateless = Vec::new();
+    for pop in &world.pops {
         if pop.state.is_some() {
             continue;
         }
         if pop.wages > 0.0 {
-            stateless_wage_idxs.push(i);
+            stateless.push(pop);
         } else {
-            add_pop_consumption_scaled(
+            add_pop_from_units(
                 &mut frozen_pop_buy,
                 pop,
                 base_prices,
                 base_prices,
-                defs,
-                world_sell,
+                units,
                 1.0,
             );
         }
@@ -983,12 +1033,11 @@ fn split_pop_buy(
             frozen_pop_buy.add(good, quantity * shop.access);
         }
     }
-    (stateless_wage_idxs, frozen_pop_buy)
+    (wage_bins_from_pops(stateless), frozen_pop_buy)
 }
 
 #[derive(Clone)]
 struct PriceResidual<'a> {
-    world: &'a World,
     defs: &'a GameDefs,
     goods: &'a [GoodIdx],
     bases: &'a [f64],
@@ -998,8 +1047,9 @@ struct PriceResidual<'a> {
     upper: Vec<f64>,
     frozen_buy: GoodsVec,
     frozen_sell: GoodsVec,
+    units: UnitBaskets,
     shops: Vec<StateShop>,
-    stateless_wage_idxs: Vec<usize>,
+    stateless_wage_bins: Vec<WealthBin>,
     frozen_pop_buy: GoodsVec,
 }
 
@@ -1016,19 +1066,17 @@ impl PriceResidual<'_> {
         let n = self.base_prices.len();
         let mut local = market.clone();
         let mut pop_buy = shop.frozen_pop_buy.clone();
+        let mut next = GoodsVec::zeros(n);
         for _ in 0..LOCAL_ITERS {
-            pop_buy = shop.frozen_pop_buy.clone();
-            for &i in &shop.wage_idxs {
-                add_pop_consumption(
-                    &mut pop_buy,
-                    &self.world.pops[i],
-                    &local,
-                    &self.base_prices,
-                    self.defs,
-                    &self.frozen_sell,
-                );
-            }
-            let mut next = GoodsVec::zeros(n);
+            pop_buy.copy_from(&shop.frozen_pop_buy);
+            add_wage_bins(
+                &mut pop_buy,
+                &shop.wage_bins,
+                &local,
+                &self.base_prices,
+                &self.units,
+                1.0,
+            );
             let mut delta = 0.0_f64;
             for i in 0..n {
                 let good = GoodIdx::from_usize(i);
@@ -1039,7 +1087,7 @@ impl PriceResidual<'_> {
                 delta = delta.max((price - local[good]).abs());
                 next[good] = price;
             }
-            local = next;
+            local.copy_from(&next);
             if delta < LOCAL_EPS {
                 break;
             }
@@ -1049,19 +1097,16 @@ impl PriceResidual<'_> {
 
     fn world_pop_buy_at(&self, market: &GoodsVec) -> GoodsVec {
         let mut buy = self.frozen_pop_buy.clone();
-        for &i in &self.stateless_wage_idxs {
-            add_pop_consumption_scaled(
-                &mut buy,
-                &self.world.pops[i],
-                market,
-                &self.base_prices,
-                self.defs,
-                &self.frozen_sell,
-                1.0,
-            );
-        }
+        add_wage_bins(
+            &mut buy,
+            &self.stateless_wage_bins,
+            market,
+            &self.base_prices,
+            &self.units,
+            1.0,
+        );
         for shop in &self.shops {
-            if shop.wage_idxs.is_empty() {
+            if shop.wage_bins.is_empty() {
                 continue;
             }
             let (_, pop_buy) = self.settle_state(shop, market);
@@ -1074,17 +1119,14 @@ impl PriceResidual<'_> {
 
     fn snapshot_at(&self, market: &GoodsVec) -> ShopSnapshot {
         let mut world_pop_buy = self.frozen_pop_buy.clone();
-        for &i in &self.stateless_wage_idxs {
-            add_pop_consumption_scaled(
-                &mut world_pop_buy,
-                &self.world.pops[i],
-                market,
-                &self.base_prices,
-                self.defs,
-                &self.frozen_sell,
-                1.0,
-            );
-        }
+        add_wage_bins(
+            &mut world_pop_buy,
+            &self.stateless_wage_bins,
+            market,
+            &self.base_prices,
+            &self.units,
+            1.0,
+        );
         let mut local_by_state = BTreeMap::new();
         let mut pop_buy_by_state = BTreeMap::new();
         for shop in &self.shops {

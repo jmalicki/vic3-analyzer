@@ -715,7 +715,7 @@ fn scale_to_flag(image: &RgbaImage) -> RgbaImage {
 
 fn decode_texture(bytes: &[u8]) -> Option<RgbaImage> {
     if bytes.starts_with(b"DDS ") {
-        let decoded = icons::coa_dds_to_rgba(bytes)?;
+        let decoded = icons::coa_dds_to_rgba_covering(bytes, FLAG_W, FLAG_H)?;
         return Some(RgbaImage {
             w: decoded.width,
             h: decoded.height,
@@ -900,6 +900,7 @@ fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
     let mut encoder = png::Encoder::new(&mut out, width, height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
+    encoder.set_compression(png::Compression::Fast);
     let mut writer = encoder.write_header().ok()?;
     writer.write_image_data(rgba).ok()?;
     drop(writer);
