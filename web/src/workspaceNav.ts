@@ -43,3 +43,13 @@ export function hashForView(view: WorkspaceView, militaryTab?: MilitaryTab): str
   if (view === 'military' && militaryTab) return `#/military/${militaryTab}`
   return `#/${view}`
 }
+
+export function hashForState(id: number): string {
+  return `#/states/${id}`
+}
+
+export function parseStateId(hash = window.location.hash): number | undefined {
+  const path = hash.replace(/^#\/?/, '').split('/')
+  if (path[0] !== 'states' || !path[1] || !Number.isFinite(Number(path[1]))) return undefined
+  return Number(path[1])
+}

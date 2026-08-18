@@ -24,17 +24,24 @@ type SortState<K extends string> = { key: K; direction: Direction }
 type View =
   | { kind: 'goods' }
   | { kind: 'good'; id: string }
-  | { kind: 'state'; id: number }
+  | { kind: 'state'; id: number; from: 'prices' | 'states' }
   | { kind: 'building'; id: number }
-type FilterMode = 'our_market' | 'domestic' | 'all'
+  | { kind: 'states' }
+export type FilterMode = 'our_market' | 'domestic' | 'all'
 type StateTab = 'overview' | 'buildings' | 'population' | 'prices' | 'information'
 
-function currentView(): View {
+export function currentView(): View {
   const path = window.location.hash.replace(/^#\/?/, '').split('/')
+  if (path[0] === 'states') {
+    if (path[1] && Number.isFinite(Number(path[1]))) {
+      return { kind: 'state', id: Number(path[1]), from: 'states' }
+    }
+    return { kind: 'states' }
+  }
   if (path[0] !== 'prices') return { kind: 'goods' }
   if (path[1] === 'good' && path[2]) return { kind: 'good', id: decodeURIComponent(path[2]) }
   if (path[1] === 'state' && Number.isFinite(Number(path[2]))) {
-    return { kind: 'state', id: Number(path[2]) }
+    return { kind: 'state', id: Number(path[2]), from: 'prices' }
   }
   if (path[1] === 'building' && Number.isFinite(Number(path[2]))) {
     return { kind: 'building', id: Number(path[2]) }
@@ -42,7 +49,7 @@ function currentView(): View {
   return { kind: 'goods' }
 }
 
-function displayId(id: string): string {
+export function displayId(id: string): string {
   return id
     .replace(/^STATE_/, '')
     .replace(/^(building|pm)_/, '')
@@ -174,7 +181,7 @@ function percentFromBase(price: number, base: number): number {
   return base > 0 ? (price - base) / base : 0
 }
 
-function sortRows<T, K extends string>(
+export function sortRows<T, K extends string>(
   rows: T[],
   sort: SortState<K>,
   value: (row: T, key: K) => string | number,
@@ -189,7 +196,7 @@ function sortRows<T, K extends string>(
   })
 }
 
-function SortButton<K extends string>({
+export function SortButton<K extends string>({
   label,
   sortKey,
   sort,
@@ -213,7 +220,7 @@ function SortButton<K extends string>({
   )
 }
 
-function useSort<K extends string>(initial: K, direction: Direction = 'asc') {
+export function useSort<K extends string>(initial: K, direction: Direction = 'asc') {
   const [sort, setSort] = useState<SortState<K>>({ key: initial, direction })
   const onSort = (key: K) =>
     setSort((current) => ({
@@ -223,7 +230,7 @@ function useSort<K extends string>(initial: K, direction: Direction = 'asc') {
   return [sort, onSort] as const
 }
 
-function ScopeFilter({
+export function ScopeFilter({
   mode,
   onChange,
 }: {
@@ -343,7 +350,7 @@ function GoodsTable({ goods, icons }: { goods: GoodPrice[]; icons: Icons }) {
 type StateSort = 'name' | 'price' | 'delta' | 'buy' | 'sell'
 type StateRow = StateGood & { state?: StateInfo }
 
-function CountryFlag({
+export function CountryFlag({
   countryId,
   playerCountryId,
   countries,
@@ -530,7 +537,10 @@ function StateBuildings({
                 return (
                   <article className="state-building-card empty-slot" key={`empty-${row.group.id}`}>
                     <div>
-                      <strong>{row.type.name || displayId(row.type.id)}</strong>
+                      <strong>
+                        <GameIcon kind="building" id={row.type.id} icons={icons} />
+                        {row.type.name || displayId(row.type.id)}
+                      </strong>
                       <span>{row.group.name || displayId(row.group.id)}</span>
                     </div>
                     <b>0 levels · constructable placeholder</b>
@@ -547,6 +557,7 @@ function StateBuildings({
                   <div className="state-building-title">
                     <div>
                       <a className="building-link" href={`#/prices/building/${building.id}`}>
+                        <GameIcon kind="building" id={building.type_id} icons={icons} />
                         <strong>{name}</strong>
                       </a>
                       <span>{group?.name || (group ? displayId(group.id) : 'Other')}</span>
@@ -662,6 +673,9 @@ function StatePops({
                         aria-expanded={open === index}
                         onClick={() => setOpen(open === index ? null : index)}
                       >
+                        {pop.profession_id ? (
+                          <GameIcon kind="pop" id={pop.profession_id} icons={icons} />
+                        ) : null}
                         {pop.profession_name || displayId(pop.profession_id || 'unknown')}
                       </button>
                     </th>
@@ -888,6 +902,135 @@ function StateInformation({
   )
 }
 
+export function StatePage({
+  result,
+  icons = {},
+  playerCountryId,
+  stateId,
+  source = 'prices',
+}: {
+  result: PricesResult
+  icons?: DefsIcons
+  playerCountryId?: number
+  stateId: number
+  source?: 'prices' | 'states'
+}) {
+  const [stateTab, setStateTab] = useState<StateTab>('overview')
+  useEffect(() => {
+    setStateTab('overview')
+  }, [stateId])
+
+  const states = result.states ?? []
+  const stateGoods = result.state_goods ?? []
+  const buildings = result.buildings ?? []
+  const buildingTypes = result.building_types ?? []
+  const buildingGroups = result.building_groups ?? []
+  const statePops = result.state_pops ?? []
+  const stateQualifications = result.state_qualifications ?? []
+  const stateNeeds = result.state_needs ?? []
+  const countries = result.countries ?? []
+  const state = states.find((row) => row.id === stateId)
+  const rows = buildings.filter((building) => building.state_id === stateId)
+  const pops = statePops.filter((pop) => pop.state_id === stateId)
+  const qualifications = stateQualifications.filter((row) => row.state_id === stateId)
+  const needs = stateNeeds.filter((row) => row.state_id === stateId)
+  const localGoods = stateGoods.filter((row) => row.state_id === stateId)
+  const name = state?.region_name || displayId(state?.region_id || `State ${stateId}`)
+  const owner = countries.find((country) => country.id === state?.country_id)
+  const tabs: Array<{ id: StateTab; label: string }> = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'buildings', label: 'Buildings' },
+    { id: 'population', label: 'Population' },
+    { id: 'prices', label: 'Local Prices' },
+    { id: 'information', label: 'Information' },
+  ]
+  const parentHref = source === 'states' ? '#/states' : '#/prices'
+  const parentLabel = source === 'states' ? 'States' : 'Goods'
+  return (
+    <section aria-labelledby="state-heading" className="state-panel">
+      <nav className="breadcrumbs" aria-label={source === 'states' ? 'State detail' : 'Price detail'}>
+        <a href={parentHref}>{parentLabel}</a><span>›</span><span>{name}</span>
+      </nav>
+      <div className="state-header">
+        <div className="state-owner">
+          <CountryFlag
+            countryId={state?.country_id}
+            playerCountryId={playerCountryId}
+            countries={countries}
+            showPlayer
+          />
+          <div>
+            <h2 id="state-heading">{name}</h2>
+            <span>{owner?.name || owner?.tag || 'Owner unavailable'}</span>
+          </div>
+        </div>
+      </div>
+      <div className="state-tabs" role="tablist" aria-label="State details">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={stateTab === tab.id}
+            onClick={() => setStateTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      {stateTab === 'overview' && (
+        <div role="tabpanel" aria-label="Overview">
+          <StateOverview
+            pops={pops}
+            buildings={rows}
+            qualifications={qualifications}
+            stateNeeds={needs}
+            goods={result.goods}
+            icons={icons}
+          />
+        </div>
+      )}
+      {stateTab === 'buildings' && (
+        <div role="tabpanel" aria-label="Buildings">
+          <p className="model-info">
+            Profit and goods flows are estimates at whole-save synthetic prices. Empty rows show
+            saved rural capacity or broadly available defaults, not full construction eligibility.
+          </p>
+          <StateBuildings
+            state={state}
+            buildings={rows}
+            buildingTypes={buildingTypes}
+            buildingGroups={buildingGroups}
+            goods={result.goods}
+            icons={icons}
+          />
+        </div>
+      )}
+      {stateTab === 'population' && (
+        <div role="tabpanel" aria-label="Population">
+          <StatePops
+            pops={pops}
+            qualifications={qualifications}
+            stateNeeds={needs}
+            goods={result.goods}
+            icons={icons}
+          />
+        </div>
+      )}
+      {stateTab === 'prices' && (
+        <div role="tabpanel" aria-label="Local Prices">
+          <StateLocalPrices rows={localGoods} goods={result.goods} icons={icons} />
+        </div>
+      )}
+      {stateTab === 'information' && (
+        <div role="tabpanel" aria-label="Information">
+          <StateInformation state={state} owner={owner} />
+        </div>
+      )}
+    </section>
+  )
+}
+
 function EmployeesTable({ employees }: { employees: ProfessionCount[] }) {
   if (!employees.length) return <p>No workplace pops linked to this building.</p>
   return (
@@ -958,13 +1101,8 @@ export function PriceExplorer({
 }) {
   const [view, setView] = useState<View>(() => currentView())
   const [filterMode, setFilterMode] = useState<FilterMode>('our_market')
-  const [stateTab, setStateTab] = useState<StateTab>('overview')
   useEffect(() => {
-    const update = () => {
-      const next = currentView()
-      setView(next)
-      if (next.kind === 'state') setStateTab('overview')
-    }
+    const update = () => setView(currentView())
     window.addEventListener('hashchange', update)
     return () => window.removeEventListener('hashchange', update)
   }, [])
@@ -973,10 +1111,6 @@ export function PriceExplorer({
   const stateGoods = result.state_goods ?? []
   const buildings = result.buildings ?? []
   const buildingTypes = result.building_types ?? []
-  const buildingGroups = result.building_groups ?? []
-  const statePops = result.state_pops ?? []
-  const stateQualifications = result.state_qualifications ?? []
-  const stateNeeds = result.state_needs ?? []
   const countries = result.countries ?? []
   const missingPlayerMarket = filterMode === 'our_market' && playerMarketId == null
   const effectiveFilterMode: FilterMode = missingPlayerMarket ? 'all' : filterMode
@@ -1067,105 +1201,18 @@ export function PriceExplorer({
   }
 
   if (view.kind === 'state') {
-    const state = states.find((row) => row.id === view.id)
-    const rows = buildings.filter((building) => building.state_id === view.id)
-    const pops = statePops.filter((pop) => pop.state_id === view.id)
-    const qualifications = stateQualifications.filter((row) => row.state_id === view.id)
-    const needs = stateNeeds.filter((row) => row.state_id === view.id)
-    const localGoods = stateGoods.filter((row) => row.state_id === view.id)
-    const name = state?.region_name || displayId(state?.region_id || `State ${view.id}`)
-    const owner = countries.find((country) => country.id === state?.country_id)
-    const tabs: Array<{ id: StateTab; label: string }> = [
-      { id: 'overview', label: 'Overview' },
-      { id: 'buildings', label: 'Buildings' },
-      { id: 'population', label: 'Population' },
-      { id: 'prices', label: 'Local Prices' },
-      { id: 'information', label: 'Information' },
-    ]
     return (
-      <section aria-labelledby="state-heading" className="state-panel">
-        <nav className="breadcrumbs" aria-label="Price detail">
-          <a href="#/prices">Goods</a><span>›</span><span>{name}</span>
-        </nav>
-        <div className="state-header">
-          <div className="state-owner">
-            <CountryFlag
-              countryId={state?.country_id}
-              playerCountryId={playerCountryId}
-              countries={countries}
-              showPlayer
-            />
-            <div>
-              <h2 id="state-heading">{name}</h2>
-              <span>{owner?.name || owner?.tag || 'Owner unavailable'}</span>
-            </div>
-          </div>
-        </div>
-        <div className="state-tabs" role="tablist" aria-label="State details">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={stateTab === tab.id}
-              onClick={() => setStateTab(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        {stateTab === 'overview' && (
-          <div role="tabpanel" aria-label="Overview">
-            <StateOverview
-              pops={pops}
-              buildings={rows}
-              qualifications={qualifications}
-              stateNeeds={needs}
-              goods={result.goods}
-              icons={icons}
-            />
-          </div>
-        )}
-        {stateTab === 'buildings' && (
-          <div role="tabpanel" aria-label="Buildings">
-            <p className="model-info">
-              Profit and goods flows are estimates at whole-save synthetic prices. Empty rows show
-              saved rural capacity or broadly available defaults, not full construction eligibility.
-            </p>
-            <StateBuildings
-              state={state}
-              buildings={rows}
-              buildingTypes={buildingTypes}
-              buildingGroups={buildingGroups}
-              goods={result.goods}
-              icons={icons}
-            />
-          </div>
-        )}
-        {stateTab === 'population' && (
-          <div role="tabpanel" aria-label="Population">
-            <StatePops
-              pops={pops}
-              qualifications={qualifications}
-              stateNeeds={needs}
-              goods={result.goods}
-              icons={icons}
-            />
-          </div>
-        )}
-        {stateTab === 'prices' && (
-          <div role="tabpanel" aria-label="Local Prices">
-            <StateLocalPrices rows={localGoods} goods={result.goods} icons={icons} />
-          </div>
-        )}
-        {stateTab === 'information' && (
-          <div role="tabpanel" aria-label="Information">
-            <StateInformation state={state} owner={owner} />
-          </div>
-        )}
-      </section>
+      <StatePage
+        result={result}
+        icons={icons}
+        playerCountryId={playerCountryId}
+        stateId={view.id}
+        source={view.from}
+      />
     )
   }
+
+  if (view.kind === 'states') return null
 
   return (
     <section aria-labelledby="prices-heading">

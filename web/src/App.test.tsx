@@ -11,6 +11,16 @@ import type { WasmApi } from './wasm'
 /** Test-only blobs; silly names so they never look like a real install export. */
 const result = JSON.stringify({
   goods: [{ id: 'iron', base: 40, price: 43.5, buy: 120, sell: 100 }],
+  states: [
+    {
+      id: 1,
+      region_id: 'STATE_ILE_DE_FRANCE',
+      region_name: 'Ile-de-France',
+      country_id: 16777216,
+      market_id: 1,
+    },
+  ],
+  state_pops: [{ state_id: 1, workforce: 8000, dependents: 4000, wealth: 12 }],
   residual: 0.00001,
   status: 'converged',
   limitations: ['Employment and production methods stay frozen.'],
@@ -634,7 +644,7 @@ describe('prices UI', () => {
 
     await user.click(screen.getByRole('button', { name: 'States' }))
     expect(screen.getByRole('heading', { name: 'States' })).toBeInTheDocument()
-    expect(screen.getByText('State list arrives in a follow-up.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ile-de-France' })).toBeInTheDocument()
     expect(window.location.hash).toBe('#/states')
 
     await user.click(screen.getByRole('button', { name: 'Military' }))
@@ -642,6 +652,15 @@ describe('prices UI', () => {
     expect(screen.getByRole('tab', { name: 'Army' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Navy' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Mobilization' })).toBeInTheDocument()
+  })
+
+  it('shows a state name on the States pane after a save loads', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+
+    await user.click(screen.getByRole('button', { name: 'States' }))
+    expect(await screen.findByRole('link', { name: 'Ile-de-France' })).toBeInTheDocument()
   })
 
   it('opens a known pane from the location hash', async () => {
