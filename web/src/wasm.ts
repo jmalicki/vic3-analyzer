@@ -43,6 +43,7 @@ export interface WasmApi {
   loaded_gaps(goal: string): string | Promise<string>
   loaded_plan(planOptsJson: string): string | Promise<string>
   loaded_alerts(): string | Promise<string>
+  loaded_production_methods(): string | Promise<string>
   prices(
     save: Uint8Array,
     tokens: Uint8Array | undefined,

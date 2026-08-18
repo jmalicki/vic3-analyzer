@@ -1,0 +1,155 @@
+import { cleanup, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { BuildingsPane } from './BuildingsPane'
+import type { PricesResult, ProductionMethodDef } from './types'
+
+const result: PricesResult = {
+  goods: [
+    { id: 'iron', name: 'Iron', base: 40, price: 50, buy: 2, sell: 1 },
+    { id: 'grain', name: 'Grain', base: 20, price: 18, buy: 4, sell: 8 },
+  ],
+  states: [
+    { id: 1, region_id: 'STATE_ALPACA', region_name: 'Alpaca' },
+    { id: 2, region_id: 'STATE_ZEBRA', region_name: 'Zebra' },
+  ],
+  buildings: [
+    {
+      id: 7,
+      state_id: 1,
+      type_id: 'building_silly_hammer_factory',
+      level: 3,
+      staffing: 2.4,
+      production_method_ids: ['pm_goofy_hammers'],
+      inputs: [{ good_id: 'iron', quantity: 2, value: 80 }],
+      outputs: [{ good_id: 'zany_tools', quantity: 3, value: 150 }],
+      revenue: 150,
+      cost: 80,
+      profit: 70,
+      short_inputs: ['iron'],
+    },
+    {
+      id: 8,
+      state_id: 2,
+      type_id: 'building_silly_hammer_factory',
+      level: 1,
+      staffing: 1,
+      production_method_ids: ['pm_goofy_hammers'],
+      inputs: [],
+      outputs: [],
+      revenue: 10,
+      cost: 5,
+      profit: 5,
+      short_inputs: [],
+    },
+    {
+      id: 9,
+      state_id: 1,
+      type_id: 'building_rye_farm',
+      level: 10,
+      staffing: 8,
+      production_method_ids: ['pm_simple_farming'],
+      inputs: [],
+      outputs: [{ good_id: 'grain', quantity: 20, value: 200 }],
+      revenue: 200,
+      cost: 20,
+      profit: 180,
+      short_inputs: [],
+    },
+  ],
+  building_types: [
+    { id: 'building_silly_hammer_factory', name: 'Silly Hammer Factory' },
+    { id: 'building_rye_farm', name: 'Rye Farms' },
+  ],
+  residual: 0,
+  status: 'converged',
+  limitations: [],
+}
+
+const methods: ProductionMethodDef[] = [
+  { id: 'pm_goofy_hammers', inputs: [{ good: 'iron', qty: 2 }], outputs: [{ good: 'zany_tools', qty: 3 }] },
+  { id: 'pm_simple_farming', inputs: [], outputs: [{ good: 'grain', qty: 20 }] },
+]
+
+describe('BuildingsPane', () => {
+  beforeEach(() => {
+    window.location.hash = '#/buildings'
+  })
+  afterEach(cleanup)
+
+  it('groups buildings by type and sorts by name, profit, and shortage', async () => {
+    const user = userEvent.setup()
+    render(<BuildingsPane result={result} />)
+
+    const names = () =>
+      [...document.querySelectorAll('.buildings-table > tbody > tr > th')].map((cell) =>
+        cell.textContent?.replace(/^[▶▼]\s*/, '').trim(),
+      )
+
+    expect(screen.getByRole('heading', { name: 'Buildings' })).toBeInTheDocument()
+    expect(names()[0]).toContain('Rye Farms')
+    expect(names()[1]).toContain('Silly Hammer Factory')
+
+    await user.click(screen.getByRole('button', { name: 'Sort by Profit' }))
+    expect(names()[0]).toContain('Silly Hammer Factory')
+    expect(names()[1]).toContain('Rye Farms')
+
+    await user.click(screen.getByRole('button', { name: 'Sort by Shortage' }))
+    expect(names()[0]).toContain('Rye Farms')
+    expect(names()[1]).toContain('Silly Hammer Factory')
+  })
+
+  it('expands a type to instance rows with production methods', async () => {
+    const user = userEvent.setup()
+    render(<BuildingsPane result={result} />)
+
+    await user.click(screen.getByRole('button', { name: 'Expand Silly Hammer Factory' }))
+    expect(screen.getByRole('link', { name: 'Alpaca' })).toHaveAttribute('href', '#/buildings/building/7')
+    expect(screen.getByRole('link', { name: 'Zebra' })).toHaveAttribute('href', '#/buildings/building/8')
+    expect(screen.getAllByText('Goofy Hammers').length).toBeGreaterThan(0)
+  })
+
+  it('opens a building page from a deep link', () => {
+    window.location.hash = '#/buildings/building/7'
+    render(<BuildingsPane result={result} />)
+
+    expect(screen.getByRole('heading', { name: 'Silly Hammer Factory' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Buildings' })).toHaveAttribute('href', '#/buildings')
+    expect(screen.getByText('Workforce')).toBeInTheDocument()
+  })
+
+  it('keeps the optimizer disabled', () => {
+    render(<BuildingsPane result={result} />)
+
+    const optimizer = screen.getByRole('button', { name: 'Optimize production methods' })
+    expect(optimizer).toBeDisabled()
+    expect(optimizer).toHaveAttribute('title', 'coming in apply track')
+  })
+
+  it('lists production methods from production_method_ids and previews recipes', async () => {
+    const user = userEvent.setup()
+    render(<BuildingsPane result={result} productionMethods={methods} />)
+
+    await user.click(screen.getByRole('button', { name: 'Expand Silly Hammer Factory' }))
+    const alpaca = screen.getByRole('checkbox', { name: 'Goofy Hammers for Alpaca' })
+    expect(alpaca).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Simple Farming for Alpaca' })).not.toBeChecked()
+    expect(screen.getAllByText('Preview only — apply comes later.').length).toBeGreaterThan(0)
+
+    await user.click(screen.getByRole('checkbox', { name: 'Simple Farming for Alpaca' }))
+    const detail = screen.getByRole('link', { name: 'Alpaca' }).closest('tr')
+    expect(detail).toBeTruthy()
+    expect(within(detail as HTMLElement).getByText(/Grain 20/)).toBeInTheDocument()
+  })
+
+  it('runs extra-level what-if from the type row', async () => {
+    const user = userEvent.setup()
+    const onWhatIf = vi.fn()
+    render(<BuildingsPane result={result} onWhatIf={onWhatIf} />)
+
+    await user.clear(screen.getByRole('spinbutton', { name: 'Extra levels for Rye Farms' }))
+    await user.type(screen.getByRole('spinbutton', { name: 'Extra levels for Rye Farms' }), '3')
+    await user.click(screen.getAllByRole('button', { name: 'Run what-if' })[0])
+    expect(onWhatIf).toHaveBeenCalledWith('building_rye_farm', 3)
+  })
+})

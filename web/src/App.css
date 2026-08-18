@@ -286,6 +286,56 @@ section[aria-labelledby] { margin-top: 1rem; }
 .building-link:hover { text-decoration: underline; }
 .states-table tbody tr { cursor: pointer; }
 .states-table tbody tr:hover { background: #1f2a22; }
+.buildings-table th:first-child {
+  align-items: center;
+  display: flex;
+  gap: .45rem;
+}
+.building-expand {
+  background: transparent;
+  color: inherit;
+  min-width: 1.6rem;
+  padding: .2rem;
+}
+.building-what-if {
+  align-items: end;
+  display: flex;
+  gap: .45rem;
+  justify-content: flex-end;
+}
+.building-what-if label {
+  display: grid;
+  gap: .2rem;
+  font-size: .78rem;
+  text-align: left;
+}
+.building-what-if input { width: 4.5rem; }
+.building-what-if button { padding: .45rem .65rem; }
+.building-instances { margin-top: .5rem; }
+.building-levels { color: #9ba79d; display: block; font-size: .78rem; font-weight: 400; }
+.pm-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem .7rem;
+  list-style: none;
+  margin: 0 0 .5rem;
+  padding: 0;
+}
+.pm-list li, .pm-picker label { align-items: center; display: inline-flex; gap: .3rem; }
+.pm-picker {
+  border: 1px dashed #4e5c50;
+  display: grid;
+  gap: .35rem;
+  margin-top: .5rem;
+  padding: .55rem .7rem;
+}
+.pm-picker legend { padding: 0 .3rem; }
+.pm-picker input[type="checkbox"] { width: auto; }
+.pm-preview-note { color: #9ba79d; font-size: .82rem; margin: .25rem 0 0; }
+.pm-preview { display: grid; gap: .35rem; margin: .35rem 0 0; }
+.pm-preview div { display: grid; gap: .15rem; }
+.pm-preview dt { color: #9ba79d; font-size: .75rem; text-transform: uppercase; }
+.pm-preview dd { margin: 0; }
 .shortage-badges {
   display: inline-flex;
   flex-wrap: wrap;

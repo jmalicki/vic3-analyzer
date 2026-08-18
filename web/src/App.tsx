@@ -11,6 +11,7 @@ import { DefsBuilder } from './DefsBuilder'
 import { clearStoredDefs, loadStoredDefs, storeDefs } from './defsStore'
 import { clearStoredSave, loadStoredSave, persistErrorMessage, storeSave, storeSaveAnalysis } from './saveStore'
 import { AlertsPane } from './AlertsPane'
+import { BuildingsPane } from './BuildingsPane'
 import { MilitaryPane } from './MilitaryPane'
 import { FieldHelp } from './FieldHelp'
 import { GoalBuilder } from './GoalBuilder'
@@ -453,21 +454,25 @@ function App({ wasmApi }: Props) {
     setRecords(await listAnalyses())
   }
 
-  const runWhatIf = async () => {
+  const applyWhatIf = async (opts: Record<string, unknown>) => {
     if (!api || !saveFile || !effectiveDefs) return
     setBusy(true)
     setError(undefined)
     try {
       const [saveBytes, tokenBytes] = await Promise.all([bytes(saveFile), bytes(tokensFile)])
-      const json = await api.loaded_what_if(JSON.stringify(whatIfOpts))
+      const json = await api.loaded_what_if(JSON.stringify(opts))
       const nextResult = JSON.parse(json) as PricesResult
       setResult(nextResult)
-      await archiveResult('what_if', whatIfOpts, nextResult, saveBytes!, tokenBytes)
+      await archiveResult('what_if', opts, nextResult, saveBytes!, tokenBytes)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setBusy(false)
     }
+  }
+
+  const runWhatIf = async () => {
+    await applyWhatIf(whatIfOpts)
   }
 
   const selectView = (view: WorkspaceView) => {
@@ -908,12 +913,15 @@ function App({ wasmApi }: Props) {
       )}
 
       {activeView === 'buildings' && (
-        <section
-          className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
-          aria-labelledby="buildings-heading"
-        >
-          <h2 id="buildings-heading">Buildings</h2>
-        </section>
+        <BuildingsPane
+          result={result}
+          icons={goodIcons}
+          gated={gated}
+          api={api}
+          onWhatIf={(building, extraLevels) => {
+            void applyWhatIf({ building, extra_levels: extraLevels })
+          }}
+        />
       )}
 
       {activeView === 'what-if' && (
