@@ -34,7 +34,8 @@ A deployed build ships no definitions: `npm run build:defs` writes
 a user builds or picks are stored in IndexedDB (`defsStore.ts`) and restored on
 the next visit, labelled as such, with a button to forget them — otherwise a
 reload would quietly leave the app with no definitions at all. The last `.v3`
-save (and optional token map) is kept the same way (`saveStore.ts`).
+save (and optional token map) is kept the same way (`saveStore.ts`), together
+with the last prices solve so a reload can paint the table before wasm reruns.
 
 Analysis tools stay greyed out until definitions are available, and long reads
 report progress: a determinate bar over the selected file count and an

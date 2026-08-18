@@ -9,7 +9,7 @@ import {
 } from './archive'
 import { DefsBuilder } from './DefsBuilder'
 import { clearStoredDefs, loadStoredDefs, storeDefs } from './defsStore'
-import { clearStoredSave, loadStoredSave, storeSave } from './saveStore'
+import { clearStoredSave, loadStoredSave, persistErrorMessage, storeSave, storeSaveAnalysis } from './saveStore'
 import { FieldHelp } from './FieldHelp'
 import { GoalBuilder } from './GoalBuilder'
 import { Modal } from './Modal'
@@ -190,8 +190,8 @@ function App({ wasmApi }: Props) {
   }
 
   const persistSave = (save: File, tokens?: File) => {
-    void storeSave(save, tokens).catch(() => {
-      setError('Save could not be kept in this browser; it lasts until reload.')
+    void storeSave(save, tokens).catch((error: unknown) => {
+      setError(persistErrorMessage(error))
     })
   }
 
@@ -200,6 +200,11 @@ function App({ wasmApi }: Props) {
     setSaveFile(file)
     setTokensFile(file ? tokens ?? undefined : undefined)
     setSaveRestored(false)
+    setResult(undefined)
+    setGapsResult(undefined)
+    setPlanResult(undefined)
+    setSummary(undefined)
+    setAnalysisReady(false)
     if (!file) {
       void clearStoredSave().catch(() => {})
       return
@@ -211,6 +216,10 @@ function App({ wasmApi }: Props) {
   const applyDefsFile = (file?: File) => {
     setDefsFile(file)
     setDefsRestored(false)
+    setResult(undefined)
+    setGapsResult(undefined)
+    setPlanResult(undefined)
+    setAnalysisReady(false)
     void (file ? storeDefs(file) : clearStoredDefs()).catch(() => {
       setError('Definitions could not be saved in this browser; they last until reload.')
     })
@@ -224,6 +233,8 @@ function App({ wasmApi }: Props) {
         setSaveFile(stored.save)
         setTokensFile(stored.tokens)
         setSaveRestored(true)
+        if (stored.summary) setSummary(stored.summary)
+        if (stored.prices) setResult(stored.prices)
       })
       .catch(() => {})
     return () => {
@@ -282,13 +293,10 @@ function App({ wasmApi }: Props) {
 
   useEffect(() => {
     if (!api || !saveFile) {
-      setSummary(undefined)
-      setAnalysisReady(false)
-      if (api) void api.clear_analysis()
+      if (!saveFile && api) void api.clear_analysis()
       return
     }
     let cancelled = false
-    setAnalysisReady(false)
     const inputs = effectiveDefs
       ? Promise.all([bytes(saveFile), bytes(tokensFile), bytes(effectiveDefs)])
       : Promise.all([bytes(saveFile), bytes(tokensFile)])
@@ -302,6 +310,9 @@ function App({ wasmApi }: Props) {
           setSummary(payload.summary)
           setResult(payload.prices)
           setAnalysisReady(true)
+          void storeSaveAnalysis(payload.summary, payload.prices).catch((error: unknown) => {
+            setError(persistErrorMessage(error))
+          })
         } else {
           const [saveBytes, tokenBytes] = loaded
           const json = await api.parse_save(saveBytes!, tokenBytes)
@@ -318,14 +329,6 @@ function App({ wasmApi }: Props) {
       cancelled = true
     }
   }, [api, saveFile, tokensFile, effectiveDefs])
-
-  // Swapping inputs invalidates any table on screen; keeping it would read as
-  // the new blob's output.
-  useEffect(() => {
-    setResult(undefined)
-    setGapsResult(undefined)
-    setPlanResult(undefined)
-  }, [saveFile, tokensFile, effectiveDefs])
 
   useEffect(() => {
     if (!api || !effectiveDefs) {
@@ -407,6 +410,11 @@ function App({ wasmApi }: Props) {
       const nextResult = JSON.parse(json) as PricesResult
       setResult(nextResult)
       await archiveResult(kind, kind === 'prices' ? {} : whatIfOpts, nextResult, saveBytes!, tokenBytes)
+      if (kind === 'prices' && summary) {
+        void storeSaveAnalysis(summary, nextResult).catch((error: unknown) => {
+          setError(persistErrorMessage(error))
+        })
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -924,6 +932,12 @@ function App({ wasmApi }: Props) {
 
       {(activeView === 'prices' || activeView === 'what-if') && result && (
         <>
+          {saveRestored && !analysisReady && (
+            <p className="model-info">
+              Showing the last analysis instantly. Tools that need a live solve unlock when the
+              engine finishes reloading.
+            </p>
+          )}
           <PriceExplorer
             result={result}
             icons={goodIcons}

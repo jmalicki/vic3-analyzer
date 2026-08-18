@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { clearAnalyses, listAnalyses, saveAnalysis } from './archive'
 import { clearStoredDefs, storeDefs } from './defsStore'
-import { clearStoredSave } from './saveStore'
-import type { AnalysisRecord } from './types'
+import { clearStoredSave, loadStoredSave, storeSave, storeSaveAnalysis } from './saveStore'
+import type { AnalysisRecord, PricesResult } from './types'
 import type { WasmApi } from './wasm'
 
 /** Test-only blobs; silly names so they never look like a real install export. */
@@ -455,6 +455,9 @@ describe('prices UI', () => {
     render(<App wasmApi={mockApi()} />)
     await selectSave(user)
     expect(screen.getByText('campaign.v3')).toBeInTheDocument()
+    await waitFor(async () => {
+      expect((await loadStoredSave())?.save.name).toBe('campaign.v3')
+    })
 
     cleanup()
     render(<App wasmApi={mockApi()} />)
@@ -470,6 +473,24 @@ describe('prices UI', () => {
     render(<App wasmApi={mockApi()} />)
     await screen.findByText(/Using the local development demo blob/)
     expect(screen.queryByText(/campaign\.v3/)).not.toBeInTheDocument()
+  })
+
+  it('shows cached prices immediately on reload without waiting for wasm', async () => {
+    await storeSave(new File(['save'], 'campaign.v3'))
+    await storeSaveAnalysis(saveSummary, JSON.parse(result) as PricesResult)
+    const cached = await loadStoredSave()
+    expect(cached?.summary?.tag).toBe('FRA')
+    expect(cached?.prices?.goods[0]?.id).toBe('iron')
+    const api = mockApi()
+    api.load_analysis = vi.fn(() => new Promise(() => {}))
+    render(<App wasmApi={api} />)
+
+    expect(
+      await screen.findByText(/campaign\.v3 \(kept from a previous visit\)/),
+    ).toBeInTheDocument()
+    expect(await screen.findByText('Iron')).toBeInTheDocument()
+    expect(await screen.findByText('FRA')).toBeInTheDocument()
+    expect(screen.getByText(/Showing the last analysis instantly/)).toBeInTheDocument()
   })
 
   it('clears a stored blob when Rust rejects its format version', async () => {
