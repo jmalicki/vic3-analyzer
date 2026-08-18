@@ -21,6 +21,23 @@ const result = JSON.stringify({
     },
   ],
   state_pops: [{ state_id: 1, workforce: 8000, dependents: 4000, wealth: 12 }],
+  buildings: [
+    {
+      id: 9,
+      state_id: 1,
+      type_id: 'building_rye_farm',
+      level: 4,
+      staffing: 3.2,
+      production_method_ids: ['pm_simple_farming'],
+      inputs: [],
+      outputs: [{ good_id: 'grain', quantity: 10, value: 200 }],
+      revenue: 200,
+      cost: 50,
+      profit: 150,
+      short_inputs: [],
+    },
+  ],
+  building_types: [{ id: 'building_rye_farm', name: 'Rye Farms' }],
   residual: 0.00001,
   status: 'converged',
   limitations: ['Employment and production methods stay frozen.'],
@@ -121,6 +138,11 @@ function mockApi(): WasmApi {
         alerts: [],
         limitations: ['Apply is disabled until the apply track.'],
       }),
+    ),
+    loaded_production_methods: vi.fn(() =>
+      JSON.stringify([
+        { id: 'pm_simple_farming', inputs: [], outputs: [{ good: 'grain', qty: 20 }] },
+      ]),
     ),
     prices: vi.fn(() => result),
     what_if: vi.fn(() => result),
@@ -661,6 +683,36 @@ describe('prices UI', () => {
 
     await user.click(screen.getByRole('button', { name: 'States' }))
     expect(await screen.findByRole('link', { name: 'Ile-de-France' })).toBeInTheDocument()
+  })
+
+  it('shows grouped buildings and a disabled optimizer', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+
+    await user.click(screen.getByRole('button', { name: 'Buildings' }))
+    expect(screen.getByRole('heading', { name: 'Buildings' })).toBeInTheDocument()
+    expect(screen.getByText('Rye Farms')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Optimize production methods' })).toBeDisabled()
+    expect(window.location.hash).toBe('#/buildings')
+
+    await user.click(screen.getByRole('button', { name: 'Expand Rye Farms' }))
+    expect(screen.getByRole('link', { name: 'Ile-de-France' })).toHaveAttribute(
+      'href',
+      '#/buildings/building/9',
+    )
+    expect(screen.getAllByText('Simple Farming').length).toBeGreaterThan(0)
+  })
+
+  it('opens a building page from a buildings hash', async () => {
+    const user = userEvent.setup()
+    window.location.hash = '#/buildings/building/9'
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+
+    expect(await screen.findByRole('heading', { name: 'Rye Farms' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Buildings' })).toHaveAttribute('href', '#/buildings')
+    expect(screen.getByText('Workforce')).toBeInTheDocument()
   })
 
   it('opens a known pane from the location hash', async () => {

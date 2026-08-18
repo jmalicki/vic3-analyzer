@@ -53,3 +53,15 @@ export function parseStateId(hash = window.location.hash): number | undefined {
   if (path[0] !== 'states' || !path[1] || !Number.isFinite(Number(path[1]))) return undefined
   return Number(path[1])
 }
+
+export function hashForBuilding(id: number, source: 'prices' | 'buildings' = 'buildings'): string {
+  return source === 'prices' ? `#/prices/building/${id}` : `#/buildings/building/${id}`
+}
+
+export function parseBuildingId(hash = window.location.hash): number | undefined {
+  const path = hash.replace(/^#\/?/, '').split('/')
+  if (path[0] !== 'buildings' || path[1] !== 'building' || !path[2] || !Number.isFinite(Number(path[2]))) {
+    return undefined
+  }
+  return Number(path[2])
+}

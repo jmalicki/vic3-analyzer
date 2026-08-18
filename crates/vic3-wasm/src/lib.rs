@@ -125,6 +125,12 @@ pub fn loaded_alerts() -> Result<String, JsError> {
     loaded_alerts_json().map_err(to_js)
 }
 
+/// Production-method recipes from the loaded definitions (`[{id, inputs, outputs}]`).
+#[wasm_bindgen]
+pub fn loaded_production_methods() -> Result<String, JsError> {
+    loaded_production_methods_json().map_err(to_js)
+}
+
 /// Build a postcard definitions blob from browser-selected Victoria 3 files.
 ///
 /// `manifest_json` is an array of `{path, offset, length}` entries into the
@@ -425,6 +431,53 @@ pub fn loaded_alerts_json() -> Result<String, WasmError> {
     with_loaded_analysis(|loaded| {
         let result = diagnose_alerts(&loaded.world, &loaded.defs, &loaded.prices);
         Ok(serde_json::to_string(&result)?)
+    })
+}
+
+#[derive(Serialize)]
+struct ProductionMethodJson {
+    id: String,
+    inputs: Vec<PmFlowJson>,
+    outputs: Vec<PmFlowJson>,
+}
+
+#[derive(Serialize)]
+struct PmFlowJson {
+    good: String,
+    qty: f64,
+}
+
+pub fn loaded_production_methods_json() -> Result<String, WasmError> {
+    with_loaded_analysis(|loaded| {
+        let methods: Vec<ProductionMethodJson> = loaded
+            .defs
+            .production_methods
+            .values()
+            .map(|pm| ProductionMethodJson {
+                id: pm.id.clone(),
+                inputs: pm
+                    .inputs
+                    .iter()
+                    .filter_map(|(idx, qty)| {
+                        loaded.defs.good_by_index(*idx).map(|good| PmFlowJson {
+                            good: good.to_string(),
+                            qty: *qty,
+                        })
+                    })
+                    .collect(),
+                outputs: pm
+                    .outputs
+                    .iter()
+                    .filter_map(|(idx, qty)| {
+                        loaded.defs.good_by_index(*idx).map(|good| PmFlowJson {
+                            good: good.to_string(),
+                            qty: *qty,
+                        })
+                    })
+                    .collect(),
+            })
+            .collect();
+        Ok(serde_json::to_string(&methods)?)
     })
 }
 
@@ -1116,6 +1169,28 @@ mod tests {
                 || json.contains("\"limitations\"")
         );
         clear_analysis();
+    }
+
+    #[test]
+    fn loaded_production_methods_after_load_analysis() {
+        clear_analysis();
+        load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
+        let json = loaded_production_methods_json().expect("loaded production methods");
+        let methods: Vec<Value> = serde_json::from_str(&json).expect("PM array");
+        assert!(
+            methods.iter().any(|pm| pm["id"] == "pm_simple_forestry"),
+            "{json}"
+        );
+        let forestry = methods
+            .iter()
+            .find(|pm| pm["id"] == "pm_simple_forestry")
+            .expect("forestry");
+        assert!(forestry["outputs"].as_array().is_some_and(|rows| !rows.is_empty()));
+        clear_analysis();
+        assert!(matches!(
+            loaded_production_methods_json(),
+            Err(WasmError::NoLoadedAnalysis)
+        ));
     }
 
     #[test]

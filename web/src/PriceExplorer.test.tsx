@@ -395,6 +395,16 @@ describe('PriceExplorer', () => {
     expect(screen.queryByRole('link', { name: 'Goods' })).not.toBeInTheDocument()
   })
 
+  it('opens the same building page from a buildings hash', () => {
+    window.location.hash = '#/buildings/building/7'
+    render(<PriceExplorer result={result} />)
+
+    expect(screen.getByRole('heading', { name: 'Silly Hammer Factory' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Buildings' })).toHaveAttribute('href', '#/buildings')
+    expect(screen.getByText('Workforce')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Goods' })).not.toBeInTheDocument()
+  })
+
   it('can return to Our market when playerMarketId is present', async () => {
     const user = userEvent.setup()
     window.location.hash = '#/prices/good/zany_tools'

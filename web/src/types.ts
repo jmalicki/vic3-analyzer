@@ -120,6 +120,17 @@ export interface BuildingEconomics {
   employees?: ProfessionCount[]
 }
 
+export interface ProductionMethodFlow {
+  good: string
+  qty: number
+}
+
+export interface ProductionMethodDef {
+  id: string
+  inputs: ProductionMethodFlow[]
+  outputs: ProductionMethodFlow[]
+}
+
 export interface MarketInputs {
   pops: number
   skipped_pops: number

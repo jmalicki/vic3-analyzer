@@ -1,0 +1,444 @@
+import { useEffect, useMemo, useState } from 'react'
+import { GameIcon } from './GameIcon'
+import {
+  BuildingPage,
+  displayId,
+  SortButton,
+  sortRows,
+  useSort,
+} from './PriceExplorer'
+import type {
+  BuildingEconomics,
+  BuildingTypeInfo,
+  DefsIcons,
+  GoodFlow,
+  PricesResult,
+  ProductionMethodDef,
+} from './types'
+import type { WasmApi } from './wasm'
+import { hashForBuilding, parseBuildingId } from './workspaceNav'
+
+type BuildingSort = 'name' | 'productivity' | 'profit' | 'employment' | 'shortage'
+
+type TypeRow = {
+  typeId: string
+  name: string
+  buildings: BuildingEconomics[]
+  levels: number
+  staffing: number
+  profit: number
+  productivity: number
+  employment: number
+  shortage: number
+  productionMethodIds: string[]
+}
+
+function employmentRatio(staffing: number, level: number): number {
+  if (level <= 0) return 0
+  return Math.max(0, Math.min(1, staffing / level))
+}
+
+function uniqueIds(ids: string[]): string[] {
+  return [...new Set(ids)]
+}
+
+function buildRows(result: PricesResult): TypeRow[] {
+  const types = new Map((result.building_types ?? []).map((type) => [type.id, type]))
+  const grouped = new Map<string, BuildingEconomics[]>()
+  for (const building of result.buildings ?? []) {
+    const rows = grouped.get(building.type_id)
+    if (rows) rows.push(building)
+    else grouped.set(building.type_id, [building])
+  }
+  return [...grouped.entries()].map(([typeId, buildings]) => {
+    const type: BuildingTypeInfo | undefined = types.get(typeId)
+    const levels = buildings.reduce((sum, building) => sum + building.level, 0)
+    const staffing = buildings.reduce((sum, building) => sum + building.staffing, 0)
+    const profit = buildings.reduce((sum, building) => sum + building.profit, 0)
+    return {
+      typeId,
+      name: type?.name || displayId(typeId),
+      buildings,
+      levels,
+      staffing,
+      profit,
+      productivity: levels > 0 ? profit / levels : 0,
+      employment: employmentRatio(staffing, levels),
+      shortage: buildings.reduce((sum, building) => sum + building.short_inputs.length, 0),
+      productionMethodIds: uniqueIds(buildings.flatMap((building) => building.production_method_ids ?? [])),
+    }
+  })
+}
+
+function stateName(result: PricesResult, stateId?: number): string {
+  const state = result.states?.find((row) => row.id === stateId)
+  return state?.region_name || displayId(state?.region_id || (stateId != null ? `State ${stateId}` : 'State'))
+}
+
+function sameIds(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false
+  const other = new Set(right)
+  return left.every((id) => other.has(id))
+}
+
+function previewFlows(
+  selected: string[],
+  building: BuildingEconomics,
+  methods: ProductionMethodDef[],
+): { inputs: GoodFlow[]; outputs: GoodFlow[] } {
+  const byId = new Map(methods.map((method) => [method.id, method]))
+  const hasRecipes = selected.some((id) => byId.has(id))
+  if (!hasRecipes) {
+    const current = building.production_method_ids ?? []
+    if (sameIds(selected, current)) {
+      return { inputs: building.inputs, outputs: building.outputs }
+    }
+    return { inputs: [], outputs: [] }
+  }
+  const inputs = new Map<string, number>()
+  const outputs = new Map<string, number>()
+  for (const id of selected) {
+    const method = byId.get(id)
+    if (!method) continue
+    for (const flow of method.inputs) {
+      inputs.set(flow.good, (inputs.get(flow.good) ?? 0) + flow.qty)
+    }
+    for (const flow of method.outputs) {
+      outputs.set(flow.good, (outputs.get(flow.good) ?? 0) + flow.qty)
+    }
+  }
+  const toFlows = (map: Map<string, number>): GoodFlow[] =>
+    [...map.entries()].map(([good_id, quantity]) => ({ good_id, quantity, value: 0 }))
+  return { inputs: toFlows(inputs), outputs: toFlows(outputs) }
+}
+
+function FlowList({
+  flows,
+  icons,
+}: {
+  flows: GoodFlow[]
+  icons?: DefsIcons
+}) {
+  if (!flows.length) return <>{'—'}</>
+  return (
+    <ul className="good-chips">
+      {flows.map((flow) => (
+        <li key={flow.good_id}>
+          <GameIcon kind="good" id={flow.good_id} icons={icons} />
+          {displayId(flow.good_id)} {flow.quantity.toFixed(1)}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function PmList({
+  ids,
+  icons,
+}: {
+  ids: string[]
+  icons?: DefsIcons
+}) {
+  if (!ids.length) return <>{'—'}</>
+  return (
+    <ul className="pm-list">
+      {ids.map((id) => (
+        <li key={id}>
+          <GameIcon kind="pm" id={id} icons={icons} />
+          {displayId(id)}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+export function BuildingsPane({
+  result,
+  icons = {},
+  gated = false,
+  api,
+  onWhatIf,
+  productionMethods,
+}: {
+  result?: PricesResult
+  icons?: DefsIcons
+  gated?: boolean
+  api?: WasmApi
+  onWhatIf?: (building: string, extraLevels: number) => void
+  productionMethods?: ProductionMethodDef[]
+}) {
+  const [hash, setHash] = useState(() => window.location.hash)
+  const [sort, onSort] = useSort<BuildingSort>('name')
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  const [extraLevels, setExtraLevels] = useState<Record<string, number>>({})
+  const [selectedPms, setSelectedPms] = useState<Record<number, string[]>>({})
+  const [loadedMethods, setLoadedMethods] = useState<ProductionMethodDef[]>([])
+  useEffect(() => {
+    const update = () => setHash(window.location.hash)
+    window.addEventListener('hashchange', update)
+    return () => window.removeEventListener('hashchange', update)
+  }, [])
+  useEffect(() => {
+    if (productionMethods || !api?.loaded_production_methods) return
+    let cancelled = false
+    void Promise.resolve(api.loaded_production_methods())
+      .then((json) => {
+        if (!cancelled) setLoadedMethods(JSON.parse(json) as ProductionMethodDef[])
+      })
+      .catch(() => {
+        if (!cancelled) setLoadedMethods([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [api, productionMethods])
+
+  const buildingId = parseBuildingId(hash)
+  const methods = productionMethods ?? loadedMethods
+  const rows = useMemo(() => (result ? buildRows(result) : []), [result])
+  const resultPmIds = uniqueIds(
+    rows.flatMap((row) => row.buildings.flatMap((building) => building.production_method_ids ?? [])),
+  )
+  const pickerIds = resultPmIds.length ? resultPmIds : methods.map((method) => method.id)
+  const visible = useMemo(
+    () =>
+      sortRows(rows, sort, (row, key) => {
+        if (key === 'name') return row.name
+        if (key === 'productivity') return row.productivity
+        if (key === 'profit') return row.profit
+        if (key === 'employment') return row.employment
+        return row.shortage
+      }),
+    [rows, sort],
+  )
+
+  if (buildingId != null && result) {
+    return (
+      <section className={gated ? 'workspace-page needs-defs' : 'workspace-page'}>
+        <BuildingPage result={result} icons={icons} buildingId={buildingId} source="buildings" />
+      </section>
+    )
+  }
+
+  const toggleType = (typeId: string) => {
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (next.has(typeId)) next.delete(typeId)
+      else next.add(typeId)
+      return next
+    })
+  }
+
+  const selectedFor = (building: BuildingEconomics): string[] =>
+    selectedPms[building.id] ?? building.production_method_ids ?? []
+
+  return (
+    <section
+      className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
+      aria-labelledby="buildings-heading"
+    >
+      <div className="result-heading">
+        <h2 id="buildings-heading">Buildings</h2>
+        <button type="button" disabled title="coming in apply track">
+          Optimize production methods
+        </button>
+      </div>
+      {visible.length ? (
+        <div className="table-scroll">
+          <table className="buildings-table">
+            <thead>
+              <tr>
+                <th><SortButton label="Name" sortKey="name" sort={sort} onSort={onSort} /></th>
+                <th><SortButton label="Productivity" sortKey="productivity" sort={sort} onSort={onSort} /></th>
+                <th><SortButton label="Profit" sortKey="profit" sort={sort} onSort={onSort} /></th>
+                <th><SortButton label="Employment" sortKey="employment" sort={sort} onSort={onSort} /></th>
+                <th><SortButton label="Shortage" sortKey="shortage" sort={sort} onSort={onSort} /></th>
+                <th>What-if</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((row) => {
+                const open = expanded.has(row.typeId)
+                const extra = extraLevels[row.typeId] ?? 1
+                return (
+                  <TypeBlock
+                    key={row.typeId}
+                    row={row}
+                    open={open}
+                    extra={extra}
+                    result={result}
+                    icons={icons}
+                    pickerIds={pickerIds}
+                    methods={methods}
+                    selectedFor={selectedFor}
+                    onToggle={() => toggleType(row.typeId)}
+                    onExtra={(value) =>
+                      setExtraLevels((current) => ({ ...current, [row.typeId]: value }))
+                    }
+                    onWhatIf={onWhatIf}
+                    onSelectPm={(building, id, checked) => {
+                      setSelectedPms((current) => {
+                        const previous = current[building.id] ?? building.production_method_ids ?? []
+                        const next = checked
+                          ? uniqueIds([...previous, id])
+                          : previous.filter((item) => item !== id)
+                        return { ...current, [building.id]: next }
+                      })
+                    }}
+                  />
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p>{result ? 'No buildings in this save.' : 'Load a save to see buildings.'}</p>
+      )}
+    </section>
+  )
+}
+
+function TypeBlock({
+  row,
+  open,
+  extra,
+  result,
+  icons,
+  pickerIds,
+  methods,
+  selectedFor,
+  onToggle,
+  onExtra,
+  onWhatIf,
+  onSelectPm,
+}: {
+  row: TypeRow
+  open: boolean
+  extra: number
+  result?: PricesResult
+  icons?: DefsIcons
+  pickerIds: string[]
+  methods: ProductionMethodDef[]
+  selectedFor: (building: BuildingEconomics) => string[]
+  onToggle: () => void
+  onExtra: (value: number) => void
+  onWhatIf?: (building: string, extraLevels: number) => void
+  onSelectPm: (building: BuildingEconomics, id: string, checked: boolean) => void
+}) {
+  return (
+    <>
+      <tr>
+        <th>
+          <button
+            type="button"
+            className="building-expand"
+            aria-expanded={open}
+            aria-label={`${open ? 'Collapse' : 'Expand'} ${row.name}`}
+            onClick={onToggle}
+          >
+            {open ? '▼' : '▶'}
+          </button>
+          <GameIcon kind="building" id={row.typeId} icons={icons} />
+          {row.name}
+        </th>
+        <td>{row.productivity.toFixed(2)}</td>
+        <td>{row.profit.toFixed(2)}</td>
+        <td>{`${(row.employment * 100).toFixed(0)}%`}</td>
+        <td>{row.shortage || '—'}</td>
+        <td>
+          <div className="building-what-if">
+            <label>
+              Extra levels
+              <input
+                aria-label={`Extra levels for ${row.name}`}
+                type="number"
+                min="1"
+                step="1"
+                value={extra}
+                onChange={(event) => onExtra(Number(event.target.value))}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={!onWhatIf}
+              onClick={() => onWhatIf?.(row.typeId, extra)}
+            >
+              Run what-if
+            </button>
+          </div>
+        </td>
+      </tr>
+      {open && (
+        <tr className="building-type-detail">
+          <td colSpan={6}>
+            <PmList ids={row.productionMethodIds} icons={icons} />
+            <div className="table-scroll">
+              <table className="building-instances">
+                <thead>
+                  <tr>
+                    <th>State</th>
+                    <th>Levels</th>
+                    <th>Employment</th>
+                    <th>Profit</th>
+                    <th>Production methods</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {row.buildings.map((building) => {
+                    const selected = selectedFor(building)
+                    const preview = previewFlows(selected, building, methods)
+                    const instanceName = result
+                      ? stateName(result, building.state_id)
+                      : `Building ${building.id}`
+                    return (
+                      <tr key={building.id}>
+                        <th>
+                          <a className="building-link" href={hashForBuilding(building.id)}>
+                            {instanceName}
+                          </a>
+                          <span className="building-levels">{building.level.toLocaleString()} levels</span>
+                        </th>
+                        <td>{building.level.toLocaleString()}</td>
+                        <td>{`${(employmentRatio(building.staffing, building.level) * 100).toFixed(0)}%`}</td>
+                        <td>{building.profit.toFixed(2)}</td>
+                        <td>
+                          <PmList ids={building.production_method_ids ?? []} icons={icons} />
+                          <fieldset className="pm-picker">
+                            <legend>Production method preview</legend>
+                            {pickerIds.map((id) => (
+                              <label key={id}>
+                                <input
+                                  type="checkbox"
+                                  aria-label={`${displayId(id)} for ${instanceName}`}
+                                  checked={selected.includes(id)}
+                                  onChange={(event) => onSelectPm(building, id, event.target.checked)}
+                                />
+                                <GameIcon kind="pm" id={id} icons={icons} />
+                                {displayId(id)}
+                              </label>
+                            ))}
+                            <p className="pm-preview-note">Preview only — apply comes later.</p>
+                            <dl className="pm-preview">
+                              <div>
+                                <dt>Inputs</dt>
+                                <dd><FlowList flows={preview.inputs} icons={icons} /></dd>
+                              </div>
+                              <div>
+                                <dt>Outputs</dt>
+                                <dd><FlowList flows={preview.outputs} icons={icons} /></dd>
+                              </div>
+                            </dl>
+                          </fieldset>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}

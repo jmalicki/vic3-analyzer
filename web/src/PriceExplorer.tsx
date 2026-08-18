@@ -25,7 +25,7 @@ type View =
   | { kind: 'goods' }
   | { kind: 'good'; id: string }
   | { kind: 'state'; id: number; from: 'prices' | 'states' }
-  | { kind: 'building'; id: number }
+  | { kind: 'building'; id: number; from: 'prices' | 'buildings' }
   | { kind: 'states' }
 export type FilterMode = 'our_market' | 'domestic' | 'all'
 type StateTab = 'overview' | 'buildings' | 'population' | 'prices' | 'information'
@@ -38,13 +38,16 @@ export function currentView(): View {
     }
     return { kind: 'states' }
   }
+  if (path[0] === 'buildings' && path[1] === 'building' && Number.isFinite(Number(path[2]))) {
+    return { kind: 'building', id: Number(path[2]), from: 'buildings' }
+  }
   if (path[0] !== 'prices') return { kind: 'goods' }
   if (path[1] === 'good' && path[2]) return { kind: 'good', id: decodeURIComponent(path[2]) }
   if (path[1] === 'state' && Number.isFinite(Number(path[2]))) {
     return { kind: 'state', id: Number(path[2]), from: 'prices' }
   }
   if (path[1] === 'building' && Number.isFinite(Number(path[2]))) {
-    return { kind: 'building', id: Number(path[2]) }
+    return { kind: 'building', id: Number(path[2]), from: 'prices' }
   }
   return { kind: 'goods' }
 }
@@ -1055,6 +1058,70 @@ function EmployeesTable({ employees }: { employees: ProfessionCount[] }) {
   )
 }
 
+export function BuildingPage({
+  result,
+  icons = {},
+  buildingId,
+  source = 'prices',
+}: {
+  result: PricesResult
+  icons?: DefsIcons
+  buildingId: number
+  source?: 'prices' | 'buildings'
+}) {
+  const states = result.states ?? []
+  const buildings = result.buildings ?? []
+  const buildingTypes = result.building_types ?? []
+  const building = buildings.find((row) => row.id === buildingId)
+  const state = states.find((row) => row.id === building?.state_id)
+  const type = buildingTypes.find((row) => row.id === building?.type_id)
+  const name = type?.name || displayId(building?.type_id || `Building ${buildingId}`)
+  const stateName = state?.region_name || displayId(state?.region_id || (state ? `State ${state.id}` : 'State'))
+  const employment = building && building.level > 0
+    ? Math.max(0, Math.min(1, building.staffing / building.level))
+    : 0
+  const parentHref = source === 'buildings' ? '#/buildings' : '#/prices'
+  const parentLabel = source === 'buildings' ? 'Buildings' : 'Goods'
+  const stateHref = state
+    ? source === 'buildings'
+      ? `#/states/${state.id}`
+      : `#/prices/state/${state.id}`
+    : undefined
+  return (
+    <section aria-labelledby="building-heading" className="state-panel">
+      <nav className="breadcrumbs" aria-label={source === 'buildings' ? 'Building detail' : 'Price detail'}>
+        <a href={parentHref}>{parentLabel}</a><span>›</span>
+        {state && stateHref ? <a href={stateHref}>{stateName}</a> : <span>{stateName}</span>}
+        <span>›</span><span>{name}</span>
+      </nav>
+      <div className="state-header">
+        <div>
+          <h2 id="building-heading">{name}</h2>
+          <span>{building ? `${building.level.toLocaleString()} levels` : 'Building unavailable'}</span>
+        </div>
+      </div>
+      {building ? (
+        <>
+          <dl className="overview-kpis">
+            <div><dt>Employment</dt><dd>{(employment * 100).toFixed(0)}%</dd></div>
+            <div><dt>Revenue</dt><dd>{building.revenue.toFixed(2)}</dd></div>
+            <div><dt>Cost</dt><dd>{building.cost.toFixed(2)}</dd></div>
+            <div><dt>Model profit</dt><dd>{building.profit.toFixed(2)}</dd></div>
+          </dl>
+          <dl className="state-building-stats">
+            <div><dt>Inputs</dt><dd><GoodFlows flows={building.inputs} goods={result.goods} icons={icons} /></dd></div>
+            <div><dt>Outputs</dt><dd><GoodFlows flows={building.outputs} goods={result.goods} icons={icons} /></dd></div>
+          </dl>
+          <h3>Workforce</h3>
+          <EmployeesTable employees={building.employees ?? []} />
+        </>
+      ) : (
+        <p>No building with that id.</p>
+      )}
+    </section>
+  )
+}
+
 /**
  * A market with no orders prices every good at its base price and still reports
  * `converged`, which is indistinguishable from a balanced economy unless we say
@@ -1109,8 +1176,6 @@ export function PriceExplorer({
 
   const states = result.states ?? []
   const stateGoods = result.state_goods ?? []
-  const buildings = result.buildings ?? []
-  const buildingTypes = result.building_types ?? []
   const countries = result.countries ?? []
   const missingPlayerMarket = filterMode === 'our_market' && playerMarketId == null
   const effectiveFilterMode: FilterMode = missingPlayerMarket ? 'all' : filterMode
@@ -1157,46 +1222,13 @@ export function PriceExplorer({
   }
 
   if (view.kind === 'building') {
-    const building = buildings.find((row) => row.id === view.id)
-    const state = states.find((row) => row.id === building?.state_id)
-    const type = buildingTypes.find((row) => row.id === building?.type_id)
-    const name = type?.name || displayId(building?.type_id || `Building ${view.id}`)
-    const stateName = state?.region_name || displayId(state?.region_id || (state ? `State ${state.id}` : 'State'))
-    const employment = building && building.level > 0
-      ? Math.max(0, Math.min(1, building.staffing / building.level))
-      : 0
     return (
-      <section aria-labelledby="building-heading" className="state-panel">
-        <nav className="breadcrumbs" aria-label="Price detail">
-          <a href="#/prices">Goods</a><span>›</span>
-          {state ? <a href={`#/prices/state/${state.id}`}>{stateName}</a> : <span>{stateName}</span>}
-          <span>›</span><span>{name}</span>
-        </nav>
-        <div className="state-header">
-          <div>
-            <h2 id="building-heading">{name}</h2>
-            <span>{building ? `${building.level.toLocaleString()} levels` : 'Building unavailable'}</span>
-          </div>
-        </div>
-        {building ? (
-          <>
-            <dl className="overview-kpis">
-              <div><dt>Employment</dt><dd>{(employment * 100).toFixed(0)}%</dd></div>
-              <div><dt>Revenue</dt><dd>{building.revenue.toFixed(2)}</dd></div>
-              <div><dt>Cost</dt><dd>{building.cost.toFixed(2)}</dd></div>
-              <div><dt>Model profit</dt><dd>{building.profit.toFixed(2)}</dd></div>
-            </dl>
-            <dl className="state-building-stats">
-              <div><dt>Inputs</dt><dd><GoodFlows flows={building.inputs} goods={result.goods} icons={icons} /></dd></div>
-              <div><dt>Outputs</dt><dd><GoodFlows flows={building.outputs} goods={result.goods} icons={icons} /></dd></div>
-            </dl>
-            <h3>Workforce</h3>
-            <EmployeesTable employees={building.employees ?? []} />
-          </>
-        ) : (
-          <p>No building with that id.</p>
-        )}
-      </section>
+      <BuildingPage
+        result={result}
+        icons={icons}
+        buildingId={view.id}
+        source={view.from}
+      />
     )
   }
 
