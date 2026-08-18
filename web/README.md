@@ -67,12 +67,13 @@ Vite.
 
 The goods table sorts by display name, price, and difference from base. Hash
 links drill into state-attributed buy/sell orders and then individual building
-model IO, costs, revenue, profit, and shortages. State rows use synthetic local
-prices blended with the solved market price using infrastructure-only access
-and base MAPI 75%, while the global table shows an order-weighted average for
-the selected geography. Laws/tech modifiers, overseas access, and separate
-market solves are not yet modeled. State-attributed orders are access-scaled
-into the current single market; building cashflow is not save-native.
+model IO, costs, revenue, profit, and shortages. State rows use local prices
+blended with the solved market price using infrastructure-only access and base
+MAPI 75%; wage pops shop at those local prices inside the solver. The global
+table shows an order-weighted average for the selected geography. Extra MAPI
+modifiers, overseas access, and separate market solves are not yet modeled.
+State-attributed orders are access-scaled into the current single market;
+building cashflow is not save-native.
 
 ## wasm and definitions
 

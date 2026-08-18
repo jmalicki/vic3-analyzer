@@ -18,7 +18,9 @@ price = base * (1 + PRICE_RANGE * clamp(ratio, -1, +1))
 Zero orders: define a documented convention in P4 (do not divide by zero); property tests cover it.
 
 The first MAPI milestone blends the solved whole-save market price with each
-state's attributed-order price:
+state's attributed-order price **inside the residual**. Wage pops shop at that
+local price (cost of living / buy-package size). Substitution still uses world
+sell-order shares, not local ones.
 
 ```text
 market_access = clamp(infrastructure / infrastructure_usage, 0, 1)
@@ -26,13 +28,15 @@ effective_MAPI = 0.75 * market_access
 local_price = effective_MAPI * market_price + (1 - effective_MAPI) * state_price
 ```
 
-Missing infrastructure data defaults to full access. State-attributed building
-and pop orders are multiplied by that access before entering the current single
-whole-save market residual; full local orders still determine `state_price`.
-Trade routes remain unscaled because their endpoints are absent from the IR.
-Laws, technologies, incorporation, state traits, overseas convoy access, and
-separate market solves are not included yet. The global goods table displays an
-order-weighted average of the local prices.
+Missing infrastructure data defaults to full access. For each candidate world
+price vector, each state settles local prices against its own unscaled buy/sell
+(pops at `local_price`, buildings and post-1.9 trade frozen). Access then scales
+those pop orders into the single whole-save market residual. Full local orders
+still determine `state_price`. Building revenue/cost/profit on the report uses
+that state's local prices. Trade routes remain unscaled because their endpoints
+are absent from the IR. Laws, technologies, incorporation, state traits, overseas
+convoy access, and separate market solves are not included yet. The global goods
+table displays an order-weighted average of the local prices.
 
 Geography filters (`Our market` default, `Domestic`, `All`) scope both the
 global average and the goods-by-state list. They do **not** re-solve prices. A
@@ -69,8 +73,8 @@ English labels keyed by script id (`cultures_l_english.yml`); resolving the
 index is what lets the Population tab show "North German" instead of `0`.
 
 Pop **needs** on the Population tab are the same package-ladder + substitution
-path as the residual, valued at solved prices. They are model baskets, not a
-cashflow ledger from the save.
+path as the residual, valued at each pop's **local** prices. They are model
+baskets, not a cashflow ledger from the save.
 
 **Wealth 1–99** is relaxed to a continuous variable during NLS, then **rounded** to an integer wealth. This is not ILP.
 
@@ -113,7 +117,7 @@ per-building model economics. The state page groups buildings from those defs,
 shows remaining rural capacity and broadly available default placeholders, and
 does not claim complete construction eligibility. Building revenue/cost/profit
 use saved current IO when present, otherwise PM quantities × staffed levels,
-valued at the solved shared price. They are modeled diagnostics, not cashflow
+valued at each building's state local price. They are modeled diagnostics, not cashflow
 fields read from the save.
 
 ## Solver
@@ -137,7 +141,7 @@ instead of placing solver diagnostics above the main results:
 1. Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.
 2. Prices are clamped to ±`PRICE_RANGE`; the clamp is part of the model.
 3. Employment, wages, and trade volumes are frozen except explicit what-if deltas.
-4. State building, pop, and post-1.9 trade orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, and MAPI modifiers and overseas convoy constraints are not modeled.
+4. Pops shop at each state's MAPI-blended local prices; state orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, and extra MAPI modifiers and overseas convoy constraints are not modeled.
 5. The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.
 
 ## What-if / prices result shape

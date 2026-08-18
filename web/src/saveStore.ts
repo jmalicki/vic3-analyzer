@@ -5,7 +5,7 @@ import type { PricesResult, SaveSummary } from './types'
  * Bump when the prices solver or `PricesResult` shape changes so a reload does
  * not paint a stale table. The save itself is still restored.
  */
-export const PRICES_CACHE_VERSION = 1
+export const PRICES_CACHE_VERSION = 2
 
 /**
  * The last save a user dropped or picked, plus its last prices solve, so a

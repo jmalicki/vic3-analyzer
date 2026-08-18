@@ -14,10 +14,13 @@ pub(crate) struct NeedBasket {
 
 /// Pop buy orders at `prices` (good id → quantity).
 ///
+/// `prices` are the prices the household pays — market prices for a single
+/// world shop, or a state's MAPI-blended local prices in the residual.
+///
 /// Wealth 1–99 is **relaxed continuous** (Laspeyres real-income scaling when
 /// wages are set) then **interpolated** between neighboring buy packages — not
 /// an ILP over the discrete ladder. Substitution uses
-/// [`vic3_defs::substitution_shares`] on each need's sell-order shares.
+/// [`vic3_defs::substitution_shares`] on each need's **world** sell-order shares.
 pub fn consumption(
     pops: &[WorldPop],
     prices: &GoodsVec,

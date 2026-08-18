@@ -5,6 +5,9 @@
 /// positive orders.
 pub const ORDER_EPS: f64 = 1e-12;
 
+/// Base market-access price impact, before multiplying by infrastructure access.
+pub const BASE_MAPI: f64 = 0.75;
+
 /// Buy/sell imbalance used by [`price`].
 ///
 /// # Zero orders
@@ -74,6 +77,11 @@ pub fn market_access(infrastructure: Option<f64>, usage: Option<f64>) -> f64 {
 pub fn local_price(effective_mapi: f64, market_price: f64, state_price: f64) -> f64 {
     let mapi = effective_mapi.clamp(0.0, 1.0);
     mapi * market_price + (1.0 - mapi) * state_price
+}
+
+/// Infrastructure access times [`BASE_MAPI`].
+pub fn effective_mapi(access: f64) -> f64 {
+    BASE_MAPI * access.clamp(0.0, 1.0)
 }
 
 #[cfg(test)]

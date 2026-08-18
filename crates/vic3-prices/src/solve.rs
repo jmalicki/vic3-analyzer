@@ -8,8 +8,10 @@ use basin::{
 };
 use vic3_defs::{GameDefs, GoodIdx, GoodsVec};
 
-use crate::consumption::{add_pop_consumption_scaled, consumption, pop_need_baskets};
-use crate::formula::{local_price, market_access, price};
+use crate::consumption::{
+    add_pop_consumption, add_pop_consumption_scaled, consumption, pop_need_baskets,
+};
+use crate::formula::{effective_mapi, local_price, market_access, price};
 use crate::result::{
     BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, GoodFlow, GoodPrice,
     MarketInputs, PopNeedBasket, PricesResult, ProfessionCount, SolveOpts, SolveStatus, StateGood,
@@ -20,6 +22,8 @@ use crate::LIMITATIONS;
 
 const WARM_START_ALPHA: f64 = 0.5;
 const FD_STEP: f64 = 1e-7;
+const LOCAL_ITERS: u32 = 16;
+const LOCAL_EPS: f64 = 1e-10;
 
 /// Find relative prices `r` minimizing `‖r − r_formula(orders(r))‖²`
 /// with box bounds `r ∈ [1 − PRICE_RANGE, 1 + PRICE_RANGE]`.
@@ -34,7 +38,7 @@ const FD_STEP: f64 = 1e-7;
 /// 1. Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.
 /// 2. Prices are clamped to ±PRICE_RANGE; the clamp is part of the model.
 /// 3. Employment, wages, and trade volumes are frozen except explicit what-if deltas.
-/// 4. State building, pop, and post-1.9 trade orders are access-scaled into one whole-save market; full MAPI modifiers are unavailable.
+/// 4. Pops shop at each state's MAPI-blended local prices; those orders are access-scaled into one whole-save market. Extra MAPI modifiers and overseas constraints are not modeled.
 /// 5. The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.
 pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
     let base_prices: GoodsVec = defs
@@ -44,12 +48,19 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
         .collect();
     let goods = market_goods(&base_prices);
     if goods.is_empty() {
-        return finished(world, defs, Vec::new(), 0.0, SolveStatus::Converged);
+        return finished(world, defs, Vec::new(), 0.0, SolveStatus::Converged, None);
     }
 
     let bases: Vec<f64> = goods.iter().map(|&idx| base_prices[idx]).collect();
     if bases.iter().any(|b| *b <= 0.0) {
-        return finished(world, defs, Vec::new(), f64::INFINITY, SolveStatus::Failed);
+        return finished(
+            world,
+            defs,
+            Vec::new(),
+            f64::INFINITY,
+            SolveStatus::Failed,
+            None,
+        );
     }
 
     let price_range = defs.price_range.max(0.0);
@@ -64,18 +75,18 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
             )
         })
         .collect::<BTreeMap<_, _>>();
-    let pop_access = world
-        .pops
-        .iter()
-        .map(|pop| {
-            pop.state
-                .and_then(|state| access_by_state.get(&state).copied())
-                .unwrap_or(1.0)
-        })
-        .collect::<Vec<_>>();
     let (frozen_buy, frozen_sell) = access_scaled_non_pop_orders(world, defs, &access_by_state);
-    let (wage_pop_idxs, frozen_pop_buy) =
-        split_pop_buy(world, defs, &base_prices, &frozen_sell, &pop_access);
+    let n_goods = defs.goods_order.len();
+    let shops = state_shops(
+        world,
+        defs,
+        &access_by_state,
+        n_goods,
+        &base_prices,
+        &frozen_sell,
+    );
+    let (stateless_wage_idxs, frozen_pop_buy) =
+        split_pop_buy(world, defs, &base_prices, &frozen_sell, &shops);
     let problem = PriceResidual {
         world,
         defs,
@@ -87,9 +98,9 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
         upper: vec![1.0 + price_range; n],
         frozen_buy,
         frozen_sell,
-        wage_pop_idxs,
+        shops,
+        stateless_wage_idxs,
         frozen_pop_buy,
-        pop_access,
     };
 
     let mut rel = vec![1.0; n];
@@ -123,7 +134,7 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
     problem.damp_toward_formula(&mut rel, WARM_START_ALPHA, polish);
     problem.clamp_rel(&mut rel);
 
-    let (rows, residual) = problem.evaluate(&rel);
+    let (rows, residual, snapshot) = problem.evaluate(&rel);
     let status = if residual < opts.residual_eps {
         SolveStatus::Converged
     } else if failed && !used_max_iters {
@@ -132,7 +143,7 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
         SolveStatus::MaxIters
     };
 
-    finished(world, defs, rows, residual, status)
+    finished(world, defs, rows, residual, status, Some(&snapshot))
 }
 
 /// Apply a building-level delta and re-solve. Employment (`staffing`) stays frozen.
@@ -152,8 +163,9 @@ fn finished(
     goods: Vec<GoodPrice>,
     residual: f64,
     status: SolveStatus,
+    snapshot: Option<&ShopSnapshot>,
 ) -> PricesResult {
-    let detail = detail_rows(world, defs, &goods);
+    let detail = detail_rows(world, defs, &goods, snapshot);
     let countries = country_rows(world, defs);
     let building_types = defs
         .buildings
@@ -226,7 +238,12 @@ struct DetailRows {
     state_needs: Vec<StateNeed>,
 }
 
-fn detail_rows(world: &World, defs: &GameDefs, goods: &[GoodPrice]) -> DetailRows {
+fn detail_rows(
+    world: &World,
+    defs: &GameDefs,
+    goods: &[GoodPrice],
+    snapshot: Option<&ShopSnapshot>,
+) -> DetailRows {
     let mut prices = GoodsVec::zeros(defs.goods_order.len());
     let mut base_prices = GoodsVec::zeros(defs.goods_order.len());
     let mut sell_orders = GoodsVec::zeros(defs.goods_order.len());
@@ -246,16 +263,22 @@ fn detail_rows(world: &World, defs: &GameDefs, goods: &[GoodPrice]) -> DetailRow
     let mut state_sell = BTreeMap::<(u32, GoodIdx), f64>::new();
 
     for state in &world.states {
-        let pops = world
-            .pops
-            .iter()
-            .filter(|pop| pop.state == Some(state.id))
+        let pop_buy = snapshot
+            .and_then(|snap| snap.pop_buy_by_state.get(&state.id))
             .cloned()
-            .collect::<Vec<_>>();
-        for (good, quantity) in
-            consumption(&pops, &prices, &base_prices, defs, &frozen_sell).iter_indexed()
-        {
-            *state_buy.entry((state.id, good)).or_default() += quantity;
+            .unwrap_or_else(|| {
+                let pops = world
+                    .pops
+                    .iter()
+                    .filter(|pop| pop.state == Some(state.id))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                consumption(&pops, &prices, &base_prices, defs, &frozen_sell)
+            });
+        for (good, quantity) in pop_buy.iter_indexed() {
+            if quantity.abs() > crate::ORDER_EPS {
+                *state_buy.entry((state.id, good)).or_default() += quantity;
+            }
         }
     }
 
@@ -264,8 +287,12 @@ fn detail_rows(world: &World, defs: &GameDefs, goods: &[GoodPrice]) -> DetailRow
     let mut buildings = Vec::new();
     for building in &world.buildings {
         let (input_qty, output_qty) = building.goods_io(defs);
-        let inputs = priced_flows(input_qty, &prices, defs, building.state, &mut state_buy);
-        let outputs = priced_flows(output_qty, &prices, defs, building.state, &mut state_sell);
+        let local = building
+            .state
+            .and_then(|state| snapshot.and_then(|snap| snap.local_by_state.get(&state)))
+            .unwrap_or(&prices);
+        let inputs = priced_flows(input_qty, local, defs, building.state, &mut state_buy);
+        let outputs = priced_flows(output_qty, local, defs, building.state, &mut state_sell);
         let cost = inputs.iter().map(|flow| flow.value).sum::<f64>();
         let revenue = outputs.iter().map(|flow| flow.value).sum::<f64>();
         let short_inputs = inputs
@@ -319,13 +346,17 @@ fn detail_rows(world: &World, defs: &GameDefs, goods: &[GoodPrice]) -> DetailRow
             let sell = state_sell.get(&(state.id, idx)).copied().unwrap_or(0.0);
             let state_price = price(row.base, buy, sell, defs.price_range.max(0.0));
             let market_access = market_access(state.infrastructure, state.infrastructure_usage);
-            let effective_mapi = 0.75 * market_access;
+            let effective_mapi = effective_mapi(market_access);
+            let price = snapshot
+                .and_then(|snap| snap.local_by_state.get(&state.id))
+                .map(|local| local[idx])
+                .unwrap_or_else(|| local_price(effective_mapi, row.price, state_price));
             Some(StateGood {
                 state_id: state.id,
                 good_id,
                 buy,
                 sell,
-                price: local_price(effective_mapi, row.price, state_price),
+                price,
                 market_price: row.price,
                 state_price,
                 market_access,
@@ -352,7 +383,8 @@ fn detail_rows(world: &World, defs: &GameDefs, goods: &[GoodPrice]) -> DetailRow
             infrastructure_usage: state.infrastructure_usage,
         })
         .collect();
-    let state_pops = collapsed_state_pops(world, defs, &prices, &base_prices, &sell_orders);
+    let state_pops =
+        collapsed_state_pops(world, defs, &prices, &base_prices, &sell_orders, snapshot);
     let state_needs = aggregate_state_needs(&state_pops);
     let state_qualifications = state_qualification_rows(world, defs, &employees_by_building);
     DetailRows {
@@ -409,6 +441,7 @@ fn collapsed_state_pops(
     prices: &GoodsVec,
     base_prices: &GoodsVec,
     sell_orders: &GoodsVec,
+    snapshot: Option<&ShopSnapshot>,
 ) -> Vec<StatePop> {
     let source: Vec<WorldStatePop> = if world.state_pops.is_empty() {
         world
@@ -478,7 +511,15 @@ fn collapsed_state_pops(
     groups
         .into_values()
         .map(|pop| {
-            let needs = pop_needs_for(&pop, defs, prices, base_prices, sell_orders);
+            let needs = pop_needs_for(
+                &pop,
+                defs,
+                pop.state
+                    .and_then(|state| snapshot.and_then(|snap| snap.local_by_state.get(&state)))
+                    .unwrap_or(prices),
+                base_prices,
+                sell_orders,
+            );
             StatePop {
                 id: Some(pop.id),
                 state_id: pop.state.unwrap_or(0),
@@ -811,33 +852,138 @@ fn access_scaled_non_pop_orders(
     (buy, sell)
 }
 
-/// Split pops into wage-sensitive vs frozen-wealth; precompute the constant buy.
+#[derive(Clone)]
+struct StateShop {
+    id: u32,
+    access: f64,
+    mapi: f64,
+    frozen_buy: GoodsVec,
+    frozen_sell: GoodsVec,
+    frozen_pop_buy: GoodsVec,
+    wage_idxs: Vec<usize>,
+}
+
+#[derive(Clone, Default)]
+struct ShopSnapshot {
+    world_pop_buy: GoodsVec,
+    local_by_state: BTreeMap<u32, GoodsVec>,
+    pop_buy_by_state: BTreeMap<u32, GoodsVec>,
+}
+
+fn state_shops(
+    world: &World,
+    defs: &GameDefs,
+    access_by_state: &BTreeMap<u32, f64>,
+    n: usize,
+    base_prices: &GoodsVec,
+    world_sell: &GoodsVec,
+) -> Vec<StateShop> {
+    let mut ids: BTreeMap<u32, f64> = access_by_state.clone();
+    for state in &world.states {
+        ids.entry(state.id)
+            .or_insert_with(|| market_access(state.infrastructure, state.infrastructure_usage));
+    }
+    for pop in &world.pops {
+        if let Some(state) = pop.state {
+            ids.entry(state).or_insert(1.0);
+        }
+    }
+    for building in &world.buildings {
+        if let Some(state) = building.state {
+            ids.entry(state).or_insert(1.0);
+        }
+    }
+    for trade in &world.state_trade {
+        ids.entry(trade.state).or_insert(1.0);
+    }
+
+    ids.into_iter()
+        .map(|(id, access)| {
+            let mut frozen_buy = GoodsVec::zeros(n);
+            let mut frozen_sell = GoodsVec::zeros(n);
+            for trade in &world.state_trade {
+                if trade.state == id {
+                    trade.add_orders(&mut frozen_buy, &mut frozen_sell, 1.0);
+                }
+            }
+            for building in &world.buildings {
+                if building.state == Some(id) {
+                    let (inputs, outputs) = building.goods_io(defs);
+                    for (good, quantity) in inputs.iter_indexed() {
+                        frozen_buy.add(good, quantity);
+                    }
+                    for (good, quantity) in outputs.iter_indexed() {
+                        frozen_sell.add(good, quantity);
+                    }
+                }
+            }
+            let mut frozen_pop_buy = GoodsVec::zeros(n);
+            let mut wage_idxs = Vec::new();
+            for (i, pop) in world.pops.iter().enumerate() {
+                if pop.state != Some(id) {
+                    continue;
+                }
+                if pop.wages > 0.0 {
+                    wage_idxs.push(i);
+                } else {
+                    add_pop_consumption(
+                        &mut frozen_pop_buy,
+                        pop,
+                        base_prices,
+                        base_prices,
+                        defs,
+                        world_sell,
+                    );
+                }
+            }
+            StateShop {
+                id,
+                access,
+                mapi: effective_mapi(access),
+                frozen_buy,
+                frozen_sell,
+                frozen_pop_buy,
+                wage_idxs,
+            }
+        })
+        .collect()
+}
+
+/// Split pops with no state into wage-sensitive vs frozen-wealth; precompute
+/// access-scaled frozen pop buy (stateless + every state's frozen pops).
 fn split_pop_buy(
     world: &World,
     defs: &GameDefs,
     base_prices: &GoodsVec,
-    frozen_sell: &GoodsVec,
-    pop_access: &[f64],
+    world_sell: &GoodsVec,
+    shops: &[StateShop],
 ) -> (Vec<usize>, GoodsVec) {
-    let mut wage_pop_idxs = Vec::new();
+    let mut stateless_wage_idxs = Vec::new();
     let mut frozen_pop_buy = GoodsVec::zeros(defs.goods_order.len());
     for (i, pop) in world.pops.iter().enumerate() {
+        if pop.state.is_some() {
+            continue;
+        }
         if pop.wages > 0.0 {
-            wage_pop_idxs.push(i);
+            stateless_wage_idxs.push(i);
         } else {
-            // Prices are irrelevant for wages ≤ 0 (wealth is frozen).
             add_pop_consumption_scaled(
                 &mut frozen_pop_buy,
                 pop,
                 base_prices,
                 base_prices,
                 defs,
-                frozen_sell,
-                pop_access.get(i).copied().unwrap_or(1.0),
+                world_sell,
+                1.0,
             );
         }
     }
-    (wage_pop_idxs, frozen_pop_buy)
+    for shop in shops {
+        for (good, quantity) in shop.frozen_pop_buy.iter_indexed() {
+            frozen_pop_buy.add(good, quantity * shop.access);
+        }
+    }
+    (stateless_wage_idxs, frozen_pop_buy)
 }
 
 #[derive(Clone)]
@@ -852,9 +998,9 @@ struct PriceResidual<'a> {
     upper: Vec<f64>,
     frozen_buy: GoodsVec,
     frozen_sell: GoodsVec,
-    wage_pop_idxs: Vec<usize>,
+    shops: Vec<StateShop>,
+    stateless_wage_idxs: Vec<usize>,
     frozen_pop_buy: GoodsVec,
-    pop_access: Vec<f64>,
 }
 
 impl PriceResidual<'_> {
@@ -866,20 +1012,98 @@ impl PriceResidual<'_> {
         prices
     }
 
-    fn pop_buy_at(&self, prices: &GoodsVec) -> GoodsVec {
+    fn settle_state(&self, shop: &StateShop, market: &GoodsVec) -> (GoodsVec, GoodsVec) {
+        let n = self.base_prices.len();
+        let mut local = market.clone();
+        let mut pop_buy = shop.frozen_pop_buy.clone();
+        for _ in 0..LOCAL_ITERS {
+            pop_buy = shop.frozen_pop_buy.clone();
+            for &i in &shop.wage_idxs {
+                add_pop_consumption(
+                    &mut pop_buy,
+                    &self.world.pops[i],
+                    &local,
+                    &self.base_prices,
+                    self.defs,
+                    &self.frozen_sell,
+                );
+            }
+            let mut next = GoodsVec::zeros(n);
+            let mut delta = 0.0_f64;
+            for i in 0..n {
+                let good = GoodIdx::from_usize(i);
+                let buy = shop.frozen_buy[good] + pop_buy[good];
+                let sell = shop.frozen_sell[good];
+                let state_price = price(self.base_prices[good], buy, sell, self.price_range);
+                let price = local_price(shop.mapi, market[good], state_price);
+                delta = delta.max((price - local[good]).abs());
+                next[good] = price;
+            }
+            local = next;
+            if delta < LOCAL_EPS {
+                break;
+            }
+        }
+        (local, pop_buy)
+    }
+
+    fn world_pop_buy_at(&self, market: &GoodsVec) -> GoodsVec {
         let mut buy = self.frozen_pop_buy.clone();
-        for &i in &self.wage_pop_idxs {
+        for &i in &self.stateless_wage_idxs {
             add_pop_consumption_scaled(
                 &mut buy,
                 &self.world.pops[i],
-                prices,
+                market,
                 &self.base_prices,
                 self.defs,
                 &self.frozen_sell,
-                self.pop_access.get(i).copied().unwrap_or(1.0),
+                1.0,
             );
         }
+        for shop in &self.shops {
+            if shop.wage_idxs.is_empty() {
+                continue;
+            }
+            let (_, pop_buy) = self.settle_state(shop, market);
+            for (good, quantity) in pop_buy.iter_indexed() {
+                buy.add(good, shop.access * (quantity - shop.frozen_pop_buy[good]));
+            }
+        }
         buy
+    }
+
+    fn snapshot_at(&self, market: &GoodsVec) -> ShopSnapshot {
+        let mut world_pop_buy = self.frozen_pop_buy.clone();
+        for &i in &self.stateless_wage_idxs {
+            add_pop_consumption_scaled(
+                &mut world_pop_buy,
+                &self.world.pops[i],
+                market,
+                &self.base_prices,
+                self.defs,
+                &self.frozen_sell,
+                1.0,
+            );
+        }
+        let mut local_by_state = BTreeMap::new();
+        let mut pop_buy_by_state = BTreeMap::new();
+        for shop in &self.shops {
+            let (local, pop_buy) = self.settle_state(shop, market);
+            for (good, quantity) in pop_buy.iter_indexed() {
+                world_pop_buy.add(good, shop.access * (quantity - shop.frozen_pop_buy[good]));
+            }
+            local_by_state.insert(shop.id, local);
+            pop_buy_by_state.insert(shop.id, pop_buy);
+        }
+        ShopSnapshot {
+            world_pop_buy,
+            local_by_state,
+            pop_buy_by_state,
+        }
+    }
+
+    fn pop_buy_at(&self, prices: &GoodsVec) -> GoodsVec {
+        self.world_pop_buy_at(prices)
     }
 
     fn formula_rel(&self, rel: &[f64]) -> Vec<f64> {
@@ -920,12 +1144,20 @@ impl PriceResidual<'_> {
         }
     }
 
-    fn evaluate(&self, rel: &[f64]) -> (Vec<GoodPrice>, f64) {
+    fn evaluate(&self, rel: &[f64]) -> (Vec<GoodPrice>, f64, ShopSnapshot) {
         let prices = self.prices_from_rel(rel);
-        let pop_buy = self.pop_buy_at(&prices);
+        let snapshot = self.snapshot_at(&prices);
+        let pop_buy = &snapshot.world_pop_buy;
         let residual = self
-            .residual_at(rel)
+            .goods
             .iter()
+            .zip(self.bases.iter().zip(rel.iter()))
+            .map(|(&id, (base, rrel))| {
+                let buy = self.frozen_buy[id] + pop_buy[id];
+                let sell = self.frozen_sell[id];
+                let formula = price(*base, buy, sell, self.price_range) / *base;
+                rrel - formula
+            })
             .map(|x| x * x)
             .sum::<f64>()
             .sqrt();
@@ -947,7 +1179,7 @@ impl PriceResidual<'_> {
                 })
             })
             .collect();
-        (rows, residual)
+        (rows, residual, snapshot)
     }
 }
 

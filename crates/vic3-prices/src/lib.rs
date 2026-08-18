@@ -1,4 +1,4 @@
-//! Price equilibrium. Inner problem: pop consumption in the loop, buildings frozen.
+//! Price equilibrium. Inner problem: pop consumption at local prices in the loop, buildings frozen.
 //!
 //! Solver: `min ‖r − r_formula(orders(r))‖²` with box bounds on relative
 //! prices, via Basin **trust-region-reflective** (`Trf`, Vec backend) and
@@ -11,7 +11,9 @@ mod solve;
 mod world;
 
 pub use consumption::consumption;
-pub use formula::{local_price, market_access, market_ratio, price, ORDER_EPS};
+pub use formula::{
+    effective_mapi, local_price, market_access, market_ratio, price, BASE_MAPI, ORDER_EPS,
+};
 pub use result::{
     BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, GoodFlow, GoodPrice,
     MarketInputs, PopNeedBasket, PricesResult, ProfessionCount, SolveOpts, SolveStatus, StateGood,
@@ -28,13 +30,13 @@ pub use world::{
 /// 1. Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.
 /// 2. Prices are clamped to ±PRICE_RANGE; the clamp is part of the model.
 /// 3. Employment, wages, and trade volumes are frozen except explicit what-if deltas.
-/// 4. State building, pop, and post-1.9 trade orders are access-scaled into one whole-save market; MAPI modifiers and overseas constraints are not modeled.
+/// 4. Pops shop at each state's MAPI-blended local prices; those orders are access-scaled into one whole-save market. Extra MAPI modifiers and overseas constraints are not modeled.
 /// 5. The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.
 pub const LIMITATIONS: &[&str] = &[
     "Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.",
     "Prices are clamped to ±PRICE_RANGE; the clamp is part of the model.",
     "Employment, wages, and trade volumes are frozen except explicit what-if deltas.",
-    "State building, pop, and post-1.9 trade orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, and MAPI modifiers and overseas convoy constraints are not modeled.",
+    "Pops shop at each state's MAPI-blended local prices; state orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, and extra MAPI modifiers and overseas convoy constraints are not modeled.",
     "The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.",
 ];
 
@@ -332,7 +334,7 @@ mod tests {
         );
         assert_eq!(
             LIMITATIONS[3],
-            "State building, pop, and post-1.9 trade orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, and MAPI modifiers and overseas convoy constraints are not modeled."
+            "Pops shop at each state's MAPI-blended local prices; state orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, and extra MAPI modifiers and overseas convoy constraints are not modeled."
         );
         assert_eq!(
             LIMITATIONS[4],
@@ -512,6 +514,114 @@ mod tests {
                 wood(1).market_price,
                 wood(1).state_price
             )
+        );
+    }
+
+    #[test]
+    fn wage_pops_shop_at_local_prices_not_world() {
+        let mut defs = heating_defs();
+        defs.production_methods.insert(
+            "pm_wood_buyer".into(),
+            ProductionMethod {
+                id: "pm_wood_buyer".into(),
+                inputs: vec![(GoodIdx::from_usize(1), 10.0)],
+                outputs: Vec::new(),
+            },
+        );
+        defs.production_methods.insert(
+            "pm_wood_seller".into(),
+            ProductionMethod {
+                id: "pm_wood_seller".into(),
+                inputs: Vec::new(),
+                outputs: vec![(GoodIdx::from_usize(1), 10.0)],
+            },
+        );
+        let state = |id| WorldState {
+            id,
+            country: Some(1),
+            market: Some(1),
+            infrastructure: (id == 1).then_some(45.0),
+            infrastructure_usage: (id == 1).then_some(90.0),
+            ..WorldState::default()
+        };
+        let building = |id, state, method: &str| WorldBuilding {
+            id,
+            state: Some(state),
+            building: format!("building_{method}"),
+            level: 1.0,
+            staffing: 1.0,
+            production_methods: vec![method.into()],
+            saved_inputs: Default::default(),
+            saved_outputs: Default::default(),
+        };
+        let wage_pop = |state| WorldPop {
+            state: Some(state),
+            size: POP_SCALE,
+            wealth: 1,
+            wages: 1.0,
+            culture: None,
+            profession: None,
+        };
+        let world = World {
+            states: vec![state(1), state(2)],
+            buildings: vec![
+                building(1, 1, "pm_wood_buyer"),
+                building(2, 2, "pm_wood_seller"),
+            ],
+            pops: vec![wage_pop(1), wage_pop(2)],
+            ..World::default()
+        };
+
+        let result = solve(&world, &defs, SolveOpts::default());
+        let heating = |state_id: u32| {
+            result
+                .state_pops
+                .iter()
+                .find(|pop| pop.state_id == state_id)
+                .and_then(|pop| pop.needs.first())
+                .expect("heating basket")
+        };
+        let poor_access = heating(1);
+        let full_access = heating(2);
+        assert_ne!(
+            poor_access.package_value, full_access.package_value,
+            "local cost of living must move wage-pop packages apart"
+        );
+        assert!(
+            full_access.package_value > poor_access.package_value,
+            "cheap local wood should raise real income / package size, got poor={} full={}",
+            poor_access.package_value,
+            full_access.package_value
+        );
+
+        let wood_row = |state_id: u32| {
+            result
+                .state_goods
+                .iter()
+                .find(|row| row.state_id == state_id && row.good_id == "wood")
+                .expect("state wood")
+        };
+        let pop_wood_1 = wood_row(1).buy - 10.0;
+        let pop_wood_2 = wood_row(2).buy;
+        assert!(
+            (pop_wood_1 - pop_wood_2).abs() > crate::ORDER_EPS,
+            "unscaled pop wood buy must differ when local prices differ ({pop_wood_1} vs {pop_wood_2})"
+        );
+
+        let buyer = result
+            .buildings
+            .iter()
+            .find(|building| building.state_id == Some(1))
+            .expect("buyer");
+        let local_wood = result
+            .state_goods
+            .iter()
+            .find(|row| row.state_id == 1 && row.good_id == "wood")
+            .expect("local wood");
+        assert_eq!(buyer.inputs[0].good_id, "wood");
+        assert!(
+            (buyer.inputs[0].value / buyer.inputs[0].quantity - local_wood.price).abs() < 1e-9,
+            "building IO is valued at the state's local price"
         );
     }
 
