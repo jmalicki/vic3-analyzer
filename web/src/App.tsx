@@ -11,6 +11,7 @@ import { DefsBuilder } from './DefsBuilder'
 import { clearStoredDefs, loadStoredDefs, storeDefs } from './defsStore'
 import { clearStoredSave, loadStoredSave, persistErrorMessage, storeSave, storeSaveAnalysis } from './saveStore'
 import { AlertsPane } from './AlertsPane'
+import { MilitaryPane } from './MilitaryPane'
 import { FieldHelp } from './FieldHelp'
 import { GoalBuilder } from './GoalBuilder'
 import { parseDefsIcons } from './GameIcon'
@@ -30,6 +31,7 @@ import type {
   AnalysisResult,
   AlertsResult,
   DefsIcons,
+  MilitarySnapshot,
   DefsSummary,
   GapAtom,
   GapsResult,
@@ -170,6 +172,7 @@ function App({ wasmApi }: Props) {
   const [gapsResult, setGapsResult] = useState<GapsResult>()
   const [planResult, setPlanResult] = useState<PlanResult>()
   const [alertsResult, setAlertsResult] = useState<AlertsResult>()
+  const [militaryResult, setMilitaryResult] = useState<MilitarySnapshot>()
   const [goal, setGoal] = useState('research(tech=nitroglycerin)')
   const [label, setLabel] = useState('')
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
@@ -399,6 +402,21 @@ function App({ wasmApi }: Props) {
     void Promise.resolve(api.loaded_alerts())
       .then((json) => {
         if (!cancelled) setAlertsResult(JSON.parse(json) as AlertsResult)
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeView, api, result])
+
+  useEffect(() => {
+    if (activeView !== 'military' || !api || !result) return
+    let cancelled = false
+    void Promise.resolve(api.loaded_military())
+      .then((json) => {
+        if (!cancelled) setMilitaryResult(JSON.parse(json) as MilitarySnapshot)
       })
       .catch((reason: unknown) => {
         if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason))
@@ -879,10 +897,11 @@ function App({ wasmApi }: Props) {
               </button>
             ))}
           </div>
-          <p>
-            {militaryTab === 'army' ? 'Army' : militaryTab === 'navy' ? 'Navy' : 'Mobilization'}{' '}
-            details arrive in a follow-up.
-          </p>
+          {militaryResult ? (
+            <MilitaryPane snapshot={militaryResult} tab={militaryTab} icons={goodIcons} />
+          ) : (
+            <p>Military details appear after a save is priced.</p>
+          )}
         </section>
       )}
 

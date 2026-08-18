@@ -107,10 +107,27 @@ function mockApi(): WasmApi {
     loaded_prices: vi.fn(() => result),
     loaded_military: vi.fn(() =>
       JSON.stringify({
-        armies: [],
-        navies: [],
-        mobilization: [],
-        limitations: ['Military IR incomplete; missing managers yield empty lists'],
+        armies: [
+          {
+            id: 1,
+            name: 'Armée du Nord',
+            type: 'army',
+            organization: 85,
+            current_manpower: 12000,
+            units: [{ id: 11, name: '1st Infantry', type: 'line_infantry', manpower: 1000 }],
+          },
+        ],
+        navies: [
+          {
+            id: 2,
+            name: 'Atlantic Fleet',
+            type: 'navy',
+            current_manpower: 4000,
+            units: [{ id: 21, name: 'HMS Vic', type: 'man_o_war' }],
+          },
+        ],
+        mobilization: [{ id: 3, name: 'General Mobilization', type: 'general' }],
+        limitations: [],
       }),
     ),
     loaded_what_if: vi.fn(() => result),
@@ -652,6 +669,52 @@ describe('prices UI', () => {
     expect(screen.getByRole('tab', { name: 'Army' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Navy' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Mobilization' })).toBeInTheDocument()
+    expect(await screen.findByText('Armée du Nord')).toBeInTheDocument()
+  })
+
+  it('fills army, navy, and mobilization tabs from loaded_military', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+
+    await user.click(screen.getByRole('button', { name: 'Military' }))
+    expect(await screen.findByText('Armée du Nord')).toBeInTheDocument()
+    expect(screen.getByText(/12,000 manpower/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Navy' }))
+    expect(screen.getByRole('tab', { name: 'Navy' })).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByText('Atlantic Fleet')).toBeInTheDocument()
+    expect(screen.queryByText('Armée du Nord')).not.toBeInTheDocument()
+    expect(window.location.hash).toBe('#/military/navy')
+
+    await user.click(screen.getByRole('tab', { name: 'Mobilization' }))
+    expect(await screen.findByText('General Mobilization')).toBeInTheDocument()
+    expect(window.location.hash).toBe('#/military/mobilization')
+  })
+
+  it('shows empty military lists with the snapshot limitation, not zero counts', async () => {
+    const user = userEvent.setup()
+    const api = mockApi()
+    api.loaded_military = vi.fn(() =>
+      JSON.stringify({
+        armies: [],
+        navies: [],
+        mobilization: [],
+        limitations: ['Military IR incomplete; missing managers yield empty lists'],
+      }),
+    )
+    render(<App wasmApi={api} />)
+    await selectSave(user)
+
+    await user.click(screen.getByRole('button', { name: 'Military' }))
+    expect(await screen.findByText('No armies recorded in this save.')).toBeInTheDocument()
+    expect(
+      screen.getByText('Military IR incomplete; missing managers yield empty lists'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/0 armies/i)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Mobilization' }))
+    expect(await screen.findByText('None recorded')).toBeInTheDocument()
   })
 
   it('shows a state name on the States pane after a save loads', async () => {
