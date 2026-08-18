@@ -1,5 +1,14 @@
 import { GameIcon } from './GameIcon'
-import type { Alert, AlertKind, AlertsResult, DefsIcons, MitigationAction } from './types'
+import { deltaForMitigation } from './ConfirmApply'
+import type {
+  Alert,
+  AlertKind,
+  AlertsResult,
+  BuildingEconomics,
+  DefsIcons,
+  MitigationAction,
+  WorldDelta,
+} from './types'
 
 function actionBuilding(action?: MitigationAction): string | undefined {
   if (!action) return undefined
@@ -34,7 +43,17 @@ function alertIconId(kind: AlertKind): string {
   }
 }
 
-export function AlertsPane({ result, icons }: { result: AlertsResult; icons?: DefsIcons }) {
+export function AlertsPane({
+  result,
+  icons,
+  buildings = [],
+  onApply,
+}: {
+  result: AlertsResult
+  icons?: DefsIcons
+  buildings?: BuildingEconomics[]
+  onApply?: (delta: WorldDelta) => void
+}) {
   if (result.alerts.length === 0) {
     return <p>No shortages detected in the current solve.</p>
   }
@@ -42,14 +61,24 @@ export function AlertsPane({ result, icons }: { result: AlertsResult; icons?: De
     <ul className="alerts-list">
       {result.alerts.map((alert) => (
         <li key={alert.id}>
-          <AlertExpander alert={alert} icons={icons} />
+          <AlertExpander alert={alert} icons={icons} buildings={buildings} onApply={onApply} />
         </li>
       ))}
     </ul>
   )
 }
 
-function AlertExpander({ alert, icons }: { alert: Alert; icons?: DefsIcons }) {
+function AlertExpander({
+  alert,
+  icons,
+  buildings,
+  onApply,
+}: {
+  alert: Alert
+  icons?: DefsIcons
+  buildings: BuildingEconomics[]
+  onApply?: (delta: WorldDelta) => void
+}) {
   const mitigations = [...alert.mitigations].sort((left, right) => left.rank - right.rank)
   return (
     <details className="alert-expander">
@@ -73,25 +102,37 @@ function AlertExpander({ alert, icons }: { alert: Alert; icons?: DefsIcons }) {
         </dl>
       )}
       <ol className="alert-mitigations">
-        {mitigations.map((mitigation) => (
-          <li key={mitigation.id}>
-            <div className="alert-mitigation-heading">
-              {actionBuilding(mitigation.action) && (
-                <GameIcon kind="building" id={actionBuilding(mitigation.action)!} icons={icons} />
-              )}
-              {actionGood(mitigation.action) && (
-                <GameIcon kind="good" id={actionGood(mitigation.action)!} icons={icons} />
-              )}
-              <strong>
-                {mitigation.rank}. {mitigation.title}
-              </strong>
-              <button type="button" className="alert-apply" disabled title="coming in apply track">
-                Apply
-              </button>
-            </div>
-            <p>{mitigation.detail}</p>
-          </li>
-        ))}
+        {mitigations.map((mitigation) => {
+          const delta = deltaForMitigation(mitigation.action, buildings)
+          const canApply = Boolean(delta && onApply)
+          return (
+            <li key={mitigation.id}>
+              <div className="alert-mitigation-heading">
+                {actionBuilding(mitigation.action) && (
+                  <GameIcon kind="building" id={actionBuilding(mitigation.action)!} icons={icons} />
+                )}
+                {actionGood(mitigation.action) && (
+                  <GameIcon kind="good" id={actionGood(mitigation.action)!} icons={icons} />
+                )}
+                <strong>
+                  {mitigation.rank}. {mitigation.title}
+                </strong>
+                <button
+                  type="button"
+                  className="alert-apply"
+                  disabled={!canApply}
+                  title={canApply ? 'Apply this mitigation' : 'Cannot apply this mitigation yet'}
+                  onClick={() => {
+                    if (delta) onApply?.(delta)
+                  }}
+                >
+                  Apply
+                </button>
+              </div>
+              <p>{mitigation.detail}</p>
+            </li>
+          )
+        })}
       </ol>
     </details>
   )

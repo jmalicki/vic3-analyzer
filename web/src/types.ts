@@ -165,6 +165,9 @@ export interface PricesResult {
   residual: number
   status: 'converged' | 'max_iters' | 'failed'
   limitations: string[]
+  gdp?: number
+  sol?: number
+  population_weighted_wealth?: number
 }
 
 export interface ProductionMethodDelta {
@@ -220,6 +223,12 @@ export interface OptimizeResult {
   prices?: OptimizePricesSummary
   limitations: string[]
   world_delta: WorldDelta
+}
+
+/** Surgical save rewrite: extra levels and PMs keyed by building instance id. */
+export interface SavePatch {
+  production_methods?: ProductionMethodDelta[]
+  extra_levels?: Array<{ building_id: number; extra_levels: number }>
 }
 
 export type GapAtom = string | Record<string, unknown>

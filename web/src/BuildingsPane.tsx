@@ -17,6 +17,7 @@ import type {
   OptimizeResult,
   PricesResult,
   ProductionMethodDef,
+  WorldDelta,
 } from './types'
 import type { WasmApi } from './wasm'
 import { hashForBuilding, parseBuildingId } from './workspaceNav'
@@ -180,6 +181,7 @@ export function BuildingsPane({
   gated = false,
   api,
   onWhatIf,
+  onApply,
   productionMethods,
 }: {
   result?: PricesResult
@@ -187,6 +189,7 @@ export function BuildingsPane({
   gated?: boolean
   api?: WasmApi
   onWhatIf?: (building: string, extraLevels: number) => void
+  onApply?: (delta: WorldDelta) => void
   productionMethods?: ProductionMethodDef[]
 }) {
   const [hash, setHash] = useState(() => window.location.hash)
@@ -356,6 +359,7 @@ export function BuildingsPane({
                       setExtraLevels((current) => ({ ...current, [row.typeId]: value }))
                     }
                     onWhatIf={onWhatIf}
+                    onApply={onApply}
                     onSelectPm={(building, id, checked) => {
                       setSelectedPms((current) => {
                         const previous = current[building.id] ?? building.production_method_ids ?? []
@@ -390,6 +394,7 @@ function TypeBlock({
   onToggle,
   onExtra,
   onWhatIf,
+  onApply,
   onSelectPm,
 }: {
   row: TypeRow
@@ -403,6 +408,7 @@ function TypeBlock({
   onToggle: () => void
   onExtra: (value: number) => void
   onWhatIf?: (building: string, extraLevels: number) => void
+  onApply?: (delta: WorldDelta) => void
   onSelectPm: (building: BuildingEconomics, id: string, checked: boolean) => void
 }) {
   return (
@@ -444,6 +450,16 @@ function TypeBlock({
               onClick={() => onWhatIf?.(row.typeId, extra)}
             >
               Run what-if
+            </button>
+            <button
+              type="button"
+              aria-label={`Apply extra levels for ${row.name}`}
+              disabled={!onApply || extra < 1}
+              onClick={() =>
+                onApply?.({ extra_levels: [{ building: row.typeId, extra_levels: extra }] })
+              }
+            >
+              Apply
             </button>
           </div>
         </td>
@@ -497,7 +513,25 @@ function TypeBlock({
                                 {displayId(id)}
                               </label>
                             ))}
-                            <p className="pm-preview-note">Preview only — apply comes later.</p>
+                            <p className="pm-preview-note">
+                              Preview uses selected methods; Apply writes them to a new save step.
+                            </p>
+                            <button
+                              type="button"
+                              aria-label={`Apply production methods for ${instanceName}`}
+                              disabled={
+                                !onApply ||
+                                sameIds(selected, building.production_method_ids ?? []) ||
+                                selected.length === 0
+                              }
+                              onClick={() =>
+                                onApply?.({
+                                  production_methods: [{ building_id: building.id, methods: selected }],
+                                })
+                              }
+                            >
+                              Apply
+                            </button>
                             <dl className="pm-preview">
                               <div>
                                 <dt>Inputs</dt>
