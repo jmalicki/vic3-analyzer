@@ -142,6 +142,25 @@ section[aria-labelledby] { margin-top: 1rem; }
 .workspace-page { border: 1px solid #37433a; background: #18201a; padding: 1.25rem; margin-top: 0; }
 .workspace-page h2 { margin: .15rem 0; }
 .alerts-list { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: .75rem; }
+.military-list { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: .75rem; }
+.military-card {
+  background: #141b16;
+  border: 1px solid #37433a;
+  display: grid;
+  gap: .45rem;
+  padding: .75rem .85rem;
+}
+.military-heading { align-items: center; display: flex; gap: .5rem; }
+.military-heading strong { font-family: Georgia, serif; font-weight: 400; }
+.military-meta { color: #9ba79d; font-size: .85rem; margin: 0; }
+.military-units { display: grid; gap: .35rem; list-style: none; margin: .15rem 0 0; padding: 0; }
+.military-units li {
+  align-items: center;
+  display: flex;
+  gap: .4rem;
+  justify-content: space-between;
+}
+.military-unit-manpower { color: #9ba79d; font-variant-numeric: tabular-nums; }
 .alert-expander {
   border: 1px solid #3d4a40;
   background: #111713;
