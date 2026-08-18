@@ -190,7 +190,9 @@ impl DefsBlobBuilder {
     #[wasm_bindgen(js_name = addBatch)]
     pub fn add_batch(&mut self, manifest_json: &str, contents: &[u8]) -> Result<(), JsError> {
         let files = manifest_files(manifest_json, contents).map_err(to_js)?;
-        self.inner.add_files(files);
+        self.inner
+            .add_files(files)
+            .map_err(|error| to_js(WasmError::from(error)))?;
         Ok(())
     }
 

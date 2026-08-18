@@ -492,36 +492,49 @@ pub fn render_library(
     library: &mut CoaLibrary,
     textures: &BTreeMap<String, Vec<u8>>, // filename stem/name → RGBA via dds or raw
 ) {
-    resolve_parents(&mut library.coats);
-    resolve_template_lists(library);
+    library.prepare_render();
     let decoded = library
         .needed_texture_names()
         .into_iter()
         .filter_map(|key: String| Some((key.clone(), decode_flag_texture(textures.get(&key)?)?)))
         .collect::<BTreeMap<_, _>>();
-    render_resolved(library, &decoded);
-}
-
-/// Render from textures already decoded to flag size.
-///
-/// The browser builder scales each texture as it arrives so the source art —
-/// over 400 MB across a full install — never has to be held at once.
-pub fn render_library_scaled(library: &mut CoaLibrary, textures: &BTreeMap<String, RgbaImage>) {
-    resolve_parents(&mut library.coats);
-    resolve_template_lists(library);
-    render_resolved(library, textures);
-}
-
-fn render_resolved(library: &mut CoaLibrary, textures: &BTreeMap<String, RgbaImage>) {
-    let coats = library.coats.clone();
-    for (id, coa) in coats {
-        if let Some(png) = render_coa(&coa, &library.colors, textures) {
-            library.rendered.insert(id, png);
-        }
-    }
+    library.render_remaining_coats(&decoded);
 }
 
 impl CoaLibrary {
+    /// Fold parent coats and unambiguous template lists into concrete CoAs.
+    pub(crate) fn prepare_render(&mut self) {
+        resolve_parents(&mut self.coats);
+        resolve_template_lists(self);
+    }
+
+    /// Render coats whose pattern and emblems are all present.
+    ///
+    /// Called as each texture arrives so finishing the blob is just encoding.
+    pub(crate) fn render_ready_coats(&mut self, textures: &BTreeMap<String, RgbaImage>) {
+        self.render_coats(textures, true);
+    }
+
+    /// Render anything not yet drawn, including coats with missing emblems.
+    pub(crate) fn render_remaining_coats(&mut self, textures: &BTreeMap<String, RgbaImage>) {
+        self.render_coats(textures, false);
+    }
+
+    fn render_coats(&mut self, textures: &BTreeMap<String, RgbaImage>, only_ready: bool) {
+        let coats = self.coats.clone();
+        for (id, coa) in coats {
+            if self.rendered.contains_key(&id) {
+                continue;
+            }
+            if only_ready && !coat_textures_ready(&coa, textures) {
+                continue;
+            }
+            if let Some(png) = render_coa(&coa, &self.colors, textures) {
+                self.rendered.insert(id, png);
+            }
+        }
+    }
+
     /// Texture file names every coat could ask for.
     ///
     /// Parent and template-list resolution only copy emblems between coats
@@ -683,6 +696,18 @@ fn render_coa(
     }
 
     encode_png(FLAG_W, FLAG_H, &rgba)
+}
+
+fn coat_textures_ready(coa: &CoatOfArms, textures: &BTreeMap<String, RgbaImage>) -> bool {
+    if let Some(pattern) = &coa.pattern {
+        let key = texture_key(pattern);
+        if key != "pattern_solid.tga" && !textures.contains_key(&key) {
+            return false;
+        }
+    }
+    coa.emblems
+        .iter()
+        .all(|emblem| textures.contains_key(&texture_key(&emblem.texture)))
 }
 
 fn texture_key(name: &str) -> String {

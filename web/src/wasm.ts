@@ -3,12 +3,14 @@ import type { JsonSchema } from './types'
 /**
  * Incremental defs build. Batching keeps the tab from holding a full install's
  * coat-of-arms art (400 MB+) in one array and copying it again into wasm.
+ * Worker-backed builders return promises so the page can read the next batch
+ * while this one is absorbed.
  */
 export interface DefsBlobBuilder {
-  addBatch(manifestJson: string, contents: Uint8Array): void
+  addBatch(manifestJson: string, contents: Uint8Array): void | Promise<void>
   /** JSON array of lowercase gfx file names the added definitions reference. */
-  neededGfxNames(): string
-  finish(): Uint8Array
+  neededGfxNames(): string | Promise<string>
+  finish(): Uint8Array | Promise<Uint8Array>
   free?(): void
 }
 

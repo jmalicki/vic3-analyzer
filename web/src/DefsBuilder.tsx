@@ -7,6 +7,7 @@ import {
   type InputHTMLAttributes,
 } from 'react'
 import {
+  createJobQueue,
   enumerateDroppedDefsFiles,
   isGfxDefsPath,
   isExtraIconDefsPath,
@@ -44,11 +45,6 @@ const directoryProps = {
   directory: '',
 } as InputHTMLAttributes<HTMLInputElement>
 
-/** Hand the event loop a turn so progress paints between wasm handoffs. */
-function yieldToBrowser(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0))
-}
-
 export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
   const [status, setStatus] = useState<string>()
   const [error, setError] = useState<string>()
@@ -70,10 +66,11 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
   /**
    * Run a streamed build.
    *
-   * `pump` reads the source and hands over batches; each is packed, submitted
-   * to wasm, and released before the next is read, so the tab never holds a
-   * full install's coat-of-arms art at once. Yielding between batches lets the
-   * progress bar actually repaint.
+   * `pump` reads the source and queues batches; each is packed and handed to
+   * the worker, then the next files are read while that job runs. The queue is
+   * bounded so the tab never holds a full install's coat-of-arms art. Progress
+   * tracks files the worker has absorbed — remaining work is unread files plus
+   * queue depth — not a later parse step.
    */
   const build = async (
     locate: () => Promise<DefsFileSource[]>,
@@ -91,6 +88,7 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
     const classify: DefsPathClassifier = (path, isDirectory) =>
       api.classify_defs_path(path, isDirectory)
     const builder = new api.DefsBlobBuilder()
+    const jobs = createJobQueue()
     let accepted = 0
     try {
       const sources = await locate()
@@ -99,21 +97,22 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
       const submit = async (batch: DefsSourceFile[]) => {
         const packed = packDefsFiles(batch, classify)
         const manifest = JSON.parse(packed.manifestJson) as unknown[]
-        if (manifest.length > 0) {
-          builder.addBatch(packed.manifestJson, packed.contents)
+        if (manifest.length === 0) return
+        await jobs.enqueue(async () => {
+          await builder.addBatch(packed.manifestJson, packed.contents)
           accepted += manifest.length
-        }
-        setProgress({ label, done: accepted, total })
-        await yieldToBrowser()
+          setProgress({ label, done: accepted, total })
+        })
       }
 
       // Definitions first: they name the art worth reading, and a full install
       // ships hundreds of emblems and icons that nothing points at.
       const text = sources.filter((source) => !isGfxDefsPath(source.path))
       const read = await streamDefsFiles(text, submit)
+      await jobs.drain()
       if (accepted === 0) throw new Error(emptyMessage)
 
-      const needed = new Set(JSON.parse(builder.neededGfxNames()) as string[])
+      const needed = new Set(JSON.parse(await builder.neededGfxNames()) as string[])
       const art = sources.filter(
         (source) =>
           isGfxDefsPath(source.path) &&
@@ -122,10 +121,8 @@ export function DefsBuilder({ api, onBuilt, onDone, onBusyChange }: Props) {
       total = text.length + art.length
       setProgress({ label, done: accepted, total })
       await streamDefsFiles(art, submit, { alreadyRead: read })
-      setProgress({ label: 'Parsing definitions in wasm' })
-      // finish() blocks the thread, so let the new label paint first.
-      await yieldToBrowser()
-      const bytes = builder.finish()
+      await jobs.drain()
+      const bytes = await builder.finish()
       const file = new File([bytes.slice().buffer as ArrayBuffer], 'defs.postcard', {
         type: 'application/octet-stream',
       })

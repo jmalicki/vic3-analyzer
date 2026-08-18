@@ -3,8 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { DefsBuilder } from './DefsBuilder'
 import {
+  createJobQueue,
   DEFS_BATCH_BYTES,
   DEFS_BATCH_SIZE,
+  DEFS_QUEUE_DEPTH,
   enumerateDroppedDefsFiles,
   packDefsFiles,
   streamDefsFiles,
@@ -89,6 +91,7 @@ function defsSummaryJson(goods = 53): string {
 type BuilderSpy = {
   batches: { manifestJson: string; contents: Uint8Array }[]
   finish: Mock<() => Uint8Array>
+  addBatch?: Mock<(manifestJson: string, contents: Uint8Array) => void | Promise<void>>
   /** Art the fake wasm claims to reference; everything else must go unread. */
   neededGfxNames: string[]
 }
@@ -97,6 +100,7 @@ function api(builder?: Partial<BuilderSpy>): WasmApi & { builder: BuilderSpy } {
   const spy: BuilderSpy = {
     batches: [],
     finish: builder?.finish ?? vi.fn(() => new Uint8Array([1, 2, 3])),
+    addBatch: builder?.addBatch,
     neededGfxNames: builder?.neededGfxNames ?? [],
   }
   const wasm = {
@@ -104,6 +108,7 @@ function api(builder?: Partial<BuilderSpy>): WasmApi & { builder: BuilderSpy } {
     DefsBlobBuilder: class {
       addBatch(manifestJson: string, contents: Uint8Array) {
         spy.batches.push({ manifestJson, contents })
+        return spy.addBatch?.(manifestJson, contents)
       }
       neededGfxNames() {
         return JSON.stringify(spy.neededGfxNames)
@@ -173,6 +178,41 @@ describe('DefsBuilder', () => {
 
     expect(sizes).toEqual([[3], [3, 1], [6]])
     expect(DEFS_BATCH_BYTES).toBe(4 * 1024 * 1024)
+  })
+
+  it('bounds the worker job queue so reads cannot run unbounded ahead', async () => {
+    const started: number[] = []
+    const releases: Array<() => void> = []
+    const { enqueue, drain, size } = createJobQueue(2)
+    const hang = (n: number) =>
+      enqueue(
+        () =>
+          new Promise<void>((resolve) => {
+            started.push(n)
+            releases.push(resolve)
+          }),
+      )
+
+    const first = hang(1)
+    const second = hang(2)
+    await Promise.resolve()
+    expect(started).toEqual([1, 2])
+    expect(size()).toBe(2)
+    expect(DEFS_QUEUE_DEPTH).toBe(2)
+
+    void hang(3)
+    await Promise.resolve()
+    expect(started).toEqual([1, 2])
+
+    releases[0]()
+    await first
+    await waitFor(() => expect(started).toEqual([1, 2, 3]))
+    expect(size()).toBe(2)
+    releases[1]()
+    releases[2]()
+    await second
+    await drain()
+    expect(size()).toBe(0)
   })
 
   it('shows a platform game path hint under the picker', () => {
@@ -500,7 +540,7 @@ describe('DefsBuilder', () => {
     await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false))
   })
 
-  it('reports progress while wasm parses the definitions', async () => {
+  it('keeps a determinate file-count bar until queued absorbs finish', async () => {
     let release: (summary: string) => void = () => {}
     const wasm = api()
     wasm.defs_summary = vi.fn(() => new Promise<string>((resolve) => (release = resolve)))
@@ -513,12 +553,37 @@ describe('DefsBuilder', () => {
       dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
     })
 
-    const bar = await screen.findByRole('progressbar', { name: 'Parsing definitions in wasm' })
-    expect(bar).not.toHaveAttribute('value')
+    const bar = await screen.findByRole('progressbar', { name: 'Reading dropped files' })
+    expect(bar).toHaveAttribute('max', '1')
+    expect(screen.queryByText(/wasm/i)).not.toBeInTheDocument()
     await waitFor(() => expect(wasm.defs_summary).toHaveBeenCalled())
+    expect(screen.getByText('Reading dropped files: 1 / 1')).toBeInTheDocument()
 
     release(defsSummaryJson())
     await waitFor(() => expect(screen.queryByRole('progressbar')).not.toBeInTheDocument())
+  })
+
+  it('does not count a file as done until the worker absorbs it', async () => {
+    let release = () => {}
+    const wasm = api({
+      addBatch: vi.fn(() => new Promise<void>((resolve) => (release = resolve))),
+    })
+    render(<DefsBuilder api={wasm} onBuilt={vi.fn()} />)
+    const common = dirEntry('common', [
+      dirEntry('goods', [fileEntry('00_goods.txt', 'grain = { cost = 20 }')]),
+    ])
+
+    fireEvent.drop(screen.getByLabelText('Drop the Victoria 3 game folder'), {
+      dataTransfer: { files: [], items: [{ webkitGetAsEntry: () => common }] },
+    })
+
+    expect(await screen.findByText('Reading dropped files: 0 / 1')).toBeInTheDocument()
+    expect(screen.getByRole('progressbar')).toHaveAttribute('value', '0')
+    expect(wasm.builder.finish).not.toHaveBeenCalled()
+
+    release()
+    await waitFor(() => expect(wasm.builder.finish).toHaveBeenCalled())
+    expect(screen.queryByText(/wasm/i)).not.toBeInTheDocument()
   })
 
   it('copies the platform path for pasting into the folder dialog', async () => {

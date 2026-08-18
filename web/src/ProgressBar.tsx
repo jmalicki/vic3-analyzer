@@ -6,7 +6,7 @@ interface Props {
   total?: number
 }
 
-/** Determinate when `total` is known, indeterminate while wasm works. */
+/** Determinate when `total` is known; omit `done`/`total` only when the work is uncountable. */
 export function ProgressBar({ label, done, total }: Props) {
   const determinate = typeof total === 'number' && total > 0 && typeof done === 'number'
   const counted = determinate ? `${done!.toLocaleString()} / ${total!.toLocaleString()}` : undefined

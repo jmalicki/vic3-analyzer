@@ -30,6 +30,37 @@ export type DefsDropItem = {
 /** Receives one batch of files; resolves once the batch may be released. */
 export type DefsBatchSink = (batch: DefsSourceFile[], read: number) => Promise<void>
 
+/**
+ * How many batches may sit with the worker at once.
+ *
+ * The page reads the next files while those jobs run. A deeper queue would
+ * rebuild the old multi-hundred-megabyte buffer; 2 is one in flight plus one
+ * read-ahead.
+ */
+export const DEFS_QUEUE_DEPTH = 2
+
+/** Bounded FIFO of worker jobs. `size()` is the live queue depth. */
+export function createJobQueue(depth = DEFS_QUEUE_DEPTH) {
+  const pending: Promise<void>[] = []
+  const enqueue = async (work: () => Promise<void>) => {
+    while (pending.length >= depth) {
+      await pending[0]
+    }
+    let job!: Promise<void>
+    job = work().finally(() => {
+      const index = pending.indexOf(job)
+      if (index >= 0) pending.splice(index, 1)
+    })
+    pending.push(job)
+  }
+  const drain = async () => {
+    while (pending.length > 0) {
+      await pending[0]
+    }
+  }
+  return { enqueue, drain, size: () => pending.length }
+}
+
 /** A file located but not yet read. */
 export type DefsFileSource = {
   path: string

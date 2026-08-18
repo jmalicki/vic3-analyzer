@@ -91,6 +91,26 @@ describe('workerWasmApi', () => {
     expect(await pending).toBe('{"summary":{},"prices":{}}')
   })
 
+  it('sends definition batches to the worker', async () => {
+    const { port, sent, reply } = fakePort()
+    const api = workerWasmApi(localApi(), port)
+    const builder = new api.DefsBlobBuilder()
+    expect(sent.map((message) => message.method)).toEqual(['defs_builder_reset'])
+    reply({ id: sent[0].id, ok: true, value: undefined })
+
+    const contents = new Uint8Array([1, 2, 3])
+    const pending = builder.addBatch('[]', contents)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(sent[1]).toEqual({
+      id: 2,
+      method: 'defs_builder_add_batch',
+      args: ['[]', contents],
+    })
+    reply({ id: sent[1].id, ok: true, value: undefined })
+    await pending
+  })
+
   it('keeps the allowlist local, since the folder walk cannot await', () => {
     const local = localApi()
     const { port, sent } = fakePort()

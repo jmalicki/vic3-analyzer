@@ -84,9 +84,9 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     // One file per batch, the way a browser hands over what it has just read.
     for (const source of sources) {
       const batch = pack([source])
-      builder.addBatch(batch.manifestJson, batch.contents)
+      await builder.addBatch(batch.manifestJson, batch.contents)
     }
-    const streamed = builder.finish()
+    const streamed = await builder.finish()
 
     const whole = pack(sources)
     const oneShot = await api.build_defs_blob(whole.manifestJson, whole.contents)

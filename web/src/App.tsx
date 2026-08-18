@@ -1039,7 +1039,7 @@ function App({ wasmApi }: Props) {
         </p>
       )}
 
-      {busy && <ProgressBar label="Analyzing in wasm" />}
+      {busy && <ProgressBar label="Analyzing" />}
 
       {activeView === 'prices' && (
         <section

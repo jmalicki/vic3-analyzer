@@ -63,7 +63,7 @@ pub fn load_from_files(
     files: impl IntoIterator<Item = (String, Vec<u8>)>,
 ) -> Result<GameDefs, DefsError> {
     let mut builder = DefsBuilder::default();
-    builder.add_files(files);
+    builder.add_files(files)?;
     builder.finish()
 }
 
@@ -73,17 +73,29 @@ pub fn load_from_files(
 /// cannot buffer in one array and hand to wasm. Feeding it in batches keeps
 /// only the current batch alive: textures are decoded and reduced to flag size
 /// on arrival, so what the builder retains is a few megabytes of thumbnails.
+/// Clausewitz text is parsed as each file arrives; coats render as soon as
+/// their textures are in, so `finish` is encoding rather than a second parse.
 #[derive(Debug, Default)]
 pub struct DefsBuilder {
-    /// Clausewitz and localization sources, parsed together once every text
-    /// file is in, so a later file still overrides an earlier one by sorted
-    /// path no matter what order the batches arrived in.
-    texts: Vec<(String, Vec<u8>)>,
-    /// Parsed form of `texts`, dropped whenever another text file arrives.
+    /// Per-file parse results, keyed by normalized path so a later file still
+    /// overrides an earlier one by sorted path no matter what order the
+    /// batches arrived in.
+    texts: BTreeMap<String, ParsedTextFile>,
+    /// Merged form of `texts`, dropped whenever another text file arrives.
     parsed: Option<ParsedTexts>,
+    /// Parents and template lists have been folded; coats may render as art
+    /// arrives.
+    coats_prepared: bool,
     coa_textures: BTreeMap<String, crate::coa::RgbaImage>,
     icons: BTreeMap<String, Vec<u8>>,
     extra_icons: BTreeMap<String, Vec<u8>>,
+}
+
+#[derive(Debug, Clone)]
+struct ParsedTextFile {
+    price_range: Option<f64>,
+    defs: StagingDefs,
+    library: crate::coa::CoaLibrary,
 }
 
 #[derive(Debug)]
@@ -98,8 +110,12 @@ impl DefsBuilder {
     }
 
     /// Absorb one batch. Unsupported paths are dropped, as they are on the
-    /// one-shot path, so the allowlist stays the trust boundary.
-    pub fn add_files(&mut self, files: impl IntoIterator<Item = (String, Vec<u8>)>) {
+    /// one-shot path, so the allowlist stays the trust boundary. Text is
+    /// parsed here; a later merge in path order still applies overrides.
+    pub fn add_files(
+        &mut self,
+        files: impl IntoIterator<Item = (String, Vec<u8>)>,
+    ) -> Result<(), DefsError> {
         for (path, bytes) in files {
             if classify_defs_path(&path, false) != DefsPathClass::Read {
                 continue;
@@ -108,8 +124,10 @@ impl DefsBuilder {
                 continue;
             };
             if relative.ends_with(".txt") || relative.ends_with(".yml") {
-                self.texts.push((relative, bytes));
+                self.texts
+                    .insert(relative.clone(), parse_text_file(&relative, &bytes)?);
                 self.parsed = None;
+                self.coats_prepared = false;
             } else if relative.contains("gfx/coat_of_arms/")
                 && (relative.ends_with(".dds") || relative.ends_with(".tga"))
             {
@@ -118,6 +136,7 @@ impl DefsBuilder {
                     crate::coa::decode_flag_texture(&bytes),
                 ) {
                     self.coa_textures.insert(key, image);
+                    self.render_ready_coats();
                 }
             } else if relative.ends_with(".dds") {
                 if let (Some(stem), Some(png)) = (icon_stem(&relative), icons::dds_to_png(&bytes)) {
@@ -129,28 +148,54 @@ impl DefsBuilder {
                 }
             }
         }
+        Ok(())
     }
 
-    /// Parse the text sources, reusing the previous parse when nothing new
-    /// arrived since.
-    fn parse_texts(&mut self) -> Result<&ParsedTexts, DefsError> {
-        if self.parsed.is_none() {
-            self.texts.sort_by(|left, right| left.0.cmp(&right.0));
-            if !self
-                .texts
-                .iter()
-                .any(|(path, _)| path.starts_with("common/goods/"))
-            {
-                return Err(DefsError::NotAGameRoot(PathBuf::from("<selected files>")));
-            }
-            let mut defs = StagingDefs::default();
-            let mut library = crate::coa::CoaLibrary::default();
-            for (relative, bytes) in &self.texts {
-                parse_defs_text(relative, bytes, &mut defs, &mut library)?;
-            }
-            self.parsed = Some(ParsedTexts { defs, library });
+    /// Merge per-file parses in path order, reusing the previous merge when
+    /// nothing new arrived since.
+    fn merge_texts(&mut self) -> Result<(), DefsError> {
+        if self.parsed.is_some() {
+            return Ok(());
         }
-        Ok(self.parsed.as_ref().expect("just parsed"))
+        if !self
+            .texts
+            .keys()
+            .any(|path| path.starts_with("common/goods/"))
+        {
+            return Err(DefsError::NotAGameRoot(PathBuf::from("<selected files>")));
+        }
+        let mut defs = StagingDefs::default();
+        let mut library = crate::coa::CoaLibrary::default();
+        for file in self.texts.values() {
+            absorb_text_file(&mut defs, &mut library, file);
+        }
+        self.parsed = Some(ParsedTexts { defs, library });
+        self.coats_prepared = false;
+        Ok(())
+    }
+
+    fn prepare_coats(&mut self) -> Result<(), DefsError> {
+        self.merge_texts()?;
+        if self.coats_prepared {
+            return Ok(());
+        }
+        let mut parsed = self.parsed.take().expect("merged above");
+        parsed.library.prepare_render();
+        parsed.library.render_ready_coats(&self.coa_textures);
+        self.parsed = Some(parsed);
+        self.coats_prepared = true;
+        Ok(())
+    }
+
+    fn render_ready_coats(&mut self) {
+        if !self.coats_prepared {
+            return;
+        }
+        let Some(mut parsed) = self.parsed.take() else {
+            return;
+        };
+        parsed.library.render_ready_coats(&self.coa_textures);
+        self.parsed = Some(parsed);
     }
 
     /// Lowercase names of the `gfx` sources the text definitions reference.
@@ -160,9 +205,11 @@ impl DefsBuilder {
     /// ask first means those files are never read at all.
     ///
     /// Call once every text file has been added; art added before this is
-    /// still kept, so the answer only ever narrows future reads.
+    /// still kept, so the answer only ever narrows future reads. Coats that
+    /// already have their textures start rendering here.
     pub fn needed_gfx_names(&mut self) -> Result<std::collections::BTreeSet<String>, DefsError> {
-        let parsed = self.parse_texts()?;
+        self.merge_texts()?;
+        let parsed = self.parsed.as_ref().expect("merged above");
         let mut names = parsed.library.needed_texture_names();
         names.extend(parsed.defs.goods.values().map(|good| {
             good.texture
@@ -177,19 +224,72 @@ impl DefsBuilder {
                 .and_then(icon_stem)
                 .or_else(|| Some(pm.id.to_lowercase()))
         }));
+        self.prepare_coats()?;
         Ok(names)
     }
 
     pub fn finish(mut self) -> Result<GameDefs, DefsError> {
-        self.parse_texts()?;
-        let ParsedTexts { mut defs, library } = self.parsed.take().expect("parsed above");
-        let mut library = library;
+        self.merge_texts()?;
+        let ParsedTexts {
+            mut defs,
+            mut library,
+        } = self.parsed.take().expect("merged above");
+        if !self.coats_prepared {
+            library.prepare_render();
+        }
+        library.render_remaining_coats(&self.coa_textures);
         attach_icons(&mut defs, self.icons);
         attach_extra_icons(&mut defs, self.extra_icons);
-        crate::coa::render_library_scaled(&mut library, &self.coa_textures);
         finish_coa(&mut defs, library);
         defs.resolve()
     }
+}
+
+fn parse_text_file(relative: &str, bytes: &[u8]) -> Result<ParsedTextFile, DefsError> {
+    let mut defs = StagingDefs::default();
+    let mut library = crate::coa::CoaLibrary::default();
+    let price_range = parse_defs_text(relative, bytes, &mut defs, &mut library)?;
+    Ok(ParsedTextFile {
+        price_range,
+        defs,
+        library,
+    })
+}
+
+fn absorb_text_file(
+    defs: &mut StagingDefs,
+    library: &mut crate::coa::CoaLibrary,
+    file: &ParsedTextFile,
+) {
+    if let Some(value) = file.price_range {
+        defs.price_range = value;
+    }
+    for id in &file.defs.goods_order {
+        if !defs.goods_order.contains(id) {
+            defs.goods_order.push(id.clone());
+        }
+    }
+    for id in &file.defs.needs_order {
+        if !defs.needs_order.contains(id) {
+            defs.needs_order.push(id.clone());
+        }
+    }
+    defs.goods.extend(file.defs.goods.clone());
+    defs.labels.extend(file.defs.labels.clone());
+    defs.production_methods
+        .extend(file.defs.production_methods.clone());
+    defs.buildings.extend(file.defs.buildings.clone());
+    defs.building_groups
+        .extend(file.defs.building_groups.clone());
+    defs.pop_needs.extend(file.defs.pop_needs.clone());
+    defs.buy_packages.extend(file.defs.buy_packages.clone());
+    defs.obsessions.extend(file.defs.obsessions.clone());
+    library.colors.extend(file.library.colors.clone());
+    library.coats.extend(file.library.coats.clone());
+    library
+        .template_lists
+        .extend(file.library.template_lists.clone());
+    library.flag_defs.extend(file.library.flag_defs.clone());
 }
 
 /// Fold one Clausewitz or localization file into the definitions under build.
@@ -198,13 +298,15 @@ fn parse_defs_text(
     bytes: &[u8],
     defs: &mut StagingDefs,
     library: &mut crate::coa::CoaLibrary,
-) -> Result<(), DefsError> {
+) -> Result<Option<f64>, DefsError> {
     let path = &PathBuf::from(relative);
+    let mut price_range = None;
     {
         if relative.starts_with("common/defines/") {
             let raw: RawDefinesFile = parse_bytes(path, bytes)?;
             if let Some(value) = raw.price_range() {
                 defs.price_range = value;
+                price_range = Some(value);
             }
         } else if relative.starts_with("common/goods/") {
             let (order, goods) = parse_goods_bytes(path, bytes)?;
@@ -306,7 +408,7 @@ fn parse_defs_text(
             parse_localization(bytes, &mut defs.labels);
         }
     }
-    Ok(())
+    Ok(price_range)
 }
 
 type IconPngs = BTreeMap<String, Vec<u8>>;

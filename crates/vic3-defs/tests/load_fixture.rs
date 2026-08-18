@@ -290,12 +290,27 @@ fn one_file_at_a_time_matches_a_single_batch() {
     files.reverse();
     let mut builder = vic3_defs::DefsBuilder::new();
     for file in files.clone() {
-        builder.add_files([file]);
+        builder.add_files([file]).expect("streamed file");
     }
     assert_eq!(builder.finish().expect("streamed fixture tree"), {
         files.reverse();
         load_from_files(files).expect("in-memory fixture tree")
     });
+}
+
+#[test]
+fn builder_parses_text_when_the_file_arrives() {
+    let mut builder = vic3_defs::DefsBuilder::new();
+    let error = builder
+        .add_files([(
+            "game/common/goods/00_goods.txt".to_string(),
+            b"grain = { ".to_vec(),
+        )])
+        .expect_err("malformed goods should fail on add, not finish");
+    assert!(
+        error.to_string().contains("parse"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]

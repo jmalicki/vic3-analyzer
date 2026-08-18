@@ -8,7 +8,7 @@ use crate::{
     NeedEntry, NeedIdx, NeedsVec, PopNeed, ProductionMethod,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct StagingDefs {
     pub price_range: f64,
     pub goods_order: Vec<String>,

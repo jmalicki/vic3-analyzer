@@ -1,17 +1,19 @@
-import { loadWasm, type WasmApi } from './wasm'
+import { loadWasm, type DefsBlobBuilder, type WasmApi } from './wasm'
 import type { WasmWorkerRequest, WasmWorkerResponse } from './wasmWorker'
 
 /** The slice of `Worker` this client uses, so tests can supply a stand-in. */
 export interface WasmWorkerPort {
-  postMessage(message: WasmWorkerRequest): void
+  postMessage(message: WasmWorkerRequest, transfer?: Transferable[]): void
   addEventListener(
     type: 'message',
     listener: (event: MessageEvent<WasmWorkerResponse>) => void,
   ): void
 }
 
+type WorkerCall = <T>(method: string, args: unknown[], transfer?: Transferable[]) => Promise<T>
+
 /** Send calls to `port` and settle them against the replies. */
-export function connectWasmWorker(port: WasmWorkerPort) {
+export function connectWasmWorker(port: WasmWorkerPort): WorkerCall {
   const pending = new Map<number, { resolve: (value: never) => void; reject: (error: Error) => void }>()
   let nextId = 1
 
@@ -24,12 +26,61 @@ export function connectWasmWorker(port: WasmWorkerPort) {
     else waiting.reject(new Error(response.error))
   })
 
-  return function call<T>(method: string, args: unknown[]): Promise<T> {
+  return function call<T>(method: string, args: unknown[], transfer: Transferable[] = []): Promise<T> {
     const id = nextId++
     return new Promise<T>((resolve, reject) => {
       pending.set(id, { resolve: resolve as (value: never) => void, reject })
-      port.postMessage({ id, method, args })
+      port.postMessage({ id, method, args }, transfer)
     })
+  }
+}
+
+function transferableBytes(bytes: Uint8Array): Transferable[] {
+  return bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+    ? [bytes.buffer]
+    : []
+}
+
+/** Stateful builder that lives on the worker, so reads can overlap absorbs. */
+function workerDefsBuilder(call: WorkerCall): new () => DefsBlobBuilder {
+  return class implements DefsBlobBuilder {
+    #ready: Promise<void>
+    constructor() {
+      this.#ready = call('defs_builder_reset', [])
+    }
+    addBatch(manifestJson: string, contents: Uint8Array) {
+      const transfer = transferableBytes(contents)
+      const run = this.#ready.then(() =>
+        call<void>('defs_builder_add_batch', [manifestJson, contents], transfer),
+      )
+      this.#ready = run.then(
+        () => undefined,
+        () => undefined,
+      )
+      return run
+    }
+    neededGfxNames() {
+      const run = this.#ready.then(() => call<string>('defs_builder_needed_gfx_names', []))
+      this.#ready = run.then(
+        () => undefined,
+        () => undefined,
+      )
+      return run
+    }
+    finish() {
+      const run = this.#ready.then(() => call<Uint8Array>('defs_builder_finish', []))
+      this.#ready = run.then(
+        () => undefined,
+        () => undefined,
+      )
+      return run
+    }
+    free() {
+      this.#ready = this.#ready.then(
+        () => call('defs_builder_reset', []),
+        () => call('defs_builder_reset', []),
+      )
+    }
   }
 }
 
@@ -45,7 +96,7 @@ export function workerWasmApi(local: WasmApi, port: WasmWorkerPort): WasmApi {
   const call = connectWasmWorker(port)
   return {
     classify_defs_path: (path, isDirectory) => local.classify_defs_path(path, isDirectory),
-    DefsBlobBuilder: local.DefsBlobBuilder,
+    DefsBlobBuilder: workerDefsBuilder(call),
     what_if_schema: () => local.what_if_schema(),
     prices_schema: () => local.prices_schema(),
     build_defs_blob: (manifestJson, contents) =>
@@ -58,7 +109,8 @@ export function workerWasmApi(local: WasmApi, port: WasmWorkerPort): WasmApi {
     clear_analysis: () => call('clear_analysis', []),
     loaded_prices: () => call('loaded_prices', []),
     loaded_military: () => call('loaded_military', []),
-    export_save: (originalBytes, deltaJson) => call('export_save', [originalBytes, deltaJson]),
+    export_save: (originalBytes, deltaJson) =>
+      call('export_save', [originalBytes, deltaJson]),
     loaded_what_if: (whatIfOptsJson) => call('loaded_what_if', [whatIfOptsJson]),
     loaded_apply_delta: (deltaJson) => call('loaded_apply_delta', [deltaJson]),
     loaded_optimize_pms: (axisJson) => call('loaded_optimize_pms', [axisJson]),
