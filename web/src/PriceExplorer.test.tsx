@@ -383,6 +383,16 @@ describe('PriceExplorer', () => {
     expect(screen.getByText('Arable land')).toBeInTheDocument()
     expect(screen.getByText('10')).toBeInTheDocument()
     expect(screen.getByText(/incorporation/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Goods' })).toHaveAttribute('href', '#/prices')
+  })
+
+  it('opens the same state panel from a states hash with a States breadcrumb', () => {
+    window.location.hash = '#/states/1'
+    render(<PriceExplorer result={result} />)
+
+    expect(screen.getByRole('heading', { name: 'Alpaca' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'States' })).toHaveAttribute('href', '#/states')
+    expect(screen.queryByRole('link', { name: 'Goods' })).not.toBeInTheDocument()
   })
 
   it('can return to Our market when playerMarketId is present', async () => {

@@ -16,6 +16,7 @@ import { parseDefsIcons } from './GameIcon'
 import { Modal } from './Modal'
 import { PLAN_TEMPLATES, planTemplate } from './planTemplates'
 import { PriceExplorer } from './PriceExplorer'
+import { StatesPane } from './StatesPane'
 import { ProgressBar } from './ProgressBar'
 import {
   canUseRememberedSavePicker,
@@ -806,13 +807,13 @@ function App({ wasmApi }: Props) {
       )}
 
       {activeView === 'states' && (
-        <section
-          className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
-          aria-labelledby="states-heading"
-        >
-          <h2 id="states-heading">States</h2>
-          <p>State list arrives in a follow-up.</p>
-        </section>
+        <StatesPane
+          result={result}
+          icons={goodIcons}
+          playerCountryId={summary?.country_id}
+          playerMarketId={summary?.market_id}
+          gated={gated}
+        />
       )}
 
       {activeView === 'pops' && (

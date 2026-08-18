@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hashForView, parseHash } from './workspaceNav'
+import { hashForView, hashForState, parseHash, parseStateId } from './workspaceNav'
 
 describe('workspaceNav', () => {
   it('parses known pane hashes including nested price and military paths', () => {
@@ -20,5 +20,8 @@ describe('workspaceNav', () => {
     expect(hashForView('what-if')).toBe('#/what-if')
     expect(hashForView('military')).toBe('#/military')
     expect(hashForView('military', 'army')).toBe('#/military/army')
+    expect(hashForState(12)).toBe('#/states/12')
+    expect(parseStateId('#/states/12')).toBe(12)
+    expect(parseStateId('#/states')).toBeUndefined()
   })
 })
