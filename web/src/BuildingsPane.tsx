@@ -3,9 +3,11 @@ import { GameIcon } from './GameIcon'
 import {
   BuildingPage,
   displayId,
+  ScopeFilter,
   SortButton,
   sortRows,
   useSort,
+  type FilterMode,
 } from './PriceExplorer'
 import type {
   Alert,
@@ -18,6 +20,7 @@ import type {
   OptimizeResult,
   PricesResult,
   ProductionMethodDef,
+  StateInfo,
   WorldDelta,
 } from './types'
 import type { WasmApi } from './wasm'
@@ -47,32 +50,44 @@ function uniqueIds(ids: string[]): string[] {
   return [...new Set(ids)]
 }
 
-function buildRows(result: PricesResult): TypeRow[] {
+const HIDDEN_FROM_UI = /should never show up in the UI/i
+
+function isHiddenFromUi(name?: string): boolean {
+  return Boolean(name && HIDDEN_FROM_UI.test(name))
+}
+
+function buildRows(result: PricesResult, buildings: BuildingEconomics[]): TypeRow[] {
   const types = new Map((result.building_types ?? []).map((type) => [type.id, type]))
   const grouped = new Map<string, BuildingEconomics[]>()
-  for (const building of result.buildings ?? []) {
+  for (const building of buildings) {
     const rows = grouped.get(building.type_id)
     if (rows) rows.push(building)
     else grouped.set(building.type_id, [building])
   }
-  return [...grouped.entries()].map(([typeId, buildings]) => {
+  const rows: TypeRow[] = []
+  for (const [typeId, groupedBuildings] of grouped) {
     const type: BuildingTypeInfo | undefined = types.get(typeId)
-    const levels = buildings.reduce((sum, building) => sum + building.level, 0)
-    const staffing = buildings.reduce((sum, building) => sum + building.staffing, 0)
-    const profit = buildings.reduce((sum, building) => sum + building.profit, 0)
-    return {
+    const name = type?.name || displayId(typeId)
+    if (isHiddenFromUi(type?.name) || isHiddenFromUi(name)) continue
+    const levels = groupedBuildings.reduce((sum, building) => sum + building.level, 0)
+    const staffing = groupedBuildings.reduce((sum, building) => sum + building.staffing, 0)
+    const profit = groupedBuildings.reduce((sum, building) => sum + building.profit, 0)
+    rows.push({
       typeId,
-      name: type?.name || displayId(typeId),
-      buildings,
+      name,
+      buildings: groupedBuildings,
       levels,
       staffing,
       profit,
       productivity: levels > 0 ? profit / levels : 0,
       employment: employmentRatio(staffing, levels),
-      shortage: buildings.reduce((sum, building) => sum + building.short_inputs.length, 0),
-      productionMethodIds: uniqueIds(buildings.flatMap((building) => building.production_method_ids ?? [])),
-    }
-  })
+      shortage: groupedBuildings.reduce((sum, building) => sum + building.short_inputs.length, 0),
+      productionMethodIds: uniqueIds(
+        groupedBuildings.flatMap((building) => building.production_method_ids ?? []),
+      ),
+    })
+  }
+  return rows
 }
 
 function stateName(result: PricesResult, stateId?: number): string {
@@ -179,6 +194,8 @@ function PmList({
 export function BuildingsPane({
   result,
   icons = {},
+  playerCountryId,
+  playerMarketId,
   gated = false,
   api,
   onWhatIf,
@@ -188,6 +205,8 @@ export function BuildingsPane({
 }: {
   result?: PricesResult
   icons?: DefsIcons
+  playerCountryId?: number
+  playerMarketId?: number
   gated?: boolean
   api?: WasmApi
   onWhatIf?: (building: string, extraLevels: number) => void
@@ -196,6 +215,7 @@ export function BuildingsPane({
   alerts?: Alert[]
 }) {
   const [hash, setHash] = useState(() => window.location.hash)
+  const [filterMode, setFilterMode] = useState<FilterMode>('domestic')
   const [sort, onSort] = useSort<BuildingSort>('name')
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [extraLevels, setExtraLevels] = useState<Record<string, number>>({})
@@ -228,11 +248,24 @@ export function BuildingsPane({
 
   const buildingId = parseBuildingId(hash)
   const methods = productionMethods ?? loadedMethods
-  const rows = useMemo(() => (result ? buildRows(result) : []), [result])
-  const resultPmIds = uniqueIds(
-    rows.flatMap((row) => row.buildings.flatMap((building) => building.production_method_ids ?? [])),
-  )
-  const pickerIds = resultPmIds.length ? resultPmIds : methods.map((method) => method.id)
+  const missingPlayerMarket = filterMode === 'our_market' && playerMarketId == null
+  const missingPlayerCountry = filterMode === 'domestic' && playerCountryId == null
+  const effectiveFilterMode: FilterMode =
+    missingPlayerMarket || missingPlayerCountry ? 'all' : filterMode
+  const rows = useMemo(() => {
+    if (!result) return []
+    const states = new Map((result.states ?? []).map((state) => [state.id, state]))
+    const inScope = (state?: StateInfo) => {
+      if (effectiveFilterMode === 'all') return true
+      if (!state) return false
+      if (effectiveFilterMode === 'our_market') return state.market_id === playerMarketId
+      return state.country_id === playerCountryId
+    }
+    const buildings = (result.buildings ?? []).filter((building) =>
+      inScope(building.state_id == null ? undefined : states.get(building.state_id)),
+    )
+    return buildRows(result, buildings)
+  }, [result, effectiveFilterMode, playerCountryId, playerMarketId])
   const visible = useMemo(
     () =>
       sortRows(rows, sort, (row, key) => {
@@ -327,6 +360,13 @@ export function BuildingsPane({
           </button>
         </div>
       </div>
+      <ScopeFilter mode={effectiveFilterMode} onChange={setFilterMode} />
+      {missingPlayerMarket && (
+        <p className="model-info">Player market unavailable; showing all buildings.</p>
+      )}
+      {missingPlayerCountry && (
+        <p className="model-info">Player country unavailable; showing all buildings.</p>
+      )}
       {optimizeError && <p role="alert">{optimizeError}</p>}
       {optimizeResult && (
         <OptimizeDiff
@@ -338,7 +378,7 @@ export function BuildingsPane({
         />
       )}
       {visible.length ? (
-        <div className="table-scroll">
+        <div className="table-scroll buildings-table-scroll">
           <table className="buildings-table">
             <thead>
               <tr>
@@ -362,7 +402,7 @@ export function BuildingsPane({
                     extra={extra}
                     result={result}
                     icons={icons}
-                    pickerIds={pickerIds}
+                    pickerIds={row.productionMethodIds}
                     methods={methods}
                     selectedFor={selectedFor}
                     onToggle={() => toggleType(row.typeId)}
@@ -426,17 +466,19 @@ function TypeBlock({
     <>
       <tr>
         <th>
-          <button
-            type="button"
-            className="building-expand"
-            aria-expanded={open}
-            aria-label={`${open ? 'Collapse' : 'Expand'} ${row.name}`}
-            onClick={onToggle}
-          >
-            {open ? '▼' : '▶'}
-          </button>
-          <GameIcon kind="building" id={row.typeId} icons={icons} />
-          {row.name}
+          <div className="building-type-name">
+            <button
+              type="button"
+              className="building-expand"
+              aria-expanded={open}
+              aria-label={`${open ? 'Collapse' : 'Expand'} ${row.name}`}
+              onClick={onToggle}
+            >
+              {open ? '▼' : '▶'}
+            </button>
+            <GameIcon kind="building" id={row.typeId} icons={icons} />
+            {row.name}
+          </div>
         </th>
         <td>{row.productivity.toFixed(2)}</td>
         <td>{row.profit.toFixed(2)}</td>

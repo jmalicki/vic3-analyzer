@@ -338,7 +338,17 @@ section[aria-labelledby] { margin-top: 1rem; }
 .building-link:hover { text-decoration: underline; }
 .states-table tbody tr { cursor: pointer; }
 .states-table tbody tr:hover { background: #1f2a22; }
-.buildings-table th:first-child {
+.buildings-table-scroll {
+  max-height: min(70vh, calc(100vh - 16rem));
+  overflow: auto;
+}
+.buildings-table thead th {
+  background: #18201a;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.building-type-name {
   align-items: center;
   display: flex;
   gap: .45rem;
