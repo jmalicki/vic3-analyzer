@@ -133,7 +133,7 @@ pub enum MitigationAction {
 /// Diagnose shortages from a solved market. Does not mutate `world` or `prices`.
 ///
 /// Needs-unmet uses a documented heuristic: a state need is unmet when any
-/// basket good has local sell below demanded quantity, or local/package prices
+/// basket good has local sell below demanded quantity, or local/market prices
 /// sit at the `base * (1 + PRICE_RANGE)` ceiling.
 pub fn alerts(world: &World, defs: &GameDefs, prices: &PricesResult) -> AlertsResult {
     let mut alerts = Vec::new();
@@ -792,12 +792,12 @@ fn collect_needs_unmet(
     limitations: &mut BTreeSet<String>,
 ) {
     // Heuristic: a state need is unmet when any basket good has local sell
-    // below the demanded quantity, or local/package prices sit at the
+    // below the demanded quantity, or local/market prices sit at the
     // `base * (1 + PRICE_RANGE)` ceiling.
     let ceiling_factor = 1.0 + defs.price_range.max(0.0);
     let mut by_state: BTreeMap<u32, Vec<&StateNeed>> = BTreeMap::new();
     for need in &prices.state_needs {
-        if need_is_unmet(need, prices, ceiling_factor) {
+        if !need_trips(need, prices, defs, ceiling_factor).is_empty() {
             by_state.entry(need.state_id).or_default().push(need);
         }
     }
@@ -805,25 +805,24 @@ fn collect_needs_unmet(
         return;
     }
     limitations.insert(
-        "Needs-unmet detection compares state need baskets to local sell, and flags high package prices near the PRICE_RANGE ceiling."
+        "Needs-unmet detection compares need Amounts to local Sell, and flags goods at the max price."
             .into(),
     );
     for (state_id, needs) in by_state {
         let mut evidence = Vec::new();
-        let mut goods = Vec::new();
+        let mut goods: Vec<(String, String)> = Vec::new();
         for need in &needs {
-            evidence.push(Evidence {
-                label: need
-                    .need_name
-                    .clone()
-                    .unwrap_or_else(|| need.need_id.clone()),
-                value: format!("package {}", format_num(need.package_value)),
-            });
-            for flow in &need.goods {
-                goods.push(flow.good_id.clone());
+            for trip in need_trips(need, prices, defs, ceiling_factor) {
+                evidence.push(Evidence {
+                    label: format!("{}: {}", trip.need_name, trip.good_name),
+                    value: trip.value,
+                });
+                if !goods.iter().any(|(id, _)| id == &trip.good_id) {
+                    goods.push((trip.good_id, trip.good_name));
+                }
             }
         }
-        let good_id = goods.first().cloned();
+        let good_id = goods.first().map(|(id, _)| id.clone());
         let mitigations = need_mitigations(state_id, &goods);
         alerts.push(Alert {
             id: format!("needs_unmet:{state_id}"),
@@ -833,8 +832,7 @@ fn collect_needs_unmet(
                 "Unmet pop needs in {}",
                 state_label(prices, world, defs, state_id)
             ),
-            summary: "Pop need baskets exceed local sell, or package prices are at the ceiling."
-                .into(),
+            summary: "Need goods exceed local sell, or sit at the max price.".into(),
             state_id: Some(state_id),
             building_id: None,
             good_id,
@@ -844,10 +842,29 @@ fn collect_needs_unmet(
     }
 }
 
-fn need_is_unmet(need: &StateNeed, prices: &PricesResult, ceiling_factor: f64) -> bool {
+struct NeedTrip {
+    need_name: String,
+    good_id: String,
+    good_name: String,
+    value: String,
+}
+
+fn need_trips(
+    need: &StateNeed,
+    prices: &PricesResult,
+    defs: &GameDefs,
+    ceiling_factor: f64,
+) -> Vec<NeedTrip> {
     if need.goods.is_empty() && need.package_value > 0.0 {
-        return false;
+        return Vec::new();
     }
+    let need_name = need
+        .need_name
+        .as_deref()
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| script_label(defs, &need.need_id));
+    let mut trips = Vec::new();
     for flow in &need.goods {
         if flow.quantity <= ORDER_EPS {
             continue;
@@ -856,32 +873,67 @@ fn need_is_unmet(need: &StateNeed, prices: &PricesResult, ceiling_factor: f64) -
             .state_goods
             .iter()
             .find(|row| row.state_id == need.state_id && row.good_id == flow.good_id);
-        let Some(local) = local else {
-            return true;
-        };
-        if local.sell + ORDER_EPS < flow.quantity {
-            return true;
-        }
-        if local.price + ORDER_EPS >= local.base * ceiling_factor {
-            return true;
-        }
         let market = prices.goods.iter().find(|good| good.id == flow.good_id);
-        if let Some(market) = market {
-            if market.price + ORDER_EPS >= market.base * ceiling_factor {
-                return true;
-            }
+        let amount_short = match local {
+            Some(local) => local.sell + ORDER_EPS < flow.quantity,
+            None => true,
+        };
+        let at_max = local
+            .map(|row| row.price + ORDER_EPS >= row.base * ceiling_factor)
+            .unwrap_or(false)
+            || market
+                .map(|row| row.price + ORDER_EPS >= row.base * ceiling_factor)
+                .unwrap_or(false);
+        if !amount_short && !at_max {
+            continue;
         }
+        let good_name = good_label(prices, defs, &flow.good_id);
+        let value = if amount_short {
+            let sell = local.map(|row| row.sell).unwrap_or(0.0);
+            format!("{} vs sell {}", format_num(flow.quantity), format_num(sell))
+        } else {
+            let (price, base) = if let Some(local) = local {
+                if local.price + ORDER_EPS >= local.base * ceiling_factor {
+                    (local.price, local.base)
+                } else if let Some(market) = market {
+                    (market.price, market.base)
+                } else {
+                    (local.price, local.base)
+                }
+            } else if let Some(market) = market {
+                (market.price, market.base)
+            } else {
+                continue;
+            };
+            format!("{} / {} (max)", format_num(price), format_num(base))
+        };
+        trips.push(NeedTrip {
+            need_name: need_name.clone(),
+            good_id: flow.good_id.clone(),
+            good_name,
+            value,
+        });
     }
-    false
+    trips
 }
 
-fn need_mitigations(state_id: u32, goods: &[String]) -> Vec<Mitigation> {
+fn good_label(prices: &PricesResult, defs: &GameDefs, good_id: &str) -> String {
+    prices
+        .goods
+        .iter()
+        .find(|good| good.id == good_id)
+        .and_then(|good| good.name.clone())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| script_label(defs, good_id))
+}
+
+fn need_mitigations(state_id: u32, goods: &[(String, String)]) -> Vec<Mitigation> {
     let mut items = Vec::new();
-    for good_id in goods.iter().take(3) {
+    for (good_id, good_name) in goods.iter().take(3) {
         items.push(action_mit(
             format!("needs:{state_id}:sol:{good_id}"),
-            format!("Cheapen {good_id}"),
-            format!("Lower the local price of {good_id} (produce more or import) to cover the need basket."),
+            format!("Cheapen {good_name}"),
+            format!("Lower the local price of {good_name} (produce more or import) to cover the need basket."),
             MitigationAction::SolGoods {
                 good_id: good_id.clone(),
                 state_id: Some(state_id),
@@ -889,8 +941,8 @@ fn need_mitigations(state_id: u32, goods: &[String]) -> Vec<Mitigation> {
         ));
         items.push(action_mit(
             format!("needs:{state_id}:import:{good_id}"),
-            format!("Import {good_id} through a trade center"),
-            format!("Trade-center imports of pop goods can fill the {good_id} basket."),
+            format!("Import {good_name} through a trade center"),
+            format!("Trade-center imports of pop goods can fill the {good_name} basket."),
             MitigationAction::TradeAlloc {
                 state_id,
                 good_id: good_id.clone(),
@@ -2373,5 +2425,78 @@ mod tests {
                 .any(|mit| matches!(mit.action, Some(MitigationAction::Pm { .. }))),
             "electricity should not get a generic/unrelated PM"
         );
+    }
+
+    fn needs_unmet(world: &World, defs: &GameDefs, prices: &PricesResult) -> Alert {
+        alerts(world, defs, prices)
+            .alerts
+            .into_iter()
+            .find(|alert| alert.kind == AlertKind::NeedsUnmet)
+            .expect("needs_unmet")
+    }
+
+    fn name_clothes(prices: &mut PricesResult, name: &str) {
+        if let Some(good) = prices.goods.iter_mut().find(|good| good.id == "clothes") {
+            good.name = Some(name.into());
+        }
+    }
+
+    #[test]
+    fn needs_unmet_evidence_prefers_amount_vs_sell_over_package() {
+        let (world, defs, mut prices) = fixture();
+        name_clothes(&mut prices, "Clothes");
+        let result = alerts(&world, &defs, &prices);
+        let needs = result
+            .alerts
+            .iter()
+            .find(|alert| alert.kind == AlertKind::NeedsUnmet)
+            .expect("needs");
+        assert!(
+            needs
+                .evidence
+                .iter()
+                .all(|row| !row.value.contains("package") && !row.label.contains("package")),
+            "package budget must not leak into evidence, got {:?}",
+            needs.evidence
+        );
+        assert_eq!(needs.evidence.len(), 1);
+        assert_eq!(needs.evidence[0].label, "Clothing: Clothes");
+        assert_eq!(needs.evidence[0].value, "12 vs sell 0");
+        assert_eq!(
+            needs.summary,
+            "Need goods exceed local sell, or sit at the max price."
+        );
+        assert!(result.limitations.iter().any(|line| {
+            line.contains("need Amounts to local Sell")
+                && line.contains("max price")
+                && !line.contains("PRICE_RANGE")
+                && !line.to_ascii_lowercase().contains("package")
+        }));
+        assert!(needs
+            .mitigations
+            .iter()
+            .any(|mit| mit.title == "Cheapen Clothes"));
+        assert!(needs
+            .mitigations
+            .iter()
+            .any(|mit| mit.title == "Import Clothes through a trade center"));
+    }
+
+    #[test]
+    fn needs_unmet_evidence_shows_price_over_base_at_max() {
+        let (world, defs, mut prices) = fixture();
+        name_clothes(&mut prices, "Clothes");
+        let local = prices
+            .state_goods
+            .iter_mut()
+            .find(|row| row.good_id == "clothes")
+            .expect("clothes state good");
+        local.sell = 20.0;
+        local.price = 52.5;
+        local.base = 30.0;
+        let needs = needs_unmet(&world, &defs, &prices);
+        assert_eq!(needs.evidence.len(), 1);
+        assert_eq!(needs.evidence[0].label, "Clothing: Clothes");
+        assert_eq!(needs.evidence[0].value, "52.50 / 30 (max)");
     }
 }
