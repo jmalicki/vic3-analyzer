@@ -5,14 +5,18 @@ import { BuildingsPane } from './BuildingsPane'
 import type { PricesResult, ProductionMethodDef } from './types'
 import type { WasmApi } from './wasm'
 
+const dummyName =
+  '#This is a dummy building that serve no gameplay mechanical purpose but still need to be reacted to by city hub graphics. It (and this text) should never show up in the UI#!'
+
 const result: PricesResult = {
   goods: [
     { id: 'iron', name: 'Iron', base: 40, price: 50, buy: 2, sell: 1 },
     { id: 'grain', name: 'Grain', base: 20, price: 18, buy: 4, sell: 8 },
   ],
   states: [
-    { id: 1, region_id: 'STATE_ALPACA', region_name: 'Alpaca' },
-    { id: 2, region_id: 'STATE_ZEBRA', region_name: 'Zebra' },
+    { id: 1, region_id: 'STATE_ALPACA', region_name: 'Alpaca', country_id: 10, market_id: 1 },
+    { id: 2, region_id: 'STATE_ZEBRA', region_name: 'Zebra', country_id: 10, market_id: 2 },
+    { id: 3, region_id: 'STATE_BADGER', region_name: 'Badger', country_id: 20, market_id: 3 },
   ],
   buildings: [
     {
@@ -35,7 +39,7 @@ const result: PricesResult = {
       type_id: 'building_silly_hammer_factory',
       level: 1,
       staffing: 1,
-      production_method_ids: ['pm_goofy_hammers'],
+      production_method_ids: ['pm_steam_hammers'],
       inputs: [],
       outputs: [],
       revenue: 10,
@@ -57,10 +61,40 @@ const result: PricesResult = {
       profit: 180,
       short_inputs: [],
     },
+    {
+      id: 10,
+      state_id: 1,
+      type_id: 'building_city_hub_dummy',
+      level: 1,
+      staffing: 0,
+      production_method_ids: [],
+      inputs: [],
+      outputs: [],
+      revenue: 0,
+      cost: 0,
+      profit: 0,
+      short_inputs: [],
+    },
+    {
+      id: 11,
+      state_id: 3,
+      type_id: 'building_badger_mill',
+      level: 2,
+      staffing: 2,
+      production_method_ids: ['pm_goofy_hammers'],
+      inputs: [{ good_id: 'iron', quantity: 1, value: 40 }],
+      outputs: [{ good_id: 'zany_tools', quantity: 1, value: 50 }],
+      revenue: 50,
+      cost: 40,
+      profit: 10,
+      short_inputs: [],
+    },
   ],
   building_types: [
     { id: 'building_silly_hammer_factory', name: 'Silly Hammer Factory' },
     { id: 'building_rye_farm', name: 'Rye Farms' },
+    { id: 'building_city_hub_dummy', name: dummyName },
+    { id: 'building_badger_mill', name: 'Badger Mill' },
   ],
   residual: 0,
   status: 'converged',
@@ -69,8 +103,32 @@ const result: PricesResult = {
 
 const methods: ProductionMethodDef[] = [
   { id: 'pm_goofy_hammers', inputs: [{ good: 'iron', qty: 2 }], outputs: [{ good: 'zany_tools', qty: 3 }] },
+  { id: 'pm_steam_hammers', inputs: [{ good: 'iron', qty: 3 }], outputs: [{ good: 'zany_tools', qty: 5 }] },
   { id: 'pm_simple_farming', inputs: [], outputs: [{ good: 'grain', qty: 20 }] },
 ]
+
+function renderBuildings(
+  props: {
+    result?: PricesResult
+    productionMethods?: ProductionMethodDef[]
+    api?: WasmApi
+    onWhatIf?: (building: string, extraLevels: number) => void
+    onApply?: (delta: { extra_levels?: unknown; production_methods?: unknown }) => void
+    playerCountryId?: number
+    playerMarketId?: number
+  } = {},
+) {
+  const { result: prices = result, ...rest } = props
+  return render(
+    <BuildingsPane result={prices} playerCountryId={10} playerMarketId={1} {...rest} />,
+  )
+}
+
+function typeNames(): string[] {
+  return [...document.querySelectorAll('.buildings-table > tbody > tr > th')].map((cell) =>
+    cell.textContent?.replace(/^[▶▼]\s*/, '').trim() ?? '',
+  )
+}
 
 describe('BuildingsPane', () => {
   beforeEach(() => {
@@ -80,29 +138,61 @@ describe('BuildingsPane', () => {
 
   it('groups buildings by type and sorts by name, profit, and shortage', async () => {
     const user = userEvent.setup()
-    render(<BuildingsPane result={result} />)
-
-    const names = () =>
-      [...document.querySelectorAll('.buildings-table > tbody > tr > th')].map((cell) =>
-        cell.textContent?.replace(/^[▶▼]\s*/, '').trim(),
-      )
+    renderBuildings()
 
     expect(screen.getByRole('heading', { name: 'Buildings' })).toBeInTheDocument()
-    expect(names()[0]).toContain('Rye Farms')
-    expect(names()[1]).toContain('Silly Hammer Factory')
+    expect(typeNames()[0]).toContain('Rye Farms')
+    expect(typeNames()[1]).toContain('Silly Hammer Factory')
 
     await user.click(screen.getByRole('button', { name: 'Sort by Profit' }))
-    expect(names()[0]).toContain('Silly Hammer Factory')
-    expect(names()[1]).toContain('Rye Farms')
+    expect(typeNames()[0]).toContain('Silly Hammer Factory')
+    expect(typeNames()[1]).toContain('Rye Farms')
 
     await user.click(screen.getByRole('button', { name: 'Sort by Shortage' }))
-    expect(names()[0]).toContain('Rye Farms')
-    expect(names()[1]).toContain('Silly Hammer Factory')
+    expect(typeNames()[0]).toContain('Rye Farms')
+    expect(typeNames()[1]).toContain('Silly Hammer Factory')
+  })
+
+  it('defaults to Domestic and hides foreign and dummy types', () => {
+    renderBuildings()
+
+    expect(screen.getByRole('button', { name: 'Domestic' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('Rye Farms')).toBeInTheDocument()
+    expect(screen.getByText('Silly Hammer Factory')).toBeInTheDocument()
+    expect(screen.queryByText('Badger Mill')).not.toBeInTheDocument()
+    expect(screen.queryByText(/should never show up in the UI/)).not.toBeInTheDocument()
+    expect(document.querySelector('.buildings-table-scroll')).toBeTruthy()
+  })
+
+  it('shows the player market and all countries from the scope filter', async () => {
+    const user = userEvent.setup()
+    renderBuildings()
+
+    await user.click(screen.getByRole('button', { name: 'Our market' }))
+    expect(screen.getByText('Rye Farms')).toBeInTheDocument()
+    expect(screen.getByText('Silly Hammer Factory')).toBeInTheDocument()
+    expect(screen.queryByText('Badger Mill')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Expand Silly Hammer Factory' }))
+    expect(screen.getByRole('link', { name: 'Alpaca' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Zebra' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'All' }))
+    expect(screen.getByText('Badger Mill')).toBeInTheDocument()
+    expect(screen.queryByText(/should never show up in the UI/)).not.toBeInTheDocument()
+  })
+
+  it('falls back to all buildings when the player country is missing', () => {
+    renderBuildings({ playerCountryId: undefined, playerMarketId: undefined })
+
+    expect(screen.getByText(/Player country unavailable/)).toBeInTheDocument()
+    expect(screen.getByText('Badger Mill')).toBeInTheDocument()
+    expect(screen.queryByText(/should never show up in the UI/)).not.toBeInTheDocument()
   })
 
   it('expands a type to instance rows with production methods', async () => {
     const user = userEvent.setup()
-    render(<BuildingsPane result={result} />)
+    renderBuildings()
 
     await user.click(screen.getByRole('button', { name: 'Expand Silly Hammer Factory' }))
     expect(screen.getByRole('link', { name: 'Alpaca' })).toHaveAttribute('href', '#/buildings/building/7')
@@ -112,7 +202,7 @@ describe('BuildingsPane', () => {
 
   it('opens a building page from a deep link', () => {
     window.location.hash = '#/buildings/building/7'
-    render(<BuildingsPane result={result} />)
+    renderBuildings()
 
     expect(screen.getByRole('heading', { name: 'Silly Hammer Factory' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Buildings' })).toHaveAttribute('href', '#/buildings')
@@ -120,7 +210,7 @@ describe('BuildingsPane', () => {
   })
 
   it('keeps the optimizer disabled without an API', () => {
-    render(<BuildingsPane result={result} />)
+    renderBuildings()
 
     const optimizer = screen.getByRole('button', { name: 'Optimize production methods' })
     expect(optimizer).toBeDisabled()
@@ -148,7 +238,7 @@ describe('BuildingsPane', () => {
         }),
       ),
     }
-    render(<BuildingsPane result={result} api={api as unknown as WasmApi} />)
+    renderBuildings({ api: api as unknown as WasmApi })
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Optimization axis' }), 'income')
     await user.click(screen.getByRole('button', { name: 'Optimize production methods' }))
@@ -187,9 +277,7 @@ describe('BuildingsPane', () => {
         }),
       ),
     }
-    render(
-      <BuildingsPane result={result} api={api as unknown as WasmApi} onApply={onApply} />,
-    )
+    renderBuildings({ api: api as unknown as WasmApi, onApply })
     await user.click(screen.getByRole('button', { name: 'Optimize production methods' }))
     await user.click(screen.getByRole('button', { name: 'Apply all' }))
     expect(onApply).toHaveBeenCalledWith({
@@ -197,26 +285,32 @@ describe('BuildingsPane', () => {
     })
   })
 
-  it('lists production methods from production_method_ids and previews recipes', async () => {
+  it('lists only production methods used on that building type', async () => {
     const user = userEvent.setup()
-    render(<BuildingsPane result={result} productionMethods={methods} />)
+    renderBuildings({ productionMethods: methods })
 
     await user.click(screen.getByRole('button', { name: 'Expand Silly Hammer Factory' }))
     const alpaca = screen.getByRole('checkbox', { name: 'Goofy Hammers for Alpaca' })
     expect(alpaca).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: 'Simple Farming for Alpaca' })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Steam Hammers for Alpaca' })).not.toBeChecked()
+    expect(screen.queryByRole('checkbox', { name: 'Simple Farming for Alpaca' })).not.toBeInTheDocument()
     expect(screen.getAllByText(/Preview uses selected methods/).length).toBeGreaterThan(0)
 
-    await user.click(screen.getByRole('checkbox', { name: 'Simple Farming for Alpaca' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Steam Hammers for Alpaca' }))
     const detail = screen.getByRole('link', { name: 'Alpaca' }).closest('tr')
     expect(detail).toBeTruthy()
-    expect(within(detail as HTMLElement).getByText(/Grain 20/)).toBeInTheDocument()
+    expect(within(detail as HTMLElement).getByText(/Zany Tools 8/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Collapse Silly Hammer Factory' }))
+    await user.click(screen.getByRole('button', { name: 'Expand Rye Farms' }))
+    expect(screen.getByRole('checkbox', { name: 'Simple Farming for Alpaca' })).toBeChecked()
+    expect(screen.queryByRole('checkbox', { name: 'Goofy Hammers for Alpaca' })).not.toBeInTheDocument()
   })
 
   it('runs extra-level what-if from the type row', async () => {
     const user = userEvent.setup()
     const onWhatIf = vi.fn()
-    render(<BuildingsPane result={result} onWhatIf={onWhatIf} />)
+    renderBuildings({ onWhatIf })
 
     await user.clear(screen.getByRole('spinbutton', { name: 'Extra levels for Rye Farms' }))
     await user.type(screen.getByRole('spinbutton', { name: 'Extra levels for Rye Farms' }), '3')
@@ -227,7 +321,7 @@ describe('BuildingsPane', () => {
   it('applies extra levels and changed production methods', async () => {
     const user = userEvent.setup()
     const onApply = vi.fn()
-    render(<BuildingsPane result={result} productionMethods={methods} onApply={onApply} />)
+    renderBuildings({ productionMethods: methods, onApply })
 
     await user.click(screen.getByRole('button', { name: 'Apply extra levels for Rye Farms' }))
     expect(onApply).toHaveBeenCalledWith({
@@ -236,10 +330,10 @@ describe('BuildingsPane', () => {
 
     await user.click(screen.getByRole('button', { name: 'Expand Silly Hammer Factory' }))
     expect(screen.getByRole('button', { name: 'Apply production methods for Alpaca' })).toBeDisabled()
-    await user.click(screen.getByRole('checkbox', { name: 'Simple Farming for Alpaca' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Steam Hammers for Alpaca' }))
     await user.click(screen.getByRole('button', { name: 'Apply production methods for Alpaca' }))
     expect(onApply).toHaveBeenCalledWith({
-      production_methods: [{ building_id: 7, methods: ['pm_goofy_hammers', 'pm_simple_farming'] }],
+      production_methods: [{ building_id: 7, methods: ['pm_goofy_hammers', 'pm_steam_hammers'] }],
     })
   })
 })

@@ -1140,6 +1140,8 @@ function App({ wasmApi }: Props) {
         <BuildingsPane
           result={result}
           icons={goodIcons}
+          playerCountryId={summary?.country_id}
+          playerMarketId={summary?.market_id}
           gated={gated}
           api={api}
           alerts={alertsResult?.alerts}
