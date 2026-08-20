@@ -52,6 +52,7 @@ recorded directly on each trade-center state.
 | [planning](docs/planning.md) | `PlanningState`, A* |
 | [archive](docs/archive.md) | Past saves and alternative plans |
 | [sql](docs/sql.md) | **Design (review):** DataFusion SQL tables / UDFs / `plan()` TVF |
+| [mcp](docs/mcp.md) | **Design (review):** stdio MCP tools / resources / agent flow |
 | [libraries](docs/libraries.md) | Locked deps and selection bar |
 | [invariants](docs/invariants.md) | I1–I9 property tests |
 | [json-schema](docs/json-schema.md) | Result/option contract (draft) |
