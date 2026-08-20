@@ -26,6 +26,7 @@ Where to look: [crates.io](https://crates.io), [lib.rs](https://lib.rs), [docs.r
 | Desktop config / save catalog | `vic3-catalog`: `dirs`, `toml` (+ `serde_json` for `config.json`). No network. |
 | Desktop shell | [Tauri](https://crates.io/crates/tauri) 2 (`vic3-analyzer` binary). Not Electron. |
 | SQL engine | [DataFusion](https://crates.io/crates/datafusion) 51 (`vic3-sql`). Not SQLite/GlueSQL. |
+| MCP SDK | Official [rmcp](https://crates.io/crates/rmcp) 3.x (`vic3-mcp`, stdio via `transport-io`). |
 
 ## Open (decide before the phase)
 

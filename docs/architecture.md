@@ -8,7 +8,7 @@ License: AGPL-3.0. Saves and token maps are user-supplied and never uploaded.
 
 1. **CLI** (`vic3-cli`) — first product. Load a `.v3`, print prices, what-if, alerts, WorldDelta preview, PM search, gaps, and plans as JSON or text. Patch-export writes a **new** plaintext `.v3`.
 2. **In-browser UI** (`web/` + `vic3-wasm`) — same Rust core via `vic3-api`, thin `wasm-bindgen`. Drop a save in the tab. No server, no upload. Load solves prices immediately.
-3. **Desktop** (`vic3-analyzer`) — Tauri 2 shell; default argv opens a WebView; `vic3-analyzer mcp` is a no-window stub ([`desktop.md`](desktop.md), [`mcp.md`](mcp.md)).
+3. **Desktop** (`vic3-analyzer`) — Tauri 2 shell; default argv opens a WebView; `vic3-analyzer mcp` runs stdio MCP via `vic3-mcp` / rmcp ([`desktop.md`](desktop.md), [`mcp.md`](mcp.md)).
 4. **Local archive** — past runs and named alternative plans stay on the machine ([`archive.md`](archive.md)). UI save timelines live in IndexedDB (`origins` / `timelines` / `steps` / `current`).
 
 ## Crates
@@ -24,8 +24,10 @@ License: AGPL-3.0. Saves and token maps are user-supplied and never uploaded.
 | `vic3-plan` | `SearchNode` glue + `shortest_path`; shared option/result/archive types |
 | `vic3-api` | Transport-free analysis (bytes or paths in, JSON out); shared by CLI, wasm, Tauri |
 | `vic3-catalog` | Save-root scan (stubs, `local`/`steam_cloud`), shared TOML/JSON app config + path auto-detect |
+| `vic3-sql` | Read-only DataFusion SQL over catalog + active/latest fact tables |
+| `vic3-mcp` | Stdio MCP server (rmcp): tools `query` / `use_save` / `refresh_catalog` / `explain`, resources, prompts |
 | `vic3-cli` | clap only lives here |
-| `vic3-analyzer` | Tauri 2 desktop binary (`gui` / `mcp` argv); companion Settings/catalog + `vic3-api` JSON invokes |
+| `vic3-analyzer` | Tauri 2 desktop binary (`gui` / `mcp` argv); companion Settings/catalog + links `vic3-mcp` |
 | `vic3-wasm` | Thin `wasm-bindgen` over `vic3-api`; no filesystem |
 | `web/` | Vite + React; IndexedDB archive; forms from JSON Schema |
 

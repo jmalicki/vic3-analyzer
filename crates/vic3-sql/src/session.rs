@@ -17,6 +17,7 @@ use crate::host::{ActiveMeta, EngineLoadOpts, HostState, UseSaveRequest, UseSave
 use crate::providers;
 use crate::readonly::assert_readonly;
 use crate::SqlError;
+use vic3_catalog::SaveEntry;
 
 /// Read-only SQL engine over catalog + optional active analysis snapshot.
 pub struct SqlEngine {
@@ -92,6 +93,28 @@ impl SqlEngine {
         host.refresh_catalog(roots)
     }
 
+    /// Current catalog snapshot (agent-facing fields; paths may be present).
+    pub fn catalog_entries(&self) -> Result<Vec<SaveEntry>, SqlError> {
+        let host = self.host.as_ref().ok_or_else(|| {
+            SqlError::internal("catalog_entries requires SqlEngine::with_catalog")
+        })?;
+        Ok(host.catalog_entries())
+    }
+
+    /// Active session metadata after [`Self::use_save`], if any.
+    pub fn active_session(&self) -> Option<ActiveSessionInfo> {
+        self.host.as_ref().and_then(|h| {
+            h.active_meta().map(|meta| ActiveSessionInfo {
+                name: meta.entry.name,
+                kind: meta.entry.kind.as_str().to_string(),
+                in_game_date: meta.entry.in_game_date,
+                country: meta.entry.country,
+                loaded: true,
+                location: meta.entry.location.as_str().to_string(),
+            })
+        })
+    }
+
     /// Host API: bind session by stub or selector (`docs/mcp.md`).
     ///
     /// Loads via `vic3-api`, installs the process analysis session, and
@@ -130,4 +153,15 @@ impl SqlEngine {
         let df = self.ctx.sql(sql).await?;
         Ok(df.collect().await?)
     }
+}
+
+/// Agent-facing snapshot of the bound save (`vic3://session`, `use_save` result).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveSessionInfo {
+    pub name: String,
+    pub kind: String,
+    pub in_game_date: Option<String>,
+    pub country: Option<String>,
+    pub loaded: bool,
+    pub location: String,
 }

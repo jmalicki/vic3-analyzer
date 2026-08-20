@@ -6,13 +6,13 @@
 
 ## Build / run
 
-Desktop crate: `crates/vic3-analyzer` (Tauri 2). Default argv opens the GUI; `mcp` is a no-window stub.
+Desktop crate: `crates/vic3-analyzer` (Tauri 2). Default argv opens the GUI; `mcp` runs stdio MCP via `vic3-mcp` (no window).
 
 ```text
 cargo check -p vic3-analyzer
 cargo test -p vic3-analyzer
 cargo run -p vic3-analyzer            # companion UI (Dashboard / Saves / Settings)
-cargo run -p vic3-analyzer -- mcp     # stderr stub; does not open a window
+cargo run -p vic3-analyzer -- mcp     # stdio MCP (rmcp); logs on stderr, no window
 ```
 
 Linux CI installs WebKitGTK 4.1 and related packages (see `.github/workflows/ci.yml`). Locally, follow [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).

@@ -5,7 +5,7 @@
 pub enum Mode {
     /// Open the desktop WebView (default).
     Gui,
-    /// Stdio MCP server path — stub for Wave 2c (must not open a window).
+    /// Stdio MCP server (`vic3-mcp` / rmcp) — must not open a window.
     Mcp,
 }
 
