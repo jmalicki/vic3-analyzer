@@ -19,7 +19,7 @@ It is **not** the full save. Hash it. **I8:** identical state ⇒ identical hash
 | `good_prices`, `gdp` | Last price solve (`gdp` only via `*_with_prices`) |
 | `treasury`, `weekly_balance`, `debt_*`, `credit_*`, `solvent` | Country budget |
 | `population_weighted_wealth` | Pops in states owned by the country |
-| `army_power_projection`, `interest` | Empty / `0` until later waves (not projected yet) |
+| `army_power_projection`, `interest_states` / `interest_regions` | Country `cached_total_army_power_projection` (else army formation `power_projection`); `interest_marker_manager` + country `declared_interests` (normalized for DSL `state=` / `region=`) |
 | `building_level_deltas` | Empty at load; sim branches fill deltas |
 
 `from_world` reads the same projected fields off [`WorldCountry`](../crates/vic3-prices/src/world.rs) after `World::from_save`.
@@ -67,7 +67,8 @@ research formulas.
 
 Snapshot fiscal (`weekly_balance`, `credit_headroom`, `solvent`) and saved-wealth
 atoms are diagnostic-only until a budget/debt or wage transition model exists.
-Army and declared-interest actions require save IR that is not parsed yet.
+Army power and declared interest **project from save IR** into `PlanningState`
+(so gaps/eval work on real saves); sim actions that change them are a later wave.
 
 The first non-tech action is a building-level decision followed by a fixed-time
 construction event and price re-solve. `vic3-prices` preserves the building's

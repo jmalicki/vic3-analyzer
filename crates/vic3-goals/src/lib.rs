@@ -118,7 +118,14 @@ impl Atom {
                 .unwrap_or(false),
             Atom::ArmyPower { rel, value } => rel.holds(state.army_power_projection, *value),
             Atom::Solvent => state.solvent,
-            Atom::InterestIn { id, .. } => state.has_interest(id),
+            Atom::InterestIn {
+                kind: InterestKind::State,
+                id,
+            } => state.has_interest_state(id),
+            Atom::InterestIn {
+                kind: InterestKind::Region,
+                id,
+            } => state.has_interest_region(id),
             Atom::Gdp { rel, value } => rel.holds(state.gdp, *value),
             Atom::WeeklyBalance { rel, value } => state
                 .weekly_balance
@@ -438,6 +445,31 @@ mod tests {
             &state
         ));
         assert!(!evaluate(&parse("credit_headroom > 0").unwrap(), &state));
+    }
+
+    #[test]
+    fn interest_in_eval_respects_state_vs_region() {
+        let state = PlanningState::from_parts(PlanningParts {
+            interest: vec!["alsace".into()],
+            interest_regions: vec!["region_western_europe".into()],
+            ..PlanningParts::default()
+        });
+        assert!(evaluate(
+            &parse("interest_in(state=alsace)").unwrap(),
+            &state
+        ));
+        assert!(!evaluate(
+            &parse("interest_in(region=alsace)").unwrap(),
+            &state
+        ));
+        assert!(evaluate(
+            &parse("interest_in(region=region_western_europe)").unwrap(),
+            &state
+        ));
+        assert!(!evaluate(
+            &parse("interest_in(state=region_western_europe)").unwrap(),
+            &state
+        ));
     }
 
     #[test]

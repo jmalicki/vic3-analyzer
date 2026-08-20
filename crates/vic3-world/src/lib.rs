@@ -33,7 +33,10 @@ pub struct PlanningParts {
     pub solvent: bool,
     pub treasury: f64,
     pub army_power_projection: f64,
+    /// State ids for DSL `interest_in(state=…)`.
     pub interest: Vec<String>,
+    /// Region ids for DSL `interest_in(region=…)`.
+    pub interest_regions: Vec<String>,
     pub queued_tech: Option<String>,
     pub gdp: f64,
     pub weekly_balance: Option<f64>,
@@ -56,6 +59,7 @@ impl Default for PlanningParts {
             treasury: 0.0,
             army_power_projection: 0.0,
             interest: Vec::new(),
+            interest_regions: Vec::new(),
             queued_tech: None,
             gdp: 0.0,
             weekly_balance: None,
@@ -87,8 +91,10 @@ pub struct PlanningState {
     pub treasury: f64,
     /// Army power projection. Default `0` when the save does not expose it.
     pub army_power_projection: f64,
-    /// Strategic regions / states in which the country has declared interest.
-    pub interest: BTreeSet<String>,
+    /// State-region / state ids in which the country has declared interest.
+    pub interest_states: BTreeSet<String>,
+    /// Strategic-region ids in which the country has declared interest.
+    pub interest_regions: BTreeSet<String>,
     /// Technology currently in the research queue, if any.
     pub queued_tech: Option<String>,
     /// Current GDP after prices (model series, not Paradox’s binary).
@@ -124,7 +130,8 @@ impl PartialEq for PlanningState {
             && self.solvent == other.solvent
             && f64_bits_eq(self.treasury, other.treasury)
             && f64_bits_eq(self.army_power_projection, other.army_power_projection)
-            && self.interest == other.interest
+            && self.interest_states == other.interest_states
+            && self.interest_regions == other.interest_regions
             && self.queued_tech == other.queued_tech
             && f64_bits_eq(self.gdp, other.gdp)
             && f64_option_bits_eq(self.weekly_balance, other.weekly_balance)
@@ -155,7 +162,8 @@ impl Hash for PlanningState {
         self.solvent.hash(state);
         self.treasury.to_bits().hash(state);
         self.army_power_projection.to_bits().hash(state);
-        self.interest.hash(state);
+        self.interest_states.hash(state);
+        self.interest_regions.hash(state);
         self.queued_tech.hash(state);
         self.gdp.to_bits().hash(state);
         hash_f64_option(self.weekly_balance, state);
@@ -241,7 +249,8 @@ impl PlanningState {
             solvent: parts.solvent,
             treasury: parts.treasury,
             army_power_projection: parts.army_power_projection,
-            interest: parts.interest.into_iter().collect(),
+            interest_states: parts.interest.into_iter().collect(),
+            interest_regions: parts.interest_regions.into_iter().collect(),
             queued_tech: parts.queued_tech,
             gdp: parts.gdp,
             weekly_balance: parts.weekly_balance,
@@ -257,11 +266,13 @@ impl PlanningState {
     /// Project the player country and last price solve into a planning node.
     ///
     /// Researched techs and research/construction queue heads come from save IR
-    /// (`technology` manager, country tech fields, construction queues). Interest
-    /// and army power default to empty / `0` until later waves. Weekly balance is
-    /// the last saved sample; population-weighted wealth is computed from pops in
-    /// states owned by this country. Solvency requires known principal and credit.
-    /// Missing metrics remain `None`. GDP defaults to `0` here; use
+    /// (`technology` manager, country tech fields, construction queues). Army
+    /// power prefers country `cached_total_army_power_projection`, else army
+    /// formation `power_projection`. Interest comes from
+    /// `interest_marker_manager` / country `declared_interests`. Weekly balance
+    /// is the last saved sample; population-weighted wealth is computed from
+    /// pops in states owned by this country. Solvency requires known principal
+    /// and credit. Missing metrics remain `None`. GDP defaults to `0` here; use
     /// [`Self::from_save_with_prices`] for modeled GDP.
     pub fn from_save(
         save: &Save,
@@ -313,6 +324,7 @@ impl PlanningState {
         } else {
             None
         };
+        let interest = save.declared_interest_for(country_id);
         Ok(Self {
             date: save.meta_data.game_date.unwrap_or_else(default_date),
             country: country.definition.clone(),
@@ -320,8 +332,9 @@ impl PlanningState {
             good_prices: prices.into_price_map(),
             solvent: country.budget.is_solvent(),
             treasury,
-            army_power_projection: 0.0,
-            interest: BTreeSet::new(),
+            army_power_projection: save.army_power_projection_for(country_id),
+            interest_states: interest.states.into_iter().collect(),
+            interest_regions: interest.regions.into_iter().collect(),
             queued_tech: save.queued_tech_for(country_id),
             gdp: 0.0,
             weekly_balance,
@@ -372,10 +385,11 @@ impl PlanningState {
     /// Project the player country from a compact [`World`] plus last prices.
     ///
     /// Techs and research/construction queue heads come from [`WorldCountry`]
-    /// (filled by [`World::from_save`] from save IR). Interest and army power
-    /// default to empty / `0`. Population-weighted wealth uses pops in states
-    /// owned by this country. Solvency and budget lines come from [`WorldCountry`].
-    /// GDP defaults to `0`; use [`Self::from_world_with_prices`] for modeled GDP.
+    /// (filled by [`World::from_save`] from save IR). Army power and declared
+    /// interest are projected the same way. Population-weighted wealth uses pops
+    /// in states owned by this country. Solvency and budget lines come from
+    /// [`WorldCountry`]. GDP defaults to `0`; use [`Self::from_world_with_prices`]
+    /// for modeled GDP.
     pub fn from_world(
         world: &World,
         country_tag: &str,
@@ -391,8 +405,9 @@ impl PlanningState {
             good_prices: prices.into_price_map(),
             solvent: country.solvent,
             treasury: country.treasury,
-            army_power_projection: 0.0,
-            interest: BTreeSet::new(),
+            army_power_projection: country.army_power_projection,
+            interest_states: country.interest_states.iter().cloned().collect(),
+            interest_regions: country.interest_regions.iter().cloned().collect(),
             queued_tech: country.queued_tech.clone(),
             gdp: 0.0,
             weekly_balance: country.weekly_balance,
@@ -449,9 +464,19 @@ impl PlanningState {
         self.techs.contains(tech)
     }
 
-    /// Whether the country has interest in `id` (state or region as in the DSL).
+    /// Whether the country has interest matching DSL `state=` / `region=` ids.
     pub fn has_interest(&self, id: &str) -> bool {
-        self.interest.contains(id)
+        self.interest_states.contains(id) || self.interest_regions.contains(id)
+    }
+
+    /// Whether `interest_in(state=id)` holds.
+    pub fn has_interest_state(&self, id: &str) -> bool {
+        self.interest_states.contains(id)
+    }
+
+    /// Whether `interest_in(region=id)` holds.
+    pub fn has_interest_region(&self, id: &str) -> bool {
+        self.interest_regions.contains(id)
     }
 }
 
@@ -608,7 +633,8 @@ mod tests {
         assert_eq!(state.price("ammunition"), Some(40.0));
         assert_eq!(state.army_power_projection, 0.0);
         assert!(state.techs.is_empty());
-        assert!(state.interest.is_empty());
+        assert!(state.interest_states.is_empty());
+        assert!(state.interest_regions.is_empty());
         assert!(state.queued_tech.is_none());
         assert!(state.queued_building.is_none());
     }
@@ -1016,5 +1042,44 @@ mod tests {
             prop_assert_eq!(&state, &clone);
             prop_assert_eq!(state.fingerprint(), clone.fingerprint());
         }
+    }
+
+    #[test]
+    fn from_save_projects_army_power_and_interest() {
+        let mut save = ger_save(10_000.0);
+        {
+            let country = save
+                .country_manager
+                .database
+                .get_mut(&1)
+                .unwrap()
+                .as_mut()
+                .unwrap();
+            country.cached_total_army_power_projection = Some(210.0);
+            country.declared_interests = vec!["region_north_africa".into()];
+        }
+        save.interest_marker_manager.database.insert(
+            1,
+            Some(vic3_load::InterestMarker {
+                country: Some(1),
+                strategic_region: Some("sr:region_western_europe".into()),
+                state: Some("STATE_ALSACE".into()),
+                kind: None,
+            }),
+        );
+
+        let state = PlanningState::from_save(&save, "GER", BTreeMap::new()).unwrap();
+        assert_eq!(state.army_power_projection, 210.0);
+        assert!(state.has_interest_state("alsace"));
+        assert!(!state.has_interest_region("alsace"));
+        assert!(state.has_interest_region("region_western_europe"));
+        assert!(state.has_interest_region("region_north_africa"));
+        assert!(!state.has_interest_state("region_western_europe"));
+
+        let world = World::from_save(&save, &vic3_defs::GameDefs::default());
+        let from_world = PlanningState::from_world(&world, "GER", BTreeMap::new()).unwrap();
+        assert_eq!(from_world.army_power_projection, 210.0);
+        assert!(from_world.has_interest_state("alsace"));
+        assert!(from_world.has_interest_region("region_western_europe"));
     }
 }

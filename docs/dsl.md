@@ -112,7 +112,11 @@ The state and numeric targets are starting values, not fixed policy.
 in states owned by the country; it is a compact SoL proxy, not a recomputed
 living-standard equilibrium. `credit_headroom` is `credit - principal` when both
 are present; `solvent` is true only when that headroom is strictly positive.
-Missing metrics remain unavailable and do not satisfy comparisons. A valid
+`army_power_projection` reads country cache or army-formation power from the
+save. `interest_in(state=…)` / `interest_in(region=…)` match projected state vs
+strategic-region interest ids separately (Clausewitz ids are normalized, e.g.
+`STATE_ALSACE` → `alsace`). Missing metrics remain unavailable and do not
+satisfy comparisons. A valid
 preset can still be unreachable when `vic3-sim` has no action capable of
 closing its open atoms.
 
