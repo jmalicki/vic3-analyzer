@@ -1,4 +1,8 @@
 //! Serializable planning inputs, results, and local archive records.
+//!
+//! [`PlanOpts`] / [`PlanResult`] are the shared contract for CLI, wasm, Tauri,
+//! and SQL `plan(goal [, max_days [, label]])` (label accepted, not emitted).
+//! [`plan`] runs A* via [`Vic3Node`]; failures are [`PlanError`].
 
 use crate::{pathfinding::shortest_path, Vic3Node};
 use rust_advanced_heaps::pairing::PairingHeap;
@@ -8,12 +12,15 @@ use vic3_goals::Goal;
 use vic3_sim::{Action, EconomyContext, SimConfig};
 use vic3_world::PlanningState;
 
-/// Shared planner options used by CLI and wasm.
+/// Shared planner options (CLI / wasm JSON; SQL mirrors `goal` + `max_days`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanOpts {
+    /// DSL source compiled by [`vic3_goals::compile`].
     pub goal: String,
+    /// Reject plans whose day cost exceeds this (default 3650).
     #[serde(default = "default_max_days")]
     pub max_days: u32,
+    /// Archive / UI label; ignored by SQL `plan()` row shape.
     #[serde(default)]
     pub label: Option<String>,
 }
@@ -238,18 +245,23 @@ fn align_actions(left: &[PlanStep], right: &[PlanStep]) -> Vec<ActionDiff> {
     differences
 }
 
-/// Planner failures that can be reported consistently by clients.
+/// Planner failures reported consistently by CLI, wasm, and SQL.
 #[derive(Debug, thiserror::Error)]
 pub enum PlanError {
+    /// A* found no path under the current sim model.
     #[error("goal is unreachable under the current simulation model")]
     Unreachable,
+    /// Shortest path exists but exceeds [`PlanOpts::max_days`].
     #[error("shortest plan costs {cost} days, exceeding --max-days {max_days}")]
     MaxDays { cost: u32, max_days: u32 },
+    /// Path nodes were not adjacent under [`vic3_sim::successors`] (bug).
     #[error("planner path contains an unknown state transition")]
     UnknownTransition,
 }
 
-/// Run the Vic3 shortest-path search and retain the simulator actions.
+/// Run Vic3 shortest-path search and retain simulator actions.
+///
+/// Cost is total event-wait days. Decision edges contribute 0.
 pub fn plan(
     state: PlanningState,
     goal: Goal,

@@ -87,6 +87,8 @@ SwitchPm alternatives when defs expose them.
 
 `vic3-goals` evaluates a compiled predicate against `PlanningState`. It does not search. Gaps = unsatisfied atoms. Plans = A* until the predicate is true ([`planning.md`](planning.md)).
 
+UI presets and SQL `plan`/`gaps` TVFs consume the **same** compiled atoms — presets are DSL strings, not a parallel vocabulary.
+
 ## What search can close today
 
 | Goal family | Gaps | Timeline (A*) |

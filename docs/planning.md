@@ -27,6 +27,17 @@ It is **not** the full save. Hash it. **I8:** identical state ⇒ identical hash
 
 `from_world` reads the same projected fields off [`WorldCountry`](../crates/vic3-prices/src/world.rs) after `World::from_save`.
 
+## Consumers (same atoms)
+
+Compiled atoms are the contract across surfaces:
+
+| Surface | Entry | Notes |
+| --- | --- | --- |
+| Web presets | `web/src/planTemplates.ts` | Ordinary DSL strings (`declare-war(state=alsace)`, `gdp >= …`, …); no bypass of compile/eval |
+| Gaps / Timeline UI | wasm `loaded_gaps` / `loaded_plan` | Same `PlanOpts` / gaps JSON as CLI |
+| SQL | `plan(goal [, max_days [, label]])`, `gaps(goal)` | TVFs compile the goal, project `PlanningState::from_world_with_prices`, then call `vic3-plan` / `vic3-goals` ([`sql.md`](sql.md)) |
+| CLI | `vic3-cli gaps` / `plan` | Identical JSON field names ([`json-schema.md`](json-schema.md)) |
+
 ## Graph
 
 Nodes: `PlanningState`.  

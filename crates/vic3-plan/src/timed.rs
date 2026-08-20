@@ -1,8 +1,12 @@
 //! Toy timed graphs for generic A* (phase 9a).
 //!
-//! The intern-map key is [`TimedNode`]: a cheap `u32` id plus an [`Arc`] to the
-//! shared topology. Equality and hashing use **only** the id, so a fat world is
-//! never a `HashMap` key. Goal context and edges live on the `Arc`.
+//! Proves the pathfinding contract before Vic3 wiring:
+//! - intern key is [`TimedNode`] (`u32` id + [`Arc`] topology) — Eq/Hash use **id only**
+//! - decision edges cost 0; wait edges cost positive days
+//! - admissible `h` via reverse-topo DP on forward DAGs (**I7**)
+//! - identical compact nodes ⇒ identical hash (**I8**)
+//!
+//! Production search uses [`crate::Vic3Node`] instead.
 
 use crate::pathfinding::SearchNode;
 use std::hash::{Hash, Hasher};

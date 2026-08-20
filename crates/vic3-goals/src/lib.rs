@@ -1,5 +1,35 @@
-//! Goal DSL: chumsky parser, sugar compilation, evaluation against
-//! [`vic3_world::PlanningState`]. This crate does not search.
+//! Goal DSL: parse → compile sugar → evaluate / list gaps.
+//!
+//! # Pipeline
+//!
+//! 1. [`compile`] / [`parse`] — chumsky grammar ([`docs/dsl.md`](../../../docs/dsl.md))
+//! 2. Sugar expands to [`Atom`] trees (`declare-war`, `research`, `gdp`)
+//! 3. [`evaluate`] / [`gaps`] — read [`vic3_world::PlanningState`] only
+//!
+//! This crate does **not** search. Timelines live in `vic3-plan`; successors in
+//! `vic3-sim`.
+//!
+//! # Sugar
+//!
+//! | Input | Compiles to |
+//! | --- | --- |
+//! | `declare-war(state=…)` or `region=` | interest ∧ army ≥ [`DECLARE_WAR_ARMY_THRESHOLD`] ∧ munitions ≤ [`DECLARE_WAR_MUNITIONS_PRICE_CEILING`] ∧ solvent (I-declare-war) |
+//! | `research(tech=…)` / `has_tech(…)` | [`Atom::HasTech`] |
+//! | `gdp rel n` | [`Atom::Gdp`] on modeled GDP |
+//!
+//! Optional `tag=` / `wargoal=` on `declare-war` parse but are ignored.
+//!
+//! # Consumers (same atoms)
+//!
+//! - Web UI presets (`web/src/planTemplates.ts`) emit ordinary DSL strings
+//! - SQL TVFs `plan(goal)` / `gaps(goal)` compile the same string against the
+//!   bound session (`vic3-sql`)
+//! - CLI / wasm / Tauri call [`evaluate`] / [`gaps`] or A* via `vic3-api`
+//!
+//! # Errors
+//!
+//! [`GoalError::Parse`], [`GoalError::DeclareWarTarget`] (no `state=`/`region=`),
+//! [`GoalError::ResearchTech`] (missing tech id).
 
 mod parse;
 
@@ -23,13 +53,16 @@ pub const DECLARE_WAR_MUNITIONS_PRICE_CEILING: f64 = 40.0;
 /// Good id used as the munitions-price atom when compiling `declare-war`.
 pub const MUNITIONS_GOOD: &str = "ammunition";
 
-/// Parse / compile failure.
+/// Parse / compile failure (no partial [`Goal`]).
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum GoalError {
+    /// Chumsky / unknown-predicate failure.
     #[error("failed to parse goal: {0}")]
     Parse(String),
+    /// `declare-war` / bare `interest_in` without `state=` or `region=`.
     #[error("declare-war requires state= or region=")]
     DeclareWarTarget,
+    /// `research` / `has_tech` missing a tech id.
     #[error("research requires tech=")]
     ResearchTech,
 }
@@ -73,7 +106,10 @@ pub enum InterestKind {
     Region,
 }
 
-/// A compiled leaf predicate.
+/// Compiled leaf predicate over [`PlanningState`].
+///
+/// Gaps list these; sim successors branch only on open ones; SQL `gaps()`
+/// formats them as `predicate` / `status` / `detail` rows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Atom {
     HasTech(String),
@@ -217,12 +253,12 @@ impl Goal {
 
 /// Parse the DSL and compile sugar (`declare-war`, `research`, `gdp`).
 ///
-/// This is the parser entrypoint.
+/// Alias of [`parse`]. Prefer this name at API boundaries (CLI, SQL, wasm).
 pub fn compile(src: &str) -> Result<Goal, GoalError> {
     parse(src)
 }
 
-/// Evaluate a compiled goal against a planning projection. Does not search.
+/// Whether the compiled formula holds on `state`. Does not search.
 pub fn evaluate(goal: &Goal, state: &PlanningState) -> bool {
     match goal {
         Goal::And(xs) => xs.iter().all(|g| evaluate(g, state)),
@@ -233,6 +269,9 @@ pub fn evaluate(goal: &Goal, state: &PlanningState) -> bool {
 }
 
 /// Unsatisfied atoms (empty when [`evaluate`] is true). Does not search.
+///
+/// Under `And`/`Or`, only failing subtrees contribute; under `Not`, all atoms
+/// of the negated subtree are listed when the `not` itself fails.
 pub fn gaps(goal: &Goal, state: &PlanningState) -> Vec<Atom> {
     let mut out = Vec::new();
     collect_gaps(goal, state, &mut out);

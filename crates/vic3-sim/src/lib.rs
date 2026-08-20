@@ -1,8 +1,32 @@
-//! Goal-relevant simulator successors over [`PlanningState`].
+//! Goal-relevant simulator successors over [`vic3_world::PlanningState`].
 //!
-//! Decision edges cost zero days. An expansion contains at most one event-wait
-//! edge, selected from events already in flight. This crate deliberately does
-//! not perform graph search.
+//! # Why goal-relevant only
+//!
+//! Enumerating the whole game is intractable. [`successors`] / [`successors_for_atoms`]
+//! open only edges that can close currently failing [`vic3_goals::Atom`]s (plus
+//! capped building / PM candidates when an [`EconomyContext`] is present). Idle
+//! atoms with no model action emit nothing.
+//!
+//! # Edges
+//!
+//! - **Decision** (0 days): queue tech/building/interest/army/law, `SwitchPm`,
+//!   `AdjustTax`. Emitted only when no compact queue is occupied
+//!   ([`vic3_world::PlanningState::has_inflight_queue`]).
+//! - **At most one event-wait** per expansion: complete the in-flight item that
+//!   still closes an open atom, or a payday tick when a solvency atom can move
+//!   closer. **I6:** wait never decreases date; no wait if nothing in flight and
+//!   solvency is not an open progress path.
+//!
+//! Shared single in-flight slot ⇒ declare-war needing both interest and army
+//! pays the **sum** of waits even when the A* AND heuristic is their max.
+//!
+//! # Invariants
+//!
+//! - **I6** — monotone dates; no spurious waits (property-tested).
+//! - **I8** — [`apply_action`] on identical state is deterministic / same fingerprint.
+//!
+//! This crate does **not** search; `vic3-plan` owns A*.
+//! See [`docs/planning.md`](../../../docs/planning.md).
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -306,7 +330,10 @@ fn pm_affects_open_atoms(defs: &GameDefs, pm_id: &str, atoms: &[Atom], wants_gdp
     false
 }
 
-/// Tunable durations used by the compact simulator.
+/// Tunable durations and branch caps for the compact simulator.
+///
+/// Defaults are model constants (not Paradox timings). Caps keep A* finite
+/// (`max_added_levels_per_type`, `max_pm_*`, `max_tax_steps`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SimConfig {
     /// Fixed research duration in the phase-8 model.
@@ -368,7 +395,10 @@ pub enum Event {
     Payday {},
 }
 
-/// A deterministic state transition.
+/// Deterministic state transition (decision or wait).
+///
+/// Decisions cost 0 days when emitted as successors; waits carry positive
+/// `days` and advance [`PlanningState::date`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Action {
     /// Put a goal-relevant technology in the empty research queue.

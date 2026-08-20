@@ -1,8 +1,36 @@
-//! Planner glue. Search uses `rust_advanced_heaps::pathfinding` (phase 9).
-//! Shared option/archive types live here so CLI and wasm emit the same JSON.
+//! Planner glue: A* over [`vic3_sim`] successors + shared JSON types.
 //!
-//! Phase 9a toys: [`timed`] graphs with cheap [`timed::TimedNode`] intern keys.
-//! Phase 9b: [`Vic3Node`] wires that search API to `vic3-sim`.
+//! # Stack
+//!
+//! ```text
+//! PlanningState  →  Goal (compile)  →  sim successors  →  Vic3Node / A*
+//!                                              ↘ gaps() / evaluate()
+//! ```
+//!
+//! - Phase 9a toys: [`timed`] graphs with cheap [`timed::TimedNode`] ids
+//! - Phase 9b: [`Vic3Node`] wires `rust_advanced_heaps::pathfinding` to sim
+//! - [`plan`] / [`plan_with_economy`] → [`PlanResult`] for CLI, wasm, SQL `plan()`
+//!
+//! # Why cheap intern keys
+//!
+//! `SearchNode: Clone + Eq + Hash` is stored in the pathfinder's HashMap.
+//! Fat worlds must not be key bodies: [`TimedNode`] hashes a `u32` id;
+//! [`Vic3Node`] hashes only [`vic3_world::PlanningState::fingerprint`]. State,
+//! goal, and economy ride behind [`std::sync::Arc`].
+//!
+//! # Heuristic (I7)
+//!
+//! [`Vic3Node`]'s heuristic is an admissible remaining-days DAG relaxation of
+//! the compiled goal (AND = max child, OR = min, timed atoms = model durations,
+//! fiscal/SoL/tax = 0). Exact on P9a forward DAGs; property-tested on research
+//! formulas for Vic3 nodes.
+//!
+//! # Consumers
+//!
+//! UI presets and SQL `plan`/`gaps` TVFs pass the same DSL string and
+//! [`PlanOpts`]-shaped options; atoms are unchanged end-to-end.
+//!
+//! Do **not** use crates.io `pathfinding`. See [`docs/planning.md`](../../../docs/planning.md).
 
 /// Ensure the heaps crate stays in the graph (pathfinding API used in phase 9a).
 pub use rust_advanced_heaps::pathfinding;

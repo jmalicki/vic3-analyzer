@@ -1,9 +1,23 @@
-//! A* node backed by the goal-relevant [`vic3_sim`] transition model.
+//! A* node backed by goal-relevant [`vic3_sim`] transitions.
 //!
-//! [`Vic3Node`] keeps the intern-map key cheap: equality and hashing inspect
-//! only the state's precomputed `u64` fingerprint. The projected state and
-//! immutable search inputs ride behind [`Arc`]s and are not deeply compared by
-//! the pathfinder.
+//! # Cheap intern key
+//!
+//! [`Vic3Node`] Eq/Hash inspect only the precomputed `u64` fingerprint of
+//! [`PlanningState`]. The projected state and immutable search inputs
+//! (goal, [`SimConfig`], optional [`EconomyContext`]) ride behind [`Arc`]s and
+//! are never deeply compared by the pathfinder.
+//!
+//! # Heuristic DAG
+//!
+//! [`SearchNode::heuristic`] walks the compiled [`Goal`] as a dependency DAG:
+//! AND → max child, OR → min child, NOT → 0. Open research / interest /
+//! raisable army / law atoms contribute fixed model days even if an unrelated
+//! item is queued (returning 0 over a zero-day queue edge would break
+//! consistency). Open `good_price` / `gdp` use `construction_days` unless a
+//! zero-day SwitchPm path exists. Fiscal / SoL / tax atoms contribute 0.
+//!
+//! Admissible relaxation of the real graph (**I7** on research formulas), not
+//! a substitute for search.
 
 use crate::pathfinding::SearchNode;
 use std::hash::{Hash, Hasher};
