@@ -1,11 +1,8 @@
 # Desktop config and auto-detect
 
-**Status:** Implemented — companion UI (Dashboard / Saves / Query / Settings) + shared config with MCP.  
+**Status:** Implemented — companion UI (Dashboard / Saves / Query / Settings) + shared fat binary (`gui` / `mcp` argv); Settings, catalog, SQL, and MCP share config/defs resolution.  
 **Applies to:** Tauri GUI + `vic3-analyzer mcp` (same `config.toml`).  
 **Does not apply to:** GitHub Pages / wasm (browser pickers / drag-drop).
-**Status:** Companion UI + Advanced Query tab + shared fat binary (`gui` / `mcp` argv) — Settings, catalog, SQL, and MCP share config/defs resolution.  
-**Applies to:** Tauri GUI + `vic3-analyzer mcp` (same config file).  
-**Does not apply to:** GitHub Pages / wasm (browser still uses pickers / drag-drop).
 
 ## Build / run
 
@@ -14,8 +11,6 @@ Desktop crate: `crates/vic3-analyzer` (Tauri 2). **One fat binary:** default arg
 ```text
 cargo check -p vic3-analyzer
 cargo test -p vic3-analyzer
-cargo run -p vic3-analyzer            # companion UI
-cargo run -p vic3-analyzer -- mcp     # stdio MCP; logs on stderr, no window
 cargo run -p vic3-analyzer            # companion UI (Dashboard / Saves / Query / Settings)
 cargo run -p vic3-analyzer -- mcp     # stdio MCP (rmcp); logs on stderr, no window
 ./scripts/mcp-smoke.sh                # headless ready check (CI; no display required)
