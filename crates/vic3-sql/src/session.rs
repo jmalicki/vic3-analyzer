@@ -174,6 +174,7 @@ impl SqlEngine {
         let mut meta_entry = entry.clone();
         meta_entry.in_game_date = loaded.in_game_date.clone();
         meta_entry.country = loaded.country.clone();
+        host.patch_catalog_meta(&meta_entry);
         host.set_active(ActiveMeta {
             entry: meta_entry.clone(),
             binding: Arc::clone(&loaded.binding),

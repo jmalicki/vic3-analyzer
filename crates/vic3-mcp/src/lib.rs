@@ -79,8 +79,14 @@ pub fn run() -> ExitCode {
 
 async fn run_async() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let runtime = McpRuntime::open(None).await?;
+    let catalog_saves = runtime
+        .catalog_entries()
+        .await
+        .map(|e| e.len())
+        .unwrap_or(0);
     tracing::info!(
-        saves = runtime.save_count(),
+        save_dirs = runtime.save_dir_count(),
+        catalog_saves,
         config = %runtime.config_path().display(),
         "vic3-analyzer mcp ready"
     );

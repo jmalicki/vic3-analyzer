@@ -1,7 +1,9 @@
 //! Scalar diagnostics: `good_price(good)`, `army_power()` (`docs/sql.md`).
 //!
 //! `good_price` returns NULL for a NULL arg or unknown good id. `army_power`
-//! returns NULL when `player_tag` does not resolve to a country row.
+//! returns NULL when there is no `player_tag`. When a player country is bound
+//! but save IR has no army power projection fields, the UDF **errors** (and
+//! logs) instead of returning a silent NULL or false zero.
 
 use std::sync::Arc;
 
@@ -32,11 +34,7 @@ pub fn register(ctx: &SessionContext, binding: Arc<SessionBinding>) -> Result<()
         vec![],
         DataType::Float64,
         Volatility::Stable,
-        Arc::new(move |_args| {
-            Ok(ColumnarValue::Scalar(ScalarValue::Float64(army_power(
-                army_binding.as_ref(),
-            ))))
-        }),
+        Arc::new(move |_args| army_power_invoke(army_binding.as_ref())),
     ));
     Ok(())
 }
@@ -103,13 +101,42 @@ fn lookup_price(binding: &SessionBinding, good: &str) -> Option<f64> {
         .map(|g| g.price)
 }
 
-/// Player country's `army_power_projection` when `player_tag` resolves; else NULL.
-fn army_power(binding: &SessionBinding) -> Option<f64> {
-    let tag = binding.world.player_tag.as_deref()?;
-    binding
-        .world
-        .countries
-        .iter()
-        .find(|c| c.tag == tag)
-        .map(|c| c.army_power_projection)
+fn army_power_invoke(binding: &SessionBinding) -> DfResult<ColumnarValue> {
+    match army_power(binding)? {
+        Some(power) => Ok(ColumnarValue::Scalar(ScalarValue::Float64(Some(power)))),
+        None => Ok(ColumnarValue::Scalar(ScalarValue::Float64(None))),
+    }
+}
+
+/// Player country's projection when known.
+///
+/// - [`None`] (SQL NULL) — no `player_tag` on the bound world
+/// - [`Err`] — player tag set but country missing, or projection IR absent
+/// - [`Some`] — known finite projection
+fn army_power(binding: &SessionBinding) -> DfResult<Option<f64>> {
+    let Some(tag) = binding.world.player_tag.as_deref() else {
+        return Ok(None);
+    };
+    let Some(country) = binding.world.countries.iter().find(|c| c.tag == tag) else {
+        tracing::error!(
+            player_tag = tag,
+            "army_power(): player_tag set but no matching countries row"
+        );
+        return exec_err!(
+            "army_power(): player_tag {tag:?} has no matching country in the bound session"
+        );
+    };
+    match country.army_power_projection {
+        Some(power) => Ok(Some(power)),
+        None => {
+            tracing::error!(
+                player_tag = tag,
+                "army_power(): save IR has no army power projection for player (refusing silent NULL/0)"
+            );
+            exec_err!(
+                "army_power(): army power projection unknown for player {tag:?} \
+                 (save IR missing cached/formation power_projection; not a zero army)"
+            )
+        }
+    }
 }

@@ -133,6 +133,18 @@ impl HostState {
         *self.active.write().expect("active lock") = Some(meta);
     }
 
+    /// Patch catalog row meta after a successful load (`in_game_date` / `country`).
+    pub(crate) fn patch_catalog_meta(&self, entry: &SaveEntry) {
+        let mut catalog = self.catalog.write().expect("catalog lock");
+        let _ = catalog.patch_loaded_meta(
+            &entry.name,
+            entry.location,
+            entry.mtime,
+            entry.in_game_date.clone(),
+            entry.country.clone(),
+        );
+    }
+
     /// Rescan allowlisted roots and drop the `latest.*` cache so the next read
     /// re-resolves max-mtime against the fresh catalog.
     pub(crate) fn refresh_catalog(&self, roots: &[SaveRoot]) -> Result<usize, SqlError> {

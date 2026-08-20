@@ -110,7 +110,7 @@ async fn stub_use_save_then_active_queries() {
     assert_eq!(unqualified[0].num_rows(), 1);
 
     let saves_after = eng
-        .query("SELECT loaded FROM saves WHERE name = 'autosave'")
+        .query("SELECT loaded, in_game_date, country FROM saves WHERE name = 'autosave'")
         .await
         .expect("loaded flag");
     let loaded = saves_after[0]
@@ -119,6 +119,22 @@ async fn stub_use_save_then_active_queries() {
         .downcast_ref::<BooleanArray>()
         .unwrap();
     assert!(loaded.value(0));
+    let dates = saves_after[0]
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert!(
+        !dates.is_null(0),
+        "in_game_date should be patched after use_save"
+    );
+    assert!(!dates.value(0).is_empty());
+    let countries_col = saves_after[0]
+        .column(2)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert_eq!(countries_col.value(0), "GER");
 }
 
 #[tokio::test]

@@ -110,8 +110,14 @@ impl McpRuntime {
     }
 
     /// Number of configured save *directories* (not catalog entry count).
-    pub fn save_count(&self) -> usize {
+    pub fn save_dir_count(&self) -> usize {
         self.config.save_dirs.len()
+    }
+
+    /// Deprecated alias for [`Self::save_dir_count`] (name was easy to confuse
+    /// with catalog size).
+    pub fn save_count(&self) -> usize {
+        self.save_dir_count()
     }
 
     /// Allowlisted save roots derived from config (local / steam_cloud).

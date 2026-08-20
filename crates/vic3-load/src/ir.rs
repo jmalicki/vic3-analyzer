@@ -1357,7 +1357,7 @@ impl Save {
     }
 
     /// Army power projection for `country_id` (cached country value, else formations).
-    pub fn army_power_projection_for(&self, country_id: u32) -> f64 {
+    pub fn army_power_projection_for(&self, country_id: u32) -> Option<f64> {
         army_power_projection_for(self, country_id)
     }
 
@@ -1476,8 +1476,9 @@ pub struct DeclaredInterest {
 ///
 /// Prefers `cached_total_army_power_projection` / `army_power_projection` on the
 /// country. Falls back to the sum of army-formation `power_projection` values
-/// when the country cache is missing. Returns `0` when neither is present.
-pub fn army_power_projection_for(save: &impl WorldSnapshot, country_id: u32) -> f64 {
+/// when the country cache is missing. Returns [`None`] when neither is present
+/// (modern saves often omit both — do not treat that as zero strength).
+pub fn army_power_projection_for(save: &impl WorldSnapshot, country_id: u32) -> Option<f64> {
     if let Some(cached) = save
         .country_manager()
         .database
@@ -1486,7 +1487,7 @@ pub fn army_power_projection_for(save: &impl WorldSnapshot, country_id: u32) -> 
         .and_then(|country| country.cached_total_army_power_projection)
         .filter(|value| value.is_finite())
     {
-        return cached;
+        return Some(cached);
     }
     let mut total = 0.0;
     let mut found = false;
@@ -1509,9 +1510,9 @@ pub fn army_power_projection_for(save: &impl WorldSnapshot, country_id: u32) -> 
         }
     }
     if found {
-        total
+        Some(total)
     } else {
-        0.0
+        None
     }
 }
 
@@ -1990,7 +1991,7 @@ formation_manager={
             ger.declared_interests,
             vec!["region_north_africa".to_string()]
         );
-        assert_eq!(save.army_power_projection_for(16777216), 180.5);
+        assert_eq!(save.army_power_projection_for(16777216), Some(180.5));
         let interest = save.declared_interest_for(16777216);
         assert!(interest.states.iter().any(|id| id == "alsace"));
         assert!(interest.states.iter().any(|id| id == "STATE_ALSACE"));
@@ -2022,6 +2023,25 @@ armies={
             crate::empty_tokens(),
         )
         .expect("formation fallback");
-        assert_eq!(save.army_power_projection_for(1), 40.0);
+        assert_eq!(save.army_power_projection_for(1), Some(40.0));
+    }
+
+    #[test]
+    fn army_power_unknown_when_no_projection_fields() {
+        let save = crate::load_slice(
+            br#"SAV01000000000000000000
+country_manager={
+	database={ 1={ definition="GER" } }
+}
+armies={
+	database={
+		1={ type=army country=1 }
+	}
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("no pp fields");
+        assert_eq!(save.army_power_projection_for(1), None);
     }
 }

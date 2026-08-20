@@ -129,8 +129,8 @@ pub struct WorldCountry {
     pub queued_tech: Option<String>,
     /// Construction queue head (building type id) when present for this country.
     pub queued_building: Option<String>,
-    /// Army power projection from save IR (`0` when missing).
-    pub army_power_projection: f64,
+    /// Army power projection from save IR (`None` when missing / unknown).
+    pub army_power_projection: Option<f64>,
     /// State ids for DSL `interest_in(state=…)`.
     pub interest_states: Vec<String>,
     /// Strategic-region ids for DSL `interest_in(region=…)`.

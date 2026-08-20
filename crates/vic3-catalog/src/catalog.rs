@@ -106,6 +106,29 @@ impl SaveCatalog {
         self.entries.is_empty()
     }
 
+    /// Update `in_game_date` / `country` for the entry matching identity
+    /// (`name` + `location` + `mtime`). Used after a successful load so `saves`
+    /// reflects last-known meta (`docs/sql.md`).
+    ///
+    /// Returns `true` when an entry was patched.
+    pub fn patch_loaded_meta(
+        &mut self,
+        name: &str,
+        location: SaveLocation,
+        mtime: SystemTime,
+        in_game_date: Option<String>,
+        country: Option<String>,
+    ) -> bool {
+        for entry in &mut self.entries {
+            if entry.name == name && entry.location == location && entry.mtime == mtime {
+                entry.in_game_date = in_game_date;
+                entry.country = country;
+                return true;
+            }
+        }
+        false
+    }
+
     /// Rescan allowlisted roots (non-recursive; `*.v3` files only).
     ///
     /// # Errors

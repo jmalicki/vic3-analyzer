@@ -127,18 +127,32 @@ async fn building_types_and_production_methods_from_defs() {
 #[tokio::test]
 async fn join_example_from_docs() {
     let eng = engine().await;
-    // Soften the docs example: fixture may have zero shortages.
+    // Exact docs example shape (`docs/sql.md`); fixture may have zero shortages.
     let batches = eng
         .query(
-            "SELECT s.state_id, g.good, g.shortage, g.price \
+            "SELECT s.region_name, g.good, g.shortage, g.price \
              FROM states s \
              JOIN goods_by_state g USING (state_id) \
+             WHERE g.shortage > 0 \
              ORDER BY g.shortage DESC \
              LIMIT 20",
         )
         .await
         .expect("join");
     assert!(!batches.is_empty());
+}
+
+#[tokio::test]
+async fn alerts_lean_select_honors_limit() {
+    let eng = engine().await;
+    let batches = eng
+        .query("SELECT kind, title FROM alerts() LIMIT 5")
+        .await
+        .expect("lean alerts");
+    let rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert!(rows <= 5, "expected at most 5 rows, got {rows}");
+    assert_eq!(batches[0].schema().field(0).name(), "kind");
+    assert_eq!(batches[0].schema().field(1).name(), "title");
 }
 
 #[tokio::test]
@@ -219,11 +233,14 @@ async fn diagnostics_alerts_and_good_price() {
         .unwrap();
     assert!(u.is_null(0));
 
-    let army = eng
-        .query("SELECT army_power() AS a")
-        .await
-        .expect("army_power");
-    assert_eq!(army[0].num_rows(), 1);
+    let army = eng.query("SELECT army_power() AS a").await;
+    // Fixture plaintext has a player but no PP fields → hard error (not NULL/0).
+    let err = army.expect_err("army_power should error when projection unknown");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("army power projection unknown") || msg.contains("army_power()"),
+        "{msg}"
+    );
 }
 
 #[tokio::test]

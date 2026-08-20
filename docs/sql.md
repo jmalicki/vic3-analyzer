@@ -303,7 +303,7 @@ Other rules:
 | Function | Returns | Notes |
 | --- | --- | --- |
 | `good_price(good TEXT)` | FLOAT | Active-session market price; NULL if unknown good |
-| `army_power()` | FLOAT | Player country's `army_power_projection` when `player_tag` resolves; else NULL |
+| `army_power()` | FLOAT | Player country's `army_power_projection` when known. **NULL** only if the bound world has no `player_tag`. **Errors** (logged) if a player is bound but save IR has no projection fields — never a silent `0` / NULL for “unknown.” |
 
 Additional scalars may be added; list them here before shipping.
 
@@ -404,7 +404,7 @@ One row per predicate still failing / cleared for goal readiness (mirrors gaps C
 ```sql
 -- After use_save({ "name": "autosave" }) or selector latest
 
-SELECT s.name, g.good, g.shortage, g.price
+SELECT s.region_name, g.good, g.shortage, g.price
 FROM states s
 JOIN goods_by_state g USING (state_id)
 WHERE g.shortage > 0

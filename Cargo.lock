@@ -6485,6 +6485,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "tracing",
  "vic3-api",
  "vic3-catalog",
  "vic3-defs",

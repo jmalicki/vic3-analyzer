@@ -139,6 +139,24 @@ pub enum MitigationAction {
     },
 }
 
+/// Options for [`alerts_with`] / SQL projection-aware scans.
+///
+/// When `with_mitigations` is false, detectors still emit titles/summaries/evidence
+/// but skip expensive mitigation builders (world clones, lever ranking).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AlertsOptions {
+    /// Attach ranked [`Mitigation`] lists (default true for CLI/wasm parity).
+    pub with_mitigations: bool,
+}
+
+impl Default for AlertsOptions {
+    fn default() -> Self {
+        Self {
+            with_mitigations: true,
+        }
+    }
+}
+
 /// Diagnose shortages from a solved market. Does not mutate `world` or `prices`.
 ///
 /// Needs-unmet uses a documented heuristic: a state need is unmet when any
@@ -157,15 +175,77 @@ pub enum MitigationAction {
 /// list and may gain detector-specific caveats. No Rust `Err` — empty `alerts`
 /// means nothing fired.
 pub fn alerts(world: &World, defs: &GameDefs, prices: &PricesResult) -> AlertsResult {
+    alerts_with(world, defs, prices, AlertsOptions::default())
+}
+
+/// Like [`alerts`], with control over mitigation expansion.
+pub fn alerts_with(
+    world: &World,
+    defs: &GameDefs,
+    prices: &PricesResult,
+    opts: AlertsOptions,
+) -> AlertsResult {
     let mut alerts = Vec::new();
     let mut extra_limitations = BTreeSet::new();
 
-    collect_goods_alerts(world, defs, prices, &mut alerts, &mut extra_limitations);
-    collect_needs_unmet(world, defs, prices, &mut alerts, &mut extra_limitations);
-    collect_market_access(prices, world, defs, &mut alerts);
-    collect_education(world, defs, prices, &mut alerts);
-    collect_pop_and_underemployed(world, defs, prices, &mut alerts, &mut extra_limitations);
+    collect_goods_alerts(
+        world,
+        defs,
+        prices,
+        &mut alerts,
+        &mut extra_limitations,
+        opts.with_mitigations,
+    );
+    collect_needs_unmet(
+        world,
+        defs,
+        prices,
+        &mut alerts,
+        &mut extra_limitations,
+        opts.with_mitigations,
+    );
+    collect_market_access(prices, world, defs, &mut alerts, opts.with_mitigations);
+    collect_education(world, defs, prices, &mut alerts, opts.with_mitigations);
+    collect_pop_and_underemployed(
+        world,
+        defs,
+        prices,
+        &mut alerts,
+        &mut extra_limitations,
+        opts.with_mitigations,
+    );
 
+    finish_alerts(prices, alerts, extra_limitations)
+}
+
+/// Goods / electricity / transportation shortage alerts only (no education/pops).
+///
+/// Used by SQL `shortage_analysis` so agents do not pay for thousands of
+/// qualification mitigations when ranking scarce goods.
+pub fn goods_shortage_alerts(
+    world: &World,
+    defs: &GameDefs,
+    prices: &PricesResult,
+    opts: AlertsOptions,
+) -> AlertsResult {
+    let mut alerts = Vec::new();
+    let mut extra_limitations = BTreeSet::new();
+    collect_goods_alerts(
+        world,
+        defs,
+        prices,
+        &mut alerts,
+        &mut extra_limitations,
+        opts.with_mitigations,
+    );
+    finish_alerts(prices, alerts, extra_limitations)
+}
+
+fn finish_alerts(
+    prices: &PricesResult,
+    alerts: Vec<Alert>,
+    extra_limitations: BTreeSet<String>,
+) -> AlertsResult {
     let mut limitations = prices.limitations.clone();
     for line in extra_limitations {
         if !limitations.iter().any(|existing| existing == &line) {
@@ -184,6 +264,7 @@ fn collect_goods_alerts(
     prices: &PricesResult,
     alerts: &mut Vec<Alert>,
     limitations: &mut BTreeSet<String>,
+    with_mitigations: bool,
 ) {
     let mut seen = BTreeSet::new();
     let mut short_goods: BTreeMap<String, GoodsShortageHint> = BTreeMap::new();
@@ -256,20 +337,24 @@ fn collect_goods_alerts(
                 value: "non-tradeable (local-only)".into(),
             });
         }
-        let mitigations = goods_mitigations(
-            &ShortageEffect {
-                world,
-                defs,
-                prices,
-                good_id: &good_id,
-                buy: hint.buy,
-                sell: hint.sell,
-                base: hint.base,
-            },
-            hint.state_id,
-            tradeable,
-            limitations,
-        );
+        let mitigations = if with_mitigations {
+            goods_mitigations(
+                &ShortageEffect {
+                    world,
+                    defs,
+                    prices,
+                    good_id: &good_id,
+                    buy: hint.buy,
+                    sell: hint.sell,
+                    base: hint.base,
+                },
+                hint.state_id,
+                tradeable,
+                limitations,
+            )
+        } else {
+            Vec::new()
+        };
         alerts.push(Alert {
             id: format!("{}:{good_id}", kind_id(kind)),
             kind,
@@ -812,6 +897,7 @@ fn collect_needs_unmet(
     prices: &PricesResult,
     alerts: &mut Vec<Alert>,
     limitations: &mut BTreeSet<String>,
+    with_mitigations: bool,
 ) {
     // Heuristic: a state need is unmet when any basket good has local sell
     // below the demanded quantity, or local/market prices sit at the
@@ -845,7 +931,11 @@ fn collect_needs_unmet(
             }
         }
         let good_id = goods.first().map(|(id, _)| id.clone());
-        let mitigations = need_mitigations(state_id, &goods);
+        let mitigations = if with_mitigations {
+            need_mitigations(state_id, &goods)
+        } else {
+            Vec::new()
+        };
         alerts.push(Alert {
             id: format!("needs_unmet:{state_id}"),
             kind: AlertKind::NeedsUnmet,
@@ -980,6 +1070,7 @@ fn collect_market_access(
     world: &World,
     defs: &GameDefs,
     alerts: &mut Vec<Alert>,
+    with_mitigations: bool,
 ) {
     let states: Vec<AccessState> = if prices.states.is_empty() {
         world
@@ -1041,16 +1132,20 @@ fn collect_market_access(
                     value: format!("{:.2}", access),
                 },
             ],
-            mitigations: rank(vec![action_mit(
-                format!("access:{}:rail", state.id),
-                "Add infrastructure",
-                "Build railways or urban infrastructure so usage no longer exceeds capacity.",
-                MitigationAction::Build {
-                    building: "building_railway".into(),
-                    state_id: Some(state.id),
-                    extra_levels: Some(1),
-                },
-            )]),
+            mitigations: if with_mitigations {
+                rank(vec![action_mit(
+                    format!("access:{}:rail", state.id),
+                    "Add infrastructure",
+                    "Build railways or urban infrastructure so usage no longer exceeds capacity.",
+                    MitigationAction::Build {
+                        building: "building_railway".into(),
+                        state_id: Some(state.id),
+                        extra_levels: Some(1),
+                    },
+                )])
+            } else {
+                Vec::new()
+            },
             staffing: Vec::new(),
         });
     }
@@ -1067,6 +1162,7 @@ fn collect_education(
     defs: &GameDefs,
     prices: &PricesResult,
     alerts: &mut Vec<Alert>,
+    with_mitigations: bool,
 ) {
     for row in &prices.state_qualifications {
         if row.shortage <= ORDER_EPS {
@@ -1074,16 +1170,21 @@ fn collect_education(
         }
         let target = row.profession_id.as_str();
         let mix = state_mix(prices, row.state_id);
-        let mut items = qualification_levers(prices, defs, row.state_id, target, &mix);
-        let wants_university = items.iter().any(is_university_build);
-        if wants_university && has_unstaffed_university(prices, world, row.state_id) {
-            items.retain(|item| !is_university_build(item));
-            items.push(plain(
-                format!("edu:{}:staff-uni", row.state_id),
-                "Staff the university already in this state",
-                "A campus here is not fully employed. Filling those academic jobs raises literacy and qualifications; another empty campus will not.",
-            ));
-        }
+        let mitigations = if with_mitigations {
+            let mut items = qualification_levers(prices, defs, row.state_id, target, &mix);
+            let wants_university = items.iter().any(is_university_build);
+            if wants_university && has_unstaffed_university(prices, world, row.state_id) {
+                items.retain(|item| !is_university_build(item));
+                items.push(plain(
+                    format!("edu:{}:staff-uni", row.state_id),
+                    "Staff the university already in this state",
+                    "A campus here is not fully employed. Filling those academic jobs raises literacy and qualifications; another empty campus will not.",
+                ));
+            }
+            rank(items)
+        } else {
+            Vec::new()
+        };
         let profession = display_prof(defs, row);
         let place = state_label(prices, world, defs, row.state_id);
         let stock = row.employable.unwrap_or(row.qualified);
@@ -1131,7 +1232,7 @@ fn collect_education(
                     value: mix.summary(),
                 },
             ],
-            mitigations: rank(items),
+            mitigations,
             staffing: Vec::new(),
         });
     }
@@ -1143,6 +1244,7 @@ fn collect_pop_and_underemployed(
     prices: &PricesResult,
     alerts: &mut Vec<Alert>,
     limitations: &mut BTreeSet<String>,
+    with_mitigations: bool,
 ) {
     let buildings = if prices.buildings.is_empty() {
         world
@@ -1190,6 +1292,7 @@ fn collect_pop_and_underemployed(
                 AlertKind::UnfilledPops,
                 1,
                 false,
+                with_mitigations,
             );
         }
         if !qual_buildings.is_empty() {
@@ -1204,6 +1307,7 @@ fn collect_pop_and_underemployed(
                 AlertKind::Underemployed,
                 2,
                 true,
+                with_mitigations,
             );
         }
     }
@@ -1221,6 +1325,7 @@ fn push_state_employment_alert(
     kind: AlertKind,
     severity: u8,
     qual_short: bool,
+    with_mitigations: bool,
 ) {
     let place = state_label(prices, world, defs, state_id);
     let staffing: Vec<BuildingStaffing> = buildings
@@ -1305,7 +1410,9 @@ fn push_state_employment_alert(
             ),
         });
     }
-    let mitigations = if qual_short {
+    let mitigations = if !with_mitigations {
+        Vec::new()
+    } else if qual_short {
         let target = buildings
             .iter()
             .find_map(|building| shortage_target(prices, building))
@@ -2603,5 +2710,41 @@ mod tests {
         assert_eq!(needs.evidence.len(), 1);
         assert_eq!(needs.evidence[0].label, "Clothing: Clothes");
         assert_eq!(needs.evidence[0].value, "52.50 / 30 (max)");
+    }
+
+    #[test]
+    fn alerts_without_mitigations_leave_lists_empty() {
+        let (world, defs, prices) = fixture();
+        let result = alerts_with(
+            &world,
+            &defs,
+            &prices,
+            AlertsOptions {
+                with_mitigations: false,
+            },
+        );
+        assert!(!result.alerts.is_empty());
+        assert!(result
+            .alerts
+            .iter()
+            .all(|alert| alert.mitigations.is_empty()));
+        assert!(kinds(&result).contains(&AlertKind::UnfilledEducation));
+    }
+
+    #[test]
+    fn goods_shortage_alerts_skip_education_and_pops() {
+        let (world, defs, prices) = fixture();
+        let result = goods_shortage_alerts(&world, &defs, &prices, AlertsOptions::default());
+        let kinds = kinds(&result);
+        assert!(
+            kinds.contains(&AlertKind::GoodsShortage)
+                || kinds.contains(&AlertKind::ElectricityShortage)
+                || kinds.contains(&AlertKind::TransportationShortage)
+        );
+        assert!(!kinds.contains(&AlertKind::UnfilledEducation));
+        assert!(!kinds.contains(&AlertKind::UnfilledPops));
+        assert!(!kinds.contains(&AlertKind::Underemployed));
+        assert!(!kinds.contains(&AlertKind::NeedsUnmet));
+        assert!(!kinds.contains(&AlertKind::LowMarketAccess));
     }
 }

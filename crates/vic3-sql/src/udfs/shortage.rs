@@ -1,8 +1,8 @@
 //! `shortage_analysis(good)` → scarce-good alert rows plus market magnitudes.
 //!
-//! Filters [`alerts`] to electricity / transportation / goods shortages.
-//! `good = NULL` means all such alerts; a string literal filters by script id.
-//! Buy/sell/shortage/price/base come from the market `goods` row (not invented).
+//! Uses [`SessionBinding::goods_shortage_alerts`] so education/pop collectors
+//! are not run. `good = NULL` means all such alerts; a string literal filters
+//! by script id. Buy/sell/shortage/price/base come from the market `goods` row.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -17,13 +17,16 @@ use datafusion::common::{plan_err, Result as DfResult};
 use datafusion::datasource::{TableProvider, TableType};
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
-use vic3_prices::{alerts, AlertKind};
+use vic3_prices::AlertKind;
 
-use crate::binding::{goods_shortage, SessionBinding};
+use crate::binding::{goods_shortage, projection_needs_json, SessionBinding};
 use crate::exec::memory_exec;
 use crate::schema::shortage_analysis_schema;
 use crate::udfs::alerts::alert_kind_str;
 use crate::udfs::args::literal_utf8;
+
+/// Column indices for `evidence` / `mitigations` in [`shortage_analysis_schema`].
+const SHORTAGE_JSON_COLS: &[usize] = &[13, 14];
 
 /// `shortage_analysis(good)` TVF over the bound session.
 #[derive(Debug)]
@@ -60,12 +63,8 @@ struct ShortageAnalysisProvider {
 }
 
 impl ShortageAnalysisProvider {
-    fn batch(&self) -> DfResult<RecordBatch> {
-        let result = alerts(
-            self.binding.world.as_ref(),
-            self.binding.defs.as_ref(),
-            self.binding.prices.as_ref(),
-        );
+    fn batch(&self, with_mitigations: bool, limit: Option<usize>) -> DfResult<RecordBatch> {
+        let result = self.binding.goods_shortage_alerts(with_mitigations);
 
         let mut good_col = StringBuilder::new();
         let mut alert_id = StringBuilder::new();
@@ -83,6 +82,7 @@ impl ShortageAnalysisProvider {
         let mut evidence = StringBuilder::new();
         let mut mitigations = StringBuilder::new();
 
+        let mut emitted = 0usize;
         for alert in &result.alerts {
             if !is_goods_shortage_kind(alert.kind) {
                 continue;
@@ -93,6 +93,11 @@ impl ShortageAnalysisProvider {
             if let Some(filter) = &self.good {
                 if good_id != filter {
                     continue;
+                }
+            }
+            if let Some(n) = limit {
+                if emitted >= n {
+                    break;
                 }
             }
 
@@ -135,6 +140,7 @@ impl ShortageAnalysisProvider {
             mitigations.append_value(
                 serde_json::to_string(&alert.mitigations).unwrap_or_else(|_| "[]".into()),
             );
+            emitted += 1;
         }
 
         RecordBatch::try_new(
@@ -189,8 +195,9 @@ impl TableProvider for ShortageAnalysisProvider {
         _state: &dyn Session,
         projection: Option<&Vec<usize>>,
         _filters: &[Expr],
-        _limit: Option<usize>,
+        limit: Option<usize>,
     ) -> DfResult<Arc<dyn ExecutionPlan>> {
-        memory_exec(self.batch()?, projection)
+        let with_mitigations = projection_needs_json(projection, SHORTAGE_JSON_COLS);
+        memory_exec(self.batch(with_mitigations, limit)?, projection)
     }
 }

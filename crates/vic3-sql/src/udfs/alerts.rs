@@ -11,11 +11,14 @@ use datafusion::common::{plan_err, Result as DfResult};
 use datafusion::datasource::{TableProvider, TableType};
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
-use vic3_prices::{alerts, AlertKind};
+use vic3_prices::AlertKind;
 
-use crate::binding::SessionBinding;
+use crate::binding::{projection_needs_json, SessionBinding};
 use crate::exec::memory_exec;
 use crate::schema::alerts_schema;
+
+/// Column indices for `evidence` / `mitigations` in [`alerts_schema`].
+const ALERTS_JSON_COLS: &[usize] = &[8, 9];
 
 /// Zero-arg TVF wrapping [`alerts`] for the bound session.
 #[derive(Debug)]
@@ -48,12 +51,12 @@ struct AlertsProvider {
 }
 
 impl AlertsProvider {
-    fn batch(&self) -> DfResult<RecordBatch> {
-        let result = alerts(
-            self.binding.world.as_ref(),
-            self.binding.defs.as_ref(),
-            self.binding.prices.as_ref(),
-        );
+    fn batch(&self, with_mitigations: bool, limit: Option<usize>) -> DfResult<RecordBatch> {
+        let result = self.binding.alerts(with_mitigations);
+        let alerts = match limit {
+            Some(n) => &result.alerts[..n.min(result.alerts.len())],
+            None => result.alerts.as_slice(),
+        };
 
         let mut id = StringBuilder::new();
         let mut kind = StringBuilder::new();
@@ -66,7 +69,7 @@ impl AlertsProvider {
         let mut evidence = StringBuilder::new();
         let mut mitigations = StringBuilder::new();
 
-        for alert in &result.alerts {
+        for alert in alerts {
             id.append_value(&alert.id);
             kind.append_value(alert_kind_str(alert.kind));
             severity.append_value(i32::from(alert.severity));
@@ -131,9 +134,10 @@ impl TableProvider for AlertsProvider {
         _state: &dyn Session,
         projection: Option<&Vec<usize>>,
         _filters: &[Expr],
-        _limit: Option<usize>,
+        limit: Option<usize>,
     ) -> DfResult<Arc<dyn ExecutionPlan>> {
-        memory_exec(self.batch()?, projection)
+        let with_mitigations = projection_needs_json(projection, ALERTS_JSON_COLS);
+        memory_exec(self.batch(with_mitigations, limit)?, projection)
     }
 }
 

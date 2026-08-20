@@ -57,7 +57,10 @@ mod world;
 
 use vic3_defs::GameDefs;
 
-pub use alerts::{alerts, Alert, AlertKind, AlertsResult, Evidence, Mitigation, MitigationAction};
+pub use alerts::{
+    alerts, alerts_with, goods_shortage_alerts, Alert, AlertKind, AlertsOptions, AlertsResult,
+    Evidence, Mitigation, MitigationAction,
+};
 pub use consumption::consumption;
 pub use formula::{
     effective_mapi, local_price, market_access, market_ratio, price, BASE_MAPI, ORDER_EPS,

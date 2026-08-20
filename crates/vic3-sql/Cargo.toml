@@ -15,6 +15,7 @@ datafusion.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 vic3-api = { path = "../vic3-api" }
 vic3-catalog = { path = "../vic3-catalog" }
 vic3-defs = { path = "../vic3-defs" }
