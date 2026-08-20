@@ -1,0 +1,255 @@
+SAV01000000000000000000
+meta_data={
+	version="1.9.0"
+	game_date=1836.1.1
+	name="ToyEconomy"
+}
+country_manager={
+	database={
+		1=none
+		16777216={
+			definition="TOY"
+			government="gov_absolute_monarchy"
+			capital=1
+			market=1
+			market_capital=1
+			is_main_tag=yes
+			country_type="recognized"
+			infamy=0
+			states={ 1 2 3 }
+			budget={
+				gold_reserves=10000
+				credit=500
+				principal=0
+				weekly_income={ 0.0 100.0 }
+			}
+		}
+	}
+}
+states={
+	database={
+		1={
+			region="STATE_TOY_A"
+			country=16777216
+			arable_land=60
+			infrastructure=20
+			infrastructure_usage=10
+			trade={
+				goods={
+					0={ value=-8 }
+				}
+			}
+			pop_statistics={
+				population_by_profession={ 15 7=15000 }
+				population_workforce_by_profession={ 15 7=9000 }
+				population_employable_qualifications={ 15 7=100 }
+			}
+		}
+		2={
+			region="STATE_TOY_B"
+			country=16777216
+			arable_land=20
+			infrastructure=25
+			infrastructure_usage=18
+			trade={
+				goods={
+					0={ value=4 }
+					1={ value=0 }
+					2={ value=-2 }
+				}
+			}
+			pop_statistics={
+				population_by_profession={ 15 7=20000 }
+				population_workforce_by_profession={ 15 7=16000 }
+				population_employable_qualifications={ 15 7=80 }
+			}
+		}
+		3={
+			region="STATE_TOY_C"
+			country=16777216
+			arable_land=5
+			infrastructure=30
+			infrastructure_usage=8
+			trade={
+				goods={
+					2={ value=3 }
+				}
+			}
+			pop_statistics={
+				population_by_profession={ 15 7=4000 }
+				population_workforce_by_profession={ 15 7=2000 }
+				population_employable_qualifications={ 15 7=20 }
+			}
+		}
+	}
+}
+building_manager={
+	database={
+		1={
+			building="building_wheat_farm"
+			state=1
+			levels=3
+			staffing=3
+			production_methods={ "pm_toy_wheat" }
+			input_goods={
+				goods={
+				}
+			}
+			output_goods={
+				goods={
+					0={ value=90 }
+				}
+			}
+		}
+		2={
+			building="building_flour_mill"
+			state=2
+			levels=2
+			staffing=2
+			production_methods={ "pm_toy_mill" }
+			input_goods={
+				goods={
+					0={ value=40 }
+				}
+			}
+			output_goods={
+				goods={
+					1={ value=30 }
+				}
+			}
+		}
+		3={
+			building="building_bakery"
+			state=2
+			levels=2
+			staffing=2
+			production_methods={ "pm_toy_bakery" }
+			input_goods={
+				goods={
+					1={ value=30 }
+				}
+			}
+			output_goods={
+				goods={
+					2={ value=40 }
+				}
+			}
+		}
+		4={
+			building="building_trade_center"
+			state=3
+			levels=1
+			staffing=1
+			production_methods={ "pm_toy_trade" }
+			input_goods={
+				goods={
+				}
+			}
+			output_goods={
+				goods={
+				}
+			}
+		}
+	}
+}
+pops={
+	database={
+		1={
+			type="farmers"
+			workforce=9000
+			dependents=6000
+			wealth=8
+			culture=0
+			location=1
+			workplace=1
+			num_literate=1800
+			qualifications={ 15 7=90 }
+		}
+		2={
+			type="laborers"
+			workforce=8000
+			dependents=4000
+			wealth=7
+			culture=0
+			location=2
+			workplace=2
+			num_literate=1000
+			qualifications={ 15 7=80 }
+		}
+		3={
+			type="laborers"
+			workforce=8000
+			dependents=4000
+			wealth=7
+			culture=0
+			location=2
+			workplace=3
+			num_literate=1000
+			qualifications={ 15 7=80 }
+		}
+		4={
+			type="laborers"
+			workforce=2000
+			dependents=1000
+			wealth=6
+			culture=0
+			location=3
+			workplace=4
+			num_literate=400
+			qualifications={ 15 7=20 }
+		}
+	}
+}
+cultures={
+	database={
+		0={
+			type=north_german
+		}
+		1=none
+	}
+}
+laws={
+	database={
+		1={
+			law="law_autocracy"
+			country=16777216
+			active=yes
+		}
+	}
+}
+market_manager={
+	database={
+		1={
+			owner=16777216
+		}
+	}
+}
+trade_route_manager={
+	database={
+		1=none
+	}
+}
+building_constructions={
+	database={
+		1=none
+	}
+}
+government_constructions={
+	database={
+		1=none
+	}
+}
+technology={
+	database={
+		1={
+			country=16777216
+			acquired_technologies={ value={ } }
+		}
+	}
+}
+previous_played={
+	{
+		idtype=16777216
+		name="toy_player"
+	}
+}
