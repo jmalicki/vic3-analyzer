@@ -1,0 +1,16 @@
+[[permission]]
+identifier = "allow-companion"
+description = "Companion UI commands: config, save catalog, and vic3-api JSON analysis."
+commands.allow = [
+  "api_ping",
+  "get_config",
+  "save_config",
+  "reset_config",
+  "list_saves",
+  "get_dashboard",
+  "detection_hints",
+  "use_save",
+  "loaded_prices",
+  "loaded_alerts",
+  "loaded_gaps",
+]

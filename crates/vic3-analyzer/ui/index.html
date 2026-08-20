@@ -12,6 +12,9 @@
         --muted: #5a6675;
         --panel: #e8eef4;
         --accent: #2a4a6a;
+        --line: #c3ced9;
+        --ok: #2f6b4f;
+        --warn: #8a5a20;
       }
       * {
         box-sizing: border-box;
@@ -23,71 +26,530 @@
         background:
           radial-gradient(1200px 600px at 10% -10%, #c5d4e4 0%, transparent 55%),
           linear-gradient(165deg, #f3f6f9 0%, #d9e3ec 100%);
-        display: grid;
-        place-items: center;
-        padding: 2rem;
+        padding: 1.5rem;
       }
-      main {
-        max-width: 36rem;
+      header {
+        max-width: 64rem;
+        margin: 0 auto 1.25rem;
       }
       h1 {
-        margin: 0 0 0.5rem;
-        font-size: clamp(2rem, 5vw, 2.75rem);
+        margin: 0 0 0.35rem;
+        font-size: clamp(1.85rem, 4vw, 2.4rem);
         font-weight: 600;
         letter-spacing: -0.02em;
         color: var(--accent);
       }
-      p {
-        margin: 0 0 1.25rem;
+      .lede {
+        margin: 0;
         color: var(--muted);
-        line-height: 1.5;
+        line-height: 1.45;
+        max-width: 40rem;
       }
-      button {
+      nav {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1rem;
+        flex-wrap: wrap;
+      }
+      nav button,
+      .actions button,
+      button.primary {
         font: inherit;
         border: 0;
         border-radius: 0.35rem;
-        padding: 0.55rem 1rem;
+        padding: 0.45rem 0.9rem;
         background: var(--accent);
         color: #f7fafc;
         cursor: pointer;
       }
-      button:hover {
-        filter: brightness(1.08);
+      nav button.ghost,
+      .actions button.ghost {
+        background: transparent;
+        color: var(--accent);
+        border: 1px solid var(--line);
       }
-      #status {
-        margin-top: 1rem;
+      nav button[aria-pressed="true"] {
+        filter: brightness(1.05);
+        box-shadow: inset 0 -2px 0 #1a334d;
+      }
+      button:hover {
+        filter: brightness(1.06);
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .layout {
+        max-width: 64rem;
+        margin: 0 auto;
+        display: grid;
+        gap: 1rem;
+      }
+      section {
+        background: color-mix(in srgb, var(--panel) 88%, white);
+        border: 1px solid var(--line);
+        border-radius: 0.4rem;
+        padding: 1rem 1.1rem 1.15rem;
+      }
+      section h2 {
+        margin: 0 0 0.75rem;
+        font-size: 1.15rem;
+        color: var(--accent);
+      }
+      .hidden {
+        display: none !important;
+      }
+      label {
+        display: grid;
+        gap: 0.25rem;
+        margin-bottom: 0.75rem;
+        font-size: 0.95rem;
+      }
+      label span {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      input[type="text"],
+      textarea {
+        font: inherit;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 0.9rem;
+        font-size: 0.85rem;
+        padding: 0.45rem 0.55rem;
+        border: 1px solid var(--line);
+        border-radius: 0.3rem;
+        background: #fff;
         color: var(--ink);
-        background: var(--panel);
-        padding: 0.75rem 1rem;
-        min-height: 2.5rem;
+        width: 100%;
+      }
+      textarea {
+        min-height: 4.5rem;
+        resize: vertical;
+      }
+      .row {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        margin-bottom: 0.85rem;
+      }
+      .check input {
+        width: auto;
+      }
+      .status {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85rem;
+        color: var(--ink);
+        background: #fff;
+        border: 1px solid var(--line);
+        padding: 0.65rem 0.8rem;
+        min-height: 2.4rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .status.ok {
+        color: var(--ok);
+      }
+      .status.err {
+        color: #8b2e2e;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92rem;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 0.4rem 0.35rem;
+        border-bottom: 1px solid var(--line);
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      tr.selected td {
+        background: #d7e4f0;
+      }
+      tr[data-stub] {
+        cursor: pointer;
+      }
+      .hint-list {
+        margin: 0.5rem 0 0;
+        padding-left: 1.1rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+        line-height: 1.45;
+      }
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+        gap: 0.65rem;
+        margin-bottom: 0.85rem;
+      }
+      .metric {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 0.3rem;
+        padding: 0.55rem 0.7rem;
+      }
+      .metric strong {
+        display: block;
+        font-size: 1.15rem;
+        color: var(--accent);
+      }
+      .metric span {
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+      dialog {
+        border: 1px solid var(--line);
+        border-radius: 0.4rem;
+        padding: 1rem 1.1rem;
+        max-width: 32rem;
+      }
+      dialog::backdrop {
+        background: rgb(28 36 48 / 35%);
       }
     </style>
   </head>
   <body>
-    <main>
+    <header>
       <h1>Vic3 Analyzer</h1>
-      <p>
-        Desktop shell skeleton. The full Vite <code>web/</code> workbench can be
-        pointed at from <code>tauri.conf.json</code> later; this page only
-        verifies the WebView and a placeholder <code>api_ping</code> invoke.
+      <p class="lede">
+        Native companion: auto-detect game and saves, Settings, filename stubs,
+        and JSON analysis via <code>vic3-api</code>. Advanced Query arrives later.
       </p>
-      <button type="button" id="ping">Ping vic3-api</button>
-      <div id="status" aria-live="polite">idle</div>
-    </main>
+      <nav aria-label="Views">
+        <button type="button" id="tab-dashboard" aria-pressed="true">Dashboard</button>
+        <button type="button" id="tab-saves" class="ghost" aria-pressed="false">Saves</button>
+        <button type="button" id="tab-settings" class="ghost" aria-pressed="false">Settings</button>
+      </nav>
+    </header>
+
+    <div class="layout">
+      <section id="view-dashboard">
+        <h2>Dashboard</h2>
+        <div class="metrics" id="metrics"></div>
+        <div class="status" id="dash-status" aria-live="polite">Loading…</div>
+        <div class="actions" style="margin-top: 0.75rem">
+          <button type="button" id="refresh-dash">Refresh</button>
+          <button type="button" class="ghost" id="show-hints">Path hints</button>
+        </div>
+      </section>
+
+      <section id="view-saves" class="hidden">
+        <h2>Save catalog</h2>
+        <p class="lede" style="margin-bottom: 0.75rem">
+          Filename stubs only — paths stay in Rust. Click a row to load analysis JSON.
+        </p>
+        <div class="actions" style="margin-bottom: 0.75rem">
+          <button type="button" id="refresh-saves">Refresh list</button>
+          <button type="button" class="ghost" id="load-prices" disabled>Loaded prices</button>
+          <button type="button" class="ghost" id="load-alerts" disabled>Loaded alerts</button>
+        </div>
+        <div style="overflow-x: auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Kind</th>
+                <th>Location</th>
+                <th>mtime</th>
+              </tr>
+            </thead>
+            <tbody id="saves-body"></tbody>
+          </table>
+        </div>
+        <div class="status" id="saves-status" style="margin-top: 0.75rem" aria-live="polite"></div>
+      </section>
+
+      <section id="view-settings" class="hidden">
+        <h2>Settings</h2>
+        <p class="lede" style="margin-bottom: 0.85rem">
+          Shared with <code>vic3-analyzer mcp</code> via app-data
+          <code>config.toml</code>.
+        </p>
+        <label>
+          Game folder (<code>…/Victoria 3/game</code>)
+          <input id="cfg-game" type="text" spellcheck="false" />
+        </label>
+        <label>
+          Defs postcard (optional — skips live install)
+          <input id="cfg-defs" type="text" spellcheck="false" />
+        </label>
+        <label>
+          Save folders (one path per line)
+          <textarea id="cfg-saves" spellcheck="false"></textarea>
+        </label>
+        <label>
+          Token map (optional, ironman/binary)
+          <input id="cfg-tokens" type="text" spellcheck="false" />
+        </label>
+        <label class="check">
+          <input id="cfg-auto" type="checkbox" />
+          Auto-detect when paths are missing
+        </label>
+        <p class="lede" id="cfg-path" style="margin-bottom: 0.75rem; font-family: ui-monospace, monospace; font-size: 0.8rem"></p>
+        <div class="actions row">
+          <button type="button" id="save-settings">Save config</button>
+          <button type="button" class="ghost" id="reset-settings">Reset to auto-detect</button>
+        </div>
+        <div class="status" id="settings-status" style="margin-top: 0.75rem" aria-live="polite"></div>
+      </section>
+    </div>
+
+    <dialog id="hints-dialog">
+      <h2 style="margin-top: 0; color: var(--accent)">Path hints</h2>
+      <ul class="hint-list" id="hints-list"></ul>
+      <form method="dialog" style="margin-top: 1rem">
+        <button type="submit">Close</button>
+      </form>
+    </dialog>
+
     <script>
-      const status = document.getElementById("status");
-      document.getElementById("ping").addEventListener("click", async () => {
-        status.textContent = "calling…";
+      const invoke = (...args) => window.__TAURI__.core.invoke(...args);
+      const listen = (...args) => window.__TAURI__.event.listen(...args);
+
+      const views = {
+        dashboard: document.getElementById("view-dashboard"),
+        saves: document.getElementById("view-saves"),
+        settings: document.getElementById("view-settings"),
+      };
+      const tabs = {
+        dashboard: document.getElementById("tab-dashboard"),
+        saves: document.getElementById("tab-saves"),
+        settings: document.getElementById("tab-settings"),
+      };
+
+      let selected = null;
+      let hasLoaded = false;
+
+      function showView(name) {
+        for (const [key, el] of Object.entries(views)) {
+          el.classList.toggle("hidden", key !== name);
+          tabs[key].setAttribute("aria-pressed", key === name ? "true" : "false");
+          tabs[key].classList.toggle("ghost", key !== name);
+        }
+      }
+
+      function setStatus(el, text, kind) {
+        el.textContent = text;
+        el.classList.toggle("ok", kind === "ok");
+        el.classList.toggle("err", kind === "err");
+      }
+
+      function fillConfig(cfg) {
+        document.getElementById("cfg-game").value = cfg.game_dir || "";
+        document.getElementById("cfg-defs").value = cfg.defs_blob || "";
+        document.getElementById("cfg-saves").value = (cfg.save_dirs || []).join("\n");
+        document.getElementById("cfg-tokens").value = cfg.tokens_path || "";
+        document.getElementById("cfg-auto").checked = !!cfg.auto_detect;
+        document.getElementById("cfg-path").textContent = "Config file: " + cfg.config_path;
+      }
+
+      function readConfigForm() {
+        const saves = document
+          .getElementById("cfg-saves")
+          .value.split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        return {
+          game_dir: document.getElementById("cfg-game").value.trim() || null,
+          defs_blob: document.getElementById("cfg-defs").value.trim() || null,
+          save_dirs: saves,
+          tokens_path: document.getElementById("cfg-tokens").value.trim() || null,
+          auto_detect: document.getElementById("cfg-auto").checked,
+          config_path: "",
+        };
+      }
+
+      function renderMetrics(dash) {
+        const items = [
+          ["Game", dash.game_detected ? "found" : "missing"],
+          ["Save roots", String(dash.save_root_count)],
+          ["Saves", String(dash.save_count)],
+          ["Loaded", dash.loaded_stub || "—"],
+        ];
+        document.getElementById("metrics").innerHTML = items
+          .map(
+            ([label, value]) =>
+              `<div class="metric"><strong>${value}</strong><span>${label}</span></div>`
+          )
+          .join("");
+      }
+
+      function renderSaves(rows) {
+        const body = document.getElementById("saves-body");
+        if (!rows.length) {
+          body.innerHTML =
+            '<tr><td colspan="4">No <code>.v3</code> files in configured save folders.</td></tr>';
+          return;
+        }
+        body.innerHTML = rows
+          .map((row) => {
+            const mtime = new Date(row.mtime * 1000).toLocaleString();
+            const sel =
+              selected && selected.name === row.name && selected.location === row.location
+                ? " selected"
+                : "";
+            return `<tr class="${sel}" data-stub="${encodeURIComponent(row.name)}" data-loc="${row.location}">
+              <td>${row.name}</td>
+              <td>${row.kind}</td>
+              <td>${row.location}</td>
+              <td>${mtime}</td>
+            </tr>`;
+          })
+          .join("");
+        body.querySelectorAll("tr[data-stub]").forEach((tr) => {
+          tr.addEventListener("click", () => {
+            selected = {
+              name: decodeURIComponent(tr.dataset.stub),
+              location: tr.dataset.loc,
+            };
+            loadSelected();
+          });
+        });
+      }
+
+      async function refreshDashboard() {
+        const dash = await invoke("get_dashboard");
+        renderMetrics(dash);
+        fillConfig(dash.config);
+        const bits = [];
+        if (!dash.game_detected) bits.push("Game folder not detected.");
+        if (dash.save_root_count === 0) bits.push("No save roots configured.");
+        bits.push(`${dash.save_count} save stub(s) indexed.`);
+        if (dash.loaded_stub) bits.push(`Session: ${dash.loaded_stub}`);
+        setStatus(
+          document.getElementById("dash-status"),
+          bits.join(" "),
+          dash.game_detected ? "ok" : "err"
+        );
+      }
+
+      async function refreshSaves() {
+        const rows = await invoke("list_saves");
+        renderSaves(rows);
+        setStatus(
+          document.getElementById("saves-status"),
+          `${rows.length} stub(s)`,
+          "ok"
+        );
+        await refreshDashboard();
+      }
+
+      async function loadSelected() {
+        if (!selected) return;
+        const status = document.getElementById("saves-status");
+        setStatus(status, `Loading ${selected.name}…`);
         try {
-          const { invoke } = window.__TAURI__.core;
-          const result = await invoke("api_ping");
-          status.textContent = String(result);
+          const json = await invoke("use_save", {
+            name: selected.name,
+            location: selected.location,
+            solveOptsJson: "{}",
+          });
+          hasLoaded = true;
+          document.getElementById("load-prices").disabled = false;
+          document.getElementById("load-alerts").disabled = false;
+          const summary = JSON.parse(json).summary || {};
+          setStatus(
+            status,
+            `Loaded ${selected.name} — ${summary.tag || "?"} @ ${summary.date || "?"}`,
+            "ok"
+          );
+          await refreshDashboard();
+          await refreshSaves();
         } catch (err) {
-          status.textContent = "error: " + err;
+          setStatus(status, String(err), "err");
+        }
+      }
+
+      tabs.dashboard.addEventListener("click", () => showView("dashboard"));
+      tabs.saves.addEventListener("click", () => showView("saves"));
+      tabs.settings.addEventListener("click", () => showView("settings"));
+
+      document.getElementById("refresh-dash").addEventListener("click", () => {
+        refreshDashboard().catch((e) =>
+          setStatus(document.getElementById("dash-status"), String(e), "err")
+        );
+      });
+      document.getElementById("refresh-saves").addEventListener("click", () => {
+        refreshSaves().catch((e) =>
+          setStatus(document.getElementById("saves-status"), String(e), "err")
+        );
+      });
+      document.getElementById("save-settings").addEventListener("click", async () => {
+        const status = document.getElementById("settings-status");
+        try {
+          const cfg = await invoke("save_config", { config: readConfigForm() });
+          fillConfig(cfg);
+          setStatus(status, "Saved.", "ok");
+          await refreshSaves();
+        } catch (err) {
+          setStatus(status, String(err), "err");
         }
       });
+      document.getElementById("reset-settings").addEventListener("click", async () => {
+        const status = document.getElementById("settings-status");
+        try {
+          const cfg = await invoke("reset_config");
+          fillConfig(cfg);
+          setStatus(status, "Reset to auto-detect.", "ok");
+          await refreshSaves();
+        } catch (err) {
+          setStatus(status, String(err), "err");
+        }
+      });
+      document.getElementById("load-prices").addEventListener("click", async () => {
+        try {
+          const json = await invoke("loaded_prices");
+          setStatus(
+            document.getElementById("saves-status"),
+            json.slice(0, 400) + (json.length > 400 ? "…" : ""),
+            "ok"
+          );
+        } catch (err) {
+          setStatus(document.getElementById("saves-status"), String(err), "err");
+        }
+      });
+      document.getElementById("load-alerts").addEventListener("click", async () => {
+        try {
+          const json = await invoke("loaded_alerts");
+          setStatus(
+            document.getElementById("saves-status"),
+            json.slice(0, 400) + (json.length > 400 ? "…" : ""),
+            "ok"
+          );
+        } catch (err) {
+          setStatus(document.getElementById("saves-status"), String(err), "err");
+        }
+      });
+      document.getElementById("show-hints").addEventListener("click", async () => {
+        const hints = await invoke("detection_hints");
+        const list = document.getElementById("hints-list");
+        list.innerHTML = hints.map((h) => `<li><code>${h}</code></li>`).join("");
+        document.getElementById("hints-dialog").showModal();
+      });
+
+      (async () => {
+        try {
+          await refreshDashboard();
+          await refreshSaves();
+          await listen("saves-changed", () => {
+            refreshSaves().catch(() => {});
+          });
+        } catch (err) {
+          setStatus(document.getElementById("dash-status"), String(err), "err");
+        }
+      })();
     </script>
   </body>
 </html>
