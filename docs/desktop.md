@@ -1,6 +1,6 @@
 # Desktop config and auto-detect (design spec)
 
-**Status:** Companion UI landed — Settings + save stubs + optional watch + `vic3-api` JSON invokes in `vic3-analyzer`. Advanced Query is Wave 4.  
+**Status:** Companion UI + Advanced Query tab (`vic3-sql` via Tauri invoke, results grid, docs panel for `docs/sql.md`).  
 **Applies to:** Tauri GUI + `vic3-analyzer mcp` (same config file).  
 **Does not apply to:** GitHub Pages / wasm (browser still uses pickers / drag-drop).
 
@@ -11,15 +11,15 @@ Desktop crate: `crates/vic3-analyzer` (Tauri 2). Default argv opens the GUI; `mc
 ```text
 cargo check -p vic3-analyzer
 cargo test -p vic3-analyzer
-cargo run -p vic3-analyzer            # companion UI (Dashboard / Saves / Settings)
+cargo run -p vic3-analyzer            # companion UI (Dashboard / Saves / Query / Settings)
 cargo run -p vic3-analyzer -- mcp     # stdio MCP (rmcp); logs on stderr, no window
 ```
 
 Linux CI installs WebKitGTK 4.1 and related packages (see `.github/workflows/ci.yml`). Locally, follow [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
-The WebView ships `ui/` (companion shell). Invokes use filename stubs in, JSON out via `vic3-api` (paths stay in Rust). To load the Vite `web/` workbench instead, point `build.frontendDist` / `build.devUrl` in `tauri.conf.json` at `web/dist` or the Vite server (set Vite `base` to `/` for the desktop target).
+The WebView ships `ui/` (companion shell). Invokes use filename stubs in, JSON out via `vic3-api` / `vic3-sql` (paths stay in Rust). To load the Vite `web/` workbench instead, point `build.frontendDist` / `build.devUrl` in `tauri.conf.json` at `web/dist` or the Vite server (set Vite `base` to `/` for the desktop target).
 
-Capability allowlist: `capabilities/default.json` — `core:default` plus `allow-companion` (config, catalog, analysis JSON).
+Capability allowlist: `capabilities/default.json` — `core:default` plus `allow-companion` (config, catalog, analysis JSON, Advanced Query).
 
 ## Goals
 
@@ -96,8 +96,10 @@ If detection fails: Dashboard “Path hints” modal with pasteable candidates (
 | --- | --- |
 | `get_config` / `save_config` / `reset_config` | Settings round-trip |
 | `list_saves` / `get_dashboard` / `detection_hints` | Catalog + status |
-| `use_save` | Stub → `vic3-api::load_analysis_from_paths` JSON |
+| `use_save` | Stub → `vic3-sql` bind + analysis session (same engine as MCP) |
 | `loaded_prices` / `loaded_alerts` / `loaded_gaps` | Session analysis JSON |
+| `sql_query` | Read-only SQL → `{ columns, rows, row_count }` (shared shape with MCP) |
+| `sql_docs` | Body of [`sql.md`](sql.md) + UDF index (future `vic3://docs/sql`) |
 | `api_ping` | Smoke link to `vic3-api` |
 
 ## Watch

@@ -25,6 +25,8 @@ pub fn run() {
             commands::loaded_prices,
             commands::loaded_alerts,
             commands::loaded_gaps,
+            commands::sql_query,
+            commands::sql_docs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running vic3-analyzer");

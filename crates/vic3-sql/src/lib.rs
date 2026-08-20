@@ -4,12 +4,14 @@
 //! (`alerts`, `shortage_analysis`, `good_price`, …), planning TVFs `plan` /
 //! `gaps`, catalog table `saves`, host [`SqlEngine::use_save`], and
 //! `active.*` / `latest.*` views. Session binding is never a mutating
-//! `SELECT`.
+//! `SELECT`. JSON/CSV result shaping ([`batches_to_json`]) is shared by the
+//! Tauri Advanced Query tab and (later) MCP `query`.
 
 mod binding;
 mod error;
 mod exec;
 mod filter;
+mod format;
 mod host;
 mod providers;
 mod readonly;
@@ -19,6 +21,7 @@ mod udfs;
 
 pub use binding::SessionBinding;
 pub use error::{SaveCandidate, SqlError};
+pub use format::{batches_to_csv, batches_to_json, FormatError};
 pub use host::{EngineLoadOpts, UseSaveRequest, UseSaveResult};
 pub use providers::{FactTable, FACT_TABLES};
 pub use session::{ActiveSessionInfo, SqlEngine};

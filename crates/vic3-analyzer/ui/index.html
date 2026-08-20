@@ -15,6 +15,7 @@
         --line: #c3ced9;
         --ok: #2f6b4f;
         --warn: #8a5a20;
+        --link: #1a4f7a;
       }
       * {
         box-sizing: border-box;
@@ -29,7 +30,7 @@
         padding: 1.5rem;
       }
       header {
-        max-width: 64rem;
+        max-width: 72rem;
         margin: 0 auto 1.25rem;
       }
       h1 {
@@ -43,7 +44,7 @@
         margin: 0;
         color: var(--muted);
         line-height: 1.45;
-        max-width: 40rem;
+        max-width: 42rem;
       }
       nav {
         display: flex;
@@ -80,7 +81,7 @@
         cursor: not-allowed;
       }
       .layout {
-        max-width: 64rem;
+        max-width: 72rem;
         margin: 0 auto;
         display: grid;
         gap: 1rem;
@@ -124,6 +125,10 @@
       textarea {
         min-height: 4.5rem;
         resize: vertical;
+      }
+      #sql-editor {
+        min-height: 8rem;
+        line-height: 1.4;
       }
       .row {
         display: flex;
@@ -178,8 +183,17 @@
       tr.selected td {
         background: #d7e4f0;
       }
-      tr[data-stub] {
+      tr.highlight td {
+        background: #f0e6c8;
+      }
+      tr[data-stub],
+      td.nav-key {
         cursor: pointer;
+      }
+      td.nav-key {
+        color: var(--link);
+        text-decoration: underline;
+        text-underline-offset: 0.15em;
       }
       .hint-list {
         margin: 0.5rem 0 0;
@@ -218,18 +232,108 @@
       dialog::backdrop {
         background: rgb(28 36 48 / 35%);
       }
+      .query-grid {
+        display: grid;
+        gap: 1rem;
+      }
+      @media (min-width: 900px) {
+        .query-grid.split {
+          grid-template-columns: 1.15fr 0.85fr;
+        }
+      }
+      .results-wrap {
+        overflow: auto;
+        max-height: 22rem;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 0.3rem;
+      }
+      .docs-panel {
+        overflow: auto;
+        max-height: 36rem;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 0.3rem;
+        padding: 0.75rem 0.9rem;
+        font-size: 0.88rem;
+        line-height: 1.45;
+      }
+      .docs-panel h1,
+      .docs-panel h2,
+      .docs-panel h3 {
+        color: var(--accent);
+        margin: 0.85rem 0 0.4rem;
+        font-size: 1.05rem;
+      }
+      .docs-panel h1 {
+        font-size: 1.2rem;
+        margin-top: 0;
+      }
+      .docs-panel pre,
+      .docs-panel code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.8rem;
+      }
+      .docs-panel pre {
+        background: #f3f6f9;
+        border: 1px solid var(--line);
+        border-radius: 0.25rem;
+        padding: 0.55rem 0.65rem;
+        overflow-x: auto;
+        white-space: pre-wrap;
+      }
+      .docs-panel table {
+        font-size: 0.82rem;
+      }
+      .docs-panel p {
+        margin: 0.35rem 0;
+      }
+      .focus-card {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 0.3rem;
+        padding: 0.75rem 0.85rem;
+        margin-bottom: 0.75rem;
+      }
+      .focus-card .eyebrow {
+        color: var(--muted);
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin: 0 0 0.35rem;
+      }
+      .examples {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        margin: 0.35rem 0 0.75rem;
+      }
+      .examples button {
+        font: inherit;
+        font-size: 0.8rem;
+        padding: 0.3rem 0.55rem;
+        border-radius: 0.3rem;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--accent);
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
     <header>
       <h1>Vic3 Analyzer</h1>
       <p class="lede">
-        Native companion: auto-detect game and saves, Settings, filename stubs,
-        and JSON analysis via <code>vic3-api</code>. Advanced Query arrives later.
+        Native companion: catalog, Settings, analysis JSON, and Advanced Query
+        over the same <code>vic3-sql</code> engine MCP will use.
       </p>
       <nav aria-label="Views">
         <button type="button" id="tab-dashboard" aria-pressed="true">Dashboard</button>
         <button type="button" id="tab-saves" class="ghost" aria-pressed="false">Saves</button>
+        <button type="button" id="tab-query" class="ghost" aria-pressed="false">Query</button>
+        <button type="button" id="tab-states" class="ghost" aria-pressed="false">States</button>
+        <button type="button" id="tab-prices" class="ghost" aria-pressed="false">Prices</button>
+        <button type="button" id="tab-timeline" class="ghost" aria-pressed="false">Timeline</button>
         <button type="button" id="tab-settings" class="ghost" aria-pressed="false">Settings</button>
       </nav>
     </header>
@@ -248,7 +352,8 @@
       <section id="view-saves" class="hidden">
         <h2>Save catalog</h2>
         <p class="lede" style="margin-bottom: 0.75rem">
-          Filename stubs only — paths stay in Rust. Click a row to load analysis JSON.
+          Filename stubs only — paths stay in Rust. Click a row to bind the SQL
+          session and analysis JSON.
         </p>
         <div class="actions" style="margin-bottom: 0.75rem">
           <button type="button" id="refresh-saves">Refresh list</button>
@@ -269,6 +374,89 @@
           </table>
         </div>
         <div class="status" id="saves-status" style="margin-top: 0.75rem" aria-live="polite"></div>
+      </section>
+
+      <section id="view-query" class="hidden">
+        <h2>Advanced Query</h2>
+        <p class="lede" style="margin-bottom: 0.65rem">
+          Read-only SQL via <code>vic3-sql</code>. Click
+          <code>state_id</code>, <code>good</code>, <code>building_id</code>, or plan
+          <code>step</code> cells to open companion panes.
+        </p>
+        <div class="examples" id="sql-examples"></div>
+        <div class="query-grid" id="query-layout">
+          <div>
+            <label>
+              SQL
+              <textarea id="sql-editor" spellcheck="false">SELECT name, kind, loaded FROM saves ORDER BY mtime DESC LIMIT 10;</textarea>
+            </label>
+            <div class="actions row" style="margin-bottom: 0.75rem">
+              <button type="button" id="run-sql">Run</button>
+              <button type="button" class="ghost" id="toggle-docs">Docs</button>
+            </div>
+            <div class="status" id="query-status" aria-live="polite"></div>
+            <div class="results-wrap" style="margin-top: 0.75rem">
+              <table>
+                <thead id="results-head"></thead>
+                <tbody id="results-body"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="docs-side" class="hidden">
+            <div class="docs-panel" id="docs-panel" aria-label="SQL documentation"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-states" class="hidden">
+        <h2>States</h2>
+        <div class="focus-card" id="states-focus">
+          <p class="eyebrow">Focus</p>
+          <p class="lede" id="states-focus-text">
+            Click a <code>state_id</code> in Query results, or load a save first.
+          </p>
+        </div>
+        <div class="results-wrap">
+          <table>
+            <thead id="states-head"></thead>
+            <tbody id="states-body"></tbody>
+          </table>
+        </div>
+        <div class="status" id="states-status" style="margin-top: 0.75rem" aria-live="polite"></div>
+      </section>
+
+      <section id="view-prices" class="hidden">
+        <h2>Prices</h2>
+        <div class="focus-card" id="prices-focus">
+          <p class="eyebrow">Focus</p>
+          <p class="lede" id="prices-focus-text">
+            Click a <code>good</code> / <code>good_id</code> cell in Query results.
+          </p>
+        </div>
+        <div class="results-wrap">
+          <table>
+            <thead id="prices-head"></thead>
+            <tbody id="prices-body"></tbody>
+          </table>
+        </div>
+        <div class="status" id="prices-status" style="margin-top: 0.75rem" aria-live="polite"></div>
+      </section>
+
+      <section id="view-timeline" class="hidden">
+        <h2>Timeline</h2>
+        <div class="focus-card">
+          <p class="eyebrow">Plan step</p>
+          <p class="lede" id="timeline-focus-text">
+            Run <code>SELECT … FROM plan('…')</code> then click a <code>step</code> cell.
+          </p>
+        </div>
+        <div class="results-wrap">
+          <table>
+            <thead id="timeline-head"></thead>
+            <tbody id="timeline-body"></tbody>
+          </table>
+        </div>
+        <div class="status" id="timeline-status" style="margin-top: 0.75rem" aria-live="polite"></div>
       </section>
 
       <section id="view-settings" class="hidden">
@@ -318,19 +506,47 @@
       const invoke = (...args) => window.__TAURI__.core.invoke(...args);
       const listen = (...args) => window.__TAURI__.event.listen(...args);
 
+      const NAV_KEYS = new Set([
+        "state_id",
+        "good",
+        "good_id",
+        "building_id",
+        "step",
+      ]);
+
+      const EXAMPLES = [
+        ["saves", "SELECT name, kind, loaded FROM saves ORDER BY mtime DESC LIMIT 10;"],
+        ["alerts", "SELECT id, kind, severity, title FROM alerts() ORDER BY severity LIMIT 20;"],
+        ["shortage", "SELECT good, shortage, price FROM goods WHERE shortage > 0 ORDER BY shortage DESC LIMIT 15;"],
+        ["plan", "SELECT step, day, action, detail FROM plan('research(tech=nitroglycerin)') ORDER BY step;"],
+      ];
+
       const views = {
         dashboard: document.getElementById("view-dashboard"),
         saves: document.getElementById("view-saves"),
+        query: document.getElementById("view-query"),
+        states: document.getElementById("view-states"),
+        prices: document.getElementById("view-prices"),
+        timeline: document.getElementById("view-timeline"),
         settings: document.getElementById("view-settings"),
       };
       const tabs = {
         dashboard: document.getElementById("tab-dashboard"),
         saves: document.getElementById("tab-saves"),
+        query: document.getElementById("tab-query"),
+        states: document.getElementById("tab-states"),
+        prices: document.getElementById("tab-prices"),
+        timeline: document.getElementById("tab-timeline"),
         settings: document.getElementById("tab-settings"),
       };
 
       let selected = null;
       let hasLoaded = false;
+      let docsLoaded = false;
+      let docsOpen = false;
+      let lastPlanRows = null;
+      let lastPlanColumns = null;
+      let timelineStep = null;
 
       function showView(name) {
         for (const [key, el] of Object.entries(views)) {
@@ -386,6 +602,137 @@
           .join("");
       }
 
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function cellText(v) {
+        if (v === null || v === undefined) return "";
+        if (typeof v === "object") return JSON.stringify(v);
+        return String(v);
+      }
+
+      function renderResultTable(headEl, bodyEl, columns, rows, opts) {
+        const options = opts || {};
+        const highlightStep = options.highlightStep;
+        const nav = options.nav !== false;
+        headEl.innerHTML =
+          "<tr>" + columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("") + "</tr>";
+        if (!rows.length) {
+          bodyEl.innerHTML = `<tr><td colspan="${columns.length || 1}">No rows.</td></tr>`;
+          return;
+        }
+        bodyEl.innerHTML = rows
+          .map((row, ri) => {
+            const stepIdx = columns.indexOf("step");
+            const isHi =
+              highlightStep != null &&
+              stepIdx >= 0 &&
+              String(row[stepIdx]) === String(highlightStep);
+            const cells = row
+              .map((val, ci) => {
+                const col = columns[ci];
+                const text = escapeHtml(cellText(val));
+                if (nav && NAV_KEYS.has(col) && val !== null && val !== undefined && val !== "") {
+                  return `<td class="nav-key" data-col="${escapeHtml(col)}" data-val="${escapeHtml(
+                    cellText(val)
+                  )}" data-row="${ri}">${text}</td>`;
+                }
+                return `<td>${text}</td>`;
+              })
+              .join("");
+            return `<tr class="${isHi ? "highlight" : ""}">${cells}</tr>`;
+          })
+          .join("");
+        bodyEl.querySelectorAll("td.nav-key").forEach((td) => {
+          td.addEventListener("click", () => {
+            navigateKey(td.dataset.col, td.dataset.val, columns, rows[Number(td.dataset.row)]);
+          });
+        });
+      }
+
+      async function runSqlInto(sql, headEl, bodyEl, statusEl, extra) {
+        setStatus(statusEl, "Running…");
+        try {
+          const raw = await invoke("sql_query", { sql });
+          const result = typeof raw === "string" ? JSON.parse(raw) : raw;
+          const columns = result.columns || [];
+          const rows = result.rows || [];
+          renderResultTable(headEl, bodyEl, columns, rows, extra);
+          setStatus(statusEl, `${result.row_count ?? rows.length} row(s)`, "ok");
+          return { columns, rows, result };
+        } catch (err) {
+          headEl.innerHTML = "";
+          bodyEl.innerHTML = "";
+          setStatus(statusEl, String(err), "err");
+          return null;
+        }
+      }
+
+      async function navigateKey(col, val, columns, row) {
+        if (col === "state_id") {
+          document.getElementById("states-focus-text").textContent = `state_id = ${val}`;
+          showView("states");
+          await runSqlInto(
+            `SELECT state_id, region_id, region_name, owner_tag, infrastructure FROM states WHERE state_id = ${Number(
+              val
+            )}`,
+            document.getElementById("states-head"),
+            document.getElementById("states-body"),
+            document.getElementById("states-status")
+          );
+          return;
+        }
+        if (col === "good" || col === "good_id") {
+          const lit = String(val).replace(/'/g, "''");
+          document.getElementById("prices-focus-text").textContent = `good = ${val}`;
+          showView("prices");
+          await runSqlInto(
+            `SELECT good, good_name, base, price, buy, sell, shortage FROM goods WHERE good = '${lit}'`,
+            document.getElementById("prices-head"),
+            document.getElementById("prices-body"),
+            document.getElementById("prices-status")
+          );
+          return;
+        }
+        if (col === "building_id") {
+          document.getElementById("states-focus-text").textContent = `building_id = ${val}`;
+          showView("states");
+          await runSqlInto(
+            `SELECT building_id, state_id, type_id, type_name, level, staffing, profit FROM buildings WHERE building_id = ${Number(
+              val
+            )}`,
+            document.getElementById("states-head"),
+            document.getElementById("states-body"),
+            document.getElementById("states-status")
+          );
+          return;
+        }
+        if (col === "step") {
+          timelineStep = val;
+          const cols = lastPlanColumns || columns;
+          const rows = lastPlanRows || [row];
+          document.getElementById("timeline-focus-text").textContent = `Highlighting plan step ${val}`;
+          showView("timeline");
+          renderResultTable(
+            document.getElementById("timeline-head"),
+            document.getElementById("timeline-body"),
+            cols,
+            rows,
+            { highlightStep: val, nav: true }
+          );
+          setStatus(
+            document.getElementById("timeline-status"),
+            `Step ${val} highlighted`,
+            "ok"
+          );
+        }
+      }
+
       function renderSaves(rows) {
         const body = document.getElementById("saves-body");
         if (!rows.length) {
@@ -401,10 +748,10 @@
                 ? " selected"
                 : "";
             return `<tr class="${sel}" data-stub="${encodeURIComponent(row.name)}" data-loc="${row.location}">
-              <td>${row.name}</td>
-              <td>${row.kind}</td>
-              <td>${row.location}</td>
-              <td>${mtime}</td>
+              <td>${escapeHtml(row.name)}</td>
+              <td>${escapeHtml(row.kind)}</td>
+              <td>${escapeHtml(row.location)}</td>
+              <td>${escapeHtml(mtime)}</td>
             </tr>`;
           })
           .join("");
@@ -433,6 +780,9 @@
           bits.join(" "),
           dash.game_detected ? "ok" : "err"
         );
+        hasLoaded = !!dash.loaded_stub;
+        document.getElementById("load-prices").disabled = !hasLoaded;
+        document.getElementById("load-alerts").disabled = !hasLoaded;
       }
 
       async function refreshSaves() {
@@ -472,8 +822,156 @@
         }
       }
 
+      async function runQuery() {
+        const sql = document.getElementById("sql-editor").value;
+        const out = await runSqlInto(
+          sql,
+          document.getElementById("results-head"),
+          document.getElementById("results-body"),
+          document.getElementById("query-status")
+        );
+        if (!out) return;
+        // Remember plan-shaped results for Timeline highlight navigation.
+        if (out.columns.includes("step") && out.columns.includes("action")) {
+          lastPlanColumns = out.columns;
+          lastPlanRows = out.rows;
+          renderResultTable(
+            document.getElementById("timeline-head"),
+            document.getElementById("timeline-body"),
+            out.columns,
+            out.rows,
+            { highlightStep: timelineStep, nav: true }
+          );
+          setStatus(
+            document.getElementById("timeline-status"),
+            `${out.rows.length} plan step(s) cached`,
+            "ok"
+          );
+        }
+      }
+
+      function renderMarkdown(md) {
+        // Minimal renderer for docs/sql.md (headers, fences, tables, paragraphs).
+        const lines = md.replace(/\r\n/g, "\n").split("\n");
+        let html = "";
+        let i = 0;
+        let inFence = false;
+        let fence = [];
+        let inTable = false;
+        let tableRows = [];
+
+        function flushTable() {
+          if (!tableRows.length) return;
+          const rows = tableRows.filter((r) => !/^\s*\|?\s*-/.test(r));
+          html += "<table>";
+          rows.forEach((r, idx) => {
+            const cells = r
+              .replace(/^\|/, "")
+              .replace(/\|$/, "")
+              .split("|")
+              .map((c) => c.trim());
+            const tag = idx === 0 ? "th" : "td";
+            html +=
+              "<tr>" +
+              cells.map((c) => `<${tag}>${inlineMd(c)}</${tag}>`).join("") +
+              "</tr>";
+          });
+          html += "</table>";
+          tableRows = [];
+          inTable = false;
+        }
+
+        function inlineMd(s) {
+          return escapeHtml(s)
+            .replace(/`([^`]+)`/g, "<code>$1</code>")
+            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+        }
+
+        while (i < lines.length) {
+          const line = lines[i];
+          if (line.startsWith("```")) {
+            if (inFence) {
+              html += `<pre>${escapeHtml(fence.join("\n"))}</pre>`;
+              fence = [];
+              inFence = false;
+            } else {
+              if (inTable) flushTable();
+              inFence = true;
+            }
+            i++;
+            continue;
+          }
+          if (inFence) {
+            fence.push(line);
+            i++;
+            continue;
+          }
+          if (line.trim().startsWith("|")) {
+            inTable = true;
+            tableRows.push(line);
+            i++;
+            continue;
+          }
+          if (inTable) flushTable();
+          if (line.startsWith("### ")) {
+            html += `<h3>${inlineMd(line.slice(4))}</h3>`;
+          } else if (line.startsWith("## ")) {
+            html += `<h2>${inlineMd(line.slice(3))}</h2>`;
+          } else if (line.startsWith("# ")) {
+            html += `<h1>${inlineMd(line.slice(2))}</h1>`;
+          } else if (line.trim() === "") {
+            html += "";
+          } else if (line.startsWith("- ")) {
+            html += `<p>• ${inlineMd(line.slice(2))}</p>`;
+          } else {
+            html += `<p>${inlineMd(line)}</p>`;
+          }
+          i++;
+        }
+        if (inFence) html += `<pre>${escapeHtml(fence.join("\n"))}</pre>`;
+        if (inTable) flushTable();
+        return html;
+      }
+
+      async function ensureDocs() {
+        if (docsLoaded) return;
+        const docs = await invoke("sql_docs");
+        document.getElementById("docs-panel").innerHTML =
+          renderMarkdown(docs.udf_md) + "<hr />" + renderMarkdown(docs.sql_md);
+        docsLoaded = true;
+      }
+
+      function toggleDocs() {
+        docsOpen = !docsOpen;
+        document.getElementById("docs-side").classList.toggle("hidden", !docsOpen);
+        document.getElementById("query-layout").classList.toggle("split", docsOpen);
+        if (docsOpen) {
+          ensureDocs().catch((e) =>
+            setStatus(document.getElementById("query-status"), String(e), "err")
+          );
+        }
+      }
+
+      // Wire examples
+      {
+        const box = document.getElementById("sql-examples");
+        box.innerHTML = EXAMPLES.map(
+          ([label]) => `<button type="button" data-ex="${label}">${label}</button>`
+        ).join("");
+        box.querySelectorAll("button[data-ex]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const found = EXAMPLES.find((e) => e[0] === btn.dataset.ex);
+            if (found) document.getElementById("sql-editor").value = found[1];
+          });
+        });
+      }
+
       tabs.dashboard.addEventListener("click", () => showView("dashboard"));
       tabs.saves.addEventListener("click", () => showView("saves"));
+      tabs.query.addEventListener("click", () => showView("query"));
+      tabs.states.addEventListener("click", () => showView("states"));
+      tabs.prices.addEventListener("click", () => showView("prices"));
+      tabs.timeline.addEventListener("click", () => showView("timeline"));
       tabs.settings.addEventListener("click", () => showView("settings"));
 
       document.getElementById("refresh-dash").addEventListener("click", () => {
@@ -486,6 +984,16 @@
           setStatus(document.getElementById("saves-status"), String(e), "err")
         );
       });
+      document.getElementById("run-sql").addEventListener("click", () => {
+        runQuery();
+      });
+      document.getElementById("sql-editor").addEventListener("keydown", (ev) => {
+        if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") {
+          ev.preventDefault();
+          runQuery();
+        }
+      });
+      document.getElementById("toggle-docs").addEventListener("click", () => toggleDocs());
       document.getElementById("save-settings").addEventListener("click", async () => {
         const status = document.getElementById("settings-status");
         try {
@@ -535,7 +1043,7 @@
       document.getElementById("show-hints").addEventListener("click", async () => {
         const hints = await invoke("detection_hints");
         const list = document.getElementById("hints-list");
-        list.innerHTML = hints.map((h) => `<li><code>${h}</code></li>`).join("");
+        list.innerHTML = hints.map((h) => `<li><code>${escapeHtml(h)}</code></li>`).join("");
         document.getElementById("hints-dialog").showModal();
       });
 

@@ -1,9 +1,9 @@
 # SQL interface (design spec)
 
-**Status:** Wave 3 — diagnostics scalars/TVFs (`alerts`, `shortage_analysis`, `good_price`, `army_power`, `building_staffing`), planning TVFs (`plan`, `gaps`), `saves` catalog, host `use_save`, and `active.*` / `latest.*` views are implemented in `vic3-sql` (fact tables from Wave 2b).  
+**Status:** Wave 4a — Advanced Query tab in the Tauri companion uses this dialect via `vic3-sql`. Wave 3 diagnostics/planning UDFs, `saves` catalog, host `use_save`, and `active.*` / `latest.*` views remain in `vic3-sql`.  
 **Engine:** Apache DataFusion (`datafusion` 51).  
-**Consumers:** MCP `query` tool, Tauri Advanced Query tab, optional `vic3-analyzer sql` debug.  
-**Related:** [`mcp.md`](mcp.md) (agent transport), [`json-schema.md`](json-schema.md) (JSON field names), [`dsl.md`](dsl.md) / [`planning.md`](planning.md) (goals / A\*).
+**Consumers:** MCP `query` tool (Wave 4b), Tauri Advanced Query tab, optional `vic3-analyzer sql` debug.  
+**Related:** [`mcp.md`](mcp.md) (agent transport), [`json-schema.md`](json-schema.md) (JSON field names), [`dsl.md`](dsl.md) / [`planning.md`](planning.md) (goals / A\*), [`desktop.md`](desktop.md) (companion invokes).
 
 This document is the contract implementers must follow. Prefer amending this file over silently changing behavior.
 
@@ -430,9 +430,9 @@ SELECT name, kind, mtime FROM saves ORDER BY mtime DESC LIMIT 5;
 
 The Tauri **Advanced Query** tab uses this same dialect:
 
-- SQL editor → same engine as MCP `query`
-- Results grid; clicking cells with recognized keys navigates to existing panes (`state_id` → States, `good` → Prices, plan `step` → Timeline highlight, etc.)
-- In-app docs panel renders this document (and UDF list) — single source with MCP `vic3://docs/sql`
+- SQL editor → same engine as MCP `query` (`sql_query` invoke → `vic3-sql`)
+- Results grid; clicking cells with recognized keys navigates to companion panes (`state_id` / `building_id` → States, `good` / `good_id` → Prices, plan `step` → Timeline highlight)
+- In-app docs panel renders this document (and a UDF index) via `sql_docs` — single source with future MCP `vic3://docs/sql`
 
 ## Open questions for review
 
