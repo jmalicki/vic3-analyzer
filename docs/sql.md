@@ -125,17 +125,101 @@ From `state_goods` (state-attributed orders / MAPI blend).
 
 ### `buildings`
 
-Per-building modeled economy (from `buildings` in prices result).
+Per-building modeled economy (from `BuildingEconomics` / `WorldBuilding`).
 
 | Column | Notes |
 | --- | --- |
 | `building_id` | **key** |
 | `state_id` | FK → states |
-| `type_id` | Building type |
-| `level` | |
-| `employees` | Summary or join to staffing TVF |
+| `type_id` | Script building type (`building_rye_farm`, …); FK → `building_types` |
+| `type_name` | Localized when available |
+| `level` / `staffing` | Levels vs staffed levels |
+| `employees` | Summary or join to `building_staffing` TVF |
 | `profit` / `revenue` / `cost` | As modeled |
-| `short_inputs` | Representation TBD (JSON text column or child table) |
+
+Goods IO is **not** a JSON blob on this row — use `building_goods` (and optionally `building_production_methods`).
+
+### `building_goods`
+
+Instance-level goods ↔ building map after resolve (saved IO preferred; else PM recipes × staffing — same as `WorldBuilding::goods_io`).
+
+| Column | Notes |
+| --- | --- |
+| `building_id` | FK → buildings; Exact `=` |
+| `good` | Script id; Exact `=` |
+| `good_name` | Localized; Exact `=` only |
+| `role` | `input` \| `output` |
+| `qty` | Absolute volume used in the solve for this building |
+| `short` | Bool when this input is among scarce inputs (`short_inputs`) — optional derived column |
+
+Typical joins: `building_goods` → `goods` / `goods_by_state` on `good`; → `buildings` on `building_id` for state/type.
+
+```sql
+-- Which buildings burn tools in Alsace-ish states?
+SELECT b.building_id, b.type_id, bg.qty
+FROM building_goods bg
+JOIN buildings b USING (building_id)
+JOIN states s USING (state_id)
+WHERE bg.good = 'tools' AND bg.role = 'input'
+  AND s.region_name = 'Alsace';
+```
+
+### `building_production_methods`
+
+Active PMs on each building instance (`WorldBuilding.production_methods` — one per PM group).
+
+| Column | Notes |
+| --- | --- |
+| `building_id` | FK → buildings |
+| `pm` | Production method script id |
+| `pm_name` | Localized when available |
+
+Join to defs recipe tables below for “what does this PM produce?” without trusting instance IO (mods / missing saved IO).
+
+### Defs: `building_types`, `production_methods`, `production_method_goods`
+
+Static catalog from `GameDefs` (same for all saves once defs are loaded). Prefer these for “what *can* a rye farm make?”; use `building_goods` for “what is this instance actually ordering?”.
+
+#### `building_types`
+
+| Column | Notes |
+| --- | --- |
+| `type_id` | Script id; **key** (`BTreeMap` → Exact `=` and range) |
+| `type_name` | Localized |
+| `group_id` | Building group |
+| `city_type` | If present |
+
+#### `building_type_pm_groups` (optional normalize)
+
+| Column | Notes |
+| --- | --- |
+| `type_id` | |
+| `pm_group` | Script id from `production_method_groups = { … }` |
+| `ordinal` | Order within the type |
+
+#### `production_methods`
+
+| Column | Notes |
+| --- | --- |
+| `pm` | Script id; **key** (`BTreeMap` → Exact `=` and range) |
+| `pm_name` | Localized |
+
+#### `production_method_goods`
+
+Recipe rows from `ProductionMethod.inputs` / `outputs`.
+
+| Column | Notes |
+| --- | --- |
+| `pm` | FK → production_methods |
+| `good` | Script id |
+| `role` | `input` \| `output` |
+| `qty` | Per-level (or as scraped) recipe quantity |
+
+```sql
+-- Defs: which PMs output grain?
+SELECT pm, qty FROM production_method_goods
+WHERE good = 'grain' AND role = 'output';
+```
 
 ### `pops` (or `state_pops`)
 
@@ -173,7 +257,7 @@ Conservative military snapshot fields once exposed by the analysis API (manpower
 
 ### Optional later
 
-- `building_types`, `building_groups`, `state_needs` as first-class tables
+- `building_groups`, `state_needs` as first-class tables
 - Multi-save compares via internal `save_id` (advanced; omit from default docs prompts)
 
 ## Keys, indexes, and joins
@@ -199,9 +283,10 @@ Examples:
 
 Other rules:
 
-- Prefer joins on `state_id` / `good` (script id); use localized names in `WHERE`.
+- Prefer joins on `state_id` / `good` / `building_id` (script ids); use localized names in `WHERE`.
 - Declare **output ordering** when a scan walks a btree or a vec sorted by id so sort-merge can apply.
 - Building a **HashMap** name→id at `use_save` for states is fine (states have no btree today); that enables Exact `=` only, not range.
+- `building_goods` should support Exact pushdown on `building_id` and `good` (hash or sorted vec scan — no range Exact unless keyed by btree).
 
 ## Scalar functions
 
@@ -316,7 +401,8 @@ The Tauri **Advanced Query** tab uses this same dialect:
 2. Mitigations as JSON columns vs child TVFs.
 3. Whether unqualified names require `use_save` or may fall back to `latest.*` automatically.
 4. Military `formations` column list (wait for stable military JSON).
-5. Ambiguous `states.name` / region labels: return all rows vs error vs prefer player-owned.
+5. Ambiguous `states.region_name` / region labels: return all rows vs error vs prefer player-owned.
+6. Keep `building_type_pm_groups` normalized vs embed PM-group list as a text/array column on `building_types`.
 
 ## Implementation notes (non-normative)
 
