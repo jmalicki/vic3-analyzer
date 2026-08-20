@@ -1,6 +1,8 @@
 //! Early argv mode selection (before Tauri `run`).
 //!
 //! Parsed in `main` so [`Mode::Mcp`] never reaches [`crate::run`] (no WebView).
+//! Unknown tokens currently fall back to [`Mode::Gui`] (reserved for future
+//! subcommands).
 
 /// Process mode selected from argv.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,6 +19,18 @@ impl Mode {
     /// - no args / `gui` → [`Mode::Gui`]
     /// - `mcp` → [`Mode::Mcp`]
     /// - anything else → [`Mode::Gui`] with the unknown token ignored for now
+    ///
+    /// # Arguments
+    ///
+    /// * `args` — iterator yielding the program name first, then optional mode.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vic3_analyzer_lib::Mode;
+    /// assert_eq!(Mode::from_args(["vic3-analyzer"]), Mode::Gui);
+    /// assert_eq!(Mode::from_args(["vic3-analyzer", "mcp"]), Mode::Mcp);
+    /// ```
     pub fn from_args<I, S>(args: I) -> Self
     where
         I: IntoIterator<Item = S>,

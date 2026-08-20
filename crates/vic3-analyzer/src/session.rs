@@ -3,6 +3,16 @@
 //! Advanced Query and the Saves tab share one [`SqlEngine`]: `use_save` binds
 //! both the process analysis session (for `loaded_*` JSON) and DataFusion
 //! `active.*` / TVFs. Catalog-only SQL (`saves`, `latest.*`) works before bind.
+//!
+//! ```text
+//! AppConfig → scan_roots → SaveCatalog
+//!                ↓
+//!         SqlEngine::use_save
+//!                ↓
+//!    sql_query  +  loaded_* (vic3-api)
+//! ```
+//!
+//! MCP uses the same catalog/config/SQL crates via `vic3-mcp` (separate process).
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -44,10 +54,12 @@ Catalog (no session): `saves`. Fact tables: `active.*` / unqualified after bind;
 
 /// Shared GUI state (mutex for Tauri managed state).
 pub struct AppState {
+    /// Inner companion session.
     pub inner: Mutex<CompanionSession>,
 }
 
 impl AppState {
+    /// Wrap a session for `app.manage`.
     pub fn new(session: CompanionSession) -> Self {
         Self {
             inner: Mutex::new(session),
@@ -70,6 +82,14 @@ pub struct CompanionSession {
 
 impl CompanionSession {
     /// Load config from the platform app-data path (or a test override).
+    ///
+    /// # Arguments
+    ///
+    /// * `app_data` — `None` uses [`app_data_dir`]; `Some` for tests.
+    ///
+    /// # Errors
+    ///
+    /// App-data / config / initial catalog scan failures as strings.
     pub fn open(app_data: Option<PathBuf>) -> Result<Self, String> {
         let app_data = match app_data {
             Some(p) => p,
@@ -91,14 +111,21 @@ impl CompanionSession {
         Ok(session)
     }
 
+    /// Current Settings DTO (includes absolute `config_path`).
     pub fn config_dto(&self) -> ConfigDto {
         ConfigDto::from_config(&self.config, &self.config_path)
     }
 
+    /// Configured save-root directories (watcher input).
     pub fn save_dirs(&self) -> &[PathBuf] {
         &self.config.save_dirs
     }
 
+    /// Apply Settings DTO, persist, drop SQL engine, refresh catalog.
+    ///
+    /// # Errors
+    ///
+    /// Config write or catalog scan failure.
     pub fn apply_config(&mut self, dto: ConfigDto) -> Result<ConfigDto, String> {
         // Preserve path from disk; ignore client-supplied config_path for writes.
         let path = self.config_path.clone();
@@ -114,6 +141,11 @@ impl CompanionSession {
         Ok(self.config_dto())
     }
 
+    /// Clear overrides, auto-detect, persist, refresh.
+    ///
+    /// # Errors
+    ///
+    /// Config write or catalog scan failure.
     pub fn reset_to_auto_detect(&mut self) -> Result<ConfigDto, String> {
         self.config.reset_to_auto_detect();
         self.config
@@ -125,6 +157,11 @@ impl CompanionSession {
         Ok(self.config_dto())
     }
 
+    /// Rescan roots into the in-memory catalog (and live SQL engine if open).
+    ///
+    /// # Errors
+    ///
+    /// Catalog I/O / SQL refresh failure.
     pub fn refresh_catalog(&mut self) -> Result<Vec<SaveStubDto>, String> {
         let roots = self.config.save_roots();
         self.catalog = scan_roots(&roots).map_err(|e| e.to_string())?;
@@ -134,6 +171,7 @@ impl CompanionSession {
         Ok(self.list_stubs())
     }
 
+    /// Agent/UI stub rows (no absolute paths).
     pub fn list_stubs(&self) -> Vec<SaveStubDto> {
         self.catalog
             .entries()
@@ -142,6 +180,7 @@ impl CompanionSession {
             .collect()
     }
 
+    /// Rolling dashboard payload for first-launch / Settings status.
     pub fn dashboard(&self) -> DashboardDto {
         let game_detected = self
             .config
@@ -161,7 +200,17 @@ impl CompanionSession {
     /// Resolve stub → path, bind SQL + analysis session, return summary JSON.
     ///
     /// Goes through [`SqlEngine::use_save`] so Advanced Query sees the same
-    /// binding as `loaded_prices` / MCP will.
+    /// binding as `loaded_prices` / MCP.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` — filename stub.
+    /// * `location` — optional `local` / `steam_cloud`.
+    /// * `solve_opts_json` — SolveOpts JSON baked into [`EngineLoadOpts`].
+    ///
+    /// # Errors
+    ///
+    /// Ambiguous/missing stub, defs/tokens, load/solve, or SQL engine errors.
     pub fn use_save(
         &mut self,
         name: &str,
@@ -198,6 +247,10 @@ impl CompanionSession {
     }
 
     /// Run one read-only SQL statement; returns MCP/UI JSON (`columns`/`rows`).
+    ///
+    /// # Errors
+    ///
+    /// Engine open / SQL execution / JSON encode failures.
     pub fn sql_query(&mut self, sql: &str) -> Result<String, String> {
         self.ensure_sql(&self.sql_solve_opts.clone())?;
         let eng = self.sql.as_ref().expect("ensure_sql");
@@ -214,18 +267,38 @@ impl CompanionSession {
         }
     }
 
+    /// Bound-session prices JSON via `vic3-api`.
+    ///
+    /// # Errors
+    ///
+    /// [`vic3_api::ApiError`] when no analysis is loaded.
     pub fn loaded_prices_json(&self) -> Result<String, String> {
         vic3_api::loaded_prices_json().map_err(|e| e.to_string())
     }
 
+    /// Bound-session alerts JSON via `vic3-api`.
+    ///
+    /// # Errors
+    ///
+    /// [`vic3_api::ApiError`] when no analysis is loaded.
     pub fn loaded_alerts_json(&self) -> Result<String, String> {
         vic3_api::loaded_alerts_json().map_err(|e| e.to_string())
     }
 
+    /// Bound-session gaps JSON for `goal`.
+    ///
+    /// # Errors
+    ///
+    /// No analysis, or goal/gaps evaluation failure.
     pub fn loaded_gaps_json(&self, goal: &str) -> Result<String, String> {
         vic3_api::loaded_gaps_json(goal).map_err(|e| e.to_string())
     }
 
+    /// Resolve a stub against the in-memory catalog.
+    ///
+    /// # Errors
+    ///
+    /// [`vic3_catalog::CatalogError`] as a string (not found / ambiguous).
     pub fn resolve_entry(
         &self,
         name: &str,

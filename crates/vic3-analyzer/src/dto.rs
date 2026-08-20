@@ -1,4 +1,7 @@
 //! JSON DTOs for companion UI invokes (stubs / paths as strings).
+//!
+//! Absolute filesystem paths never appear on [`SaveStubDto`] — only on
+//! [`ConfigDto`] (user-configured roots) and inside Rust session state.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -18,6 +21,7 @@ pub struct ConfigDto {
 }
 
 impl ConfigDto {
+    /// Build a DTO from loaded config + the on-disk config path.
     pub fn from_config(cfg: &AppConfig, config_path: &std::path::Path) -> Self {
         Self {
             game_dir: cfg.game_dir.as_ref().map(|p| p.display().to_string()),
@@ -33,6 +37,9 @@ impl ConfigDto {
         }
     }
 
+    /// Convert back to [`AppConfig`] (empty strings become `None` / omitted).
+    ///
+    /// Does not write disk; caller must [`AppConfig::save`].
     pub fn into_config(self) -> AppConfig {
         AppConfig {
             game_dir: nonempty_path(self.game_dir),
@@ -99,6 +106,14 @@ pub struct DashboardDto {
 }
 
 /// Optional location filter for `use_save` / resolve.
+///
+/// # Arguments
+///
+/// * `raw` — `None`/empty → no filter; otherwise `local` or `steam_cloud`.
+///
+/// # Errors
+///
+/// Unknown location string.
 pub fn parse_location(raw: Option<&str>) -> Result<Option<SaveLocation>, String> {
     match raw.map(str::trim).filter(|s| !s.is_empty()) {
         None => Ok(None),

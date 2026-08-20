@@ -1,8 +1,8 @@
-# Desktop config and auto-detect (design spec)
+# Desktop config and auto-detect
 
-**Status:** Companion UI + Advanced Query tab (`vic3-sql` via Tauri invoke, results grid, docs panel for `docs/sql.md`).  
-**Applies to:** Tauri GUI + `vic3-analyzer mcp` (same config file).  
-**Does not apply to:** GitHub Pages / wasm (browser still uses pickers / drag-drop).
+**Status:** Implemented — companion UI (Dashboard / Saves / Query / Settings) + shared config with MCP.  
+**Applies to:** Tauri GUI + `vic3-analyzer mcp` (same `config.toml`).  
+**Does not apply to:** GitHub Pages / wasm (browser pickers / drag-drop).
 
 ## Build / run
 
@@ -11,21 +11,37 @@ Desktop crate: `crates/vic3-analyzer` (Tauri 2). Default argv opens the GUI; `mc
 ```text
 cargo check -p vic3-analyzer
 cargo test -p vic3-analyzer
-cargo run -p vic3-analyzer            # companion UI (Dashboard / Saves / Query / Settings)
-cargo run -p vic3-analyzer -- mcp     # stdio MCP (rmcp); logs on stderr, no window
+cargo run -p vic3-analyzer            # companion UI
+cargo run -p vic3-analyzer -- mcp     # stdio MCP; logs on stderr, no window
 ```
 
-Linux CI installs WebKitGTK 4.1 and related packages (see `.github/workflows/ci.yml`). Locally, follow [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
+Linux CI installs WebKitGTK 4.1 (see `.github/workflows/ci.yml`). Locally: [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
-The WebView ships `ui/` (companion shell). Invokes use filename stubs in, JSON out via `vic3-api` / `vic3-sql` (paths stay in Rust). To load the Vite `web/` workbench instead, point `build.frontendDist` / `build.devUrl` in `tauri.conf.json` at `web/dist` or the Vite server (set Vite `base` to `/` for the desktop target).
+### Fat binary / WebView caveat
+
+v1 is **one** artifact linking Tauri + MCP. `main` branches on argv **before** `tauri::Builder::run`, so MCP never creates a window. WebView/runtime libraries may still **map at process start** (startup cost / Windows WebView2 requirement). A second headless binary is deferred.
 
 Capability allowlist: `capabilities/default.json` — `core:default` plus `allow-companion` (config, catalog, analysis JSON, Advanced Query).
 
-## Goals
+The WebView ships `ui/`. Invokes use **filename stubs** in, JSON out (`vic3-api` / `vic3-sql`); absolute save paths stay in Rust.
 
-- Zero-click defaults: find Victoria 3 **game** data and **save games** on first launch.
-- Persist overrides in a config file; expose the same knobs in a Settings UI.
-- Never ship Paradox defs or tokens; only paths to the user’s install and files.
+## How pieces connect
+
+```text
+vic3-catalog          AppConfig + scan_roots (stubs, location, mtime)
+        │
+        ▼
+vic3-sql              SqlEngine::use_save → active.* / TVFs
+        │
+        ├── vic3-analyzer   Tauri companion (CompanionSession)
+        └── vic3-mcp        stdio tools (McpRuntime; separate process)
+```
+
+GUI and MCP share the **config file** and crates; they do **not** share RAM session in v1.
+
+## Filename stubs
+
+Basename only (`autosave` or `autosave.v3`). No paths. Ambiguous local vs Steam Cloud → error with candidates; disambiguate with `location` / `mtime`. See [`sql.md`](sql.md).
 
 ## Default discovery
 
@@ -33,62 +49,49 @@ On first launch (or when config paths are missing/invalid), resolve in order:
 
 ### Game definitions (`game/`)
 
-Typical Steam layouts (same family as today’s UI hints in `web/src/savePicker.ts`):
-
 | OS | Default candidate |
 | --- | --- |
 | macOS | `~/Library/Application Support/Steam/steamapps/common/Victoria 3/game` |
 | Windows | `C:\Program Files (x86)\Steam\steamapps\common\Victoria 3\game` (and other library roots if detectable) |
 | Linux | `~/.local/share/Steam/steamapps/common/Victoria 3/game`, `~/.steam/steam/steamapps/common/Victoria 3/game` |
 
-Validation: directory contains expected allowlisted trees (e.g. `common/`).  
-On success: load defs via path-based pipeline (CLI-equivalent); cache postcard or equivalent under **app data**.
+Validation: directory contains `common/`. On success: defs via path pipeline; postcard cache under **app data**.
 
 ### Save catalog roots
 
 | OS | Local saves |
 | --- | --- |
 | macOS | `~/Documents/Paradox Interactive/Victoria 3/save games` |
-| Windows | `%USERPROFILE%\Documents\Paradox Interactive\Victoria 3\save games` |
+| Windows | `%USERPROFILE%\Documents\Paradox Interactive/Victoria 3\save games` |
 | Linux | `~/.local/share/Paradox Interactive/Victoria 3/save games` |
 
-Optional Steam Cloud cache (if present):
-
-- `…/Steam/userdata/<id>/529340/remote/save games`
-
-Catalog lists **filename stubs** for MCP/SQL — see [`sql.md`](sql.md) / [`mcp.md`](mcp.md).
+Optional Steam Cloud: `…/Steam/userdata/<id>/529340/remote/save games`.
 
 ### Tokens
 
-No auto-download. If binary/ironman saves are used, Settings points at a user-supplied token map path. Empty = plaintext-only.
+No auto-download. Empty `tokens_path` = plaintext-only.
 
 ## Config file
 
-Stored in platform app data (same root as the CLI archive: `$XDG_DATA_HOME/vic3-analyzer/` or `dirs::data_local_dir()/vic3-analyzer`), as `config.toml` by default. `config.json` is also accepted when present.
-
-Suggested keys:
+Platform app data (`$XDG_DATA_HOME/vic3-analyzer/` or `dirs::data_local_dir()/vic3-analyzer`): `config.toml` default; `config.json` accepted when present.
 
 | Key | Meaning |
 | --- | --- |
 | `game_dir` | Absolute path to `…/Victoria 3/game` |
-| `defs_blob` | Optional absolute path to a prebuilt postcard; if set, may skip live install read |
-| `save_dirs` | List of absolute save-root directories |
+| `defs_blob` | Optional prebuilt postcard; skips live install read |
+| `save_dirs` | Absolute save-root directories |
 | `tokens_path` | Optional token map |
-| `auto_detect` | Bool; if true, refresh defaults when paths missing |
-
-GUI Settings and MCP both read/write this file. Changing Settings should not require editing SQL.
+| `auto_detect` | Fill missing/invalid paths on load |
 
 ## Settings UI
 
 | Control | Behavior |
 | --- | --- |
-| Game folder | Path field + show detected path |
-| Use live install vs defs blob | Optional defs postcard path (when set, skips live install) |
-| Save folders | Multiline path list (add/remove lines) |
-| Token map | Optional path field |
-| Reset to auto-detect | Clears overrides and re-runs discovery |
-
-If detection fails: Dashboard “Path hints” modal with pasteable candidates (Cmd+Shift+G / etc.), then write config.
+| Game folder | Path + detected path |
+| Defs blob | Optional postcard path |
+| Save folders | Multiline path list |
+| Token map | Optional path |
+| Reset to auto-detect | Clears overrides, re-runs discovery |
 
 ## Tauri commands
 
@@ -96,27 +99,16 @@ If detection fails: Dashboard “Path hints” modal with pasteable candidates (
 | --- | --- |
 | `get_config` / `save_config` / `reset_config` | Settings round-trip |
 | `list_saves` / `get_dashboard` / `detection_hints` | Catalog + status |
-| `use_save` | Stub → `vic3-sql` bind + analysis session (same engine as MCP) |
+| `use_save` | Stub → `vic3-sql` bind + analysis session |
 | `loaded_prices` / `loaded_alerts` / `loaded_gaps` | Session analysis JSON |
-| `sql_query` | Read-only SQL → `{ columns, rows, row_count }` (shared shape with MCP) |
-| `sql_docs` | Body of [`sql.md`](sql.md) + UDF index (future `vic3://docs/sql`) |
+| `sql_query` | Read-only SQL → `{ columns, rows, row_count }` |
+| `sql_docs` | Body of [`sql.md`](sql.md) + UDF index |
 | `api_ping` | Smoke link to `vic3-api` |
 
 ## Watch
 
-Desktop watches configured `save_dirs` (debounced). Emits WebView event `saves-changed` so the GUI list refreshes. MCP `vic3://saves` notifications come with the rmcp server. Does **not** auto-run A\* / `plan(...)`.
+Debounced watch on `save_dirs` → WebView event `saves-changed`. Does **not** auto-run A\* / `plan(...)`.
 
 ## Privacy
 
-Allowlist only configured roots + app data. No scanning of the whole home directory beyond known Steam/Paradox patterns during auto-detect.
-
-## Open questions for review
-
-1. Multiple Steam libraries: how aggressive should discovery be on Windows?
-2. Whether defs cache invalidates on game update (mtime of `game/` or version file).
-
-## Implementation notes (non-normative)
-
-- Crate: `vic3-catalog` (shared by future catalog SQL provider, Tauri commands, MCP startup).
-- Config format: **TOML default**; JSON supported via extension.
-- Pages continues to use IndexedDB defs builder; this doc is native-only.
+Allowlist only configured roots + app data. Auto-detect uses known Steam/Paradox patterns only.

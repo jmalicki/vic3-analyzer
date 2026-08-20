@@ -1,9 +1,15 @@
+//! Catalog / config failure modes surfaced to GUI, SQL, and MCP.
+
 use std::io;
 use std::path::PathBuf;
 
 use crate::catalog::SaveEntry;
 
 /// Failure while discovering paths, loading config, or resolving a stub.
+///
+/// Callers that face agents (MCP / SQL) should map [`Self::Ambiguous`] into a
+/// structured payload that lists candidate `name` / `kind` / `mtime` /
+/// `location` — never expose absolute paths in that list.
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogError {
     /// Same filename stub appears under more than one allowlisted root.

@@ -1,9 +1,28 @@
 //! Filename stub normalization for agent-facing save handles.
+//!
+//! Stubs are basenames only. See `docs/sql.md` § Filename stubs.
 
 /// Normalize a user-facing save name to a filename stub.
 ///
 /// Accepts `autosave` or `autosave.v3`. Strips at most one trailing `.v3`
 /// (case-insensitive). Rejects path separators and parent segments.
+///
+/// # Arguments
+///
+/// * `raw` — stub or `*.v3` basename from MCP / UI / SQL.
+///
+/// # Errors
+///
+/// * [`StubError::Empty`] — blank after trim / strip.
+/// * [`StubError::PathLike`] — contains `/`, `\`, or `..`.
+///
+/// # Examples
+///
+/// ```
+/// use vic3_catalog::normalize_stub;
+/// assert_eq!(normalize_stub("autosave.v3").unwrap(), "autosave");
+/// assert!(normalize_stub("folder/autosave").is_err());
+/// ```
 pub fn normalize_stub(raw: &str) -> Result<String, StubError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -30,6 +49,14 @@ fn strip_one_v3(name: &str) -> Option<String> {
 }
 
 /// Classify a stub into a coarse save kind without opening the file.
+///
+/// `autosave`, `autosave_*`, and `autosave-*` → [`SaveKind::Autosave`];
+/// everything else → [`SaveKind::Named`]. Ironman is reserved for richer
+/// metadata later.
+///
+/// # Arguments
+///
+/// * `stub` — already-normalized basename (no `.v3`).
 pub fn classify_kind(stub: &str) -> SaveKind {
     let lower = stub.to_ascii_lowercase();
     if lower == "autosave" || lower.starts_with("autosave_") || lower.starts_with("autosave-") {
@@ -45,10 +72,12 @@ pub fn classify_kind(stub: &str) -> SaveKind {
 pub enum SaveKind {
     Autosave,
     Named,
+    /// Reserved; scan does not yet detect ironman envelopes.
     Ironman,
 }
 
 impl SaveKind {
+    /// Stable string for SQL / JSON.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Autosave => "autosave",
