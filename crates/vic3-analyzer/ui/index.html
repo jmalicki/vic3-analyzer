@@ -506,6 +506,8 @@
       const invoke = (...args) => window.__TAURI__.core.invoke(...args);
       const listen = (...args) => window.__TAURI__.event.listen(...args);
 
+      // Column names that deep-link into companion panes (docs/sql.md Advanced Query).
+      // state_id / building_id → States, good / good_id → Prices, plan step → Timeline.
       const NAV_KEYS = new Set([
         "state_id",
         "good",
@@ -673,6 +675,7 @@
         }
       }
 
+      // Click handler for NAV_KEYS cells: run a focused SQL query in the target pane.
       async function navigateKey(col, val, columns, row) {
         if (col === "state_id") {
           document.getElementById("states-focus-text").textContent = `state_id = ${val}`;
@@ -952,7 +955,6 @@
         }
       }
 
-      // Wire examples
       {
         const box = document.getElementById("sql-examples");
         box.innerHTML = EXAMPLES.map(
