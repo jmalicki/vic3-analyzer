@@ -12,6 +12,8 @@ P5 generates JSON Schema from these structs (schemars) and checks it against [`j
 | `VIC3_TOKENS` | Token map for binary saves |
 | `VIC3_GAME` | Victoria 3 install (defs). Fixtures used in CI |
 
+CI runs against the small `plaintext` Brandenburg fixture and the self-contained `toy_economy` pack (defs under `crates/vic3-defs/tests/fixtures/toy_economy`, save `crates/vic3-load/tests/fixtures/toy_economy.txt`). Real installs and ironman saves are exercised only by ignored live tests when `VIC3_SAVE` / `VIC3_GAME` are set.
+
 ## CLI (target)
 
 ```text
