@@ -132,6 +132,56 @@ pub fn defs_blob_from_game(game: &Path) -> Result<Vec<u8>, ApiError> {
     Ok(vic3_defs::encode_blob(&defs)?)
 }
 
+/// Cached defs postcard filename under the platform app-data directory.
+///
+/// Shared by the Tauri companion and `vic3-analyzer mcp` so Settings and MCP
+/// resolve the same blob path for a given install.
+pub const DEFS_CACHE_NAME: &str = "defs.postcard";
+
+/// Resolve or build a defs postcard for desktop hosts (GUI + MCP).
+///
+/// Order: explicit `defs_blob` file → existing `app_data/defs.postcard` → build
+/// from `game_dir` and write the cache. Callers should validate `game_dir` with
+/// [`vic3_catalog::is_valid_game_dir`] before relying on a live install path.
+///
+/// First-time builds from a full Steam install decode many DDS icons and can
+/// take minutes; GUI Settings and MCP share this cache so the cost is paid once
+/// per app-data directory.
+pub fn ensure_defs_blob(
+    defs_blob: Option<&Path>,
+    game_dir: Option<&Path>,
+    app_data: &Path,
+) -> Result<std::path::PathBuf, ApiError> {
+    if let Some(blob) = defs_blob {
+        if blob.is_file() {
+            return Ok(blob.to_path_buf());
+        }
+        return Err(ApiError::Config(format!(
+            "defs_blob not found: {}",
+            blob.display()
+        )));
+    }
+    let cache = app_data.join(DEFS_CACHE_NAME);
+    if cache.is_file() {
+        return Ok(cache);
+    }
+    let game = game_dir.ok_or_else(|| {
+        ApiError::Config(
+            "no game_dir or defs_blob configured — set paths in Settings or enable auto-detect"
+                .into(),
+        )
+    })?;
+    if !game.join("common").is_dir() {
+        return Err(ApiError::Config(format!(
+            "game_dir is not a valid Victoria 3 game tree: {}",
+            game.display()
+        )));
+    }
+    let bytes = defs_blob_from_game(game)?;
+    std::fs::write(&cache, &bytes).map_err(|source| ApiError::io(&cache, source))?;
+    Ok(cache)
+}
+
 /// Path convenience for [`load_analysis_json`].
 ///
 /// # Errors
@@ -1546,5 +1596,39 @@ mod tests {
         let from_bytes = prices_json(&load_fixture(), None, &blob, "{}").expect("bytes");
         assert_eq!(from_paths, from_bytes);
         let _ = std::fs::remove_file(&blob_path);
+    }
+
+    #[test]
+    fn ensure_defs_blob_prefers_explicit_then_cache() {
+        let tmp = std::env::temp_dir().join(format!("vic3-api-defs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let explicit = tmp.join("explicit.postcard");
+        std::fs::write(&explicit, defs_blob()).unwrap();
+
+        let resolved = ensure_defs_blob(Some(&explicit), None, &tmp).expect("explicit defs_blob");
+        assert_eq!(resolved, explicit);
+
+        let cache = tmp.join(DEFS_CACHE_NAME);
+        std::fs::write(&cache, defs_blob()).unwrap();
+        let from_cache = ensure_defs_blob(None, None, &tmp).expect("cached defs");
+        assert_eq!(from_cache, cache);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn ensure_defs_blob_builds_from_game_fixture() {
+        let tmp = std::env::temp_dir().join(format!("vic3-api-game-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let game = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vic3-defs/tests/fixtures");
+        let path = ensure_defs_blob(None, Some(&game), &tmp).expect("build cache");
+        assert_eq!(path, tmp.join(DEFS_CACHE_NAME));
+        assert!(path.is_file());
+        // Second call must reuse the cache without requiring game_dir.
+        let again = ensure_defs_blob(None, None, &tmp).expect("reuse cache");
+        assert_eq!(again, path);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

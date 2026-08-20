@@ -35,6 +35,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: ./scripts/lint-rust.sh
       - run: cargo test --workspace
+      - name: MCP stdio smoke (no display)
+        env:
+          # Unset so an accidental Tauri window would fail on Linux runners.
+          DISPLAY: ""
+        run: ./scripts/mcp-smoke.sh
 
   web:
     runs-on: ubuntu-latest

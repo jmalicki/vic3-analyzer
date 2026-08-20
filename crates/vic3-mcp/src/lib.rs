@@ -26,6 +26,11 @@
 //! - [`McpRuntime`] — config + locked [`vic3_sql::SqlEngine`]
 //! - [`Vic3McpServer`] — rmcp `ServerHandler`
 //! - `docs/mcp.md`, `docs/desktop.md`
+//! Invoked as `vic3-analyzer mcp` via the fat binary’s early argv branch:
+//! JSON-RPC on stdout, logs on stderr, **no Tauri window**. WebView native
+//! libraries may still load because the binary links Tauri (documented v1
+//! caveat). Shares [`vic3_catalog::DesktopConfig`] / [`vic3_api::ensure_defs_blob`]
+//! with the GUI; SQL session state stays process-local.
 
 mod error;
 mod format;
@@ -47,8 +52,14 @@ use std::process::ExitCode;
 /// Failures during bootstrap or serve are logged to stderr; the process then
 /// returns [`ExitCode::FAILURE`]. This function itself always returns an exit
 /// code (it does not panic on MCP errors).
+/// Never opens a Tauri window (callers must not invoke `vic3_analyzer_lib::run`
+/// on this path). Protocol bytes stay on stdout; tracing goes to stderr only.
+/// Session RAM is process-local (not shared with a concurrent GUI).
 pub fn run() -> ExitCode {
     init_stderr_logging();
+    // Emit before catalog/defs work so headless smoke can distinguish “starting”
+    // from a multi-minute first-time defs build under a real game_dir.
+    tracing::info!("vic3-analyzer mcp starting (stdio; no window)");
 
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()

@@ -5,20 +5,18 @@
 //! depending on the Tauri crate.
 //!
 //! Flow: [`AppConfig`] → [`scan_roots`] → [`SqlEngine::with_catalog`] → tools.
+//! Why this crate (not `vic3-analyzer`): MCP must not depend on Tauri, yet must
+//! resolve the same app-data config and defs cache as the companion UI. That is
+//! the fat-binary “share crates, separate process” contract in `docs/mcp.md`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use vic3_catalog::{
-    app_data_dir, is_valid_game_dir, resolve_config_path, scan_roots, AppConfig, SaveEntry,
-    SaveRoot,
-};
+use vic3_catalog::{is_valid_game_dir, scan_roots, AppConfig, DesktopConfig, SaveEntry, SaveRoot};
 use vic3_sql::{
     ActiveSessionInfo, EngineLoadOpts, SqlEngine, SqlError, UseSaveRequest, UseSaveResult,
 };
-
-const DEFS_CACHE_NAME: &str = "defs.postcard";
 
 /// Why MCP failed to open (config / catalog / engine).
 #[derive(Debug, thiserror::Error)]
@@ -70,13 +68,11 @@ impl McpRuntime {
     /// [`McpBootstrapError`] when app-data cannot be created, config cannot be
     /// loaded, catalog scan fails, or the SQL engine cannot open.
     pub async fn open(app_data: Option<PathBuf>) -> Result<Self, McpBootstrapError> {
-        let app_data = match app_data {
-            Some(p) => p,
-            None => app_data_dir().map_err(|e| e.to_string())?,
-        };
-        std::fs::create_dir_all(&app_data).map_err(|e| e.to_string())?;
-        let config_path = resolve_config_path(&app_data);
-        let config = AppConfig::load(&config_path).map_err(|e| e.to_string())?;
+        let DesktopConfig {
+            app_data,
+            config_path,
+            config,
+        } = DesktopConfig::open(app_data).map_err(|e| e.to_string())?;
         Self::from_config(app_data, config_path, config).await
     }
 
@@ -204,7 +200,7 @@ fn resolve_load_opts(config: &AppConfig, app_data: &Path) -> (DefsStatus, Engine
             )
         }
         Err(detail) => {
-            let placeholder = app_data.join(DEFS_CACHE_NAME);
+            let placeholder = app_data.join(vic3_api::DEFS_CACHE_NAME);
             let mut load = EngineLoadOpts::new(placeholder.clone());
             if let Some(tokens) = &config.tokens_path {
                 load = load.with_tokens(tokens.clone());
@@ -221,29 +217,20 @@ fn resolve_load_opts(config: &AppConfig, app_data: &Path) -> (DefsStatus, Engine
     }
 }
 
-/// Resolve postcard defs: explicit blob, or build/cache from `game_dir`.
+/// Resolve postcard defs via the shared [`vic3_api::ensure_defs_blob`] helper.
 fn ensure_defs_blob(config: &AppConfig, app_data: &Path) -> Result<PathBuf, String> {
-    if let Some(blob) = &config.defs_blob {
-        if blob.is_file() {
-            return Ok(blob.clone());
+    if let Some(game) = &config.game_dir {
+        if !is_valid_game_dir(game) {
+            return Err(format!(
+                "game_dir is not a valid Victoria 3 game tree: {}",
+                game.display()
+            ));
         }
-        return Err(format!("defs_blob not found: {}", blob.display()));
     }
-    let cache = app_data.join(DEFS_CACHE_NAME);
-    if cache.is_file() {
-        return Ok(cache);
-    }
-    let game = config.game_dir.as_ref().ok_or_else(|| {
-        "no game_dir or defs_blob configured — set paths in Settings or enable auto-detect"
-            .to_string()
-    })?;
-    if !is_valid_game_dir(game) {
-        return Err(format!(
-            "game_dir is not a valid Victoria 3 game tree: {}",
-            game.display()
-        ));
-    }
-    let bytes = vic3_api::defs_blob_from_game(game).map_err(|e| e.to_string())?;
-    std::fs::write(&cache, &bytes).map_err(|e| e.to_string())?;
-    Ok(cache)
+    vic3_api::ensure_defs_blob(
+        config.defs_blob.as_deref(),
+        config.game_dir.as_deref(),
+        app_data,
+    )
+    .map_err(|e| e.to_string())
 }

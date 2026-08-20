@@ -48,6 +48,9 @@ pub enum ApiError {
     /// A `loaded_*` method ran before [`crate::load_analysis_json`] (or snapshot install).
     #[error("no analysis is loaded")]
     NoLoadedAnalysis,
+    /// Desktop config / defs path resolution failed (GUI Settings and MCP share this).
+    #[error("{0}")]
+    Config(String),
 }
 
 impl ApiError {

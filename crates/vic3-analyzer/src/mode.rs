@@ -3,6 +3,9 @@
 //! Parsed in `main` so [`Mode::Mcp`] never reaches [`crate::run`] (no WebView).
 //! Unknown tokens currently fall back to [`Mode::Gui`] (reserved for future
 //! subcommands).
+//! Keeping this module free of Tauri imports documents the invariant: mode
+//! selection must not create a window. Parsed in `main` so [`Mode::Mcp`] never
+//! reaches [`crate::run`] (no WebView).
 
 /// Process mode selected from argv.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +34,7 @@ impl Mode {
     /// assert_eq!(Mode::from_args(["vic3-analyzer"]), Mode::Gui);
     /// assert_eq!(Mode::from_args(["vic3-analyzer", "mcp"]), Mode::Mcp);
     /// ```
+    /// First matching token wins; later args are left for future subcommands.
     pub fn from_args<I, S>(args: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -44,6 +48,11 @@ impl Mode {
             Some(_) => Mode::Gui,
         }
     }
+
+    /// `true` when this mode must never call Tauri `run` / create a window.
+    pub const fn is_headless(self) -> bool {
+        matches!(self, Mode::Mcp)
+    }
 }
 
 #[cfg(test)]
@@ -53,6 +62,7 @@ mod tests {
     #[test]
     fn default_is_gui() {
         assert_eq!(Mode::from_args(["vic3-analyzer"]), Mode::Gui);
+        assert!(!Mode::Gui.is_headless());
     }
 
     #[test]
@@ -61,8 +71,9 @@ mod tests {
     }
 
     #[test]
-    fn mcp_mode() {
+    fn mcp_mode_is_headless() {
         assert_eq!(Mode::from_args(["vic3-analyzer", "mcp"]), Mode::Mcp);
+        assert!(Mode::Mcp.is_headless());
     }
 
     #[test]

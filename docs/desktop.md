@@ -3,16 +3,22 @@
 **Status:** Implemented — companion UI (Dashboard / Saves / Query / Settings) + shared config with MCP.  
 **Applies to:** Tauri GUI + `vic3-analyzer mcp` (same `config.toml`).  
 **Does not apply to:** GitHub Pages / wasm (browser pickers / drag-drop).
+**Status:** Companion UI + Advanced Query tab + shared fat binary (`gui` / `mcp` argv) — Settings, catalog, SQL, and MCP share config/defs resolution.  
+**Applies to:** Tauri GUI + `vic3-analyzer mcp` (same config file).  
+**Does not apply to:** GitHub Pages / wasm (browser still uses pickers / drag-drop).
 
 ## Build / run
 
-Desktop crate: `crates/vic3-analyzer` (Tauri 2). Default argv opens the GUI; `mcp` runs stdio MCP via `vic3-mcp` (no window).
+Desktop crate: `crates/vic3-analyzer` (Tauri 2). **One fat binary:** default argv opens the GUI; `mcp` runs stdio MCP via `vic3-mcp` (early argv branch — **no window**). WebView native libraries may still load at process start because the binary links Tauri; that does not open a window (acceptable for v1; no second MCP artifact).
 
 ```text
 cargo check -p vic3-analyzer
 cargo test -p vic3-analyzer
 cargo run -p vic3-analyzer            # companion UI
 cargo run -p vic3-analyzer -- mcp     # stdio MCP; logs on stderr, no window
+cargo run -p vic3-analyzer            # companion UI (Dashboard / Saves / Query / Settings)
+cargo run -p vic3-analyzer -- mcp     # stdio MCP (rmcp); logs on stderr, no window
+./scripts/mcp-smoke.sh                # headless ready check (CI; no display required)
 ```
 
 Linux CI installs WebKitGTK 4.1 (see `.github/workflows/ci.yml`). Locally: [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
@@ -112,3 +118,17 @@ Debounced watch on `save_dirs` → WebView event `saves-changed`. Does **not** a
 ## Privacy
 
 Allowlist only configured roots + app data. Auto-detect uses known Steam/Paradox patterns only.
+Allowlist only configured roots + app data. No scanning of the whole home directory beyond known Steam/Paradox patterns during auto-detect.
+
+## Open questions for review
+
+1. Multiple Steam libraries: how aggressive should discovery be on Windows?
+2. Whether defs cache invalidates on game update (mtime of `game/` or version file).
+
+## Implementation notes (non-normative)
+
+- Crate: `vic3-catalog` (shared by catalog SQL provider, Tauri commands, MCP startup) plus `DesktopConfig` for shared open.
+- Defs postcard path: [`vic3_api::ensure_defs_blob`] (GUI + MCP).
+- Config format: **TOML default**; JSON supported via extension.
+- Pages continues to use IndexedDB defs builder; this doc is native-only.
+- Fat binary v1: early argv `mcp` branch; WebView may still load — see [`mcp.md`](mcp.md).
