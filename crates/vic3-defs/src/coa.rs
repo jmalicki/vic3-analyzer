@@ -649,7 +649,7 @@ fn render_coa(
 ) -> Option<Vec<u8>> {
     let fill = resolve_color(colors, coa, coa.color1.as_ref())?;
     let mut rgba = vec![0u8; (FLAG_W * FLAG_H * 4) as usize];
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         px.copy_from_slice(&fill);
     }
 
@@ -768,7 +768,7 @@ fn decode_png(bytes: &[u8]) -> Option<RgbaImage> {
         png::ColorType::Rgba => {}
         png::ColorType::Rgb => {
             let mut rgba = Vec::with_capacity(data.len() / 3 * 4);
-            for chunk in data.chunks_exact(3) {
+            for chunk in data.as_chunks::<3>().0 {
                 rgba.extend_from_slice(chunk);
                 rgba.push(255);
             }
