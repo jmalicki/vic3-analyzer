@@ -43,6 +43,10 @@ Rules:
 - Call `use_save` before unqualified fact tables; do not use `SELECT set_active_save(...)`.
 "#;
 
+/// rmcp [`ServerHandler`] over a process-local [`McpRuntime`].
+///
+/// Tools/resources/prompts are the agent contract (`docs/mcp.md`). Resource URIs
+/// are fixed: `vic3://schema|saves|session|docs/{flow,sql,mcp}`.
 #[derive(Clone)]
 pub struct Vic3McpServer {
     runtime: Arc<McpRuntime>,
@@ -51,6 +55,7 @@ pub struct Vic3McpServer {
 }
 
 impl Vic3McpServer {
+    /// Build routers over an already-opened [`McpRuntime`] (tests or custom serve).
     pub fn new(runtime: McpRuntime) -> Self {
         Self {
             runtime: Arc::new(runtime),
@@ -59,7 +64,7 @@ impl Vic3McpServer {
         }
     }
 
-    /// Serve over stdin/stdout until the client disconnects.
+    /// Stdio transport until the client disconnects (stdout = JSON-RPC only).
     pub async fn serve_stdio(
         runtime: McpRuntime,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -69,15 +74,17 @@ impl Vic3McpServer {
         Ok(())
     }
 
-    /// Expose the tool router for schema tests (no transport).
+    /// Tool list/schemas for contract tests (no transport).
     pub fn tool_router_ref(&self) -> &ToolRouter<Self> {
         &self.tool_router
     }
 
+    /// Prompt list for contract tests (no transport).
     pub fn prompt_router_ref(&self) -> &PromptRouter<Self> {
         &self.prompt_router
     }
 
+    /// Shared config + SQL session backing this server.
     pub fn runtime(&self) -> &McpRuntime {
         &self.runtime
     }
@@ -85,6 +92,7 @@ impl Vic3McpServer {
 
 // --- Tool argument types (JSON Schema for clients) -------------------------
 
+/// Args for tool `query`: one read-only SQL statement + optional result format.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct QueryArgs {
     /// Single read-only SQL statement (`docs/sql.md`).
@@ -94,6 +102,9 @@ pub struct QueryArgs {
     pub format: Option<String>,
 }
 
+/// Args for tool `use_save`: bind session by stub or selector (not SQL).
+///
+/// Exactly one of `name` / `selector`; `location` / `mtime` disambiguate stubs.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UseSaveArgs {
     /// Filename stub (`autosave` or `autosave.v3`). Exactly one of name/selector.
@@ -110,11 +121,13 @@ pub struct UseSaveArgs {
     pub mtime: Option<String>,
 }
 
+/// Args for tool `refresh_catalog`: empty object so clients can send `{}`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct RefreshCatalogArgs {
-    // No arguments; keep an empty object schema for clients that send `{}`.
+    // No fields — schemars still emits an object schema.
 }
 
+/// Args for tool `explain`: SQL to wrap as `EXPLAIN …` when needed.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ExplainArgs {
     /// SQL to explain (wrapped as `EXPLAIN …` if needed).
@@ -436,8 +449,8 @@ impl Vic3McpServer {
                 "location": a.location,
             })),
             "defs": {
+                // App-data defs path is intentional; token map paths stay out of session JSON.
                 "ready": defs.ready,
-                // Avoid echoing full token map paths; defs path under app data is OK.
                 "path": defs.path.as_ref().map(|p| redact_home(p)),
                 "detail": defs.detail,
             },
@@ -505,7 +518,7 @@ fn system_time_iso(t: SystemTime) -> String {
     dt.to_rfc3339()
 }
 
+/// Stringify a path for `vic3://session` (full display path in v1).
 fn redact_home(path: &std::path::Path) -> String {
-    // Prefer not to leak unrelated home layout; still show basename + parent.
     path.display().to_string()
 }

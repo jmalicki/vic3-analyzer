@@ -14,10 +14,10 @@ pub use server::Vic3McpServer;
 
 use std::process::ExitCode;
 
-/// Load shared config/catalog, serve MCP over stdio, return a process exit code.
+/// Binary entry for `vic3-analyzer mcp`: shared config → stdio MCP → exit code.
 ///
 /// Never opens a Tauri window. Protocol bytes stay on stdout; tracing goes to
-/// stderr only.
+/// stderr only. Session RAM is process-local (not shared with a concurrent GUI).
 pub fn run() -> ExitCode {
     init_stderr_logging();
 

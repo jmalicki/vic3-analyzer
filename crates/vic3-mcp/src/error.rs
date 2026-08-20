@@ -11,6 +11,7 @@ pub(crate) fn tool_err(message: impl Into<String>) -> CallToolResult {
     CallToolResult::error(vec![ContentBlock::text(message.into())])
 }
 
+/// Success payload as JSON text content (agents parse the string).
 pub(crate) fn tool_ok_json(value: &serde_json::Value) -> CallToolResult {
     CallToolResult::success(vec![ContentBlock::text(value.to_string())])
 }
@@ -19,6 +20,7 @@ pub(crate) fn tool_ok_text(text: impl Into<String>) -> CallToolResult {
     CallToolResult::success(vec![ContentBlock::text(text.into())])
 }
 
+/// Map SQL failures to tool errors; ambiguous stubs get structured candidates JSON.
 pub(crate) fn sql_to_tool_result(err: SqlError) -> CallToolResult {
     match &err {
         SqlError::Ambiguous { stub, candidates } => {
