@@ -8,6 +8,22 @@ A compact projection of the save + last price solve: date, country tag, techs, l
 
 It is **not** the full save. Hash it. **I8:** identical state ⇒ identical hash; applying an action is deterministic.
 
+### Fill rules (`from_save` / `from_world`)
+
+| Field | Source |
+| --- | --- |
+| `date`, `country` | `meta_data.game_date`; country `definition` / tag |
+| `techs` | Country tech fields + top-level `technology` manager (`acquired_technologies`) |
+| `queued_tech` | Country `currently_researching`, else `technology.research_technology` |
+| `queued_building` | First private, then government, construction order in owned states |
+| `good_prices`, `gdp` | Last price solve (`gdp` only via `*_with_prices`) |
+| `treasury`, `weekly_balance`, `debt_*`, `credit_*`, `solvent` | Country budget |
+| `population_weighted_wealth` | Pops in states owned by the country |
+| `army_power_projection`, `interest` | Empty / `0` until later waves (not projected yet) |
+| `building_level_deltas` | Empty at load; sim branches fill deltas |
+
+`from_world` reads the same projected fields off [`WorldCountry`](../crates/vic3-prices/src/world.rs) after `World::from_save`.
+
 ## Graph
 
 Nodes: `PlanningState`.  

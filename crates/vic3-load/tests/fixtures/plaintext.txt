@@ -137,6 +137,15 @@ government_constructions={
 		1=none
 	}
 }
+technology={
+	database={
+		1={
+			country=16777216
+			acquired_technologies={ value={ railways nitroglycerin } }
+			research_technology=atmospheric_engine
+		}
+	}
+}
 previous_played={
 	{
 		idtype=16777216

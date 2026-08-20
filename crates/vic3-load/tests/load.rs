@@ -130,6 +130,16 @@ fn plaintext_fixture_loads() {
         order.building.as_deref(),
         Some("building_construction_sector")
     );
+    assert!(ger.techs.iter().any(|tech| tech == "railways"));
+    assert!(ger.techs.iter().any(|tech| tech == "nitroglycerin"));
+    assert_eq!(
+        ger.currently_researching.as_deref(),
+        Some("atmospheric_engine")
+    );
+    assert_eq!(
+        save.queued_building_for(16777216).as_deref(),
+        Some("building_construction_sector")
+    );
 }
 
 #[test]
@@ -138,6 +148,22 @@ fn plaintext_world_save_skips_market_ir() {
     assert_eq!(save.pops.iter_present().count(), 1);
     assert_eq!(save.active_laws(16777216), ["law_autocracy"]);
     assert_eq!(WorldSnapshot::previous_played(&save).len(), 1);
+    let ger = save
+        .country_manager
+        .database
+        .get(&16777216)
+        .and_then(Option::as_ref)
+        .expect("GER");
+    assert!(ger.techs.iter().any(|tech| tech == "nitroglycerin"));
+    assert_eq!(
+        ger.currently_researching.as_deref(),
+        Some("atmospheric_engine")
+    );
+    assert_eq!(
+        save.building_constructions.iter_present().count(),
+        1,
+        "world save keeps construction queues for planning"
+    );
 }
 
 /// Real saves list the active method of every PM group under the plural key.

@@ -256,11 +256,13 @@ impl PlanningState {
 
     /// Project the player country and last price solve into a planning node.
     ///
-    /// Techs, interest, army power, queued tech, and GDP are not on the current
-    /// save IR: they default to empty / `0` / `None`. Weekly balance is the last
-    /// saved sample; population-weighted wealth is computed from pops in states
-    /// owned by this country. Solvency requires known principal and credit.
-    /// Missing metrics remain `None`.
+    /// Researched techs and research/construction queue heads come from save IR
+    /// (`technology` manager, country tech fields, construction queues). Interest
+    /// and army power default to empty / `0` until later waves. Weekly balance is
+    /// the last saved sample; population-weighted wealth is computed from pops in
+    /// states owned by this country. Solvency requires known principal and credit.
+    /// Missing metrics remain `None`. GDP defaults to `0` here; use
+    /// [`Self::from_save_with_prices`] for modeled GDP.
     pub fn from_save(
         save: &Save,
         country_tag: &str,
@@ -314,13 +316,13 @@ impl PlanningState {
         Ok(Self {
             date: save.meta_data.game_date.unwrap_or_else(default_date),
             country: country.definition.clone(),
-            techs: BTreeSet::new(),
+            techs: save.researched_techs_for(country_id).into_iter().collect(),
             good_prices: prices.into_price_map(),
             solvent: country.budget.is_solvent(),
             treasury,
             army_power_projection: 0.0,
             interest: BTreeSet::new(),
-            queued_tech: None,
+            queued_tech: save.queued_tech_for(country_id),
             gdp: 0.0,
             weekly_balance,
             population_weighted_wealth,
@@ -328,7 +330,7 @@ impl PlanningState {
             credit_limit,
             credit_headroom,
             building_level_deltas: BTreeMap::new(),
-            queued_building: None,
+            queued_building: save.queued_building_for(country_id),
         })
     }
 
@@ -369,9 +371,11 @@ impl PlanningState {
 
     /// Project the player country from a compact [`World`] plus last prices.
     ///
-    /// Techs, interest, army power, queued tech, and GDP default to empty / `0`
-    /// / `None`. Population-weighted wealth uses pops in states owned by this
-    /// country. Solvency and budget lines come from [`WorldCountry`].
+    /// Techs and research/construction queue heads come from [`WorldCountry`]
+    /// (filled by [`World::from_save`] from save IR). Interest and army power
+    /// default to empty / `0`. Population-weighted wealth uses pops in states
+    /// owned by this country. Solvency and budget lines come from [`WorldCountry`].
+    /// GDP defaults to `0`; use [`Self::from_world_with_prices`] for modeled GDP.
     pub fn from_world(
         world: &World,
         country_tag: &str,
@@ -383,13 +387,13 @@ impl PlanningState {
         Ok(Self {
             date: world.game_date.unwrap_or_else(default_date),
             country: country.tag.clone(),
-            techs: BTreeSet::new(),
+            techs: country.techs.iter().cloned().collect(),
             good_prices: prices.into_price_map(),
             solvent: country.solvent,
             treasury: country.treasury,
             army_power_projection: 0.0,
             interest: BTreeSet::new(),
-            queued_tech: None,
+            queued_tech: country.queued_tech.clone(),
             gdp: 0.0,
             weekly_balance: country.weekly_balance,
             population_weighted_wealth: population_weighted_wealth(world, country),
@@ -397,7 +401,7 @@ impl PlanningState {
             credit_limit: country.credit_limit,
             credit_headroom: country.credit_headroom,
             building_level_deltas: BTreeMap::new(),
-            queued_building: None,
+            queued_building: country.queued_building.clone(),
         })
     }
 
@@ -606,6 +610,79 @@ mod tests {
         assert!(state.techs.is_empty());
         assert!(state.interest.is_empty());
         assert!(state.queued_tech.is_none());
+        assert!(state.queued_building.is_none());
+    }
+
+    #[test]
+    fn from_save_projects_techs_and_queue_heads() {
+        let mut save = ger_save(10_000.0);
+        save.country_manager
+            .database
+            .get_mut(&1)
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .techs = vec!["railways".into()];
+        save.states.database.insert(
+            10,
+            Some(State {
+                country: Some(1),
+                ..State::default()
+            }),
+        );
+        save.technology.database.insert(
+            1,
+            Some(vic3_load::TechnologyEntry {
+                country: Some(1),
+                acquired_technologies: vec!["nitroglycerin".into(), "urban_planning".into()],
+                research_technology: Some("atmospheric_engine".into()),
+            }),
+        );
+        save.building_constructions.database.insert(
+            1,
+            Some(vic3_load::ConstructionOrder {
+                building: Some("building_construction_sector".into()),
+                state: Some(10),
+                remaining: Some(20.0),
+            }),
+        );
+
+        let state = PlanningState::from_save(&save, "GER", BTreeMap::new()).unwrap();
+        assert!(state.has_tech("railways"));
+        assert!(state.has_tech("nitroglycerin"));
+        assert!(state.has_tech("urban_planning"));
+        assert_eq!(state.queued_tech.as_deref(), Some("atmospheric_engine"));
+        assert_eq!(
+            state.queued_building.as_deref(),
+            Some("building_construction_sector")
+        );
+
+        let world = World::from_save(&save, &vic3_defs::GameDefs::default());
+        let from_world = PlanningState::from_world(&world, "GER", BTreeMap::new()).unwrap();
+        assert_eq!(from_world.techs, state.techs);
+        assert_eq!(from_world.queued_tech, state.queued_tech);
+        assert_eq!(from_world.queued_building, state.queued_building);
+    }
+
+    #[test]
+    fn fixture_save_projects_techs_and_queues() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../vic3-load/tests/fixtures/plaintext.txt");
+        let save = vic3_load::load_path(&path, vic3_load::empty_tokens()).expect("fixture");
+        let state = PlanningState::from_save(&save, "GER", BTreeMap::new()).unwrap();
+        assert!(state.has_tech("nitroglycerin"));
+        assert!(state.has_tech("railways"));
+        assert!(!state.has_tech("mechanized_farming"));
+        assert_eq!(state.queued_tech.as_deref(), Some("atmospheric_engine"));
+        assert!(!state.has_tech("atmospheric_engine"));
+        assert_eq!(
+            state.queued_building.as_deref(),
+            Some("building_construction_sector")
+        );
+
+        let world = World::from_save(&save, &vic3_defs::GameDefs::default());
+        let from_world = PlanningState::from_world(&world, "GER", BTreeMap::new()).unwrap();
+        assert_eq!(from_world, state);
     }
 
     #[test]

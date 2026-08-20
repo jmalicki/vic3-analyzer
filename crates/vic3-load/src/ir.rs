@@ -86,12 +86,14 @@ pub struct Save {
     pub previous_played: Vec<Player>,
 }
 
-/// Save fields the market projection needs.
+/// Save fields the market + planning projections need.
 ///
-/// Unknown top-level keys (markets, trade routes, construction queues, …) are
-/// skipped without allocating IR. That cuts peak RSS and `drop` time; it does
-/// **not** skip zlib inflate of a single-member `gamestate` zip. Keep [`Save`]
-/// when those extra managers are part of the answer (`parse_save` counts).
+/// Markets and trade routes stay skipped (prices inject trade via state rows).
+/// Technology and construction queues are kept so [`World`] / planning can
+/// project researched techs and queue heads without a second full [`Save`] parse.
+/// Skipping still does **not** avoid zlib inflate of a single-member
+/// `gamestate` zip. Keep [`Save`] when market/trade-route managers are part of
+/// the answer (`parse_save` counts).
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub struct WorldSave {
     #[serde(default)]
@@ -108,6 +110,12 @@ pub struct WorldSave {
     pub cultures: Manager<Culture>,
     #[serde(default)]
     pub laws: Manager<LawEntry>,
+    #[serde(default, alias = "constructions")]
+    pub building_constructions: Manager<ConstructionOrder>,
+    #[serde(default, alias = "gov_constructions")]
+    pub government_constructions: Manager<ConstructionOrder>,
+    #[serde(default)]
+    pub technology: Manager<TechnologyEntry>,
     #[serde(default)]
     pub previous_played: Vec<Player>,
 }
@@ -126,6 +134,9 @@ pub trait WorldSnapshot {
     fn cultures(&self) -> &Manager<Culture>;
     fn previous_played(&self) -> &[Player];
     fn active_laws(&self, country_id: u32) -> Vec<&str>;
+    fn technology(&self) -> &Manager<TechnologyEntry>;
+    fn building_constructions(&self) -> &Manager<ConstructionOrder>;
+    fn government_constructions(&self) -> &Manager<ConstructionOrder>;
 }
 
 fn active_laws_in(laws: &Manager<LawEntry>, country_id: u32) -> Vec<&str> {
@@ -163,6 +174,15 @@ macro_rules! impl_world_snapshot {
             }
             fn active_laws(&self, country_id: u32) -> Vec<&str> {
                 active_laws_in(&self.laws, country_id)
+            }
+            fn technology(&self) -> &Manager<TechnologyEntry> {
+                &self.technology
+            }
+            fn building_constructions(&self) -> &Manager<ConstructionOrder> {
+                &self.building_constructions
+            }
+            fn government_constructions(&self) -> &Manager<ConstructionOrder> {
+                &self.government_constructions
             }
         }
     };
@@ -1225,31 +1245,158 @@ impl Save {
     }
 
     /// Copy researched ids from nested country fields and the top-level
-    /// [`Self::technology`] manager onto each [`Country::techs`].
+    /// [`Self::technology`] manager onto each [`Country::techs`], and copy
+    /// `research_technology` onto [`Country::currently_researching`] when unset.
     pub fn hydrate_country_techs(&mut self) {
-        for country in self.country_manager.database.values_mut().flatten() {
-            country.techs = country.researched_techs();
-        }
-        let extra: Vec<(u32, Vec<String>)> = self
-            .technology
-            .iter_present()
-            .filter_map(|(_, entry)| {
-                entry
-                    .country
-                    .map(|country_id| (country_id, entry.acquired_technologies.clone()))
+        hydrate_country_techs(&mut self.country_manager, &self.technology);
+    }
+
+    /// Researched tech ids for `country_id` (country fields + technology manager).
+    pub fn researched_techs_for(&self, country_id: u32) -> Vec<String> {
+        researched_techs_for(self, country_id)
+    }
+
+    /// Research queue head for `country_id`, if any.
+    pub fn queued_tech_for(&self, country_id: u32) -> Option<String> {
+        queued_tech_for(self, country_id)
+    }
+
+    /// First construction queue head for buildings in states owned by `country_id`.
+    pub fn queued_building_for(&self, country_id: u32) -> Option<String> {
+        queued_building_for(self, country_id)
+    }
+}
+
+impl WorldSave {
+    /// Same hydration as [`Save::hydrate_country_techs`].
+    pub fn hydrate_country_techs(&mut self) {
+        hydrate_country_techs(&mut self.country_manager, &self.technology);
+    }
+}
+
+/// Merge country-nested and top-level technology manager ids onto each country.
+pub fn hydrate_country_techs(
+    countries: &mut Manager<Country>,
+    technology: &Manager<TechnologyEntry>,
+) {
+    for country in countries.database.values_mut().flatten() {
+        country.techs = country.researched_techs();
+    }
+    let extra: Vec<(u32, Vec<String>, Option<String>)> = technology
+        .iter_present()
+        .filter_map(|(_, entry)| {
+            entry.country.map(|country_id| {
+                (
+                    country_id,
+                    entry.acquired_technologies.clone(),
+                    entry.research_technology.clone(),
+                )
             })
-            .collect();
-        for (country_id, techs) in extra {
-            let Some(Some(country)) = self.country_manager.database.get_mut(&country_id) else {
-                continue;
-            };
-            for tech in techs {
-                if !tech.is_empty() && !country.techs.iter().any(|seen| seen == &tech) {
-                    country.techs.push(tech);
-                }
+        })
+        .collect();
+    for (country_id, techs, researching) in extra {
+        let Some(Some(country)) = countries.database.get_mut(&country_id) else {
+            continue;
+        };
+        for tech in techs {
+            if !tech.is_empty() && !country.techs.iter().any(|seen| seen == &tech) {
+                country.techs.push(tech);
+            }
+        }
+        if country.currently_researching.is_none() {
+            if let Some(tech) = researching.filter(|id| !id.is_empty()) {
+                country.currently_researching = Some(tech);
             }
         }
     }
+}
+
+/// Researched tech ids for a country from a [`WorldSnapshot`].
+pub fn researched_techs_for(save: &impl WorldSnapshot, country_id: u32) -> Vec<String> {
+    let mut ids = save
+        .country_manager()
+        .database
+        .get(&country_id)
+        .and_then(Option::as_ref)
+        .map(Country::researched_techs)
+        .unwrap_or_default();
+    for (_, entry) in save.technology().iter_present() {
+        if entry.country != Some(country_id) {
+            continue;
+        }
+        for tech in &entry.acquired_technologies {
+            if !tech.is_empty() && !ids.iter().any(|seen| seen == tech) {
+                ids.push(tech.clone());
+            }
+        }
+    }
+    ids
+}
+
+/// Research queue head: country `currently_researching`, else technology manager.
+pub fn queued_tech_for(save: &impl WorldSnapshot, country_id: u32) -> Option<String> {
+    if let Some(tech) = save
+        .country_manager()
+        .database
+        .get(&country_id)
+        .and_then(Option::as_ref)
+        .and_then(|country| country.currently_researching.clone())
+        .filter(|id| !id.is_empty())
+    {
+        return Some(tech);
+    }
+    save.technology()
+        .iter_present()
+        .find_map(|(_, entry)| {
+            (entry.country == Some(country_id))
+                .then(|| entry.research_technology.clone())
+                .flatten()
+        })
+        .filter(|id| !id.is_empty())
+}
+
+/// First private, then government, construction order in states owned by the country.
+pub fn queued_building_for(save: &impl WorldSnapshot, country_id: u32) -> Option<String> {
+    let owned = owned_state_ids(save, country_id);
+    first_queued_building(save.building_constructions(), &owned)
+        .or_else(|| first_queued_building(save.government_constructions(), &owned))
+}
+
+fn owned_state_ids(save: &impl WorldSnapshot, country_id: u32) -> std::collections::BTreeSet<u32> {
+    let mut owned: std::collections::BTreeSet<u32> = save
+        .states()
+        .iter_present()
+        .filter_map(|(id, state)| (state.country == Some(country_id)).then_some(id))
+        .collect();
+    if owned.is_empty() {
+        if let Some(Some(country)) = save.country_manager().database.get(&country_id) {
+            owned.extend(country.states.iter().copied());
+        }
+    }
+    owned
+}
+
+fn first_queued_building(
+    orders: &Manager<ConstructionOrder>,
+    owned_states: &std::collections::BTreeSet<u32>,
+) -> Option<String> {
+    let mut best: Option<(u32, String)> = None;
+    for (id, order) in orders.iter_present() {
+        let Some(state) = order.state else {
+            continue;
+        };
+        if !owned_states.contains(&state) {
+            continue;
+        }
+        let Some(building) = order.building.as_ref().filter(|id| !id.is_empty()).cloned() else {
+            continue;
+        };
+        match &best {
+            Some((best_id, _)) if *best_id <= id => {}
+            _ => best = Some((id, building)),
+        }
+    }
+    best.map(|(_, building)| building)
 }
 
 #[cfg(test)]
@@ -1474,9 +1621,17 @@ technology={
         assert!(ger.techs.iter().any(|tech| tech == "railways"));
         assert!(ger.techs.iter().any(|tech| tech == "nitroglycerin"));
         assert!(ger.techs.iter().any(|tech| tech == "urban_planning"));
+        assert_eq!(
+            ger.currently_researching.as_deref(),
+            Some("atmospheric_engine")
+        );
         let entry = save.technology.iter_present().next().unwrap().1;
         assert_eq!(
             entry.research_technology.as_deref(),
+            Some("atmospheric_engine")
+        );
+        assert_eq!(
+            save.queued_tech_for(16777216).as_deref(),
             Some("atmospheric_engine")
         );
     }
