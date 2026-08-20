@@ -1,6 +1,6 @@
 # SQL interface (design spec)
 
-**Status:** Wave 3b — `plan` / `gaps` TVFs implemented on `vic3-sql` (fact tables from Wave 2b). Catalog/`use_save` and diagnostics TVFs follow in other Wave 3 PRs.  
+**Status:** Wave 3b/3c — `plan` / `gaps` TVFs, `saves` catalog table, host `use_save`, and `active.*` / `latest.*` views are implemented in `vic3-sql` (fact tables from Wave 2b). Diagnostics TVFs follow in other Wave 3 PRs.  
 **Engine:** Apache DataFusion (`datafusion` 51).  
 **Consumers:** MCP `query` tool, Tauri Advanced Query tab, optional `vic3-analyzer sql` debug.  
 **Related:** [`mcp.md`](mcp.md) (agent transport), [`json-schema.md`](json-schema.md) (JSON field names), [`dsl.md`](dsl.md) / [`planning.md`](planning.md) (goals / A\*).
@@ -419,13 +419,12 @@ The Tauri **Advanced Query** tab uses this same dialect:
 
 ## Deferred (Wave 3+)
 
-- `saves` catalog table, `use_save`, `active.*` / `latest.*` views (`feat/catalog-sql`)
 - Diagnostics TVFs and scalars (`feat/sql-udfs-diagnostics`)
 - `formations` military table
 - Optional convenience UNNEST views
 
 ## Implementation notes (non-normative)
 
-- Crate: `vic3-sql` registers providers on a `SessionContext` over an in-memory `SessionBinding` (`GameDefs` + `World` + `PricesResult`). Hosts hold the engine next to `vic3-api` session state.
+- Crate: `vic3-sql` registers providers on a `SessionContext` over an in-memory `SessionBinding` (`GameDefs` + `World` + `PricesResult`). Hosts hold the engine next to `vic3-api` session state and call Rust `SqlEngine::use_save` (never a mutating `SELECT`); `saves` reads `vic3-catalog`; `latest.*` loads via `vic3-api` without installing the active session.
 - Planning TVFs: `plan(goal [, max_days [, label]])` and `gaps(goal)` call `vic3-plan` / `vic3-goals` against the bound snapshot. `label` is accepted for [`PlanOpts`](json-schema.md) parity and ignored in the result set. `limitations` is emitted on step 0 only.
 - Pages/wasm continues without this engine in v1.

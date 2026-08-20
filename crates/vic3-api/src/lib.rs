@@ -193,13 +193,25 @@ struct LoadedAnalysisPayload<'a> {
     prices: &'a PricesResult,
 }
 
-/// Load one analysis session and solve its baseline prices.
-pub fn load_analysis_json(
+/// Owned analysis snapshot after load + baseline price solve.
+///
+/// Used by hosts that need Rust handles (e.g. `vic3-sql` `use_save`) rather
+/// than only JSON. Prefer [`load_analysis_snapshot`] over re-parsing JSON.
+#[derive(Debug, Clone)]
+pub struct AnalysisSnapshot {
+    pub defs: vic3_defs::GameDefs,
+    pub world: World,
+    pub prices: PricesResult,
+    pub tag: Option<String>,
+    pub date: Option<String>,
+}
+
+fn build_loaded_analysis(
     save_bytes: &[u8],
     tokens_bytes: Option<&[u8]>,
     defs_blob: &[u8],
     solve_opts_json: &str,
-) -> Result<String, ApiError> {
+) -> Result<(LoadedAnalysis, SaveSummary), ApiError> {
     let save = load_save(save_bytes, tokens_bytes)?;
     let mut defs = vic3_defs::decode_blob(defs_blob)?;
     // The UI extracts icons separately. They are never consulted by World or
@@ -209,18 +221,83 @@ pub fn load_analysis_json(
     let solve_opts = parse_solve_opts(solve_opts_json)?;
     let world = World::from_save(&save, &defs);
     let prices = solve(&world, &defs, solve_opts.clone());
-    let json = serde_json::to_string(&LoadedAnalysisPayload {
-        summary: SaveSummary::from(&save),
-        prices: &prices,
-    })?;
-    LOADED_ANALYSIS.with(|loaded| {
-        loaded.replace(Some(LoadedAnalysis {
+    let summary = SaveSummary::from(&save);
+    Ok((
+        LoadedAnalysis {
             defs,
             world,
             solve_opts,
             prices,
             save,
-        }));
+        },
+        summary,
+    ))
+}
+
+/// Load + solve into an [`AnalysisSnapshot`].
+///
+/// When `install` is true, also replaces the process-local analysis session
+/// (same as [`load_analysis_json`]). Pass `false` for read-side caches such as
+/// SQL `latest.*` so the active session is not mutated.
+pub fn load_analysis_snapshot(
+    save_bytes: &[u8],
+    tokens_bytes: Option<&[u8]>,
+    defs_blob: &[u8],
+    solve_opts_json: &str,
+    install: bool,
+) -> Result<AnalysisSnapshot, ApiError> {
+    let (loaded, summary) =
+        build_loaded_analysis(save_bytes, tokens_bytes, defs_blob, solve_opts_json)?;
+    let snap = AnalysisSnapshot {
+        defs: loaded.defs.clone(),
+        world: loaded.world.clone(),
+        prices: loaded.prices.clone(),
+        tag: summary.tag,
+        date: summary.date,
+    };
+    if install {
+        LOADED_ANALYSIS.with(|cell| {
+            cell.replace(Some(loaded));
+        });
+    }
+    Ok(snap)
+}
+
+/// Path convenience for [`load_analysis_snapshot`].
+pub fn load_analysis_snapshot_from_path(
+    save: &Path,
+    tokens: Option<&Path>,
+    defs_blob: &Path,
+    solve_opts_json: &str,
+    install: bool,
+) -> Result<AnalysisSnapshot, ApiError> {
+    let save_bytes = read_bytes(save)?;
+    let tokens_bytes = read_tokens(tokens)?;
+    let defs = read_defs_blob(defs_blob)?;
+    load_analysis_snapshot(
+        &save_bytes,
+        tokens_bytes.as_deref(),
+        &defs,
+        solve_opts_json,
+        install,
+    )
+}
+
+/// Load one analysis session and solve its baseline prices.
+pub fn load_analysis_json(
+    save_bytes: &[u8],
+    tokens_bytes: Option<&[u8]>,
+    defs_blob: &[u8],
+    solve_opts_json: &str,
+) -> Result<String, ApiError> {
+    let (loaded, summary) =
+        build_loaded_analysis(save_bytes, tokens_bytes, defs_blob, solve_opts_json)?;
+    let json = serde_json::to_string(&LoadedAnalysisPayload {
+        summary,
+        prices: &loaded.prices,
+    })?;
+    LOADED_ANALYSIS.with(|cell| {
+        cell.replace(Some(loaded));
     });
     Ok(json)
 }
