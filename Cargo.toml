@@ -11,6 +11,7 @@ members = [
     "crates/vic3-cli",
     "crates/vic3-api",
     "crates/vic3-catalog",
+    "crates/vic3-analyzer",
     "crates/vic3-wasm",
 ]
 
@@ -36,6 +37,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 thiserror = "2"
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
 vic3save = { git = "https://github.com/pdx-tools/pdx-tools", rev = "092edec7a853f67eea892c0d3a145329b924e103", package = "vic3save" }
 rust-advanced-heaps = { git = "https://github.com/jmalicki/rust-advanced-heaps", rev = "445818b845ad8daa1146df4c1215a88fb49f8d8f" }
 

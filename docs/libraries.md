@@ -24,7 +24,7 @@ Where to look: [crates.io](https://crates.io), [lib.rs](https://lib.rs), [docs.r
 | Price solver | [Basin](https://crates.io/crates/basin) + successive substitution warm start. Not HiGHS/Clarabel/NLopt/IPOPT. |
 | Archive | CLI: serde_json files under XDG. UI: IndexedDB. Never uploaded. |
 | Desktop config / save catalog | `vic3-catalog`: `dirs`, `toml` (+ `serde_json` for `config.json`). No network. |
-
+| Desktop shell | [Tauri](https://crates.io/crates/tauri) 2 (`vic3-analyzer` binary). Not Electron. |
 ## Open (decide before the phase)
 
 **Shared option schema (P5):** default that fits the bar is **schemars** on shared serde structs + clap flatten in the CLI. Alternatives (walk clap `Command`, ts-rs/specta, custom `Vic3Options` derive) only if schemars/clap docs drift.
