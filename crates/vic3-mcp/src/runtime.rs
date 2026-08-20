@@ -66,6 +66,10 @@ impl McpRuntime {
         Self::from_config(app_data, config_path, config).await
     }
 
+    /// Build from an explicit config (tests / injected [`AppConfig`]).
+    ///
+    /// Scans allowlisted save roots and opens [`SqlEngine::with_catalog`] with
+    /// the same defs/tokens resolution as the desktop companion session.
     pub async fn from_config(
         app_data: PathBuf,
         config_path: PathBuf,
@@ -84,19 +88,22 @@ impl McpRuntime {
         })
     }
 
+    /// Path of the shared TOML config (same file the GUI Settings writes).
     pub fn config_path(&self) -> &Path {
         &self.config_path
     }
 
+    /// Platform app-data dir used for config + defs cache.
     pub fn app_data(&self) -> &Path {
         &self.app_data
     }
 
+    /// Number of configured save *directories* (not catalog entry count).
     pub fn save_count(&self) -> usize {
-        // Cheap: roots length is not catalog size; callers use tools for exact.
         self.config.save_dirs.len()
     }
 
+    /// Allowlisted save roots derived from config (local / steam_cloud).
     pub fn save_roots(&self) -> Vec<SaveRoot> {
         self.config.save_roots()
     }
@@ -105,31 +112,37 @@ impl McpRuntime {
         &self.defs_status
     }
 
+    /// Shared SQL engine; callers must hold the mutex across await points carefully.
     pub fn engine(&self) -> Arc<Mutex<SqlEngine>> {
         Arc::clone(&self.engine)
     }
 
+    /// Current catalog rows (agent-facing metadata; no absolute paths).
     pub async fn catalog_entries(&self) -> Result<Vec<SaveEntry>, SqlError> {
         let eng = self.engine.lock().await;
         eng.catalog_entries()
     }
 
+    /// Active bound save, if any (`vic3://session`).
     pub async fn active_session(&self) -> Option<ActiveSessionInfo> {
         let eng = self.engine.lock().await;
         eng.active_session()
     }
 
+    /// Rescan allowlisted dirs and replace the in-engine `saves` catalog.
     pub async fn refresh_catalog(&self) -> Result<usize, SqlError> {
         let roots = self.save_roots();
         let eng = self.engine.lock().await;
         eng.refresh_catalog(&roots)
     }
 
+    /// Load/solve a save into the analysis session (host API, not SQL).
     pub async fn use_save(&self, req: UseSaveRequest) -> Result<UseSaveResult, SqlError> {
         let eng = self.engine.lock().await;
         eng.use_save(req).await
     }
 
+    /// Run one read-only SQL statement against the locked engine.
     pub async fn query(
         &self,
         sql: &str,

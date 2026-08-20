@@ -1,4 +1,6 @@
 //! Early argv mode selection (before Tauri `run`).
+//!
+//! Parsed in `main` so [`Mode::Mcp`] never reaches [`crate::run`] (no WebView).
 
 /// Process mode selected from argv.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
