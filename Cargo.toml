@@ -9,6 +9,7 @@ members = [
     "crates/vic3-sim",
     "crates/vic3-plan",
     "crates/vic3-cli",
+    "crates/vic3-api",
     "crates/vic3-wasm",
 ]
 

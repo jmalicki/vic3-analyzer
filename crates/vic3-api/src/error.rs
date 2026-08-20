@@ -1,8 +1,9 @@
+use std::path::PathBuf;
 use thiserror::Error;
 
-/// Failure in the bytes-in JSON-out facade.
+/// Failure in the transport-free analysis API.
 #[derive(Debug, Error)]
-pub enum WasmError {
+pub enum ApiError {
     /// Save or token map could not be loaded.
     #[error(transparent)]
     Load(#[from] vic3_load::LoadError),
@@ -12,10 +13,17 @@ pub enum WasmError {
     /// Defs postcard blob could not be decoded.
     #[error(transparent)]
     Defs(#[from] vic3_defs::DefsError),
+    /// Filesystem read failed for a path-based loader.
+    #[error("failed to read {}: {source}", path.display())]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     /// Option JSON could not be parsed.
     #[error("invalid JSON: {0}")]
     Json(#[from] serde_json::Error),
-    /// A browser definitions-file manifest referenced bytes outside its payload.
+    /// A definitions-file manifest referenced bytes outside its payload.
     #[error("invalid definitions file manifest: {0}")]
     DefsManifest(String),
     /// Goal DSL could not be compiled.
@@ -30,7 +38,16 @@ pub enum WasmError {
     /// The save contains no playable country.
     #[error("save has no playable country")]
     NoCountry,
-    /// A worker analysis method ran before a save and definitions were loaded.
+    /// An analysis method ran before a save and definitions were loaded.
     #[error("no analysis is loaded")]
     NoLoadedAnalysis,
+}
+
+impl ApiError {
+    pub(crate) fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
+        Self::Io {
+            path: path.into(),
+            source,
+        }
+    }
 }

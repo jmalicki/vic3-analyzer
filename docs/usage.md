@@ -1,6 +1,6 @@
 # Usage
 
-CLI and UI are driven by the **same nested option structs**. Filesystem fields (`save`, `--game`, `--tokens`) exist only on CLI wrappers. wasm takes `Vec<u8>`. Inner structs must not mention `PathBuf`.
+CLI and UI are driven by the **same nested option structs**, and both call through **`vic3-api`** (bytes or path loaders → JSON). Filesystem fields (`save`, `--game`, `--tokens`) exist on CLI wrappers and on `vic3-api` path helpers; wasm takes `Vec<u8>` only. Inner option structs must not mention `PathBuf`.
 
 P5 generates JSON Schema from these structs (schemars) and checks it against [`json-schema.md`](json-schema.md). The React form is built from schema, not a hardcoded field list.
 
