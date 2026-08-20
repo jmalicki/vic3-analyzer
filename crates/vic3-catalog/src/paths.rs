@@ -1,4 +1,8 @@
 //! Platform path helpers: app data, game install, Paradox/Steam save roots.
+//!
+//! Auto-detect only walks known Steam / Paradox layouts (`docs/desktop.md`).
+//! Configured `save_dirs` are allowlisted as-is; [`infer_location`] tags Steam
+//! Cloud paths for stub disambiguation.
 
 use std::path::{Path, PathBuf};
 
@@ -10,6 +14,7 @@ pub const APP_NAME: &str = "vic3-analyzer";
 
 /// Default config filename (TOML). JSON (`config.json`) is also accepted.
 pub const CONFIG_FILE_TOML: &str = "config.toml";
+/// Alternate config filename accepted by [`crate::AppConfig::load`].
 pub const CONFIG_FILE_JSON: &str = "config.json";
 
 /// Victoria 3 Steam app id (for Cloud cache under `userdata/<id>/529340/`).
@@ -19,6 +24,10 @@ pub const VIC3_STEAM_APP_ID: &str = "529340";
 ///
 /// Honors `XDG_DATA_HOME` first (same convention as the CLI archive), then
 /// [`dirs::data_local_dir`].
+///
+/// # Errors
+///
+/// [`CatalogError::NoAppDataDir`] when neither source yields a path.
 pub fn app_data_dir() -> Result<PathBuf, CatalogError> {
     if let Some(root) = std::env::var_os("XDG_DATA_HOME") {
         return Ok(PathBuf::from(root).join(APP_NAME));
@@ -29,11 +38,17 @@ pub fn app_data_dir() -> Result<PathBuf, CatalogError> {
 }
 
 /// Default path for the shared config file (`config.toml` under app data).
+///
+/// # Errors
+///
+/// Propagates [`CatalogError::NoAppDataDir`] from [`app_data_dir`].
 pub fn default_config_path() -> Result<PathBuf, CatalogError> {
     Ok(app_data_dir()?.join(CONFIG_FILE_TOML))
 }
 
-/// Candidate absolute path to `…/Victoria 3/game` for the current OS.
+/// Candidate absolute paths to `…/Victoria 3/game` for the current OS.
+///
+/// Order is preference order for [`detect_game_dir`]. Not all candidates exist.
 pub fn default_game_dir_candidates() -> Vec<PathBuf> {
     let mut out = Vec::new();
     #[cfg(target_os = "macos")]
@@ -128,6 +143,8 @@ pub fn steam_roots() -> Vec<PathBuf> {
 }
 
 /// Discover Steam Cloud save roots: `userdata/<id>/529340/remote/save games`.
+///
+/// Only directories that currently exist are returned (deduped, sorted).
 pub fn detect_steam_cloud_save_dirs() -> Vec<PathBuf> {
     let mut found = Vec::new();
     for steam in steam_roots() {
@@ -157,7 +174,9 @@ pub fn detect_steam_cloud_save_dirs() -> Vec<PathBuf> {
 /// A save-catalog root with its agent-facing `location` tag.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SaveRoot {
+    /// Absolute directory to scan for top-level `*.v3`.
     pub path: PathBuf,
+    /// Tag written into catalog / SQL `location`.
     pub location: SaveLocation,
 }
 
@@ -182,6 +201,8 @@ pub fn detect_save_roots() -> Vec<SaveRoot> {
 }
 
 /// Infer `location` for a configured absolute path (Steam Cloud pattern → cloud).
+///
+/// Matches `/userdata/` + `/{VIC3_STEAM_APP_ID}/` in a normalized path string.
 pub fn infer_location(path: &Path) -> SaveLocation {
     let s = path
         .to_string_lossy()
@@ -195,6 +216,10 @@ pub fn infer_location(path: &Path) -> SaveLocation {
 }
 
 /// Build [`SaveRoot`]s from absolute directory paths (config `save_dirs`).
+///
+/// # Arguments
+///
+/// * `paths` — absolute save-root directories from [`crate::AppConfig::save_dirs`].
 pub fn roots_from_paths(paths: impl IntoIterator<Item = PathBuf>) -> Vec<SaveRoot> {
     paths
         .into_iter()

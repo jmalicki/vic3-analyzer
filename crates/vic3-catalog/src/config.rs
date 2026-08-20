@@ -1,4 +1,8 @@
 //! Shared desktop / MCP app config (TOML or JSON under app data).
+//!
+//! GUI Settings and `vic3-analyzer mcp` read/write the same file. Keys match
+//! `docs/desktop.md`. Auto-detect fills missing `game_dir` / empty `save_dirs`
+//! from allowlisted Steam / Paradox layouts only — never a whole-home scan.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,6 +16,10 @@ use crate::paths::{
 };
 
 /// Persisted knobs shared by Tauri Settings and `vic3-analyzer mcp`.
+///
+/// Default format is TOML (`config.toml`); JSON is accepted when the path ends
+/// in `.json`. Missing file + `auto_detect` → discovery defaults without writing
+/// until [`AppConfig::save`] / Settings persist.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppConfig {
     /// Absolute path to `…/Victoria 3/game`.
@@ -49,6 +57,17 @@ impl Default for AppConfig {
 
 impl AppConfig {
     /// Load from `path`, applying auto-detect when enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` — absolute path ending in `.toml` or `.json`. Missing file is
+    ///   treated as defaults (not an error).
+    ///
+    /// # Errors
+    ///
+    /// * [`CatalogError::Io`] — read failure.
+    /// * [`CatalogError::InvalidConfig`] — parse failure.
+    /// * [`CatalogError::UnsupportedConfigFormat`] — other extension.
     pub fn load(path: &Path) -> Result<Self, CatalogError> {
         if !path.exists() {
             let mut cfg = Self::default();
@@ -66,6 +85,16 @@ impl AppConfig {
     }
 
     /// Write TOML or JSON based on the destination extension.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` — destination; parent dirs are created as needed.
+    ///
+    /// # Errors
+    ///
+    /// * [`CatalogError::Io`] — create/write failure.
+    /// * [`CatalogError::InvalidConfig`] — encode failure.
+    /// * [`CatalogError::UnsupportedConfigFormat`] — other extension.
     pub fn save(&self, path: &Path) -> Result<(), CatalogError> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| CatalogError::io(parent, e))?;
@@ -85,6 +114,9 @@ impl AppConfig {
     }
 
     /// Fill missing or invalid `game_dir` / empty `save_dirs` from defaults.
+    ///
+    /// Does not overwrite a valid `game_dir` or a non-empty `save_dirs` list.
+    /// Tokens and `defs_blob` are never auto-filled.
     pub fn apply_auto_detect(&mut self) {
         let game_ok = self.game_dir.as_ref().is_some_and(|p| is_valid_game_dir(p));
         if !game_ok {
@@ -95,13 +127,20 @@ impl AppConfig {
         }
     }
 
-    /// Save roots with inferred `location` tags for catalog refresh.
+    /// Save roots with inferred [`crate::SaveLocation`] tags for catalog refresh.
     pub fn save_roots(&self) -> Vec<SaveRoot> {
         roots_from_paths(self.save_dirs.iter().cloned())
     }
 }
 
 /// Resolve which config file to use under `app_data` (prefer existing, else TOML).
+///
+/// Preference: existing `config.toml`, else existing `config.json`, else
+/// `config.toml` (not yet created).
+///
+/// # Arguments
+///
+/// * `app_data` — directory from [`crate::app_data_dir`].
 pub fn resolve_config_path(app_data: &Path) -> PathBuf {
     let toml = app_data.join(CONFIG_FILE_TOML);
     let json = app_data.join(CONFIG_FILE_JSON);

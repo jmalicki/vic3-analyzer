@@ -2,6 +2,9 @@
 //!
 //! Tool argument shapes are derived via schemars (`docs/mcp.md`). Logging stays
 //! on stderr through tracing; stdout is protocol-only.
+//!
+//! Shared engine: every tool goes through [`McpRuntime`] → [`vic3_sql::SqlEngine`]
+//! (same dialect as Tauri Advanced Query).
 
 use std::str::FromStr;
 use std::sync::Arc;
@@ -64,7 +67,11 @@ impl Vic3McpServer {
         }
     }
 
-    /// Stdio transport until the client disconnects (stdout = JSON-RPC only).
+    /// Serve over stdin/stdout until the client disconnects.
+    ///
+    /// # Errors
+    ///
+    /// Transport / protocol errors from rmcp after the server has started.
     pub async fn serve_stdio(
         runtime: McpRuntime,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -79,7 +86,7 @@ impl Vic3McpServer {
         &self.tool_router
     }
 
-    /// Prompt list for contract tests (no transport).
+    /// Expose the prompt router for schema tests (no transport).
     pub fn prompt_router_ref(&self) -> &PromptRouter<Self> {
         &self.prompt_router
     }

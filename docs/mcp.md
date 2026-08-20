@@ -1,155 +1,114 @@
-# MCP server (design spec)
+# MCP server
 
-**Status:** Wave 3d — stdio MCP via official [rmcp](https://crates.io/crates/rmcp) in crate `vic3-mcp`, invoked as `vic3-analyzer mcp`.  
-**SDK:** Official Rust [rmcp](https://crates.io/crates/rmcp) 3.x.  
-**Binary (v1):** Single fat desktop binary — `vic3-analyzer` opens the Tauri GUI; `vic3-analyzer mcp` runs stdio MCP **without** creating a window (early argv branch before Tauri `run`). WebView libraries may still load at process start; acceptable for v1.  
-**SQL contract:** [`sql.md`](sql.md) — MCP does not redefine tables/UDFs; it exposes them.
+**Status:** Implemented — stdio MCP via [rmcp](https://crates.io/crates/rmcp) in `vic3-mcp`, invoked as `vic3-analyzer mcp`.  
+**SQL contract:** [`sql.md`](sql.md) — MCP exposes tables/UDFs; it does not redefine them.  
+**Config:** Same file as the GUI ([`desktop.md`](desktop.md)).
 
-## Goals
+## Fat binary
 
-- Let LLM clients answer freeform campaign questions by calling tools (especially SQL).
-- Share catalog, config, and analysis session with the Tauri GUI when using the same install/config.
-- Keep saves and defs on-device (AGPL privacy story): allowlisted dirs only; no upload.
-
-## Non-goals (v1)
-
-- Sampling, elicitation, or exposing arbitrary filesystem roots.
-- Write tools that overwrite live autosaves (no `export_save` tool until explicitly designed).
-- A second MCP-only binary (deferred).
-- Embedding MCP inside the Pages wasm app.
+One desktop binary: default argv → Tauri GUI; `vic3-analyzer mcp` → stdio MCP **without** calling Tauri `run` (no window). WebView libraries may still load at process start — acceptable for v1; a second headless artifact is deferred. See [`desktop.md`](desktop.md).
 
 ## Process and transport
 
 | Item | Spec |
 | --- | --- |
-| Invoke | `vic3-analyzer mcp` (stdio JSON-RPC per MCP) |
+| Invoke | `vic3-analyzer mcp` |
 | stdout | Protocol only |
 | stderr | Logs (never protocol) |
 | Window | Must not open |
-| Config | Same app config as GUI ([`desktop.md`](desktop.md) when present): game path, saves roots, optional defs blob, tokens |
+| Engine | Shared `vic3-sql` crate (separate process / RAM from GUI) |
 
-On start: load config, refresh save catalog (auto-detect defaults), register DataFusion + tools. Do not require a prior GUI launch.
+On start: load config, refresh save catalog, register DataFusion + tools. No prior GUI launch required.
 
-## Canonical agent flow
+## Agent flow
 
-1. Discover saves (tool `query` or resource `vic3://saves`).
-2. Bind session with `use_save` (stub or selector).
-3. `query` analysis SQL against `active` tables / TVFs per [`sql.md`](sql.md).
+1. Discover saves (`query` on `saves`, or resource `vic3://saves`).
+2. Bind with `use_save` (stub or selector).
+3. `query` against `active` tables / TVFs.
 
-Do **not** document `SELECT set_active_save(...)`.
-
-### Example
+Do **not** use `SELECT set_active_save(...)`.
 
 ```text
 query:  SELECT name, kind, in_game_date, mtime, location FROM saves ORDER BY mtime DESC LIMIT 10
 use_save: { "name": "autosave" }
 query:  SELECT * FROM alerts() WHERE severity = 1
-query:  SELECT step, day, action, detail FROM plan('research(tech=nitroglycerin)') ORDER BY step
 ```
 
-Or skip discovery:
-
-```text
-use_save: { "selector": "latest_autosave" }
-query: …
-```
+Or: `use_save: { "selector": "latest_autosave" }`.
 
 ## Tools
 
-JSON Schema for arguments is generated from Rust types (rmcp + schemars). Normative shapes below.
+JSON Schema from Rust (rmcp + schemars).
 
 ### `query`
 
-Run one read-only SQL statement.
-
 | Arg | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `sql` | string | yes | Single statement; see [`sql.md`](sql.md) read-only rules |
+| `sql` | string | yes | Single statement; read-only rules in [`sql.md`](sql.md) |
 | `format` | string | no | `json` (default) \| `csv` |
 
-**Result:** `{ "columns": [string], "rows": [ ... ], "row_count": number }` or CSV text. Errors as MCP tool errors with a clear message (syntax, no active save, DDL rejected, plan timeout).
+**Result:** `{ "columns", "rows", "row_count" }` or CSV. Tool errors for syntax, no active save, DDL, plan timeout.
 
 ### `use_save`
 
-Bind the analysis session.
-
 | Arg | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `name` | string | one of name/selector | Filename stub (`autosave` or `autosave.v3`) |
+| `name` | string | one of name/selector | Stub (`autosave` or `autosave.v3`) |
 | `selector` | string | one of name/selector | `latest` \| `latest_autosave` \| `latest_named` |
-| `location` | string | no | `local` \| `steam_cloud` — disambiguate stub |
-| `mtime` | string | no | ISO timestamp — further disambiguation |
+| `location` | string | no | `local` \| `steam_cloud` |
+| `mtime` | string | no | ISO timestamp |
 
-**Result:** `{ "name", "kind", "in_game_date", "country", "loaded": true }` after load/solve.  
-**Errors:** not found; ambiguous stub (include candidates with `name`, `kind`, `mtime`, `location`); missing defs/tokens with actionable message.
-
-Loading may take noticeable time; emit MCP progress notifications when supported.
+**Result:** `{ "name", "kind", "in_game_date", "country", "loaded": true }`.  
+**Errors:** not found; ambiguous stub (candidates with `name`/`kind`/`mtime`/`location`); missing defs/tokens.
 
 ### `refresh_catalog`
 
-Rescan allowlisted save directories.
+Rescan allowlisted save dirs → `{ "count": number }`.
 
-**Result:** `{ "count": number }` or summary list.
-
-### `explain` (optional v1)
+### `explain`
 
 | Arg | Type | Notes |
 | --- | --- | --- |
-| `sql` | string | |
-
-Returns DataFusion explain plan text for debugging agent SQL.
+| `sql` | string | Returns DataFusion explain text |
 
 ## Resources
 
-Support `resources/list` and `resources/read`. Prefer `resources/subscribe` (or list_changed notifications) for `vic3://saves` when the catalog watch fires.
-
 | URI | Content |
 | --- | --- |
-| `vic3://schema` | Tables, columns, UDFs/TVFs (generated from the same registry as SQL; must match [`sql.md`](sql.md)) |
-| `vic3://saves` | Current catalog snapshot (agent-facing columns) |
-| `vic3://session` | Active stub, date, country, loaded flags, defs status |
-| `vic3://docs/flow` | Short markdown: list → use_save → query |
-| `vic3://docs/sql` | Body of [`sql.md`](sql.md) (or rendered excerpt) |
-| `vic3://docs/mcp` | Body of this file (or excerpt) |
+| `vic3://schema` | Tables / columns / TVFs (same registry as SQL) |
+| `vic3://saves` | Catalog snapshot (no absolute paths) |
+| `vic3://session` | Active stub, defs status |
+| `vic3://docs/flow` | Short list → use_save → query |
+| `vic3://docs/sql` | Body of [`sql.md`](sql.md) |
+| `vic3://docs/mcp` | Body of this file |
 
 ## Prompts
 
-Suggested MCP prompts (names stable):
-
 | Prompt | Purpose |
 | --- | --- |
-| `investigate_shortages` | Guide: use_save latest → alerts / shortage_analysis |
-| `compare_latest_autosave` | Catalog + bind + summary queries |
-| `military_readiness` | Military / formations queries when available |
-| `what_is_loaded` | Read `vic3://session` + simple counts |
-| `plan_research` | `plan('research(tech=…)')` pattern |
+| `investigate_shortages` | use_save latest → shortage-oriented SQL |
+| `compare_latest_autosave` | Catalog + bind + summary |
+| `military_readiness` | Military queries when available |
+| `what_is_loaded` | `vic3://session` + counts |
+| `plan_research` | `plan('research(tech=…)')` |
 
-Prompt text should remind the model: stubs not paths; read-only SQL; call `use_save` before fact tables.
+Reminders in prompt text: stubs not paths; read-only SQL; `use_save` before fact tables.
 
 ## Completions
 
-- Prompt / resource args named `name` / `stub` / `save`: catalog stubs
-- Optional: SQL table names from schema registry (`table` argument)
-
-## Logging and notifications
-
-- MCP logging level configurable; default info on stderr + MCP log messages if the client supports them
-- Notify when catalog changes (new autosave detected)
-- Progress on `use_save` / long `plan(...)` queries when the protocol allows
+- Prompt/resource args `name` / `stub` / `save`: catalog stubs
+- Optional: SQL table names for `table` arguments
 
 ## Security
 
 | Rule | Detail |
 | --- | --- |
-| Allowlist | Configured game dir, save dirs (Paradox + optional Steam Cloud), app data, optional token path |
+| Allowlist | Configured game dir, save dirs, app data, optional tokens |
 | No path args | Tools accept stubs/selectors only |
-| Read-only SQL | Enforce in query layer |
-| Secrets | Do not echo full token map paths in tool results if avoidable; never upload |
+| Read-only SQL | Enforced in query layer |
 | AGPL | Local process; no network service required |
 
-## Client configuration (illustrative)
-
-Cursor / Claude-style MCP config:
+## Client configuration
 
 ```json
 {
@@ -162,24 +121,13 @@ Cursor / Claude-style MCP config:
 }
 ```
 
-On macOS app bundles, `command` may be `…/Vic3 Analyzer.app/Contents/MacOS/vic3-analyzer` with args `["mcp"]`.
+macOS app bundle: `…/Vic3 Analyzer.app/Contents/MacOS/vic3-analyzer` with args `["mcp"]`.
 
 ## Consistency with GUI
 
 | Concern | Behavior |
 | --- | --- |
 | Config file | Shared |
-| Catalog | Shared code; MCP process has its own instance unless later we add a daemon |
-| Active save | Per process (GUI and MCP do not share RAM session in v1) |
-| SQL engine | Same `vic3-sql` crate and [`sql.md`](sql.md) contracts |
-
-## Open questions for review
-
-1. Should `query` auto-bind `latest` if no session, or always require `use_save`?
-2. Max rows / timeout defaults for `query` and `plan(...)`.
-3. Whether GUI and MCP should ever share a long-lived daemon (out of v1).
-
-## Implementation notes
-
-- Crate: `vic3-mcp`, linked into the `vic3-analyzer` binary (`mcp` argv).
-- Tools / resources / prompts implemented in Wave 3d; catalog watch → `list_changed` remains best-effort follow-up.
+| Catalog / SQL | Same crates; separate process instance |
+| Active save | Per process |
+| Result shape | `sql_query` invoke ↔ MCP `query` JSON |

@@ -1,8 +1,31 @@
 //! Stdio MCP server for Vic3 Analyzer (`docs/mcp.md`).
 //!
-//! Invoked as `vic3-analyzer mcp`: JSON-RPC on stdout, logs on stderr, no
-//! window. Shares [`vic3_catalog::AppConfig`] and [`vic3_sql::SqlEngine`] with
-//! the desktop stack (separate process / RAM session in v1).
+//! Invoked as `vic3-analyzer mcp`: JSON-RPC on **stdout**, logs on **stderr**,
+//! **no window**. Shares [`vic3_catalog::AppConfig`] and [`vic3_sql::SqlEngine`]
+//! with the desktop stack (separate process / RAM session in v1).
+//!
+//! # Why a fat binary
+//!
+//! v1 ships one `vic3-analyzer` artifact that links Tauri + MCP. Early argv
+//! (`gui` default / `mcp`) runs before `tauri::Builder::run`, so MCP never opens
+//! a WebView — but WebView/runtime libraries may still map at process start. A
+//! second headless artifact is deferred.
+//!
+//! # Tools / resources / prompts
+//!
+//! | Kind | Names |
+//! | --- | --- |
+//! | Tools | `query`, `use_save`, `refresh_catalog`, `explain` |
+//! | Resources | `vic3://schema`, `vic3://saves`, `vic3://session`, `vic3://docs/*` |
+//! | Prompts | `investigate_shortages`, `compare_latest_autosave`, `military_readiness`, `what_is_loaded`, `plan_research` |
+//!
+//! Agent flow: catalog → `use_save` tool → read-only SQL (`docs/sql.md`).
+//!
+//! # See also
+//!
+//! - [`McpRuntime`] — config + locked [`vic3_sql::SqlEngine`]
+//! - [`Vic3McpServer`] — rmcp `ServerHandler`
+//! - `docs/mcp.md`, `docs/desktop.md`
 
 mod error;
 mod format;
@@ -18,6 +41,12 @@ use std::process::ExitCode;
 ///
 /// Never opens a Tauri window. Protocol bytes stay on stdout; tracing goes to
 /// stderr only. Session RAM is process-local (not shared with a concurrent GUI).
+///
+/// # Errors
+///
+/// Failures during bootstrap or serve are logged to stderr; the process then
+/// returns [`ExitCode::FAILURE`]. This function itself always returns an exit
+/// code (it does not panic on MCP errors).
 pub fn run() -> ExitCode {
     init_stderr_logging();
 

@@ -1,4 +1,8 @@
 //! Scan allowlisted save roots into an agent-facing catalog.
+//!
+//! Non-recursive: top-level `*.v3` only. Sorted newest-mtime first. Absolute
+//! paths stay on [`SaveEntry::path`] for loaders; strip them before MCP/SQL
+//! agent payloads.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,6 +16,9 @@ use crate::paths::SaveRoot;
 use crate::stub::{classify_kind, normalize_stub, SaveKind};
 
 /// One row of the save catalog (agent-facing fields + internal absolute path).
+///
+/// Agent-facing columns match `docs/sql.md` `saves` table. `path` is for Rust
+/// loaders only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SaveEntry {
     /// Filename stub (primary handle).
@@ -65,38 +72,61 @@ impl SaveEntry {
 }
 
 /// In-memory catalog snapshot.
+///
+/// Built by [`scan_roots`] / [`SaveCatalog::refresh`]. Fed into
+/// `vic3-sql::SqlEngine` as the `saves` table.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SaveCatalog {
     entries: Vec<SaveEntry>,
 }
 
 impl SaveCatalog {
+    /// Wrap an already-built entry list (tests / SQL providers).
     pub fn new(entries: Vec<SaveEntry>) -> Self {
         Self { entries }
     }
 
+    /// Borrow all entries (newest mtime first after a scan).
     pub fn entries(&self) -> &[SaveEntry] {
         &self.entries
     }
 
+    /// Consume into the underlying entry list.
     pub fn into_entries(self) -> Vec<SaveEntry> {
         self.entries
     }
 
+    /// Number of catalog rows.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    /// True when no saves were found under the configured roots.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
     /// Rescan allowlisted roots (non-recursive; `*.v3` files only).
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`CatalogError::Io`] from [`scan_roots`].
     pub fn refresh(roots: &[SaveRoot]) -> Result<Self, CatalogError> {
         scan_roots(roots)
     }
 
     /// Look up by stub; optional `location` / `mtime` disambiguators.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` — stub or `*.v3` basename (normalized via [`normalize_stub`]).
+    /// * `location` — when set, only that [`SaveLocation`] matches.
+    /// * `mtime` — when set, exact filesystem mtime match.
+    ///
+    /// # Errors
+    ///
+    /// * [`CatalogError::NotFound`] — zero matches (or invalid stub).
+    /// * [`CatalogError::Ambiguous`] — multiple matches; `candidates` listed.
     pub fn resolve(
         &self,
         name: &str,
@@ -123,6 +153,16 @@ impl SaveCatalog {
     }
 
     /// Host selectors: `latest`, `latest_autosave`, `latest_named`.
+    ///
+    /// Picks the newest matching entry by filesystem `mtime` (not in-game date).
+    ///
+    /// # Arguments
+    ///
+    /// * `selector` — one of the three stable names above.
+    ///
+    /// # Errors
+    ///
+    /// [`CatalogError::NotFound`] for unknown selectors or empty filtered set.
     pub fn select(&self, selector: &str) -> Result<&SaveEntry, CatalogError> {
         let filter: Box<dyn Fn(&SaveEntry) -> bool> = match selector {
             "latest" => Box::new(|_| true),
@@ -141,6 +181,18 @@ impl SaveCatalog {
 }
 
 /// Scan each root for top-level `*.v3` files.
+///
+/// Missing root directories are skipped (not an error). Path-like basenames are
+/// skipped. Results sorted by mtime descending, then name.
+///
+/// # Arguments
+///
+/// * `roots` — allowlisted directories from [`crate::AppConfig::save_roots`].
+///
+/// # Errors
+///
+/// [`CatalogError::Io`] when a root exists but cannot be read, or a file’s
+/// metadata cannot be read.
 pub fn scan_roots(roots: &[SaveRoot]) -> Result<SaveCatalog, CatalogError> {
     let mut entries = Vec::new();
     for root in roots {

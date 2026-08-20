@@ -1,8 +1,10 @@
 //! Shared desktop config + SQL engine bootstrap for the MCP process.
 //!
-//! Mirrors [`vic3_analyzer_lib::session::CompanionSession`] path resolution so
+//! Mirrors `vic3_analyzer_lib::session::CompanionSession` path resolution so
 //! GUI Settings and `vic3-analyzer mcp` read the same allowlists — without
 //! depending on the Tauri crate.
+//!
+//! Flow: [`AppConfig`] → [`scan_roots`] → [`SqlEngine::with_catalog`] → tools.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,8 +23,10 @@ const DEFS_CACHE_NAME: &str = "defs.postcard";
 /// Why MCP failed to open (config / catalog / engine).
 #[derive(Debug, thiserror::Error)]
 pub enum McpBootstrapError {
+    /// Human-readable bootstrap failure (paths, defs, I/O).
     #[error("{0}")]
     Message(String),
+    /// Propagated from [`SqlEngine`] construction / catalog wiring.
     #[error(transparent)]
     Sql(#[from] SqlError),
 }
@@ -36,7 +40,8 @@ impl From<String> for McpBootstrapError {
 /// Process-local MCP session: config, save roots, and a locked [`SqlEngine`].
 ///
 /// The engine mutex serializes `use_save` rebinding against concurrent `query`
-/// calls (DataFusion registration is not assumed concurrent-safe here).
+/// calls (DataFusion registration is not assumed concurrent-safe here). GUI and
+/// MCP do **not** share RAM in v1 — only the on-disk [`AppConfig`].
 pub struct McpRuntime {
     app_data: PathBuf,
     config_path: PathBuf,
@@ -55,6 +60,15 @@ pub(crate) struct DefsStatus {
 
 impl McpRuntime {
     /// Load config from platform app-data (or `app_data` override for tests).
+    ///
+    /// # Arguments
+    ///
+    /// * `app_data` — `None` uses [`app_data_dir`]; `Some` for tests / fixtures.
+    ///
+    /// # Errors
+    ///
+    /// [`McpBootstrapError`] when app-data cannot be created, config cannot be
+    /// loaded, catalog scan fails, or the SQL engine cannot open.
     pub async fn open(app_data: Option<PathBuf>) -> Result<Self, McpBootstrapError> {
         let app_data = match app_data {
             Some(p) => p,
@@ -66,10 +80,11 @@ impl McpRuntime {
         Self::from_config(app_data, config_path, config).await
     }
 
-    /// Build from an explicit config (tests / injected [`AppConfig`]).
+    /// Build a runtime from an already-loaded [`AppConfig`].
     ///
-    /// Scans allowlisted save roots and opens [`SqlEngine::with_catalog`] with
-    /// the same defs/tokens resolution as the desktop companion session.
+    /// # Errors
+    ///
+    /// Catalog scan / [`SqlEngine`] construction failures.
     pub async fn from_config(
         app_data: PathBuf,
         config_path: PathBuf,
@@ -117,32 +132,52 @@ impl McpRuntime {
         Arc::clone(&self.engine)
     }
 
-    /// Current catalog rows (agent-facing metadata; no absolute paths).
+    /// Snapshot of catalog rows (agent-facing fields + internal paths).
+    ///
+    /// # Errors
+    ///
+    /// [`SqlError`] from the engine catalog view.
     pub async fn catalog_entries(&self) -> Result<Vec<SaveEntry>, SqlError> {
         let eng = self.engine.lock().await;
         eng.catalog_entries()
     }
 
-    /// Active bound save, if any (`vic3://session`).
+    /// Active save summary for `vic3://session`, if bound.
     pub async fn active_session(&self) -> Option<ActiveSessionInfo> {
         let eng = self.engine.lock().await;
         eng.active_session()
     }
 
-    /// Rescan allowlisted dirs and replace the in-engine `saves` catalog.
+    /// Rescan allowlisted roots into the engine `saves` table.
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`SqlError`] from [`SqlEngine::refresh_catalog`].
     pub async fn refresh_catalog(&self) -> Result<usize, SqlError> {
         let roots = self.save_roots();
         let eng = self.engine.lock().await;
         eng.refresh_catalog(&roots)
     }
 
-    /// Load/solve a save into the analysis session (host API, not SQL).
+    /// Bind / load / solve via host API (not SQL).
+    ///
+    /// # Errors
+    ///
+    /// [`SqlError`] — not found, ambiguous stub, missing defs/tokens, load failure.
     pub async fn use_save(&self, req: UseSaveRequest) -> Result<UseSaveResult, SqlError> {
         let eng = self.engine.lock().await;
         eng.use_save(req).await
     }
 
-    /// Run one read-only SQL statement against the locked engine.
+    /// Run one read-only SQL statement (`docs/sql.md`).
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` — single `SELECT` / `WITH` / `EXPLAIN` statement.
+    ///
+    /// # Errors
+    ///
+    /// [`SqlError`] — syntax, DDL rejected, no active save, plan timeout, etc.
     pub async fn query(
         &self,
         sql: &str,

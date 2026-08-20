@@ -1,4 +1,8 @@
 //! Debounced filesystem watch over configured save roots.
+//!
+//! Emits WebView event [`SAVES_CHANGED_EVENT`] so the GUI list refreshes. Does
+//! **not** auto-run A* / `plan(...)`. MCP catalog notifications are separate
+//! (`docs/mcp.md`).
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -12,6 +16,13 @@ use tauri::{AppHandle, Emitter};
 pub const SAVES_CHANGED_EVENT: &str = "saves-changed";
 
 /// Watch `save_dirs` and emit [`SAVES_CHANGED_EVENT`] after create/rename bursts.
+///
+/// # Arguments
+///
+/// * `app` — handle used to emit events to the WebView.
+/// * `roots` — absolute save-root directories; non-directories are skipped.
+///
+/// Returns [`None`] when there are no watchable dirs or the debouncer cannot start.
 pub fn spawn_save_watcher(app: AppHandle, roots: Vec<PathBuf>) -> Option<WatchHandle> {
     let dirs: Vec<PathBuf> = roots.into_iter().filter(|p| p.is_dir()).collect();
     if dirs.is_empty() {
@@ -71,6 +82,11 @@ pub struct WatchHandle {
 }
 
 /// Restart watching after Settings changes `save_dirs`.
+///
+/// # Arguments
+///
+/// * `current` — previous handle slot (dropped / replaced).
+/// * `roots` — new save-root list from config.
 pub fn restart_watcher(app: &AppHandle, current: &mut Option<WatchHandle>, roots: Vec<PathBuf>) {
     *current = spawn_save_watcher(app.clone(), roots);
 }
