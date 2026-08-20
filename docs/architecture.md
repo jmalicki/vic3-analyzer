@@ -22,11 +22,11 @@ License: AGPL-3.0. Saves and token maps are user-supplied and never uploaded.
 | `vic3-goals` | Chumsky DSL + `declare-war` / `research` / `gdp` compilation |
 | `vic3-sim` | Goal-relevant successors; event-wait edges |
 | `vic3-plan` | `SearchNode` glue + `shortest_path`; shared option/result/archive types |
-| `vic3-api` | Transport-free analysis (bytes or paths in, JSON out); shared by CLI, wasm, Tauri |
+| `vic3-api` | Transport-free analysis (bytes or paths in, JSON out); shared shapes for wasm, Tauri, MCP (and CLI `--json`) |
 | `vic3-catalog` | Save-root scan (stubs, `local`/`steam_cloud`), shared TOML/JSON app config + path auto-detect |
 | `vic3-sql` | Read-only DataFusion SQL over catalog + active/latest fact tables |
 | `vic3-mcp` | Stdio MCP server (rmcp): tools `query` / `use_save` / `refresh_catalog` / `explain`, resources, prompts |
-| `vic3-cli` | clap only lives here |
+| `vic3-cli` | clap only lives here; commands map to the same analysis as `vic3-api` |
 | `vic3-analyzer` | Tauri 2 desktop binary (`gui` / `mcp` argv); companion Settings/catalog/Advanced Query + links `vic3-mcp` / `vic3-api` / `vic3-sql` |
 | `vic3-wasm` | Thin `wasm-bindgen` over `vic3-api`; no filesystem |
 | `web/` | Vite + React; IndexedDB archive; forms from JSON Schema |
