@@ -119,6 +119,7 @@ impl CompanionSession {
         self.config
             .save(&self.config_path)
             .map_err(|e| e.to_string())?;
+        // Auto-detect may rewrite roots/defs — rebuild the engine on next use.
         self.drop_sql();
         self.refresh_catalog()?;
         Ok(self.config_dto())
@@ -306,7 +307,9 @@ impl CompanionSession {
 /// Docs panel payload for Advanced Query / future `vic3://docs/sql`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SqlDocsDto {
+    /// Full body of `docs/sql.md` (embedded via [`SQL_DOCS_MD`]).
     pub sql_md: String,
+    /// Short UDF/TVF index ([`SQL_UDF_INDEX_MD`]) shown above the full doc.
     pub udf_md: String,
 }
 
