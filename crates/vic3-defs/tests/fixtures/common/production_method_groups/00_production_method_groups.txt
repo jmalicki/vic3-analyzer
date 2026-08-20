@@ -1,0 +1,17 @@
+pmg_base_building_rye_farm = {
+	production_methods = {
+		pm_simple_farming
+	}
+}
+
+pmg_base_building_coal_mine = {
+	production_methods = {
+		pm_simple_mining
+	}
+}
+
+pmg_base_building_university = {
+	production_methods = {
+		pm_scholastic_education
+	}
+}

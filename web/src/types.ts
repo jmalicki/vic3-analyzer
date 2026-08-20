@@ -297,6 +297,26 @@ export interface AlertMitigation {
   effect?: string
 }
 
+export interface ProfessionGap {
+  profession_id: string
+  profession_name?: string
+  employed_here: number
+  jobs_here: number
+  missing_here: number
+  state_jobs: number
+  state_stock: number
+  state_shortage: number
+}
+
+export interface BuildingStaffing {
+  building_id: number
+  building_name: string
+  type_id: string
+  staffing: number
+  level: number
+  professions: ProfessionGap[]
+}
+
 export interface Alert {
   id: string
   kind: AlertKind
@@ -308,6 +328,7 @@ export interface Alert {
   good_id?: string
   evidence: AlertEvidence[]
   mitigations: AlertMitigation[]
+  staffing?: BuildingStaffing[]
 }
 
 export interface AlertsResult {

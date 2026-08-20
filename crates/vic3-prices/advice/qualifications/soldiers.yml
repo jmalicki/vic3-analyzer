@@ -1,0 +1,8 @@
+profession: soldiers
+levers:
+  always_hire:
+    title: "Soldiers can be hired without special qualifications"
+    detail: "Barracks hire from the general population. If they are empty, the state is short of people."
+  barracks:
+    title: "Expand barracks"
+    detail: "Barracks hire soldiers. Only add levels if people are available to fill them."

@@ -1,0 +1,97 @@
+peasants = {
+	can_always_hire = yes
+}
+
+laborers = {
+	can_always_hire = yes
+}
+
+farmers = {
+	qualifications = {
+		value = 1
+		if = {
+			limit = { is_pop_type = peasants }
+			multiply = 4
+		}
+		if = {
+			limit = { is_pop_type = laborers }
+			multiply = 2
+		}
+	}
+}
+
+machinists = {
+	qualifications = {
+		value = literacy
+		multiply = 20
+		if = {
+			limit = { is_pop_type = laborers }
+			multiply = 3
+		}
+		if = {
+			limit = { is_pop_type = farmers }
+			multiply = 1.5
+		}
+	}
+}
+
+engineers = {
+	qualifications = {
+		value = literacy
+		multiply = 30
+		if = {
+			limit = { is_pop_type = machinists }
+			multiply = 4
+		}
+		if = {
+			limit = { is_pop_type = academics }
+			multiply = 2
+		}
+	}
+}
+
+academics = {
+	qualifications = {
+		value = literacy
+		multiply = 40
+		if = {
+			limit = { is_pop_type = bureaucrats }
+			multiply = 2
+		}
+		if = {
+			limit = { is_pop_type = engineers }
+			multiply = 2
+		}
+	}
+}
+
+aristocrats = {
+	qualifications = {
+		value = wealth
+		subtract = 10
+		add = {
+			value = literacy
+			multiply = 5
+		}
+		if = {
+			limit = { is_pop_type = farmers }
+			multiply = 2
+		}
+		if = {
+			limit = { is_pop_type = bureaucrats }
+			multiply = 5
+		}
+		if = {
+			limit = { is_pop_type = officers }
+			multiply = 5
+		}
+		if = {
+			limit = { is_pop_type = capitalists }
+			multiply = 2
+		}
+		if = {
+			limit = { is_pop_type = clergymen }
+			multiply = 2
+		}
+	}
+}

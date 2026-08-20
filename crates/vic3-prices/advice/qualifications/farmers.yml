@@ -1,0 +1,8 @@
+profession: farmers
+levers:
+  farm:
+    title: "Build commercial farms"
+    detail: "Peasants become farmers by working commercial farms. Subsistence farms already hold peasants and will not create more farmer qualifications."
+  university:
+    title: "University"
+    detail: "Universities do not train farmers. Hire peasants onto commercial farms instead."

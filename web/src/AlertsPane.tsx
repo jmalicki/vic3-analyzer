@@ -5,12 +5,35 @@ import type {
   AlertKind,
   AlertsResult,
   BuildingEconomics,
+  BuildingStaffing,
   DefsIcons,
   MitigationAction,
   StateInfo,
   WorldDelta,
 } from './types'
 import { hashForBuilding, hashForGood, hashForState } from './workspaceNav'
+
+function formatStaffing(value: number): string {
+  if (Number.isInteger(value) || Math.abs(value - Math.round(value)) < 1e-6) {
+    return String(Math.round(value))
+  }
+  return value.toFixed(2)
+}
+
+function buildingStaffingSummary(row: BuildingStaffing): string {
+  const percent =
+    row.level > 0 ? ` (${Math.round((row.staffing / row.level) * 100)}%)` : ''
+  const staffed = `${formatStaffing(row.staffing)} of ${formatStaffing(row.level)} levels staffed${percent}`
+  const missing = [...row.professions]
+    .filter((gap) => gap.missing_here > 0.05)
+    .sort((left, right) => right.missing_here - left.missing_here)
+  if (missing.length === 0) return staffed
+  const parts = missing.map((gap) => {
+    const name = gap.profession_name || gap.profession_id
+    return `${formatStaffing(gap.missing_here)} more ${name}`
+  })
+  return `${staffed} — needs ${parts.join(', ')}`
+}
 
 function actionBuilding(action?: MitigationAction): string | undefined {
   if (!action) return undefined
@@ -32,6 +55,7 @@ function actionPm(action?: MitigationAction): string | undefined {
 function buildingIdsForAlert(alert: Alert): number[] {
   const ids = new Set<number>()
   if (alert.building_id != null) ids.add(alert.building_id)
+  for (const row of alert.staffing ?? []) ids.add(row.building_id)
   for (const mitigation of alert.mitigations) {
     const action = mitigation.action
     if (action?.type === 'pm' || action?.type === 'subsidize') {
@@ -152,6 +176,7 @@ export function alertsForBuilding(alerts: Alert[], building: BuildingEconomics):
   ])
   return alerts.filter((alert) => {
     if (alert.building_id === building.id) return true
+    if (alert.staffing?.some((row) => row.building_id === building.id)) return true
     if (
       alert.mitigations.some(
         (item) => item.action?.type === 'pm' && item.action.building_id === building.id,
@@ -184,7 +209,9 @@ export function alertsForState(
   )
   return alerts.filter(
     (alert) =>
-      alert.state_id === stateId || (alert.building_id != null && ids.has(alert.building_id)),
+      alert.state_id === stateId ||
+      (alert.building_id != null && ids.has(alert.building_id)) ||
+      alert.staffing?.some((row) => ids.has(row.building_id)),
   )
 }
 
@@ -353,6 +380,51 @@ function LocalAlertCard({
             </div>
           ))}
         </dl>
+      )}
+      {(alert.staffing?.length ?? 0) > 0 && (
+        <ul className="alert-staffing">
+          {alert.staffing!.map((row) => (
+            <li key={row.building_id}>
+              <details open>
+                <summary>
+                  <GameIcon kind="building" id={row.type_id} icons={icons} />
+                  <a href={hashForBuilding(row.building_id)}>{row.building_name}</a>
+                  <span>{buildingStaffingSummary(row)}</span>
+                </summary>
+                {row.professions.length === 0 ? (
+                  <p>No employee counts on this building, so the missing profession mix is unknown.</p>
+                ) : (
+                  <ul className="alert-profession-gaps">
+                    {row.professions.map((gap) => {
+                      const name = gap.profession_name || gap.profession_id
+                      const blocking = gap.state_shortage > 0 && gap.missing_here > 0
+                      return (
+                        <li key={gap.profession_id} className={blocking ? 'blocking' : undefined}>
+                          <GameIcon kind="pop" id={gap.profession_id} icons={icons} />
+                          <span>
+                            <strong>{name}</strong>
+                            {blocking ? ' — this is blocking' : ''}
+                            : {formatStaffing(gap.employed_here)} working here,{' '}
+                            {formatStaffing(gap.jobs_here)} needed to staff this building
+                            {gap.missing_here > 0.05
+                              ? ` (${formatStaffing(gap.missing_here)} more)`
+                              : ' (enough here)'}
+                            . State: {formatStaffing(gap.state_jobs)} jobs,{' '}
+                            {formatStaffing(gap.state_stock)} people who can take them
+                            {gap.state_shortage > 0.05
+                              ? ` — short ${formatStaffing(gap.state_shortage)}`
+                              : ' — enough in the state'}
+                            .
+                          </span>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </details>
+            </li>
+          ))}
+        </ul>
       )}
       <ol className="alert-mitigations">
         {mitigations.map((mitigation) => {

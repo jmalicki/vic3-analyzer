@@ -13,6 +13,7 @@ workspace = true
 basin.workspace = true
 schemars.workspace = true
 serde.workspace = true
+serde_yaml.workspace = true
 thiserror.workspace = true
 vic3-defs = { path = "../vic3-defs" }
 vic3-load = { path = "../vic3-load" }

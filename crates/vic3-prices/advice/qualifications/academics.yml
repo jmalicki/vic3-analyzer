@@ -1,0 +1,11 @@
+profession: academics
+levers:
+  university:
+    title: "Build a university"
+    detail: "Universities hire academics and raise literacy so clerks and bureaucrats can qualify. Staff the campus; another empty one will not help."
+  government:
+    title: "Expand government administration"
+    detail: "Bureaucrats and clerks are the usual pops who qualify as academics."
+  farm:
+    title: "Build commercial farms"
+    detail: "Farms do not train academics. Use them only to pull peasants into any employed job with literacy."

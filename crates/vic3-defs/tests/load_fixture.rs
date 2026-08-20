@@ -183,6 +183,56 @@ fn fixture_production_methods_have_goods_io() {
 }
 
 #[test]
+fn fixture_pop_types_record_qualification_sources() {
+    let defs = load_fixture();
+    let aristocrats = defs.pop_types.get("aristocrats").expect("aristocrats");
+    assert!(!aristocrats.can_always_hire);
+    assert!(aristocrats.qualifications.wealth);
+    assert!(aristocrats.qualifications.literacy);
+    assert_eq!(aristocrats.qualifications.wealth_floor, Some(10.0));
+    assert_eq!(
+        aristocrats.qualifications.source_multipliers.get("farmers"),
+        Some(&2.0)
+    );
+    assert_eq!(
+        aristocrats
+            .qualifications
+            .source_multipliers
+            .get("bureaucrats"),
+        Some(&5.0)
+    );
+    assert!(defs.pop_types["laborers"].can_always_hire);
+    let machinists = &defs.pop_types["machinists"];
+    assert!(machinists.qualifications.literacy);
+    assert_eq!(
+        machinists.qualifications.source_multipliers.get("laborers"),
+        Some(&3.0)
+    );
+    let farm_pm = defs
+        .production_methods
+        .get("pm_simple_farming")
+        .expect("farming PM");
+    assert!(farm_pm
+        .employment
+        .iter()
+        .any(|(prof, qty)| prof == "farmers" && (*qty - 4000.0).abs() < f64::EPSILON));
+    let uni = defs
+        .production_methods
+        .get("pm_scholastic_education")
+        .expect("university PM");
+    assert!(uni.education_access);
+    assert!(uni.qualifications_boost);
+    assert_eq!(
+        defs.buildings["building_rye_farm"].production_method_groups,
+        ["pmg_base_building_rye_farm"]
+    );
+    assert_eq!(
+        defs.production_method_groups["pmg_base_building_rye_farm"],
+        ["pm_simple_farming"]
+    );
+}
+
+#[test]
 fn fixture_buildings_have_state_panel_metadata() {
     let defs = load_fixture();
     let farm = &defs.buildings["building_rye_farm"];

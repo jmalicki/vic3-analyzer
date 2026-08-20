@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use crate::types::build_package_ladder;
 use crate::{
     BuildingGroup, BuildingType, BuyPackage, DefsError, FlagDefinition, GameDefs, Good, GoodIdx,
-    NeedEntry, NeedIdx, NeedsVec, PopNeed, ProductionMethod,
+    NeedEntry, NeedIdx, NeedsVec, PopNeed, PopType, ProductionMethod,
 };
 
 #[derive(Debug, Clone)]
@@ -25,6 +25,8 @@ pub(crate) struct StagingDefs {
     pub pop_needs: BTreeMap<String, StagingNeed>,
     pub buy_packages: BTreeMap<u8, StagingBuyPackage>,
     pub obsessions: BTreeMap<String, Vec<String>>,
+    pub pop_types: BTreeMap<String, PopType>,
+    pub production_method_groups: BTreeMap<String, Vec<String>>,
 }
 
 impl Default for StagingDefs {
@@ -45,6 +47,8 @@ impl Default for StagingDefs {
             pop_needs: BTreeMap::new(),
             buy_packages: BTreeMap::new(),
             obsessions: BTreeMap::new(),
+            pop_types: BTreeMap::new(),
+            production_method_groups: BTreeMap::new(),
         }
     }
 }
@@ -55,6 +59,9 @@ pub(crate) struct StagingPm {
     pub texture: Option<String>,
     pub inputs: BTreeMap<String, f64>,
     pub outputs: BTreeMap<String, f64>,
+    pub employment: BTreeMap<String, f64>,
+    pub education_access: bool,
+    pub qualifications_boost: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +115,8 @@ impl StagingDefs {
             buy_packages: BTreeMap::new(),
             package_ladder: Vec::new(),
             obsessions: BTreeMap::new(),
+            pop_types: self.pop_types,
+            production_method_groups: self.production_method_groups,
         };
         crate::loc::polish_labels(&mut defs.labels);
         let good_index: HashMap<String, GoodIdx> = defs
@@ -142,6 +151,9 @@ impl StagingDefs {
                     id: pm.id,
                     inputs,
                     outputs,
+                    employment: pm.employment.into_iter().collect(),
+                    education_access: pm.education_access,
+                    qualifications_boost: pm.qualifications_boost,
                 },
             );
         }

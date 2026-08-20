@@ -493,6 +493,7 @@ mod tests {
                 id: "pm_rich".into(),
                 inputs: Vec::new(),
                 outputs: vec![(GoodIdx::from_usize(0), 40.0)],
+                ..Default::default()
             },
         );
         defs.production_methods.insert(
@@ -501,6 +502,7 @@ mod tests {
                 id: "pm_poor".into(),
                 inputs: Vec::new(),
                 outputs: vec![(GoodIdx::from_usize(0), 1.0)],
+                ..Default::default()
             },
         );
         defs

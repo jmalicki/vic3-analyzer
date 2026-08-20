@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{DefsError, GameDefs};
 
 /// Postcard blob format version. Bump when [`GameDefs`] is not backward compatible.
-pub const BLOB_VERSION: u32 = 10;
+pub const BLOB_VERSION: u32 = 11;
 
 #[derive(Serialize, Deserialize)]
 struct DefsBlob {
@@ -79,6 +79,7 @@ mod tests {
                 id: "pm_simple_forestry".into(),
                 inputs: vec![(GoodIdx::from_usize(0), 1.0)],
                 outputs: vec![(GoodIdx::from_usize(1), 30.0)],
+                ..ProductionMethod::default()
             },
         );
 
@@ -124,6 +125,8 @@ mod tests {
             buy_packages,
             package_ladder: Vec::new(),
             obsessions,
+            pop_types: BTreeMap::new(),
+            production_method_groups: BTreeMap::new(),
         };
         defs.rebuild_package_ladder();
         defs

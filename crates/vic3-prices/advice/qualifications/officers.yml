@@ -1,0 +1,11 @@
+profession: officers
+levers:
+  barracks:
+    title: "Expand barracks"
+    detail: "Soldiers qualify as officers. Barracks hire soldiers."
+  university:
+    title: "Build a university"
+    detail: "Literacy helps soldiers qualify as officers. Useful once barracks already employ soldiers."
+  government:
+    title: "Expand government administration"
+    detail: "Bureaucrats also qualify as officers."

@@ -1,0 +1,14 @@
+profession: clerks
+levers:
+  government:
+    title: "Expand government administration"
+    detail: "Laborers and machinists qualify as clerks. Government buildings hire them."
+  urban:
+    title: "Expand urban centers"
+    detail: "Urban centers hire clerks once lower-strata pops exist."
+  university:
+    title: "Build a university"
+    detail: "Literacy is the main clerk qualification. Useful once laborers already work in this state."
+  farm:
+    title: "Build commercial farms"
+    detail: "Farms create laborers who can later become clerks. Skip this if laborers already exist."

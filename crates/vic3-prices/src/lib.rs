@@ -8,6 +8,7 @@ mod alerts;
 mod consumption;
 mod formula;
 mod optimize;
+mod qualification_advice;
 mod result;
 mod solve;
 mod world;
@@ -24,6 +25,7 @@ pub use optimize::{
     OptimizePricesSummary, OptimizeResult, MAX_PM_TRIALS, PM_SEARCH_HEURISTIC,
     PM_TECH_GATING_INCOMPLETE,
 };
+pub use qualification_advice::{BuildingStaffing, ProfessionGap};
 pub use result::{
     BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, ExtraLevelsDelta,
     GoodFlow, GoodPrice, MarketInputs, PopNeedBasket, PricesResult, ProductionMethodDelta,
@@ -190,6 +192,7 @@ mod tests {
                 id: "pm_simple_forestry".into(),
                 inputs: Vec::new(),
                 outputs: vec![(GoodIdx::from_usize(1), 30.0)],
+                ..Default::default()
             },
         );
         defs.rebuild_package_ladder();
@@ -274,6 +277,7 @@ mod tests {
                 id: "pm_simple_forestry".into(),
                 inputs: Vec::new(),
                 outputs: vec![(GoodIdx::from_usize(1), 30.0)],
+                ..Default::default()
             },
         );
         defs.rebuild_package_ladder();
@@ -467,6 +471,7 @@ mod tests {
                 id: "pm_goofy_factory".into(),
                 inputs: vec![(GoodIdx::from_usize(2), 2.0)],
                 outputs: vec![(GoodIdx::from_usize(1), 3.0)],
+                ..Default::default()
             },
         );
         let world = World {
@@ -525,6 +530,7 @@ mod tests {
                 id: "pm_wood_buyer".into(),
                 inputs: vec![(GoodIdx::from_usize(1), 10.0)],
                 outputs: Vec::new(),
+                ..Default::default()
             },
         );
         defs.production_methods.insert(
@@ -533,6 +539,7 @@ mod tests {
                 id: "pm_wood_seller".into(),
                 inputs: Vec::new(),
                 outputs: vec![(GoodIdx::from_usize(1), 10.0)],
+                ..Default::default()
             },
         );
         let state = |id| WorldState {
@@ -603,6 +610,7 @@ mod tests {
                 id: "pm_wood_buyer".into(),
                 inputs: vec![(GoodIdx::from_usize(1), 10.0)],
                 outputs: Vec::new(),
+                ..Default::default()
             },
         );
         defs.production_methods.insert(
@@ -611,6 +619,7 @@ mod tests {
                 id: "pm_wood_seller".into(),
                 inputs: Vec::new(),
                 outputs: vec![(GoodIdx::from_usize(1), 10.0)],
+                ..Default::default()
             },
         );
         let state = |id| WorldState {
@@ -798,6 +807,7 @@ mod tests {
                 id: "pm_grain".into(),
                 inputs: Vec::new(),
                 outputs: vec![(GoodIdx::from_usize(0), 30.0)],
+                ..Default::default()
             },
         );
         let wood = GoodIdx::from_usize(1);

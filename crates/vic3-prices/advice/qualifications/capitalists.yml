@@ -1,0 +1,11 @@
+profession: capitalists
+levers:
+  urban:
+    title: "Expand urban centers"
+    detail: "Shopkeepers qualify as capitalists. Urban centers hire shopkeepers."
+  wealth:
+    title: "Raise shopkeeper wealth"
+    detail: "Capitalist qualifications need wealth. Cheap luxury and everyday goods help shopkeepers promote. Empty financial districts add capitalist jobs you cannot fill."
+  university:
+    title: "University"
+    detail: "Universities do not train capitalists. Raise shopkeeper wealth instead."

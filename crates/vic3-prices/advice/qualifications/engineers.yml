@@ -1,0 +1,14 @@
+profession: engineers
+levers:
+  farm:
+    title: "Build commercial farms"
+    detail: "Farms create laborers and farmers, a long way from engineers. Skip this if machinists already live in the state."
+  mine:
+    title: "Build mines"
+    detail: "Mines create laborers who can later become machinists, then engineers."
+  workshop:
+    title: "Build workshops"
+    detail: "Workshops hire machinists, the pops who qualify as engineers."
+  university:
+    title: "Build a university"
+    detail: "Machinists with decent literacy qualify as engineers faster with a university. Peasants do not."
