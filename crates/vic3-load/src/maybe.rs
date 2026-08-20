@@ -1,5 +1,8 @@
 //! Paradox `database` maps store deleted slots as the identifier `none`
-//! instead of an object. Serde would otherwise fail those entries.
+//! instead of an object.
+//!
+//! Without this helper, serde would reject those entries and fixtures with
+//! sparse ids would fail to load. Capitalized `None` is **not** the sentinel.
 
 use serde::de::{self, Deserialize, Deserializer, MapAccess, Unexpected, Visitor};
 use std::{collections::HashMap, fmt, hash::Hash, marker::PhantomData};

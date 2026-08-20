@@ -1,7 +1,28 @@
 //! Product IR deserialized from a Vic3 save via jomini / `DeserializeVic3`.
 //!
-//! Field names follow the save. Missing keys default so a small fixture (and
-//! older patches) still load. Extra save keys are ignored.
+//! # Ownership and growth
+//!
+//! Field names follow the save. This crate owns the structs so later phases can
+//! add managers without forking pdx-tools `Vic3Save`. Missing keys default so a
+//! small fixture (and older patches) still load. Extra save keys are ignored.
+//!
+//! # Sparse ids and `none`
+//!
+//! Paradox `*_manager.database` maps are sparse `u32` → object-or-`none`.
+//! [`Manager`] skips deleted slots via [`Manager::iter_present`]. Binary saves
+//! often store culture / goods as integer indices; fixtures use script ids —
+//! flex deserializers accept both.
+//!
+//! # [`Save`] vs [`WorldSave`] vs [`WorldSnapshot`]
+//!
+//! - [`Save`] — full file-shaped IR for summaries and tests.
+//! - [`WorldSave`] — subset deserialize for prices / planning (skips markets /
+//!   trade routes; keeps tech, queues, interest, armies).
+//! - [`WorldSnapshot`] — trait both implement so `vic3_prices::World::from_save`
+//!   never depends on unused managers.
+//!
+//! Projection helpers ([`researched_techs_for`], [`army_power_projection_for`],
+//! [`declared_interest_for`], …) read through [`WorldSnapshot`] for planning.
 
 use crate::maybe::maybe_map;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
@@ -92,8 +113,9 @@ pub struct Save {
 /// Save fields the market + planning projections need.
 ///
 /// Markets and trade routes stay skipped (prices inject trade via state rows).
-/// Technology and construction queues are kept so [`World`] / planning can
-/// project researched techs and queue heads without a second full [`Save`] parse.
+/// Technology and construction queues are kept so `vic3_prices::World` /
+/// planning can project researched techs and queue heads without a second full
+/// [`Save`] parse.
 /// Interest markers and army formations are kept so planning can project
 /// `army_power_projection` / `interest_in`.
 /// Skipping still does **not** avoid zlib inflate of a single-member
@@ -135,7 +157,7 @@ pub struct WorldSave {
     pub previous_played: Vec<Player>,
 }
 
-/// Subset of [`Save`] / [`WorldSave`] that [`vic3_prices::World::from_save`] reads.
+/// Subset of [`Save`] / [`WorldSave`] that `vic3_prices::World::from_save` reads.
 ///
 /// One projection API so prices code never takes a dependency on unused
 /// managers. Implementations stay field-shaped; layout/skipping is the
@@ -1243,6 +1265,10 @@ pub struct LawEntry {
 }
 
 /// A trade route in `trade_route_manager.database`.
+///
+/// On the prices path these volumes are **frozen** (employment / wages / trade
+/// centers stay fixed except explicit what-if deltas). [`WorldSave`] skips this
+/// manager; post-1.9 trade capacity lives on [`State::trade`] instead.
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub struct TradeRoute {
     #[serde(default)]
@@ -1437,6 +1463,9 @@ pub fn queued_building_for(save: &impl WorldSnapshot, country_id: u32) -> Option
 }
 
 /// Declared interest ids split so DSL `interest_in(state=…)` / `region=` can differ.
+///
+/// State-region and strategic-region tokens are normalized separately via
+/// [`normalize_interest_ids`] so planning atoms can match either form.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DeclaredInterest {
     pub states: Vec<String>,

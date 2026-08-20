@@ -1,4 +1,8 @@
 //! Dense good indices aligned with [`crate::GameDefs::goods_order`].
+//!
+//! Saved building IO and sell-order vectors use these indices so hot paths
+//! avoid string lookups. Prefer [`GoodIdx`] over raw `usize` so wealth levels
+//! and need slots cannot be passed where a good is required.
 
 use std::fmt;
 use std::ops::{Index, IndexMut};
@@ -20,7 +24,11 @@ impl GoodIdx {
         u16::try_from(index).ok().map(Self)
     }
 
-    /// Construct from a position in `goods_order`. Panics if `index` exceeds `u16::MAX`.
+    /// Construct from a position in `goods_order`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` exceeds `u16::MAX` (far beyond any vanilla goods table).
     #[inline]
     pub fn from_usize(index: usize) -> Self {
         Self::try_from_usize(index).expect("good count fits in u16")

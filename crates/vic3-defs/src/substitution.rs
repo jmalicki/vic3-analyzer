@@ -1,4 +1,10 @@
 //! Normalize substitution shares against indexed sell orders.
+//!
+//! Vic3 maps each pop need onto goods with `weight` and
+//! `min_supply_share` / `max_supply_share`. The price loop uses
+//! [`substitution_shares`] so consumption respects invariant **I4**
+//! ([`docs/invariants.md`](../../../docs/invariants.md),
+//! [`docs/prices.md`](../../../docs/prices.md)).
 
 use crate::{GoodIdx, GoodsVec, NeedEntry, PopNeed};
 

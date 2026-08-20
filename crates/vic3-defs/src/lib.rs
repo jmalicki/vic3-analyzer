@@ -1,34 +1,50 @@
 //! Game definitions for Victoria 3: goods, `PRICE_RANGE`, production methods,
-//! pop needs, buy packages, and cultural obsessions.
+//! pop needs, buy packages, cultural obsessions, buildings, and UI assets.
 //!
-//! # Data roots
+//! # Role in the pipeline
 //!
-//! [`load_from_path`] accepts a **game install** (`<Victoria 3>/game/common/...`)
-//! or a **fixture tree** that already has `common/` at its root. Expected
-//! relative paths (documented on the loader):
+//! ```text
+//! save (+ tokens) → vic3-load → IR
+//! install / fixture / blob → vic3-defs → GameDefs
+//! IR + GameDefs → vic3-prices → … → plan → vic3-api
+//! ```
 //!
-//! - `common/goods`
-//! - `common/defines` (`NEconomy.PRICE_RANGE`)
-//! - `common/production_methods`
-//! - `common/production_method_groups`
-//! - `common/pop_types` (qualification scripts; static analysis only)
-//! - `common/buildings`
-//! - `common/building_groups`
-//! - `common/pop_needs`
-//! - `common/buy_packages`
-//! - `common/cultures` (obsessions; may be empty)
-//! - `common/coat_of_arms`, `common/flag_definitions`, `common/named_colors`
-//! - `gfx/coat_of_arms/{patterns,colored_emblems,textured_emblems}`
-//! - `gfx/interface/icons/{goods_icons,building_icons,...}` (allowlisted leaf dirs)
-//! - `localization/english/goods_l_*.yml` and `countries_l_*.yml`
+//! This crate does **not** parse saves. It turns Clausewitz game data (or a
+//! prebuilt postcard blob) into [`GameDefs`] that the price solver and wasm UI
+//! share. Clausewitz text is parsed with **jomini** (`Deserialize` /
+//! `JominiDeserialize`); there is no custom lexer.
 //!
-//! Clausewitz text is parsed with **jomini** (`Deserialize` / `JominiDeserialize`).
-//! This crate does not implement a Clausewitz lexer.
+//! Architecture overview: [`docs/architecture.md`](../../../docs/architecture.md).
+//! Price formula and pop consumption:
+//! [`docs/prices.md`](../../../docs/prices.md).
+//! Substitution invariant **I4**:
+//! [`docs/invariants.md`](../../../docs/invariants.md).
+//!
+//! # Install vs fixture vs blob
+//!
+//! | Source | Entry point | When |
+//! | --- | --- | --- |
+//! | Game install (`…/Victoria 3/game/…`) or fixture tree with `common/` at root | [`load_from_path`] | CLI / desktop / tests with a filesystem |
+//! | In-memory allowlisted files | [`load_from_files`] / [`DefsBuilder`] | Browser file picker; batched CoA art |
+//! | Postcard snapshot | [`encode_blob`] / [`decode_blob`] | wasm: no filesystem; UI ships bytes |
+//!
+//! `goods_order` follows deterministic `common/goods` source-file order so
+//! saved building IO indices line up with vanilla. Dense [`GoodIdx`] /
+//! [`NeedIdx`] vectors are preferred over string keys in hot paths.
+//!
+//! # Path allowlist
+//!
+//! [`classify_defs_path`] is the trust boundary for browser walks and
+//! [`load_from_files`]: only listed `common/` dirs, English localization
+//! prefixes, and allowlisted icon / CoA leaf folders are read. See
+//! [`COMMON_DIRS`].
 //!
 //! # Wasm
 //!
 //! There is no filesystem in wasm. Encode a [`GameDefs`] with [`encode_blob`]
-//! (postcard) and ship the bytes; the UI calls [`decode_blob`].
+//! (postcard, versioned by [`BLOB_VERSION`]) and ship the bytes; the UI calls
+//! [`decode_blob`]. Bump [`BLOB_VERSION`] when [`GameDefs`] is not backward
+//! compatible.
 
 mod blob;
 mod coa;

@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
 /// Errors from loading game definitions or the wasm defs blob.
+///
+/// [`Self::NotAGameRoot`] covers both a bad install path and an in-memory
+/// selection that never included `common/goods`.
 #[derive(Debug, thiserror::Error)]
 pub enum DefsError {
     #[error("I/O error while reading {path}: {source}")]

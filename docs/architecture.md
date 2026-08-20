@@ -15,8 +15,8 @@ License: AGPL-3.0. Saves and token maps are user-supplied and never uploaded.
 
 | Crate | Role |
 | --- | --- |
-| `vic3-load` | Envelope via pdx-tools `vic3save` + our serde IR (`DeserializeVic3`); surgical plaintext `.v3` patch-export (`SavePatch`) |
-| `vic3-defs` | Goods, defines, PMs, pop needs from a game install or fixture tree; wasm defs blob |
+| `vic3-load` | Envelope via pdx-tools `vic3save` + our serde IR (`DeserializeVic3`); surgical plaintext `.v3` patch-export (`SavePatch`). Contracts in crate rustdoc. |
+| `vic3-defs` | Goods, defines, PMs, pop needs from a game install or fixture tree; wasm defs blob. Contracts in crate rustdoc. |
 | `vic3-prices` | Closed-form market price + pop consumption + Basin NLS equilibrium; `alerts`, `preview(WorldDelta)`, `warm_rel` |
 | `vic3-world` | Compact `PlanningState` projection from IR + prices |
 | `vic3-goals` | Chumsky DSL + `declare-war` / `research` / `gdp` compilation |

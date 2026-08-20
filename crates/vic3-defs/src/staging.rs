@@ -1,4 +1,8 @@
 //! Clausewitz load accumulates string good/need ids; resolve them once.
+//!
+//! Staging keeps script ids while files merge. [`StagingDefs::resolve`] maps
+//! those strings onto dense [`crate::GoodIdx`] / [`crate::NeedIdx`] values and
+//! builds [`crate::GameDefs::package_ladder`] before the blob is encoded.
 
 use std::collections::{BTreeMap, HashMap};
 
