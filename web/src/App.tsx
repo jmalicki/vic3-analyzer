@@ -241,6 +241,7 @@ function App({ wasmApi }: Props) {
   })
   const [activeView, setActiveView] = useState<WorkspaceView>(() => parseHash().view ?? 'prices')
   const [militaryTab, setMilitaryTab] = useState<MilitaryTab>(() => parseHash().militaryTab)
+  const [locationHash, setLocationHash] = useState(() => window.location.hash)
   const [records, setRecords] = useState<AnalysisRecord[]>([])
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
   const [archiveNote, setArchiveNote] = useState<string>()
@@ -478,6 +479,7 @@ function App({ wasmApi }: Props) {
       const parsed = parseHash()
       if (parsed.view) setActiveView(parsed.view)
       setMilitaryTab(parsed.militaryTab)
+      setLocationHash(window.location.hash)
     }
     window.addEventListener('hashchange', sync)
     return () => window.removeEventListener('hashchange', sync)
@@ -815,6 +817,7 @@ function App({ wasmApi }: Props) {
   // A real install has dozens of goods; a handful means the fixture blob or a
   // folder pick that missed common/goods.
   const thinDefs = Boolean(defsSummary && defsSummary.goods < 10)
+  const pricesListView = !/^#\/prices\/(good|state|building)\//.test(locationHash)
 
   return (
     <main>
@@ -1044,21 +1047,46 @@ function App({ wasmApi }: Props) {
       {activeView === 'prices' && (
         <section
           className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
-          aria-labelledby="prices-tool-heading"
+          aria-labelledby={pricesListView ? 'prices-tool-heading' : undefined}
         >
-          <div className="tool-heading">
-            <div>
-              <p className="eyebrow">MARKET</p>
-              <h2 id="prices-tool-heading">Goods prices</h2>
-              <p>Estimate current prices from your save and selected game definitions.</p>
-            </div>
-          </div>
-          {thinDefs && (
-            <p className="demo-warning">
-              {defsFile
-                ? `${defsFile.name} only defines ${defsSummary?.goods} goods, so prices below cover just those. Rebuild from the game folder itself — picking a subfolder skips the files the solver needs.`
-                : 'The local development demo blob defines only a few fixture goods. Build definitions from a Victoria 3 install for the full goods list.'}
-            </p>
+          {(pricesListView || !result) && (
+            <>
+              <div className="tool-heading">
+                <div>
+                  <p className="eyebrow">MARKET</p>
+                  <h2 id="prices-tool-heading">Goods prices</h2>
+                  <p>Estimate current prices from your save and selected game definitions.</p>
+                </div>
+              </div>
+              {thinDefs && (
+                <p className="demo-warning">
+                  {defsFile
+                    ? `${defsFile.name} only defines ${defsSummary?.goods} goods, so prices below cover just those. Rebuild from the game folder itself — picking a subfolder skips the files the solver needs.`
+                    : 'The local development demo blob defines only a few fixture goods. Build definitions from a Victoria 3 install for the full goods list.'}
+                </p>
+              )}
+            </>
+          )}
+          {result ? (
+            <>
+              {saveRestored && !analysisReady && (
+                <p className="model-info">
+                  Showing the last analysis instantly. Tools that need a live solve unlock when the
+                  engine finishes reloading.
+                </p>
+              )}
+              <PriceExplorer
+                result={result}
+                icons={goodIcons}
+                playerCountryId={summary?.country_id}
+                playerMarketId={summary?.market_id}
+                alerts={alertsResult?.alerts}
+                onApply={(delta) => void requestApply(delta)}
+              />
+              <ModelInfo status={result.status} />
+            </>
+          ) : (
+            <p>Prices appear after a save is priced.</p>
           )}
         </section>
       )}
@@ -1298,7 +1326,7 @@ function App({ wasmApi }: Props) {
         </section>
       )}
 
-      {(activeView === 'prices' || activeView === 'what-if') && result && (
+      {activeView === 'what-if' && result && (
         <>
           {saveRestored && !analysisReady && (
             <p className="model-info">
@@ -1309,7 +1337,7 @@ function App({ wasmApi }: Props) {
           <PriceExplorer
             result={result}
             icons={goodIcons}
-            scenario={activeView === 'what-if'}
+            scenario
             playerCountryId={summary?.country_id}
             playerMarketId={summary?.market_id}
             alerts={alertsResult?.alerts}

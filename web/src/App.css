@@ -155,6 +155,12 @@ section[aria-labelledby] { margin-top: 1rem; }
 .workspace-nav button[aria-current="page"] { background: #d7e6a7; color: #172016; }
 .workspace-page { border: 1px solid #37433a; background: #18201a; padding: 1.25rem; margin-top: 0; }
 .workspace-page h2 { margin: .15rem 0; }
+.workspace-page > section[aria-labelledby] {
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+}
 .alerts-list { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: .75rem; }
 .alert-groups { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: .85rem; }
 .alert-group {
@@ -231,6 +237,13 @@ section[aria-labelledby] { margin-top: 1rem; }
 .alert-evidence div { display: grid; grid-template-columns: 10rem 1fr; gap: .6rem; }
 .alert-evidence dt { color: #9ba79d; }
 .alert-evidence dd { margin: 0; }
+.alert-staffing { list-style: none; padding: 0; margin: 0 0 1rem; display: grid; gap: .5rem; }
+.alert-staffing details { border: 1px solid #314033; padding: .45rem .65rem; background: #111713; }
+.alert-staffing summary { display: flex; gap: .45rem; align-items: center; flex-wrap: wrap; cursor: pointer; }
+.alert-staffing summary span { color: #9ba79d; font-size: .9rem; }
+.alert-profession-gaps { list-style: none; padding: .4rem 0 0; margin: 0; display: grid; gap: .45rem; }
+.alert-profession-gaps li { display: flex; gap: .45rem; align-items: flex-start; color: #c8ccc5; font-size: .92rem; }
+.alert-profession-gaps li.blocking { color: #e2a06f; }
 .alert-mitigations { list-style: none; padding: 0; margin: 0; display: grid; gap: .75rem; }
 .alert-mitigation-heading { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .alert-mitigation-heading p, .alert-mitigations p { margin: .35rem 0 0; color: #c8ccc5; }

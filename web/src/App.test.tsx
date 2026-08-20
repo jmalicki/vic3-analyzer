@@ -241,6 +241,10 @@ describe('prices UI', () => {
 
     expect(await screen.findByText('Iron')).toBeInTheDocument()
     expect(screen.getByText('43.50')).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: 'Goods prices' })).toHaveLength(1)
+    expect(screen.getByRole('heading', { name: 'Goods prices' }).closest('.workspace-page')).toHaveTextContent(
+      'Iron',
+    )
     expect(screen.getByRole('link', { name: 'Method and limitations' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Analyze prices' })).not.toBeInTheDocument()
     expect(api.load_analysis).toHaveBeenCalled()

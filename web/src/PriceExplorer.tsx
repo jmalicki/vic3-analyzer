@@ -1289,10 +1289,10 @@ export function PriceExplorer({
 
   if (view.kind === 'states') return null
 
-  return (
-    <section aria-labelledby="prices-heading">
+  const list = (
+    <>
       <div className="result-heading">
-        <h2 id="prices-heading">{scenario ? 'Scenario prices' : 'Goods prices'}</h2>
+        {scenario ? <h2 id="prices-heading">Scenario prices</h2> : null}
         <span>{scopedGoods.length} goods</span>
       </div>
       <ScopeFilter mode={effectiveFilterMode} onChange={setFilterMode} />
@@ -1304,6 +1304,10 @@ export function PriceExplorer({
       </p>
       <EmptyMarketWarning inputs={result.inputs} />
       <GoodsTable goods={scopedGoods} icons={icons} />
-    </section>
+    </>
   )
+  if (scenario) {
+    return <section aria-labelledby="prices-heading">{list}</section>
+  }
+  return list
 }
