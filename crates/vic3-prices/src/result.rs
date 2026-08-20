@@ -1,4 +1,12 @@
-//! Option and result types matching `docs/json-schema.md` (`PricesResult`).
+//! Option and result types for JSON / schemars (`docs/json-schema.md`).
+//!
+//! [`SolveOpts`] / [`WhatIfOpts`] / [`WorldDelta`] are the public mutation and
+//! warm-start surface. [`PricesResult`] is the full solve payload: goods,
+//! state locals (MAPI), buildings, pops, residual, status, limitations, and
+//! `relative` for the next [`SolveOpts::warm_rel`].
+//!
+//! Schema snapshots live under `schema/`; regenerate with
+//! `VIC3_WRITE_SCHEMA=1 cargo test -p vic3-prices --test schema dump_schemas`.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -13,6 +21,9 @@ use vic3_defs::{GameDefs, GoodIdx, NeedIdx};
 use crate::world::Intern;
 
 /// Solver iteration / residual tolerances.
+///
+/// Passed through `vic3-api` as JSON (`solve_opts_json`). Defaults match a
+/// cold solve that still finishes within the iteration budget on late saves.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SolveOpts {
@@ -28,6 +39,9 @@ pub struct SolveOpts {
     /// When present and the length matches the internal goods vector, the
     /// successive-substitution warm start is skipped and Basin starts from this
     /// vector (clamped to bounds). A length mismatch is ignored (cold start).
+    ///
+    /// Source: prior [`PricesResult::relative`]. `vic3-api` mutate / apply-delta
+    /// set this automatically from the loaded baseline solve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warm_rel: Option<Vec<f64>>,
 }
@@ -64,7 +78,11 @@ pub struct WhatIfOpts {
 /// Preview mutation: extra levels, then production methods. Does not write a save.
 ///
 /// [`crate::apply_delta`] clones the world; [`crate::preview`] re-solves without
-/// committing. Subsidy entries are accepted and ignored (no IR flag).
+/// committing. Subsidy entries are accepted and ignored (no IR flag) and cause
+/// [`crate::SUBSIDY_NOT_MODELED`] on the result.
+///
+/// Order of application: all `extra_levels`, then all `production_methods`.
+/// PM swaps clear that building’s saved IO so recipes × staffed levels apply.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorldDelta {
@@ -677,7 +695,14 @@ fn materialize_state_pop(tables: &EmitTables, row: &CompactStatePop) -> StatePop
     }
 }
 
-/// Price-equilibrium output. `limitations` is always the crate [`crate::LIMITATIONS`].
+/// Price-equilibrium output. Every solve / preview / what-if returns this shape.
+///
+/// `limitations` is always at least the crate [`crate::LIMITATIONS`] (preview may
+/// append extras). `residual` is always present (I5). `relative` mirrors
+/// `goods` order for [`SolveOpts::warm_rel`].
+///
+/// Downstream: `PlanningState` takes `goods` prices; SQL/MCP diagnostics read
+/// the same JSON via `vic3-api` / the SQL session’s last solve.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PricesResult {
     /// Prices currently solve one synthetic economy for the whole save.

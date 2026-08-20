@@ -1,10 +1,24 @@
-//! Bound-constrained NLS (`basin::Trf`) plus successive-substitution warm start.
+//! Bound-constrained NLS ([`basin::Trf`]) plus successive-substitution warm start.
 //!
-//! The NLS / settle loop is ~1 ms on a late autosave; building shops is ~80 ms.
-//! [`finished`] still builds the full UI payload (compact pop rows, need baskets,
-//! qualifications) and dominates (~250 ms). CLI `prices` times the same work as
-//! wasm `load_analysis`. Do not add a goods-only solve because the default table
-//! omits pops.
+//! # Algorithm (same [`solve`] API)
+//!
+//! 1. Build access-scaled frozen non-pop orders and state shops (pops at local
+//!    prices; buildings + post-1.9 trade frozen).
+//! 2. If [`SolveOpts::warm_rel`] length matches, clamp and start Basin from it
+//!    (skip step 3). Else run successive substitution
+//!    `r ← (1−α)r + α P(c(r))` for a few iterations (`α = 0.5`).
+//! 3. Run Basin trust-region-reflective on
+//!    `‖r − r_formula(orders(r))‖²` with box bounds from `PRICE_RANGE`.
+//! 4. Polish with successive substitution (also the fallback after
+//!    `SolverFailed`). TRF stays strictly inside the box; SS may sit on a bound.
+//!
+//! Timing notes (late autosave, rough): NLS / settle ~1 ms; building shops
+//! ~80 ms; [`finished`] (full UI payload) dominates ~250 ms. CLI `prices` and
+//! wasm `load_analysis` pay the same. There is no goods-only public solve —
+//! the default table still needs pop/need rows for the UI contract.
+//!
+//! Downstream: [`PricesResult`] feeds `PlanningState` and `vic3-api` JSON;
+//! see the crate root docs.
 
 use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
@@ -36,7 +50,25 @@ const LOCAL_EPS: f64 = 1e-10;
 /// with box bounds `r ∈ [1 − PRICE_RANGE, 1 + PRICE_RANGE]`.
 ///
 /// Warm-starts (and, on Basin failure, falls back to) successive substitution
-/// `r ← (1−α)r + α P(c(r))` inside this same API.
+/// `r ← (1−α)r + α P(c(r))` inside this same API. See the module docs for the
+/// step order and [`SolveOpts::warm_rel`] skip rule.
+///
+/// # Arguments
+///
+/// * `world` — pops (in-loop), buildings / trade / wages (**frozen**), states
+///   (infrastructure → market access / MAPI).
+/// * `defs` — goods bases, `PRICE_RANGE`, needs / buy packages / PMs.
+/// * `opts` — `residual_eps`, `max_iters`, optional `warm_rel`.
+///
+/// # Returns
+///
+/// Always a [`PricesResult`]: `residual`, `status`, `limitations` (= crate
+/// [`LIMITATIONS`]), goods table, state locals, building economics, relative
+/// vector for a later warm start. Empty goods (no positive base prices) yields
+/// `Converged` with residual `0` and empty rows; non-positive bases yield
+/// `Failed` with infinite residual.
+///
+/// No `Result` error channel — callers inspect `status` / residual (I5).
 ///
 /// # Limitations
 ///
@@ -167,6 +199,16 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
 }
 
 /// Apply a building-level delta and re-solve. Employment (`staffing`) stays frozen.
+///
+/// Equivalent to cloning via [`World::with_extra_levels`] then [`solve`]. Prefer
+/// [`crate::preview`] with a [`crate::WorldDelta`] when swapping PMs or targeting
+/// a building id.
+///
+/// # Arguments
+///
+/// * `world` — unchanged; matching buildings get `extra_levels` on a clone.
+/// * `defs` / `opts` — same as [`solve`].
+/// * `delta` — building type id + non-negative extra levels.
 pub fn what_if(
     world: &World,
     defs: &GameDefs,

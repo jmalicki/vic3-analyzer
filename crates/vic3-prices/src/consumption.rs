@@ -1,6 +1,8 @@
 //! Pop consumption from buy packages, substitution, and relaxed wealth.
 //!
-//! Two caches share substitution shares and the 1..=99 wealth ladder:
+//! This is the **in-loop** demand side of the equilibrium: buildings and trade
+//! stay frozen; pops adjust. Two caches share substitution shares and the
+//! 1..=99 wealth ladder:
 //! - [`UnitBaskets`] — dense goods totals for the residual (scale/lerp).
 //! - [`UnitNeedBaskets`] — per-need goods for the population tab.
 //!
@@ -261,6 +263,13 @@ where
 /// wages are set) then **interpolated** between neighboring buy packages — not
 /// an ILP over the discrete ladder. Substitution uses
 /// [`vic3_defs::substitution_shares`] on each need's **world** sell-order shares.
+///
+/// # Arguments
+///
+/// * `pops` — consumption views ([`WorldPop`]); size scaled by [`POP_SCALE`].
+/// * `prices` / `base_prices` — paid prices and bases (same goods order as `defs`).
+/// * `sell_orders` — world sell vector that drives substitution shares (frozen
+///   building/trade sell in the residual, not local attributed sell).
 pub fn consumption(
     pops: &[WorldPop],
     prices: &GoodsVec,

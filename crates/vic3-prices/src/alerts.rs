@@ -1,12 +1,16 @@
-//! Shortage alerts and ranked mitigations.
+//! Shortage alerts and ranked mitigations from a solved market.
 //!
 //! Detection uses an existing [`PricesResult`] plus the [`World`] it came from.
-//! Heuristics are documented next to each detector; they are not a full Vic3
-//! simulation.
+//! Heuristics are documented next to each detector; they are **not** a full Vic3
+//! simulation and do not re-run the NLS (mitigation `effect` strings are IO /
+//! `traded_quantity` estimates).
 //!
 //! Qualification advice is filtered from `common/pop_types` (or a bundled
-//! vanilla snapshot) plus the state's current mix. Copy lives in
+//! vanilla snapshot) plus the state's current mix. Player-facing copy lives in
 //! `advice/qualifications/`.
+//!
+//! `vic3-api` / CLI / wasm serialize [`AlertsResult`]; SQL `alerts()` and MCP
+//! hosts consume the same JSON shape.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -140,6 +144,18 @@ pub enum MitigationAction {
 /// Needs-unmet uses a documented heuristic: a state need is unmet when any
 /// basket good has local sell below demanded quantity, or local/market prices
 /// sit at the `base * (1 + PRICE_RANGE)` ceiling.
+///
+/// # Arguments
+///
+/// * `world` — same snapshot that produced `prices` (staffing, states, trade).
+/// * `defs` — goods / buildings / pop_types for detectors and lever selection.
+/// * `prices` — prior [`crate::solve`] (or preview) output; local + market rows.
+///
+/// # Returns
+///
+/// [`AlertsResult`] with ranked alerts. `limitations` starts from the solve’s
+/// list and may gain detector-specific caveats. No Rust `Err` — empty `alerts`
+/// means nothing fired.
 pub fn alerts(world: &World, defs: &GameDefs, prices: &PricesResult) -> AlertsResult {
     let mut alerts = Vec::new();
     let mut extra_limitations = BTreeSet::new();

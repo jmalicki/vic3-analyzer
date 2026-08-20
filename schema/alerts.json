@@ -90,6 +90,7 @@
       "type": "string"
     },
     "BuildingStaffing": {
+      "description": "Per-building staffing rows under a state-level employment alert.",
       "properties": {
         "building_id": {
           "format": "uint32",
@@ -349,6 +350,7 @@
       ]
     },
     "ProfessionGap": {
+      "description": "Per-profession shortfall on one building vs the whole state stock.",
       "properties": {
         "employed_here": {
           "format": "double",
