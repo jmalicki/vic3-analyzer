@@ -68,6 +68,9 @@ pub struct Save {
     /// manager (`acquired_technologies.value`, `research_technology`).
     #[serde(default)]
     pub technology: Manager<TechnologyEntry>,
+    /// Declared / automatic interest markers (`interest_marker_manager`).
+    #[serde(default, alias = "interest_marker_mgr", alias = "interest_markers")]
+    pub interest_marker_manager: Manager<InterestMarker>,
     /// Formations when the save uses this key (1.5+ also writes
     /// `military_formation_manager`).
     #[serde(default, alias = "military_formation_manager")]
@@ -91,6 +94,8 @@ pub struct Save {
 /// Markets and trade routes stay skipped (prices inject trade via state rows).
 /// Technology and construction queues are kept so [`World`] / planning can
 /// project researched techs and queue heads without a second full [`Save`] parse.
+/// Interest markers and army formations are kept so planning can project
+/// `army_power_projection` / `interest_in`.
 /// Skipping still does **not** avoid zlib inflate of a single-member
 /// `gamestate` zip. Keep [`Save`] when market/trade-route managers are part of
 /// the answer (`parse_save` counts).
@@ -116,6 +121,16 @@ pub struct WorldSave {
     pub government_constructions: Manager<ConstructionOrder>,
     #[serde(default)]
     pub technology: Manager<TechnologyEntry>,
+    /// Interest markers so planning can project `interest_in` without a full [`Save`].
+    #[serde(default, alias = "interest_marker_mgr", alias = "interest_markers")]
+    pub interest_marker_manager: Manager<InterestMarker>,
+    /// Army/navy formations used to fall back army power projection.
+    #[serde(default, alias = "military_formation_manager")]
+    pub formation_manager: Manager<MilitaryFormation>,
+    #[serde(default)]
+    pub military_formations: Manager<MilitaryFormation>,
+    #[serde(default)]
+    pub armies: Manager<MilitaryFormation>,
     #[serde(default)]
     pub previous_played: Vec<Player>,
 }
@@ -137,6 +152,10 @@ pub trait WorldSnapshot {
     fn technology(&self) -> &Manager<TechnologyEntry>;
     fn building_constructions(&self) -> &Manager<ConstructionOrder>;
     fn government_constructions(&self) -> &Manager<ConstructionOrder>;
+    fn interest_marker_manager(&self) -> &Manager<InterestMarker>;
+    fn formation_manager(&self) -> &Manager<MilitaryFormation>;
+    fn military_formations(&self) -> &Manager<MilitaryFormation>;
+    fn armies(&self) -> &Manager<MilitaryFormation>;
 }
 
 fn active_laws_in(laws: &Manager<LawEntry>, country_id: u32) -> Vec<&str> {
@@ -183,6 +202,18 @@ macro_rules! impl_world_snapshot {
             }
             fn government_constructions(&self) -> &Manager<ConstructionOrder> {
                 &self.government_constructions
+            }
+            fn interest_marker_manager(&self) -> &Manager<InterestMarker> {
+                &self.interest_marker_manager
+            }
+            fn formation_manager(&self) -> &Manager<MilitaryFormation> {
+                &self.formation_manager
+            }
+            fn military_formations(&self) -> &Manager<MilitaryFormation> {
+                &self.military_formations
+            }
+            fn armies(&self) -> &Manager<MilitaryFormation> {
+                &self.armies
             }
         }
     };
@@ -243,6 +274,16 @@ pub struct Country {
     pub technology: Vec<String>,
     #[serde(default, deserialize_with = "deserialize_tech_ids")]
     pub research: Vec<String>,
+    /// Cached army power projection when the save stores it on the country.
+    #[serde(
+        default,
+        alias = "army_power_projection",
+        alias = "country_army_power_projection"
+    )]
+    pub cached_total_army_power_projection: Option<f64>,
+    /// Declared strategic-region interest ids when listed on the country.
+    #[serde(default, deserialize_with = "deserialize_tech_ids")]
+    pub declared_interests: Vec<String>,
 }
 
 impl Country {
@@ -1116,8 +1157,31 @@ pub struct MilitaryFormation {
     pub organization: Option<f64>,
     #[serde(default, alias = "manpower")]
     pub current_manpower: Option<f64>,
+    /// Formation combat / power-projection contribution when present.
+    #[serde(default, alias = "combat_power")]
+    pub power_projection: Option<f64>,
     #[serde(default, deserialize_with = "deserialize_units")]
     pub units: Vec<MilitaryUnit>,
+}
+
+/// One declared or automatic interest marker (`interest_marker_manager`).
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+pub struct InterestMarker {
+    #[serde(default, alias = "owner")]
+    pub country: Option<u32>,
+    /// Strategic region script id (`region_western_europe`, `sr:…`, …).
+    #[serde(
+        default,
+        alias = "region",
+        alias = "strategic_region",
+        deserialize_with = "optional_flex_str"
+    )]
+    pub strategic_region: Option<String>,
+    /// State-region script id when the marker names a state directly.
+    #[serde(default, deserialize_with = "optional_flex_str")]
+    pub state: Option<String>,
+    #[serde(default, rename = "type", deserialize_with = "optional_flex_str")]
+    pub kind: Option<String>,
 }
 
 /// One unit listed on a formation. Fields are best-effort.
@@ -1265,6 +1329,16 @@ impl Save {
     pub fn queued_building_for(&self, country_id: u32) -> Option<String> {
         queued_building_for(self, country_id)
     }
+
+    /// Army power projection for `country_id` (cached country value, else formations).
+    pub fn army_power_projection_for(&self, country_id: u32) -> f64 {
+        army_power_projection_for(self, country_id)
+    }
+
+    /// Declared interest targets for `country_id`, split for DSL `state=` / `region=`.
+    pub fn declared_interest_for(&self, country_id: u32) -> DeclaredInterest {
+        declared_interest_for(self, country_id)
+    }
 }
 
 impl WorldSave {
@@ -1360,6 +1434,148 @@ pub fn queued_building_for(save: &impl WorldSnapshot, country_id: u32) -> Option
     let owned = owned_state_ids(save, country_id);
     first_queued_building(save.building_constructions(), &owned)
         .or_else(|| first_queued_building(save.government_constructions(), &owned))
+}
+
+/// Declared interest ids split so DSL `interest_in(state=…)` / `region=` can differ.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DeclaredInterest {
+    pub states: Vec<String>,
+    pub regions: Vec<String>,
+}
+
+/// Army power projection for a country from save IR.
+///
+/// Prefers `cached_total_army_power_projection` / `army_power_projection` on the
+/// country. Falls back to the sum of army-formation `power_projection` values
+/// when the country cache is missing. Returns `0` when neither is present.
+pub fn army_power_projection_for(save: &impl WorldSnapshot, country_id: u32) -> f64 {
+    if let Some(cached) = save
+        .country_manager()
+        .database
+        .get(&country_id)
+        .and_then(Option::as_ref)
+        .and_then(|country| country.cached_total_army_power_projection)
+        .filter(|value| value.is_finite())
+    {
+        return cached;
+    }
+    let mut total = 0.0;
+    let mut found = false;
+    for formation in save
+        .formation_manager()
+        .iter_present()
+        .chain(save.military_formations().iter_present())
+        .chain(save.armies().iter_present())
+        .map(|(_, formation)| formation)
+    {
+        if formation.country != Some(country_id) {
+            continue;
+        }
+        if is_navy_formation(formation.kind.as_deref()) {
+            continue;
+        }
+        if let Some(power) = formation.power_projection.filter(|value| value.is_finite()) {
+            total += power;
+            found = true;
+        }
+    }
+    if found {
+        total
+    } else {
+        0.0
+    }
+}
+
+fn is_navy_formation(kind: Option<&str>) -> bool {
+    kind.is_some_and(|kind| {
+        matches!(
+            kind.to_ascii_lowercase().as_str(),
+            "navy" | "fleet" | "flotilla" | "naval"
+        )
+    })
+}
+
+/// Interest markers + country `declared_interests` for planning projection.
+pub fn declared_interest_for(save: &impl WorldSnapshot, country_id: u32) -> DeclaredInterest {
+    let mut states = Vec::new();
+    let mut regions = Vec::new();
+    let mut push_state = |raw: &str| {
+        for id in normalize_interest_ids(raw) {
+            if !states.iter().any(|seen| seen == &id) {
+                states.push(id);
+            }
+        }
+    };
+    let mut push_region = |raw: &str| {
+        for id in normalize_interest_ids(raw) {
+            if !regions.iter().any(|seen| seen == &id) {
+                regions.push(id);
+            }
+        }
+    };
+
+    if let Some(country) = save
+        .country_manager()
+        .database
+        .get(&country_id)
+        .and_then(Option::as_ref)
+    {
+        for id in &country.declared_interests {
+            push_region(id);
+        }
+    }
+
+    for (_, marker) in save.interest_marker_manager().iter_present() {
+        if marker.country != Some(country_id) {
+            continue;
+        }
+        if let Some(state) = marker.state.as_deref().filter(|id| !id.is_empty()) {
+            push_state(state);
+        }
+        if let Some(region) = marker
+            .strategic_region
+            .as_deref()
+            .filter(|id| !id.is_empty())
+        {
+            push_region(region);
+        }
+    }
+
+    DeclaredInterest { states, regions }
+}
+
+/// Normalize Clausewitz interest ids for DSL matching.
+///
+/// Keeps the raw token and adds unprefixed / `STATE_`-stripped lowercase forms
+/// so `interest_in(state=alsace)` matches `STATE_ALSACE` / `alsace`.
+pub fn normalize_interest_ids(raw: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
+        return Vec::new();
+    }
+    let mut ids = vec![trimmed.to_string()];
+    let without_sr = trimmed
+        .strip_prefix("sr:")
+        .or_else(|| trimmed.strip_prefix("SR:"))
+        .unwrap_or(trimmed);
+    if without_sr != trimmed {
+        ids.push(without_sr.to_string());
+    }
+    let lower = without_sr.to_ascii_lowercase();
+    if !ids.iter().any(|seen| seen == &lower) {
+        ids.push(lower.clone());
+    }
+    if let Some(rest) = lower.strip_prefix("state_") {
+        if !rest.is_empty() && !ids.iter().any(|seen| seen == rest) {
+            ids.push(rest.to_string());
+        }
+    }
+    if let Some(rest) = lower.strip_prefix("region_") {
+        if !rest.is_empty() && !ids.iter().any(|seen| seen == rest) {
+            ids.push(rest.to_string());
+        }
+    }
+    ids
 }
 
 fn owned_state_ids(save: &impl WorldSnapshot, country_id: u32) -> std::collections::BTreeSet<u32> {
@@ -1701,5 +1917,82 @@ country_manager={
         assert_eq!(save.country_by_tag("GER").unwrap().definition, "GER");
         assert_eq!(save.formation_manager.iter_present().count(), 0);
         assert_eq!(save.military_formations.iter_present().count(), 0);
+    }
+
+    #[test]
+    fn army_power_and_interest_markers_deserialize() {
+        let save = crate::load_slice(
+            br#"SAV01000000000000000000
+country_manager={
+	database={
+		16777216={
+			definition="GER"
+			cached_total_army_power_projection=180.5
+			declared_interests={ region_north_africa }
+		}
+	}
+}
+interest_marker_manager={
+	database={
+		1={
+			country=16777216
+			strategic_region=sr:region_western_europe
+			state=STATE_ALSACE
+		}
+		2=none
+	}
+}
+formation_manager={
+	database={
+		10={
+			type=army
+			country=16777216
+			power_projection=40
+		}
+	}
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("army/interest ir");
+        let ger = save.country_by_tag("GER").expect("GER");
+        assert_eq!(ger.cached_total_army_power_projection, Some(180.5));
+        assert_eq!(
+            ger.declared_interests,
+            vec!["region_north_africa".to_string()]
+        );
+        assert_eq!(save.army_power_projection_for(16777216), 180.5);
+        let interest = save.declared_interest_for(16777216);
+        assert!(interest.states.iter().any(|id| id == "alsace"));
+        assert!(interest.states.iter().any(|id| id == "STATE_ALSACE"));
+        assert!(interest
+            .regions
+            .iter()
+            .any(|id| id == "region_western_europe"));
+        assert!(interest
+            .regions
+            .iter()
+            .any(|id| id == "region_north_africa"));
+    }
+
+    #[test]
+    fn army_power_falls_back_to_formation_power_projection() {
+        let save = crate::load_slice(
+            br#"SAV01000000000000000000
+country_manager={
+	database={ 1={ definition="GER" } }
+}
+armies={
+	database={
+		1={ type=army country=1 power_projection=25 }
+		2={ type=army country=1 power_projection=15 }
+		3={ type=navy country=1 power_projection=99 }
+	}
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("formation fallback");
+        assert_eq!(save.army_power_projection_for(1), 40.0);
     }
 }

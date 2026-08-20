@@ -108,6 +108,12 @@ pub struct WorldCountry {
     pub queued_tech: Option<String>,
     /// Construction queue head (building type id) when present for this country.
     pub queued_building: Option<String>,
+    /// Army power projection from save IR (`0` when missing).
+    pub army_power_projection: f64,
+    /// State ids for DSL `interest_in(state=…)`.
+    pub interest_states: Vec<String>,
+    /// Strategic-region ids for DSL `interest_in(region=…)`.
+    pub interest_regions: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -283,6 +289,7 @@ impl World {
             .iter_present()
             .map(|(id, country)| {
                 let budget = &country.budget;
+                let interest = vic3_load::declared_interest_for(save, id);
                 WorldCountry {
                     id,
                     tag: country.definition.clone(),
@@ -307,6 +314,9 @@ impl World {
                     techs: vic3_load::researched_techs_for(save, id),
                     queued_tech: vic3_load::queued_tech_for(save, id),
                     queued_building: vic3_load::queued_building_for(save, id),
+                    army_power_projection: vic3_load::army_power_projection_for(save, id),
+                    interest_states: interest.states,
+                    interest_regions: interest.regions,
                 }
             })
             .collect();

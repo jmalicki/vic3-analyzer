@@ -35,10 +35,12 @@ use vic3save::{DeserializeVic3, ReaderAt, Vic3File};
 pub use error::LoadError;
 pub use export::{export_save, ExportError, ExtraLevelsPatch, ProductionMethodPatch, SavePatch};
 pub use ir::{
-    hydrate_country_techs, queued_building_for, queued_tech_for, researched_techs_for, Budget,
-    Building, BuildingGoods, ConstructionOrder, Country, Culture, IndexQtyMap, Manager, Market,
-    Meta, MilitaryFormation, MilitaryHq, MilitaryUnit, MobilizationEntry, Player, Pop, Save, State,
-    StatePopStatistics, TechnologyEntry, TradeRoute, WorldSave, WorldSnapshot,
+    army_power_projection_for, declared_interest_for, hydrate_country_techs,
+    normalize_interest_ids, queued_building_for, queued_tech_for, researched_techs_for, Budget,
+    Building, BuildingGoods, ConstructionOrder, Country, Culture, DeclaredInterest, IndexQtyMap,
+    InterestMarker, Manager, Market, Meta, MilitaryFormation, MilitaryHq, MilitaryUnit,
+    MobilizationEntry, Player, Pop, Save, State, StatePopStatistics, TechnologyEntry, TradeRoute,
+    WorldSave, WorldSnapshot,
 };
 pub use vic3save::{BasicTokenResolver, Vic3Date};
 
