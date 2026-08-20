@@ -1,9 +1,10 @@
 //! Read-only DataFusion SQL over a loaded campaign (`docs/sql.md`).
 //!
-//! Fact-table providers + `query(sql) → rows`, planning TVFs `plan` /
+//! Fact-table providers + `query(sql) → rows`, diagnostics scalars/TVFs
+//! (`alerts`, `shortage_analysis`, `good_price`, …), planning TVFs `plan` /
 //! `gaps`, catalog table `saves`, host [`SqlEngine::use_save`], and
 //! `active.*` / `latest.*` views. Session binding is never a mutating
-//! `SELECT`. Diagnostics UDFs land in other waves.
+//! `SELECT`.
 
 mod binding;
 mod error;
