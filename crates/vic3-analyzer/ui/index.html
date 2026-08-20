@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vic3 Analyzer</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+        --ink: #1c2430;
+        --muted: #5a6675;
+        --panel: #e8eef4;
+        --accent: #2a4a6a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--ink);
+        background:
+          radial-gradient(1200px 600px at 10% -10%, #c5d4e4 0%, transparent 55%),
+          linear-gradient(165deg, #f3f6f9 0%, #d9e3ec 100%);
+        display: grid;
+        place-items: center;
+        padding: 2rem;
+      }
+      main {
+        max-width: 36rem;
+      }
+      h1 {
+        margin: 0 0 0.5rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        color: var(--accent);
+      }
+      p {
+        margin: 0 0 1.25rem;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      button {
+        font: inherit;
+        border: 0;
+        border-radius: 0.35rem;
+        padding: 0.55rem 1rem;
+        background: var(--accent);
+        color: #f7fafc;
+        cursor: pointer;
+      }
+      button:hover {
+        filter: brightness(1.08);
+      }
+      #status {
+        margin-top: 1rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.9rem;
+        color: var(--ink);
+        background: var(--panel);
+        padding: 0.75rem 1rem;
+        min-height: 2.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Vic3 Analyzer</h1>
+      <p>
+        Desktop shell skeleton. The full Vite <code>web/</code> workbench can be
+        pointed at from <code>tauri.conf.json</code> later; this page only
+        verifies the WebView and a placeholder <code>api_ping</code> invoke.
+      </p>
+      <button type="button" id="ping">Ping vic3-api</button>
+      <div id="status" aria-live="polite">idle</div>
+    </main>
+    <script>
+      const status = document.getElementById("status");
+      document.getElementById("ping").addEventListener("click", async () => {
+        status.textContent = "calling…";
+        try {
+          const { invoke } = window.__TAURI__.core;
+          const result = await invoke("api_ping");
+          status.textContent = String(result);
+        } catch (err) {
+          status.textContent = "error: " + err;
+        }
+      });
+    </script>
+  </body>
+</html>

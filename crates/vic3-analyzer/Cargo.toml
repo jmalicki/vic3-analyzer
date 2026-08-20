@@ -1,0 +1,26 @@
+[package]
+name = "vic3-analyzer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Tauri desktop shell (GUI + mcp argv stub)"
+default-run = "vic3-analyzer"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "vic3-analyzer"
+path = "src/main.rs"
+
+[lib]
+name = "vic3_analyzer_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+tauri.workspace = true
+vic3-api = { path = "../vic3-api" }

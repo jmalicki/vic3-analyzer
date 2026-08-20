@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-api-ping"
+description = "Allows the placeholder api_ping command that proves vic3-api is linked."
+commands.allow = ["api_ping"]

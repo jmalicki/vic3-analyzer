@@ -1,8 +1,25 @@
 # Desktop config and auto-detect (design spec)
 
-**Status:** Partial — `vic3-catalog` implements path auto-detect, config load/save, and save-root scanning. Tauri Settings UI and filesystem watch are not implemented yet.  
+**Status:** Partial — `vic3-catalog` implements path auto-detect, config load/save, and save-root scanning. Tauri 2 shell (`vic3-analyzer`) exists with `gui`/`mcp` argv; Settings UI and filesystem watch are not implemented yet.  
 **Applies to:** Tauri GUI + `vic3-analyzer mcp` (same config file).  
 **Does not apply to:** GitHub Pages / wasm (browser still uses pickers / drag-drop).
+
+## Build / run (skeleton)
+
+Desktop crate: `crates/vic3-analyzer` (Tauri 2). Default argv opens the GUI; `mcp` is a no-window stub.
+
+```text
+cargo check -p vic3-analyzer
+cargo test -p vic3-analyzer
+cargo run -p vic3-analyzer            # GUI (minimal ui/ shell)
+cargo run -p vic3-analyzer -- mcp     # stderr stub; does not open a window
+```
+
+Linux CI installs WebKitGTK 4.1 and related packages (see `.github/workflows/ci.yml`). Locally, follow [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
+
+The WebView currently ships a minimal `ui/` page (placeholder `api_ping` invoke into `vic3-api`). To load the Vite `web/` workbench instead, point `build.frontendDist` / `build.devUrl` in `tauri.conf.json` at `web/dist` or the Vite server (set Vite `base` to `/` for the desktop target).
+
+Capability allowlist: `capabilities/default.json` — `core:default` plus `allow-api-ping`. Future game/save path scopes land there.
 
 ## Goals
 

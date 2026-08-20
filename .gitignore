@@ -2,6 +2,9 @@
 /target/
 **/*.rs.bk
 
+# Tauri generated schemas / bindings
+crates/vic3-analyzer/gen/
+
 # Node
 node_modules/
 web/dist/
