@@ -12,10 +12,15 @@ workspace = true
 [dependencies]
 async-trait = "0.1"
 datafusion.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 vic3-defs = { path = "../vic3-defs" }
+vic3-goals = { path = "../vic3-goals" }
+vic3-plan = { path = "../vic3-plan" }
 vic3-prices = { path = "../vic3-prices" }
+vic3-sim = { path = "../vic3-sim" }
+vic3-world = { path = "../vic3-world" }
 
 [dev-dependencies]
 datafusion.workspace = true
