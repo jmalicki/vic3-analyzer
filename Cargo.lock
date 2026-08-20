@@ -1405,6 +1405,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "vic3-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "vic3-defs",
+ "vic3-goals",
+ "vic3-load",
+ "vic3-plan",
+ "vic3-prices",
+ "vic3-sim",
+ "vic3-world",
+ "vic3save",
+]
+
+[[package]]
 name = "vic3-cli"
 version = "0.1.0"
 dependencies = [
@@ -1510,17 +1527,10 @@ name = "vic3-wasm"
 version = "0.1.0"
 dependencies = [
  "schemars",
- "serde",
  "serde_json",
- "thiserror",
+ "vic3-api",
  "vic3-defs",
- "vic3-goals",
- "vic3-load",
- "vic3-plan",
  "vic3-prices",
- "vic3-sim",
- "vic3-world",
- "vic3save",
  "wasm-bindgen",
 ]
 

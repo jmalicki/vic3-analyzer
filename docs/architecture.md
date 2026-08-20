@@ -7,7 +7,7 @@ License: AGPL-3.0. Saves and token maps are user-supplied and never uploaded.
 ## Delivery
 
 1. **CLI** (`vic3-cli`) — first product. Load a `.v3`, print prices, what-if, alerts, WorldDelta preview, PM search, gaps, and plans as JSON or text. Patch-export writes a **new** plaintext `.v3`.
-2. **In-browser UI** (`web/` + `vic3-wasm`) — same Rust core, `wasm-bindgen`. Drop a save in the tab. No server, no upload. Load solves prices immediately.
+2. **In-browser UI** (`web/` + `vic3-wasm`) — same Rust core via `vic3-api`, thin `wasm-bindgen`. Drop a save in the tab. No server, no upload. Load solves prices immediately.
 3. **Local archive** — past runs and named alternative plans stay on the machine ([`archive.md`](archive.md)). UI save timelines live in IndexedDB (`origins` / `timelines` / `steps` / `current`).
 
 ## Crates
@@ -21,11 +21,12 @@ License: AGPL-3.0. Saves and token maps are user-supplied and never uploaded.
 | `vic3-goals` | Chumsky DSL + `declare-war` / `research` / `gdp` compilation |
 | `vic3-sim` | Goal-relevant successors; event-wait edges |
 | `vic3-plan` | `SearchNode` glue + `shortest_path`; shared option/result/archive types |
+| `vic3-api` | Transport-free analysis (bytes or paths in, JSON out); shared by CLI, wasm, future Tauri |
 | `vic3-cli` | clap only lives here |
-| `vic3-wasm` | Bytes in, JSON out; no filesystem |
+| `vic3-wasm` | Thin `wasm-bindgen` over `vic3-api`; no filesystem |
 | `web/` | Vite + React; IndexedDB archive; forms from JSON Schema |
 
-Shared option structs (no `PathBuf`) live with results in `vic3-plan` (or a tiny sibling if that crate’s deps get too heavy). clap flatten wrappers in `vic3-cli` only. wasm never links clap.
+Shared option structs (no `PathBuf`) live with results in `vic3-plan` (or a tiny sibling if that crate’s deps get too heavy). clap flatten wrappers in `vic3-cli` only. wasm never links clap. Facades share `vic3-api` so JSON shapes stay identical.
 
 ## Data flow
 
@@ -41,12 +42,13 @@ flowchart LR
   world --> goals[vic3-goals]
   goals --> sim[vic3-sim]
   sim --> plan[vic3-plan SearchNode]
-  plan --> cli[vic3-cli]
-  plan --> wasm[vic3-wasm]
-  preview --> cli
-  alerts --> cli
+  plan --> api[vic3-api]
+  preview --> api
+  alerts --> api
   load --> export[plaintext .v3 patch]
-  export --> cli
+  export --> api
+  api --> cli[vic3-cli]
+  api --> wasm[vic3-wasm]
   cli --> xdg[XDG archive]
   wasm --> ui[React]
   ui --> idb[IndexedDB origins timelines steps]
