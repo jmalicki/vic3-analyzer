@@ -132,7 +132,20 @@ From `state_goods` (state-attributed orders / MAPI blend).
 | **Array / list column** on the parent | Field is already `Vec<…>` (or small parallel vecs) on the struct we scan |
 | **Child / junction table** | We already store a separate collection keyed for lookup, **or** agents must equijoin/filter/aggregate on exploded elements as first-class rows and UNNEST is too awkward for the common query |
 
-Agents can still explode with `UNNEST` / `unnest` when needed. Optional **views** that UNNEST arrays (e.g. `building_production_methods`) are fine for convenience — not a second source of truth.
+**Arrays stand in for junction tables.** DataFusion can explode lists into rows with `unnest` / `UNNEST` (and `unnest_outer` when empty/NULL parents should keep a row). That is the join-shaped path when you need one row per element:
+
+```sql
+-- SELECT-list unnest (supported; correlates with the parent row)
+SELECT building_id, unnest(production_methods) AS pm
+FROM buildings;
+
+SELECT pm, unnest(outputs) AS out   -- struct fields → columns, or list of structs
+FROM production_methods;
+```
+
+**Caveat (DataFusion today):** `FROM parent p, UNNEST(p.col)` lateral style is **not** supported yet — use `unnest(col)` in the **SELECT** list (or a view that does that). Document the working form in examples; do not teach the Postgres-only lateral FROM pattern.
+
+Optional **views** that wrap the SELECT-list unnest (e.g. `building_production_methods`) are fine for agents who want a fake junction table — same data, not a second store.
 
 Examples of good array columns: active PMs, `short_inputs`, PM-group ids on a building type, recipe input/output lists on a PM row.
 
@@ -191,13 +204,16 @@ Static catalog from `GameDefs` (same for all saves once defs are loaded). Prefer
 | `inputs` / `outputs` | List of `{ good, qty }` from `ProductionMethod.inputs` / `outputs` (already `Vec<(GoodIdx, f64)>`) |
 
 ```sql
--- Defs: PMs that output grain (unnest or list predicate — pick one helper and document)
-SELECT pm
-FROM production_methods p, UNNEST(p.outputs) AS o(good, qty)
-WHERE o.good = 'grain';
+-- Defs: PMs that output grain (SELECT-list unnest — not lateral FROM)
+SELECT pm, out.good, out.qty
+FROM (
+  SELECT pm, unnest(outputs) AS out
+  FROM production_methods
+)
+WHERE out.good = 'grain';
 ```
 
-Optional convenience view `production_method_goods` = UNNEST of those lists — only if MCP/docs examples need join-shaped SQL; not required if arrays are enough.
+Optional convenience view `production_method_goods` = that unnest pattern — only if MCP/docs examples want join-shaped SQL; not required if arrays + `unnest` are enough.
 
 ### `pops` (or `state_pops`)
 
@@ -380,7 +396,8 @@ The Tauri **Advanced Query** tab uses this same dialect:
 3. Whether unqualified names require `use_save` or may fall back to `latest.*` automatically.
 4. Military `formations` column list (wait for stable military JSON).
 5. Ambiguous `states.region_name` / region labels: return all rows vs error vs prefer player-owned.
-6. Keep `building_type_pm_groups` normalized vs embed PM-group list as a text/array column on `building_types`.
+6. List element type for IO: struct `{good, qty}` vs parallel `goods[]` + `qtys[]`; which DF array helpers we document (`array_has` vs `array_has_any` vs custom UDF).
+7. Whether convenience UNNEST views (`building_goods`, `production_method_goods`) ship in v1 or stay doc-only patterns.
 
 ## Implementation notes (non-normative)
 
