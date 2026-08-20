@@ -124,10 +124,61 @@ fn plaintext_fixture_loads() {
         .building_constructions
         .iter_present()
         .next()
-        .map(|(_, o)| o)
-        .expect("construction order");
+        .map(|(_, o)| o);
+    assert!(
+        order.is_none(),
+        "shared fixture leaves construction queue empty"
+    );
+    assert!(ger.techs.iter().any(|tech| tech == "railways"));
+    assert!(ger.techs.iter().any(|tech| tech == "urban_planning"));
+    assert!(ger.currently_researching.is_none());
+    assert!(save.queued_building_for(16777216).is_none());
+}
+
+#[test]
+fn construction_queue_and_research_head_parse() {
+    let save = load_slice(
+        br#"SAV01000000000000000000
+country_manager={
+	database={
+		16777216={ definition="GER" states={ 1 } }
+	}
+}
+states={
+	database={
+		1={ country=16777216 }
+	}
+}
+building_constructions={
+	database={
+		1={
+			building="building_construction_sector"
+			state=1
+			remaining=20
+		}
+	}
+}
+technology={
+	database={
+		1={
+			country=16777216
+			acquired_technologies={ value={ railways } }
+			research_technology=atmospheric_engine
+		}
+	}
+}
+"#,
+        empty_tokens(),
+    )
+    .expect("queue fixture");
+    let ger = save.country_by_tag("GER").expect("GER");
+    assert!(ger.techs.iter().any(|tech| tech == "railways"));
     assert_eq!(
-        order.building.as_deref(),
+        ger.currently_researching.as_deref(),
+        Some("atmospheric_engine")
+    );
+    assert_eq!(
+        save.queued_building_for(16777216).as_deref(),
         Some("building_construction_sector")
     );
 }
@@ -138,6 +189,19 @@ fn plaintext_world_save_skips_market_ir() {
     assert_eq!(save.pops.iter_present().count(), 1);
     assert_eq!(save.active_laws(16777216), ["law_autocracy"]);
     assert_eq!(WorldSnapshot::previous_played(&save).len(), 1);
+    let ger = save
+        .country_manager
+        .database
+        .get(&16777216)
+        .and_then(Option::as_ref)
+        .expect("GER");
+    assert!(ger.techs.iter().any(|tech| tech == "urban_planning"));
+    assert!(ger.currently_researching.is_none());
+    assert_eq!(
+        save.building_constructions.iter_present().count(),
+        0,
+        "shared fixture leaves construction queue empty"
+    );
 }
 
 /// Real saves list the active method of every PM group under the plural key.

@@ -10,8 +10,8 @@
 //! Two deserialize targets:
 //! - [`Save`] — file-shaped; markets, trade routes, and construction queues
 //!   included. Used by `parse_save` and tests.
-//! - [`WorldSave`] — managers the price projection reads. Other top-level keys
-//!   are skipped so their IR is never allocated.
+//! - [`WorldSave`] — managers the price + planning projections read. Markets
+//!   and trade routes are skipped; technology and construction queues are kept.
 //!
 //! Ironman `.v3` files are typically **one** zip member (`gamestate`). Skipping
 //! unknown keys still inflates that blob; [`WorldSave`] only avoids building
@@ -35,9 +35,10 @@ use vic3save::{DeserializeVic3, ReaderAt, Vic3File};
 pub use error::LoadError;
 pub use export::{export_save, ExportError, ExtraLevelsPatch, ProductionMethodPatch, SavePatch};
 pub use ir::{
-    Budget, Building, BuildingGoods, ConstructionOrder, Country, Culture, IndexQtyMap, Manager,
-    Market, Meta, MilitaryFormation, MilitaryHq, MilitaryUnit, MobilizationEntry, Player, Pop,
-    Save, State, StatePopStatistics, TechnologyEntry, TradeRoute, WorldSave, WorldSnapshot,
+    hydrate_country_techs, queued_building_for, queued_tech_for, researched_techs_for, Budget,
+    Building, BuildingGoods, ConstructionOrder, Country, Culture, IndexQtyMap, Manager, Market,
+    Meta, MilitaryFormation, MilitaryHq, MilitaryUnit, MobilizationEntry, Player, Pop, Save, State,
+    StatePopStatistics, TechnologyEntry, TradeRoute, WorldSave, WorldSnapshot,
 };
 pub use vic3save::{BasicTokenResolver, Vic3Date};
 
@@ -82,7 +83,9 @@ pub fn load_slice(data: &[u8], tokens: impl TokenResolver) -> Result<Save, LoadE
 /// Prefer this on the prices / `World::from_save` path. [`load_slice`] still
 /// exists for summaries that count markets and trade routes.
 pub fn load_slice_world(data: &[u8], tokens: impl TokenResolver) -> Result<WorldSave, LoadError> {
-    load_slice_as(data, tokens)
+    let mut save: WorldSave = load_slice_as(data, tokens)?;
+    save.hydrate_country_techs();
+    Ok(save)
 }
 
 /// Load a `.v3` from a filesystem path (`VIC3_SAVE`).
@@ -92,12 +95,15 @@ pub fn load_path(path: impl AsRef<Path>, tokens: impl TokenResolver) -> Result<S
     Ok(save)
 }
 
-/// [`load_path`] into [`WorldSave`]: skip construction / market / trade-route IR.
+/// [`load_path`] into [`WorldSave`]: skip market / trade-route IR; keep tech and
+/// construction queues for planning projection.
 pub fn load_path_world(
     path: impl AsRef<Path>,
     tokens: impl TokenResolver,
 ) -> Result<WorldSave, LoadError> {
-    load_path_as(path, tokens)
+    let mut save: WorldSave = load_path_as(path, tokens)?;
+    save.hydrate_country_techs();
+    Ok(save)
 }
 
 fn load_slice_as<T: serde::de::DeserializeOwned>(

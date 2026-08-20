@@ -125,16 +125,20 @@ trade_route_manager={
 }
 building_constructions={
 	database={
-		1={
-			building="building_construction_sector"
-			state=1
-			remaining=20
-		}
+		1=none
 	}
 }
 government_constructions={
 	database={
 		1=none
+	}
+}
+technology={
+	database={
+		1={
+			country=16777216
+			acquired_technologies={ value={ railways urban_planning } }
+		}
 	}
 }
 previous_played={

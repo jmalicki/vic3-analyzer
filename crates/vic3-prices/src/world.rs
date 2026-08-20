@@ -104,6 +104,10 @@ pub struct WorldCountry {
     pub solvent: bool,
     /// Researched technology ids. Empty when the save did not yield any.
     pub techs: Vec<String>,
+    /// Research queue head when the save exposes one.
+    pub queued_tech: Option<String>,
+    /// Construction queue head (building type id) when present for this country.
+    pub queued_building: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -300,7 +304,9 @@ impl World {
                     credit_limit: budget.credit.filter(|value| value.is_finite()),
                     credit_headroom: budget.credit_headroom(),
                     solvent: budget.is_solvent(),
-                    techs: country.researched_techs(),
+                    techs: vic3_load::researched_techs_for(save, id),
+                    queued_tech: vic3_load::queued_tech_for(save, id),
+                    queued_building: vic3_load::queued_building_for(save, id),
                 }
             })
             .collect();
