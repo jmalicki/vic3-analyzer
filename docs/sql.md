@@ -89,14 +89,18 @@ Identity and geography for states in scope of the active save.
 
 | Column | Notes |
 | --- | --- |
-| `state_id` | Integer; **key** (ordered when sourced from a map) |
-| `name` | Localized or save name |
+| `state_id` | Integer Paradox id; **primary key** for joins (alerts, buildings, pops already use this) |
+| `name` | Localized / region label (`region_name` / `region`); **secondary index** when a name→id map exists (see below) |
 | `owner_tag` | Country tag |
 | `market_id` | If modeled |
 | `infrastructure` | As exposed in prices result |
 | `arable_land` | If present |
 
-**Ordering:** scans should advertise order by `state_id` ascending when the backing map is ordered, so joins on `state_id` can use sort-merge.
+**Storage today (Rust):** `World.states` / `PricesResult.states` are a **`Vec` of rows**, each with its own `id: u32`. Not a dense `states[state_id]` array (ids can be sparse). Save IR uses `HashMap<u32, Option<State>>`.
+
+**Ordering:** provider full scans should advertise a stable order (prefer sorted by `state_id`) so equijoins on `state_id` can use sort-merge.
+
+**Name index:** If the SQL layer keeps (or builds) a `BTreeMap<name, state_id>` / multi-map for ambiguous labels, treat `name` (and aliases) as an **indexed** column for filter pushdown — `WHERE name = 'Alsace'` → map lookup, not a full vec scan. Tell DataFusion via `supports_filters_pushdown` (Exact on name equality), same as keyed id lookups. Duplicate display names → return all matches or require disambiguation; document the chosen rule.
 
 ### `goods`
 
@@ -104,8 +108,8 @@ Market-level goods from `PricesResult.goods`.
 
 | Column | Notes |
 | --- | --- |
-| `good` | Good id string; **key** |
-| `name` | Localized |
+| `good` | Good id string; **key** (and naturally indexed — goods also have contiguous `GoodIdx` + `goods_order`) |
+| `name` | Localized; secondary index if a name→id map is maintained |
 | `base` | Base price |
 | `price` | Solved market price |
 | `buy` | Buy orders |
@@ -179,12 +183,21 @@ Conservative military snapshot fields once exposed by the analysis API (manpower
 
 ## Keys, indexes, and joins
 
-Do not tell agents to `CREATE INDEX`. Speed comes from **provider pushdown** into Rust `BTreeMap` / `HashMap`:
+Do not tell agents to `CREATE INDEX`. Speed comes from **provider pushdown** into Rust structures:
 
-- Equality on `state_id`, `good`, `building_id`, `tag` → map lookup
-- Ordered full scans on btree-backed keys → DataFusion may choose **sort-merge join** when both sides declare ordering
+| Access path | Typical backing | Filter to push down |
+| --- | --- | --- |
+| Primary id | Row `id` / `state_id` / `building_id` (vec of rows, optional `HashMap`/`BTreeMap` id→row) | `state_id = ?`, `building_id = ?` |
+| Name / label btree | `BTreeMap<String, Id>` or multi-map built for SQL (may not exist on `World` yet — provider may construct on bind) | `name = ?`, `region_name = ?`, localized `good` name |
+| Contiguous intern | `Intern` / `goods_order` (`u16` / `GoodIdx` ↔ string) | id or name equality either direction |
+| Ordered vec scan | `Vec<WorldState>` sorted by id for the scan | full scan + sort-merge when DF knows output order |
 
-Implementers must set DataFusion output-ordering metadata on providers that iterate ordered maps.
+Rules:
+
+- Equality on **primary keys** and on **name indexes** both advertise Exact (or Inexact if multi-match) pushdown to DataFusion.
+- Prefer joins on `state_id` / `good` id columns; use names in `WHERE` for humans/LLMs, then join by id.
+- Declare **output ordering** (e.g. by `state_id`) on scans that walk a sorted vec or btree so sort-merge joins can apply.
+- If a name btree is only needed for SQL, building it once at `use_save` / session bind is fine — still document it here as an indexed column.
 
 ## Scalar functions
 
@@ -299,6 +312,7 @@ The Tauri **Advanced Query** tab uses this same dialect:
 2. Mitigations as JSON columns vs child TVFs.
 3. Whether unqualified names require `use_save` or may fall back to `latest.*` automatically.
 4. Military `formations` column list (wait for stable military JSON).
+5. Ambiguous `states.name` / region labels: return all rows vs error vs prefer player-owned.
 
 ## Implementation notes (non-normative)
 
