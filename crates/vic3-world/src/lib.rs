@@ -670,15 +670,12 @@ mod tests {
             .join("../vic3-load/tests/fixtures/plaintext.txt");
         let save = vic3_load::load_path(&path, vic3_load::empty_tokens()).expect("fixture");
         let state = PlanningState::from_save(&save, "GER", BTreeMap::new()).unwrap();
-        assert!(state.has_tech("nitroglycerin"));
+        assert!(state.has_tech("urban_planning"));
         assert!(state.has_tech("railways"));
         assert!(!state.has_tech("mechanized_farming"));
-        assert_eq!(state.queued_tech.as_deref(), Some("atmospheric_engine"));
-        assert!(!state.has_tech("atmospheric_engine"));
-        assert_eq!(
-            state.queued_building.as_deref(),
-            Some("building_construction_sector")
-        );
+        assert!(!state.has_tech("nitroglycerin"));
+        assert!(state.queued_tech.is_none());
+        assert!(state.queued_building.is_none());
 
         let world = World::from_save(&save, &vic3_defs::GameDefs::default());
         let from_world = PlanningState::from_world(&world, "GER", BTreeMap::new()).unwrap();
