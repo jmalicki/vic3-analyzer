@@ -1,4 +1,7 @@
 //! `gaps(goal)` → one row per goal atom with failing/cleared status.
+//!
+//! `goal` must be a non-null string literal. `status` is `cleared` \| `failing`;
+//! `detail` is the atom JSON.
 
 use std::any::Any;
 use std::sync::Arc;

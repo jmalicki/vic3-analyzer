@@ -1,4 +1,7 @@
-//! Arrow List builders for TEXT[] and good-IO structs.
+//! Arrow List builders for `TEXT[]` and goods-IO structs.
+//!
+//! [`good_io_list_column`] projects `GoodFlow` → `List<Struct{good, good_name, qty}>`
+//! using [`SessionBinding::good_name`] for labels.
 
 use std::sync::Arc;
 

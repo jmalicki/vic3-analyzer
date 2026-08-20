@@ -1,3 +1,8 @@
+//! Errors from the SQL façade.
+//!
+//! Agent-facing variants strip absolute paths ([`SaveCandidate`]). MCP maps
+//! these into tool errors; the Advanced Query UI surfaces [`std::fmt::Display`].
+
 use datafusion::error::DataFusionError;
 use thiserror::Error;
 use vic3_api::ApiError;
@@ -53,10 +58,13 @@ pub enum SqlError {
     /// Other catalog failures (I/O, config) not remapped to stub resolution.
     #[error(transparent)]
     Catalog(#[from] CatalogError),
+    /// Load / solve failures from `vic3-api`.
     #[error(transparent)]
     Api(#[from] ApiError),
+    /// DataFusion planning or execution.
     #[error(transparent)]
     DataFusion(#[from] DataFusionError),
+    /// Programmer / invariant failures (wrong construction path, missing path).
     #[error("{0}")]
     Internal(String),
 }

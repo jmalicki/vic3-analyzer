@@ -1,4 +1,7 @@
 //! Predicate helpers for Exact pushdown (`docs/sql.md`).
+//!
+//! Decodes DataFusion filter [`Expr`]s into [`Pred`] for providers that
+//! advertise Exact equality / range via [`crate::providers::pushdown`].
 
 use datafusion::common::ScalarValue;
 use datafusion::logical_expr::{BinaryExpr, Expr, Operator};

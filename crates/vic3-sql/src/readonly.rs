@@ -1,4 +1,7 @@
 //! Reject DDL/DML before DataFusion plans the statement.
+//!
+//! Allowed: `SELECT`, `WITH…SELECT`, and `EXPLAIN` of those. Everything else
+//! becomes [`crate::SqlError::ReadOnly`] with no partial execution.
 
 use datafusion::sql::sqlparser::ast::Statement;
 use datafusion::sql::sqlparser::dialect::GenericDialect;
@@ -8,6 +11,10 @@ use crate::SqlError;
 
 /// Ensure every top-level statement is a read-only `SELECT` / `WITH…SELECT` /
 /// `EXPLAIN` of those.
+///
+/// # Errors
+///
+/// [`SqlError::ReadOnly`] on parse failure, empty input, or non-query statements.
 pub fn assert_readonly(sql: &str) -> Result<(), SqlError> {
     let dialect = GenericDialect {};
     let statements = Parser::parse_sql(&dialect, sql)

@@ -1,4 +1,10 @@
-//! Arrow schemas for `docs/sql.md` fact tables.
+//! Arrow schemas for `docs/sql.md` fact tables and TVFs.
+//!
+//! # IO element type
+//!
+//! [`good_io_list_type`] is `List<Struct{good Utf8, good_name Utf8?, qty Float64}>`.
+//! Script ids only — never bare `GoodIdx` as the sole key. Consumers explode
+//! with SELECT-list `unnest(unnest(col))`.
 
 use std::sync::Arc;
 
@@ -9,6 +15,7 @@ pub fn good_io_list_type() -> DataType {
     DataType::List(Arc::new(Field::new("item", good_io_struct_type(), true)))
 }
 
+/// Struct element inside goods IO lists.
 pub fn good_io_struct_type() -> DataType {
     DataType::Struct(Fields::from(vec![
         Field::new("good", DataType::Utf8, false),
@@ -17,6 +24,7 @@ pub fn good_io_struct_type() -> DataType {
     ]))
 }
 
+/// `TEXT[]` / `List<Utf8>` for PM ids, short inputs, PM groups.
 pub fn text_list_type() -> DataType {
     DataType::List(Arc::new(Field::new("item", DataType::Utf8, true)))
 }
