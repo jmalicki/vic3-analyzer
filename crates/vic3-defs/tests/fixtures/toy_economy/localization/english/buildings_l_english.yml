@@ -1,0 +1,8 @@
+l_english:
+ building_wheat_farm:0 "Wheat Farms"
+ building_flour_mill:0 "Flour Mills"
+ building_bakery:0 "Bakeries"
+ building_trade_center:0 "Trade Centers"
+ bg_agriculture:0 "Agriculture"
+ bg_light_industry:0 "Light Industry"
+ bg_trade:0 "Trade"

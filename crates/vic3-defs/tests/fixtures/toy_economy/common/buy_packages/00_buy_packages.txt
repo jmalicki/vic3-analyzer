@@ -1,0 +1,13 @@
+wealth_1 = {
+	political_strength = 0.03
+	goods = {
+		popneed_staple_food = 20
+	}
+}
+
+wealth_2 = {
+	political_strength = 0.04
+	goods = {
+		popneed_staple_food = 25
+	}
+}

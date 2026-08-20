@@ -1,0 +1,24 @@
+pmg_base_building_wheat_farm = {
+	production_methods = {
+		pm_toy_wheat
+	}
+}
+
+pmg_base_building_flour_mill = {
+	production_methods = {
+		pm_toy_mill
+		pm_toy_mill_efficient
+	}
+}
+
+pmg_base_building_bakery = {
+	production_methods = {
+		pm_toy_bakery
+	}
+}
+
+pmg_base_building_trade_center = {
+	production_methods = {
+		pm_toy_trade
+	}
+}

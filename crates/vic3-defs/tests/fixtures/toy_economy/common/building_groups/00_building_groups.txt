@@ -1,0 +1,18 @@
+bg_agriculture = {
+	category = rural
+	land_usage = rural
+	always_possible = yes
+	default_building = building_wheat_farm
+}
+
+bg_light_industry = {
+	category = urban
+	always_possible = yes
+	default_building = building_flour_mill
+}
+
+bg_trade = {
+	category = urban
+	always_possible = yes
+	default_building = building_trade_center
+}

@@ -1,0 +1,19 @@
+# Toy economy goods: wheat → flour → bread.
+
+wheat = {
+	texture = "gfx/interface/icons/goods_icons/wheat.dds"
+	cost = 20
+	traded_quantity = 10
+	category = staple
+}
+
+flour = {
+	cost = 30
+	category = staple
+}
+
+bread = {
+	cost = 40
+	traded_quantity = 10
+	category = staple
+}
