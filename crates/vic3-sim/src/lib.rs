@@ -156,6 +156,8 @@ pub struct SimConfig {
     pub research_days: u16,
     /// Fixed duration for one modeled building-level expansion.
     pub construction_days: u16,
+    /// Days between modeled budget/debt paydays.
+    pub payday_days: u16,
     /// Finite search bound for added levels of one building type.
     pub max_added_levels_per_type: u16,
     /// Fixed duration to establish a declared interest (model constant).
@@ -169,6 +171,7 @@ impl Default for SimConfig {
         Self {
             research_days: 365,
             construction_days: 180,
+            payday_days: 7,
             max_added_levels_per_type: 10,
             interest_days: 90,
             army_expansion_days: 180,
@@ -187,6 +190,8 @@ pub enum Event {
     InterestDeclared { kind: InterestKind, id: String },
     /// The queued army power-projection expansion completes (`f64::to_bits`).
     ArmyPowerIncreased { target_bits: u64 },
+    /// One modeled budget tick applies the frozen weekly balance to debt/treasury.
+    Payday {},
 }
 
 /// A deterministic state transition.
@@ -234,8 +239,9 @@ pub fn successors_with_economy(
 ///
 /// Technology, building, interest, and army decisions are emitted only when no
 /// compact queue is occupied. At most one wait edge is appended from an
-/// in-flight event that still closes an open atom. Payday is intentionally not
-/// invented when no solvency model is present.
+/// in-flight event that still closes an open atom, or a payday tick when a
+/// solvency-related atom is open and one payday can move debt/credit toward
+/// that atom. Idle states without an open solvency path emit no wait (I6).
 pub fn successors_for_atoms(
     state: &PlanningState,
     open_atoms: &[Atom],
@@ -434,9 +440,112 @@ fn successors_for_atoms_with_economy(
             config.army_expansion_days,
             economy,
         );
+    } else if payday_can_help(state, open_atoms) {
+        push_wait(
+            &mut result,
+            state,
+            Event::Payday {},
+            config.payday_days,
+            economy,
+        );
     }
 
     result
+}
+
+fn is_solvency_atom(atom: &Atom) -> bool {
+    matches!(
+        atom,
+        Atom::Solvent | Atom::CreditHeadroom { .. } | Atom::DebtPrincipal { .. }
+    )
+}
+
+/// Apply one frozen weekly-balance sample to treasury and debt principal, then
+/// refresh `credit_headroom` / `solvent`. This is not Paradox's full budget.
+fn apply_payday_effects(state: &mut PlanningState) {
+    let Some(balance) = state.weekly_balance.filter(|value| value.is_finite()) else {
+        return;
+    };
+    let mut treasury = state.treasury;
+    let mut principal = state.debt_principal.unwrap_or(0.0);
+
+    if balance >= 0.0 {
+        let mut remaining = balance;
+        if principal > 0.0 {
+            let pay = remaining.min(principal);
+            principal -= pay;
+            remaining -= pay;
+        }
+        treasury += remaining;
+    } else {
+        let need = -balance;
+        if treasury >= need {
+            treasury -= need;
+        } else {
+            principal += need - treasury;
+            treasury = 0.0;
+        }
+    }
+
+    state.treasury = treasury;
+    if state.debt_principal.is_some() || state.credit_limit.is_some() || principal > 0.0 {
+        state.debt_principal = Some(principal);
+    }
+    state.credit_headroom = match (state.debt_principal, state.credit_limit) {
+        (Some(principal), Some(credit)) if principal.is_finite() && credit.is_finite() => {
+            Some(credit - principal)
+        }
+        _ => None,
+    };
+    state.solvent = state
+        .credit_headroom
+        .map(|headroom| headroom > 0.0)
+        .unwrap_or(false);
+}
+
+fn fiscal_slack(atom: &Atom, state: &PlanningState) -> Option<f64> {
+    match atom {
+        Atom::Solvent => Some(if state.solvent { 0.0 } else { 1.0 }),
+        Atom::CreditHeadroom { rel, value } => {
+            let headroom = state.credit_headroom?;
+            if rel.holds(headroom, *value) {
+                Some(0.0)
+            } else {
+                Some((headroom - *value).abs())
+            }
+        }
+        Atom::DebtPrincipal { rel, value } => {
+            let principal = state.debt_principal?;
+            if rel.holds(principal, *value) {
+                Some(0.0)
+            } else {
+                Some((principal - *value).abs())
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Emit payday only when a solvency-related open atom can move closer after one
+/// tick. Prevents idle wait loops when the frozen balance cannot help.
+fn payday_can_help(state: &PlanningState, open_atoms: &[Atom]) -> bool {
+    if !open_atoms.iter().any(is_solvency_atom) {
+        return false;
+    }
+    let mut next = state.clone();
+    apply_payday_effects(&mut next);
+    if next == *state {
+        return false;
+    }
+    open_atoms.iter().any(|atom| {
+        let Some(before) = fiscal_slack(atom, state) else {
+            return false;
+        };
+        let Some(after) = fiscal_slack(atom, &next) else {
+            return false;
+        };
+        after < before
+    })
 }
 
 /// Apply an action if its preconditions hold.
@@ -557,6 +666,16 @@ pub fn apply_action_with_economy(
             next.date = next.date.add_days(i32::from(*days));
             next.queued_army_target = None;
             next.army_power_projection = next.army_power_projection.max(target);
+        }
+        Action::WaitForEvent {
+            event: Event::Payday {},
+            days,
+        } => {
+            if *days == 0 {
+                return None;
+            }
+            next.date = next.date.add_days(i32::from(*days));
+            apply_payday_effects(&mut next);
         }
     }
     Some(next)
@@ -822,6 +941,125 @@ mod tests {
     }
 
     #[test]
+    fn payday_wait_closes_solvent_from_exhausted_credit() {
+        let goal = compile("solvent").unwrap();
+        let start = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            debt_principal: Some(1_000.0),
+            credit_limit: Some(1_000.0),
+            credit_headroom: Some(0.0),
+            solvent: false,
+            weekly_balance: Some(250.0),
+            treasury: 0.0,
+            ..PlanningParts::default()
+        });
+        let config = SimConfig {
+            payday_days: 7,
+            ..SimConfig::default()
+        };
+
+        assert!(!evaluate(&goal, &start));
+        let waits = successors(&start, &goal, config);
+        assert_eq!(waits.len(), 1);
+        assert_eq!(waits[0].days, 7);
+        assert!(matches!(
+            waits[0].action,
+            Action::WaitForEvent {
+                event: Event::Payday {},
+                days: 7,
+            }
+        ));
+        assert!(evaluate(&goal, &waits[0].state));
+        assert_eq!(waits[0].state.debt_principal, Some(750.0));
+        assert_eq!(waits[0].state.credit_headroom, Some(250.0));
+        assert!(waits[0].state.solvent);
+        assert_eq!(start.date.days_until(&waits[0].state.date), 7);
+
+        let repeated = apply_action(&start, &waits[0].action).unwrap();
+        assert_eq!(repeated, waits[0].state);
+        assert_eq!(repeated.fingerprint(), waits[0].state.fingerprint());
+    }
+
+    #[test]
+    fn payday_chain_closes_credit_headroom_target() {
+        let goal = compile("credit_headroom > 100").unwrap();
+        let mut state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            debt_principal: Some(1_000.0),
+            credit_limit: Some(1_000.0),
+            credit_headroom: Some(0.0),
+            solvent: false,
+            weekly_balance: Some(80.0),
+            treasury: 0.0,
+            ..PlanningParts::default()
+        });
+        let config = SimConfig {
+            payday_days: 7,
+            ..SimConfig::default()
+        };
+
+        for _ in 0..2 {
+            assert!(!evaluate(&goal, &state));
+            let waits = successors(&state, &goal, config);
+            assert_eq!(waits.len(), 1);
+            state = waits[0].state.clone();
+        }
+        assert!(evaluate(&goal, &state));
+        assert_eq!(state.credit_headroom, Some(160.0));
+    }
+
+    #[test]
+    fn payday_not_emitted_without_open_solvency_or_progress() {
+        let config = SimConfig::default();
+        let insolvent = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            debt_principal: Some(1_000.0),
+            credit_limit: Some(1_000.0),
+            credit_headroom: Some(0.0),
+            solvent: false,
+            weekly_balance: Some(100.0),
+            ..PlanningParts::default()
+        });
+
+        let research = successors(
+            &insolvent,
+            &compile("research(tech=railways)").unwrap(),
+            config,
+        );
+        assert!(research.iter().all(|edge| {
+            !matches!(
+                edge.action,
+                Action::WaitForEvent {
+                    event: Event::Payday {},
+                    ..
+                }
+            )
+        }));
+
+        let deficit = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            debt_principal: Some(1_000.0),
+            credit_limit: Some(1_000.0),
+            credit_headroom: Some(0.0),
+            solvent: false,
+            weekly_balance: Some(-50.0),
+            treasury: 0.0,
+            ..PlanningParts::default()
+        });
+        assert!(successors(&deficit, &compile("solvent").unwrap(), config).is_empty());
+
+        let wealth_only = successors_for_atoms(
+            &insolvent,
+            &[Atom::PopulationWeightedWealth {
+                rel: Rel::Ge,
+                value: 20.0,
+            }],
+            config,
+        );
+        assert!(wealth_only.is_empty());
+    }
+
+    #[test]
     fn i8_actions_deterministic_and_hash_stable() {
         let state = state_at(7);
         let action = Action::QueueTech {
@@ -892,6 +1130,32 @@ mod tests {
                 .iter()
                 .any(|edge| matches!(&edge.action, Action::WaitForEvent { .. }));
             prop_assert!(!has_wait);
+
+            let solvent_start = PlanningState::from_parts(PlanningParts {
+                date: Vic3Date::from_ymdh(1836, 1, 1, 0).add_days(day_offset),
+                country: "GER".into(),
+                debt_principal: Some(500.0),
+                credit_limit: Some(500.0),
+                credit_headroom: Some(0.0),
+                solvent: false,
+                weekly_balance: Some(25.0),
+                ..PlanningParts::default()
+            });
+            let solvent_edges = successors(
+                &solvent_start,
+                &compile("solvent").unwrap(),
+                config,
+            );
+            prop_assert_eq!(solvent_edges.len(), 1);
+            let is_payday = matches!(
+                solvent_edges[0].action,
+                Action::WaitForEvent {
+                    event: Event::Payday {},
+                    ..
+                }
+            );
+            prop_assert!(is_payday);
+            prop_assert!(solvent_edges[0].state.date > solvent_start.date);
         }
     }
 }

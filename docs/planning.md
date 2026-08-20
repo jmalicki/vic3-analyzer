@@ -67,8 +67,20 @@ research formulas.
 
 ## Non-tech action readiness
 
-Snapshot fiscal (`weekly_balance`, `credit_headroom`, `solvent`) and saved-wealth
-atoms are diagnostic-only until a budget/debt or wage transition model exists.
+Saved-wealth (`population_weighted_wealth`) stays diagnostic until a wage model
+exists. Fiscal atoms use a **compact payday model** in `vic3-sim`, not a full
+Paradox treasury simulation:
+
+- When `solvent`, `credit_headroom`, or `debt_principal` is an open atom and one
+  weekly tick would move that atom closer, successors emit a single payday
+  event-wait (`SimConfig::payday_days`, default 7).
+- Each payday applies the **frozen** saved `weekly_balance` sample to treasury
+  and debt principal (surplus pays principal first, then raises cash; deficit
+  spends cash then borrows), then refreshes `credit_headroom` / `solvent`.
+- `weekly_balance` itself is an input, not a transition target: unmet income
+  goals stay gaps-only until tax/PM actions (later). SoL wealth is unchanged.
+- No interest rate schedule, gold reserve floor, credit-limit growth, or
+  investment pool — only the frozen balance vs known principal/credit book.
 
 Declared interest and army power projection both **project from save IR** and
 have compact sim actions: queue a goal-relevant interest (`state=` / `region=`)

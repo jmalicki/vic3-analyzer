@@ -56,7 +56,7 @@ export const PLAN_TEMPLATES: readonly PlanTemplate[] = [
     id: 'maximize-revenue',
     title: 'Increase weekly income',
     description:
-      'Target a saved net weekly-budget sample of at least 100. Gaps only until a fiscal transition model exists.',
+      'Target a saved net weekly-budget sample of at least 100. Gaps only until tax/PM actions can raise that frozen sample.',
     goal: 'weekly_balance >= 100',
     goalKind: 'advanced',
     label: 'Weekly income 100',
@@ -66,11 +66,11 @@ export const PLAN_TEMPLATES: readonly PlanTemplate[] = [
     id: 'avoid-default',
     title: 'Avoid default',
     description:
-      'Require known remaining credit before the debt limit. Gaps only until a fiscal transition model exists.',
+      'Require known remaining credit before the debt limit. Closable when a surplus weekly balance can pay down principal under the payday model.',
     goal: 'credit_headroom > 0',
     goalKind: 'advanced',
     label: 'Avoid default',
-    closesTimeline: false,
+    closesTimeline: true,
   },
   {
     id: 'standard-of-living',
