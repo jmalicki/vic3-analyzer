@@ -77,6 +77,7 @@ pub enum InterestKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Atom {
     HasTech(String),
+    HasLaw(String),
     GoodPrice { good: String, rel: Rel, value: f64 },
     ArmyPower { rel: Rel, value: f64 },
     Solvent,
@@ -109,9 +110,14 @@ impl Atom {
         matches!(self, Atom::HasTech(t) if t == tech)
     }
 
+    pub fn is_has_law(&self, law: &str) -> bool {
+        matches!(self, Atom::HasLaw(id) if vic3_world::law_key(id) == vic3_world::law_key(law))
+    }
+
     pub fn eval(&self, state: &PlanningState) -> bool {
         match self {
             Atom::HasTech(tech) => state.has_tech(tech),
+            Atom::HasLaw(law) => state.has_law(law),
             Atom::GoodPrice { good, rel, value } => state
                 .price(good)
                 .map(|p| rel.holds(p, *value))
@@ -342,6 +348,10 @@ mod tests {
     fn research_and_numeric_metrics_compile() {
         let tech = parse("has_tech(nitroglycerin)").unwrap();
         assert!(matches!(tech, Goal::Atom(Atom::HasTech(t)) if t == "nitroglycerin"));
+        assert!(matches!(
+            parse("has_law(law_autocracy)").unwrap(),
+            Goal::Atom(Atom::HasLaw(law)) if law == "law_autocracy"
+        ));
         let gdp = parse("gdp >= 50e6").unwrap();
         assert!(matches!(
             gdp,

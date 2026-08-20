@@ -119,28 +119,39 @@ impl Hash for Vic3Node {
 
 /// Admissible remaining-days bound from the compiled goal's dependency DAG.
 ///
-/// Atomic timing is known for research, interest declarations, and army power
-/// expansions (fixed model durations). AND uses the longest child (actions may
-/// overlap or satisfy multiple atoms), OR uses the cheapest child, and NOT stays
-/// at zero. Missing technologies / open interest / raisable army atoms always
+/// Atomic timing is known for research, interest declarations, army power
+/// expansions, law enactments, and (when no zero-day PM path exists)
+/// construction. AND uses the longest child (actions may overlap or satisfy
+/// multiple atoms), OR uses the cheapest child, and NOT stays at zero. Missing
+/// technologies / open interest / raisable army / missing laws always
 /// contribute their fixed duration, even when an unrelated item is queued:
 /// returning zero there would drop the estimate over a zero-day queue edge and
-/// break consistency for closed-node A*. Construction, munitions price, fiscal,
-/// SoL, and other atoms without a proven timing model contribute zero. This is
-/// deliberately a relaxation of the real state graph, not a replacement for A*.
-fn goal_timing_lower_bound(goal: &Goal, state: &PlanningState, config: SimConfig) -> u32 {
+/// break consistency for closed-node A*. Open `good_price` / `gdp` atoms
+/// contribute `construction_days` when the economy context has no SwitchPm
+/// candidate; otherwise they contribute zero because PM switches are 0-day.
+/// Fiscal, SoL, tax, and other atoms without a proven timing model contribute
+/// zero. This is deliberately a relaxation of the real state graph, not a
+/// replacement for A*.
+fn goal_timing_lower_bound(
+    goal: &Goal,
+    state: &PlanningState,
+    config: SimConfig,
+    economy: Option<&EconomyContext>,
+) -> u32 {
     let research_days = u32::from(config.research_days.max(1));
     let interest_days = u32::from(config.interest_days.max(1));
     let army_days = u32::from(config.army_expansion_days.max(1));
+    let law_days = u32::from(config.law_days.max(1));
+    let construction_days = u32::from(config.construction_days.max(1));
     match goal {
         Goal::And(children) => children
             .iter()
-            .map(|child| goal_timing_lower_bound(child, state, config))
+            .map(|child| goal_timing_lower_bound(child, state, config, economy))
             .max()
             .unwrap_or(0),
         Goal::Or(children) => children
             .iter()
-            .map(|child| goal_timing_lower_bound(child, state, config))
+            .map(|child| goal_timing_lower_bound(child, state, config, economy))
             .min()
             .unwrap_or(0),
         Goal::Not(_) => 0,
@@ -149,6 +160,13 @@ fn goal_timing_lower_bound(goal: &Goal, state: &PlanningState, config: SimConfig
                 0
             } else {
                 research_days
+            }
+        }
+        Goal::Atom(Atom::HasLaw(law)) => {
+            if state.has_law(law) {
+                0
+            } else {
+                law_days
             }
         }
         Goal::Atom(Atom::InterestIn { kind, id }) => {
@@ -169,6 +187,17 @@ fn goal_timing_lower_bound(goal: &Goal, state: &PlanningState, config: SimConfig
                 army_days
             } else {
                 0
+            }
+        }
+        Goal::Atom(atom @ (Atom::GoodPrice { .. } | Atom::Gdp { .. })) => {
+            if atom.eval(state)
+                || economy.is_some_and(|economy| {
+                    economy.has_pm_switch_path(state, std::slice::from_ref(atom), config)
+                })
+            {
+                0
+            } else {
+                construction_days
             }
         }
         Goal::Atom(_) => 0,
@@ -194,10 +223,16 @@ impl SearchNode for Vic3Node {
         evaluate(&self.context.goal, &self.state)
     }
 
-    /// Goal-DAG relaxation: exact for research / interest / raisable army atoms,
+    /// Goal-DAG relaxation: exact for research / interest / raisable army / law
+    /// atoms, construction days for open price/GDP when no SwitchPm path exists,
     /// zero for atoms without a proven timing model.
     fn heuristic(&self) -> Self::Cost {
-        goal_timing_lower_bound(&self.context.goal, &self.state, self.context.config)
+        goal_timing_lower_bound(
+            &self.context.goal,
+            &self.state,
+            self.context.config,
+            self.context.economy.as_deref(),
+        )
     }
 }
 
@@ -356,6 +391,68 @@ mod tests {
         assert!(path.last().is_some_and(|node| node.is_goal()));
         assert!(path.last().unwrap().state().solvent);
         assert_eq!(path.last().unwrap().state().credit_headroom, Some(100.0));
+    }
+
+    #[test]
+    fn law_plan_cost_is_queue_plus_wait_days() {
+        let start = Vic3Node::new(
+            PlanningState::default(),
+            compile("has_law(law_homesteading)").unwrap(),
+            SimConfig {
+                law_days: 55,
+                ..SimConfig::default()
+            },
+        );
+        assert_eq!(start.heuristic(), 55);
+        let (path, cost) =
+            shortest_path::<_, PairingHeap<_, _>>(&start).expect("law goal reachable");
+        assert_eq!(cost, 55);
+        assert!(path.last().unwrap().state().has_law("homesteading"));
+        assert!(path.last().unwrap().is_goal());
+    }
+
+    #[test]
+    fn tax_plan_closes_weekly_balance_in_zero_days() {
+        let start = Vic3Node::new(
+            PlanningState::from_parts(PlanningParts {
+                country: "GER".into(),
+                weekly_balance: Some(20.0),
+                ..PlanningParts::default()
+            }),
+            compile("weekly_balance >= 100").unwrap(),
+            SimConfig {
+                tax_balance_per_step: 50,
+                max_tax_steps: 3,
+                ..SimConfig::default()
+            },
+        );
+        assert_eq!(start.heuristic(), 0);
+        let (path, cost) =
+            shortest_path::<_, PairingHeap<_, _>>(&start).expect("tax goal reachable");
+        assert_eq!(cost, 0);
+        assert!(path.last().unwrap().is_goal());
+        assert!(path.last().unwrap().state().weekly_balance.unwrap() >= 100.0);
+    }
+
+    #[test]
+    fn construction_bound_applies_without_pm_path() {
+        let start = Vic3Node::new(
+            PlanningState::from_parts(PlanningParts {
+                country: "GER".into(),
+                good_prices: vec![("wood".into(), 40.0)],
+                ..PlanningParts::default()
+            }),
+            compile("good_price(wood) <= 20").unwrap(),
+            SimConfig {
+                construction_days: 33,
+                ..SimConfig::default()
+            },
+        );
+        assert_eq!(
+            start.heuristic(),
+            33,
+            "without economy PM candidates, open price uses construction days"
+        );
     }
 
     #[test]

@@ -114,6 +114,8 @@ pub struct WorldCountry {
     pub interest_states: Vec<String>,
     /// Strategic-region ids for DSL `interest_in(region=…)`.
     pub interest_regions: Vec<String>,
+    /// Country infamy when present on the save.
+    pub infamy: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -317,6 +319,7 @@ impl World {
                     army_power_projection: vic3_load::army_power_projection_for(save, id),
                     interest_states: interest.states,
                     interest_regions: interest.regions,
+                    infamy: country.infamy.filter(|value| value.is_finite()),
                 }
             })
             .collect();

@@ -29,11 +29,17 @@ impl EconomyContext {
     }
 
     fn world_for(&self, state: &PlanningState) -> World {
-        state
+        let with_levels = state
             .building_level_deltas
             .iter()
             .fold(self.base_world.clone(), |world, (building, levels)| {
                 world.with_extra_levels(building, *levels)
+            });
+        state
+            .pm_overrides
+            .iter()
+            .fold(with_levels, |world, (building_id, methods)| {
+                world.with_production_methods(*building_id, methods.clone())
             })
     }
 
@@ -147,6 +153,157 @@ impl EconomyContext {
             .map(|building| building.revenue.max(0.0))
             .sum()
     }
+
+    /// Goal-relevant alternate production methods, capped for finite branching.
+    fn pm_switch_candidates(
+        &self,
+        state: &PlanningState,
+        atoms: &[Atom],
+        max_candidates: u16,
+        max_overrides: u16,
+    ) -> Vec<(u32, Vec<String>)> {
+        if state.pm_overrides.len() >= usize::from(max_overrides) || max_candidates == 0 {
+            return Vec::new();
+        }
+        let wants_price = atoms
+            .iter()
+            .any(|atom| matches!(atom, Atom::GoodPrice { .. }));
+        let wants_gdp = atoms.iter().any(|atom| {
+            matches!(
+                atom,
+                Atom::Gdp {
+                    rel: Rel::Ge | Rel::Gt | Rel::Eq,
+                    ..
+                }
+            )
+        });
+        if !wants_price && !wants_gdp {
+            return Vec::new();
+        }
+        let world = self.world_for(state);
+        let country_id = world
+            .countries
+            .iter()
+            .find(|country| country.tag == state.country)
+            .map(|country| country.id);
+        let owned_states: BTreeSet<u32> = world
+            .states
+            .iter()
+            .filter_map(|world_state| (world_state.country == country_id).then_some(world_state.id))
+            .collect();
+        let mut out = Vec::new();
+        let mut seen = BTreeSet::new();
+        'buildings: for building in &world.buildings {
+            if building.state.is_some_and(|state_id| {
+                !owned_states.is_empty() && !owned_states.contains(&state_id)
+            }) {
+                continue;
+            }
+            if state.pm_overrides.contains_key(&building.id) {
+                continue;
+            }
+            let Some(building_type) = self.defs.buildings.get(&building.building) else {
+                continue;
+            };
+            let slot_count = building.production_methods.len().max(1);
+            for slot in 0..slot_count {
+                let current = building.production_methods.get(slot).cloned();
+                let mut alternatives = BTreeSet::new();
+                for group_id in &building_type.production_method_groups {
+                    let Some(group) = self.defs.production_method_groups.get(group_id) else {
+                        continue;
+                    };
+                    alternatives.extend(group.iter().cloned());
+                }
+                if alternatives.is_empty() {
+                    alternatives.extend(building.production_methods.iter().cloned());
+                    for other in &world.buildings {
+                        if other.building == building.building {
+                            alternatives.extend(other.production_methods.iter().cloned());
+                        }
+                    }
+                }
+                for candidate in alternatives {
+                    if current.as_ref() == Some(&candidate) {
+                        continue;
+                    }
+                    let relevant = pm_affects_open_atoms(&self.defs, &candidate, atoms, wants_gdp);
+                    if !relevant {
+                        continue;
+                    }
+                    let mut methods = if building.production_methods.is_empty() {
+                        vec![candidate.clone()]
+                    } else {
+                        building.production_methods.clone()
+                    };
+                    if slot >= methods.len() {
+                        methods.push(candidate);
+                    } else {
+                        methods[slot] = candidate;
+                    }
+                    if !seen.insert((building.id, methods.clone())) {
+                        continue;
+                    }
+                    out.push((building.id, methods));
+                    if out.len() >= usize::from(max_candidates) {
+                        break 'buildings;
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// True when at least one zero-day PM switch candidate exists for open atoms.
+    pub fn has_pm_switch_path(
+        &self,
+        state: &PlanningState,
+        atoms: &[Atom],
+        config: SimConfig,
+    ) -> bool {
+        !self
+            .pm_switch_candidates(
+                state,
+                atoms,
+                config.max_pm_candidates,
+                config.max_pm_overrides,
+            )
+            .is_empty()
+    }
+}
+
+fn pm_affects_open_atoms(defs: &GameDefs, pm_id: &str, atoms: &[Atom], wants_gdp: bool) -> bool {
+    let Some(pm) = defs.production_methods.get(pm_id) else {
+        return wants_gdp;
+    };
+    if wants_gdp && (!pm.outputs.is_empty() || !pm.inputs.is_empty()) {
+        return true;
+    }
+    for atom in atoms {
+        let Atom::GoodPrice { good, rel, .. } = atom else {
+            continue;
+        };
+        let Some(good_idx) = defs.index_of(good) else {
+            continue;
+        };
+        let produces = pm
+            .outputs
+            .iter()
+            .any(|(idx, qty)| *idx == good_idx && *qty > 0.0);
+        let consumes = pm
+            .inputs
+            .iter()
+            .any(|(idx, qty)| *idx == good_idx && *qty > 0.0);
+        let relevant = match rel {
+            Rel::Le | Rel::Lt => produces,
+            Rel::Ge | Rel::Gt => consumes,
+            Rel::Eq => produces || consumes,
+        };
+        if relevant {
+            return true;
+        }
+    }
+    false
 }
 
 /// Tunable durations used by the compact simulator.
@@ -164,6 +321,16 @@ pub struct SimConfig {
     pub interest_days: u16,
     /// Fixed duration for one modeled army power-projection expansion.
     pub army_expansion_days: u16,
+    /// Fixed duration for one modeled law enactment.
+    pub law_days: u16,
+    /// Weekly-balance change applied per tax-level step.
+    pub tax_balance_per_step: i32,
+    /// Absolute tax-level offset cap from the saved baseline.
+    pub max_tax_steps: u8,
+    /// Max distinct building PM overrides on one planning branch.
+    pub max_pm_overrides: u16,
+    /// Max SwitchPm decision edges emitted in one expansion.
+    pub max_pm_candidates: u16,
 }
 
 impl Default for SimConfig {
@@ -175,6 +342,11 @@ impl Default for SimConfig {
             max_added_levels_per_type: 10,
             interest_days: 90,
             army_expansion_days: 180,
+            law_days: 180,
+            tax_balance_per_step: 50,
+            max_tax_steps: 3,
+            max_pm_overrides: 4,
+            max_pm_candidates: 4,
         }
     }
 }
@@ -190,6 +362,8 @@ pub enum Event {
     InterestDeclared { kind: InterestKind, id: String },
     /// The queued army power-projection expansion completes (`f64::to_bits`).
     ArmyPowerIncreased { target_bits: u64 },
+    /// The queued law enactment completes.
+    LawEnacted { law: String },
     /// One modeled budget tick applies the frozen weekly balance to debt/treasury.
     Payday {},
 }
@@ -205,6 +379,16 @@ pub enum Action {
     QueueInterest { kind: InterestKind, id: String },
     /// Queue raising army power projection to at least `f64::from_bits(target_bits)`.
     QueueArmyPower { target_bits: u64 },
+    /// Queue enacting a goal-relevant law checkpoint.
+    QueueLaw { law: String },
+    /// Instantly switch one building to alternate production methods and re-solve.
+    SwitchPm {
+        building_id: u32,
+        methods: Vec<String>,
+    },
+    /// Adjust tax level by `delta` and apply `balance_delta_bits` (`f64::to_bits`)
+    /// to the frozen weekly-balance sample.
+    AdjustTax { delta: i8, balance_delta_bits: u64 },
     /// Advance directly to an event already in flight.
     WaitForEvent { event: Event, days: u16 },
 }
@@ -237,11 +421,12 @@ pub fn successors_with_economy(
 
 /// Generate successors from an already-computed list of open goal atoms.
 ///
-/// Technology, building, interest, and army decisions are emitted only when no
-/// compact queue is occupied. At most one wait edge is appended from an
-/// in-flight event that still closes an open atom, or a payday tick when a
-/// solvency-related atom is open and one payday can move debt/credit toward
-/// that atom. Idle states without an open solvency path emit no wait (I6).
+/// Technology, building, interest, army, law, PM, and tax decisions are emitted
+/// only when no compact queue is occupied. At most one wait edge is appended
+/// from an in-flight event that still closes an open atom, or a payday tick
+/// when a solvency-related atom is open and one payday can move debt/credit
+/// toward that atom. Idle states without an open solvency path emit no wait
+/// (I6).
 pub fn successors_for_atoms(
     state: &PlanningState,
     open_atoms: &[Atom],
@@ -322,8 +507,10 @@ fn successors_for_atoms_with_economy(
 ) -> Vec<Successor> {
     let mut result = Vec::new();
     let mut seen_techs = BTreeSet::new();
+    let mut seen_laws = BTreeSet::new();
     let mut seen_interest = BTreeSet::new();
     let mut seen_army_targets = BTreeSet::new();
+    let mut seen_tax_deltas = BTreeSet::new();
 
     if !state.has_inflight_queue() {
         for atom in open_atoms {
@@ -336,6 +523,17 @@ fn successors_for_atoms_with_economy(
                         &mut result,
                         state,
                         Action::QueueTech { tech: tech.clone() },
+                        economy,
+                    );
+                }
+                Atom::HasLaw(law) => {
+                    if state.has_law(law) || !seen_laws.insert(vic3_world::law_key(law)) {
+                        continue;
+                    }
+                    push_decision(
+                        &mut result,
+                        state,
+                        Action::QueueLaw { law: law.clone() },
                         economy,
                     );
                 }
@@ -371,6 +569,24 @@ fn successors_for_atoms_with_economy(
                         economy,
                     );
                 }
+                Atom::WeeklyBalance { .. } => {
+                    for delta in tax_deltas_toward(state, atom, config) {
+                        if !seen_tax_deltas.insert(delta) {
+                            continue;
+                        }
+                        let balance_delta =
+                            f64::from(config.tax_balance_per_step) * f64::from(delta);
+                        push_decision(
+                            &mut result,
+                            state,
+                            Action::AdjustTax {
+                                delta,
+                                balance_delta_bits: balance_delta.to_bits(),
+                            },
+                            economy,
+                        );
+                    }
+                }
                 _ => {}
             }
         }
@@ -383,6 +599,22 @@ fn successors_for_atoms_with_economy(
                     &mut result,
                     state,
                     Action::QueueBuildingLevel { building },
+                    Some(economy),
+                );
+            }
+            for (building_id, methods) in economy.pm_switch_candidates(
+                state,
+                open_atoms,
+                config.max_pm_candidates,
+                config.max_pm_overrides,
+            ) {
+                push_decision(
+                    &mut result,
+                    state,
+                    Action::SwitchPm {
+                        building_id,
+                        methods,
+                    },
                     Some(economy),
                 );
             }
@@ -440,6 +672,18 @@ fn successors_for_atoms_with_economy(
             config.army_expansion_days,
             economy,
         );
+    } else if let Some(law) = state.queued_law.as_ref().filter(|queued| {
+        open_atoms
+            .iter()
+            .any(|atom| atom.is_has_law(queued.as_str()))
+    }) {
+        push_wait(
+            &mut result,
+            state,
+            Event::LawEnacted { law: law.clone() },
+            config.law_days,
+            economy,
+        );
     } else if payday_can_help(state, open_atoms) {
         push_wait(
             &mut result,
@@ -451,6 +695,43 @@ fn successors_for_atoms_with_economy(
     }
 
     result
+}
+
+/// Tax steps (±1) that move an open weekly-balance atom closer, within the cap.
+fn tax_deltas_toward(state: &PlanningState, atom: &Atom, config: SimConfig) -> Vec<i8> {
+    let Atom::WeeklyBalance { rel, value } = atom else {
+        return Vec::new();
+    };
+    let Some(balance) = state.weekly_balance.filter(|v| v.is_finite()) else {
+        return Vec::new();
+    };
+    if rel.holds(balance, *value) {
+        return Vec::new();
+    }
+    let step = f64::from(config.tax_balance_per_step);
+    if step <= 0.0 {
+        return Vec::new();
+    }
+    let max_steps = i8::try_from(config.max_tax_steps).unwrap_or(3);
+    let mut out = Vec::new();
+    for delta in [-1_i8, 1_i8] {
+        let next_level = state.tax_level.saturating_add(delta);
+        if next_level.abs() > max_steps {
+            continue;
+        }
+        let next_balance = balance + step * f64::from(delta);
+        let before = (balance - *value).abs();
+        let after = (next_balance - *value).abs();
+        let improves = match rel {
+            Rel::Ge | Rel::Gt => next_balance > balance && !rel.holds(balance, *value),
+            Rel::Le | Rel::Lt => next_balance < balance && !rel.holds(balance, *value),
+            Rel::Eq => after < before,
+        };
+        if improves {
+            out.push(delta);
+        }
+    }
+    out
 }
 
 fn is_solvency_atom(atom: &Atom) -> bool {
@@ -599,6 +880,45 @@ pub fn apply_action_with_economy(
             }
             next.queued_army_target = Some(target);
         }
+        Action::QueueLaw { law } => {
+            if law.is_empty() || next.has_inflight_queue() || next.has_law(law) {
+                return None;
+            }
+            next.queued_law = Some(law.clone());
+        }
+        Action::SwitchPm {
+            building_id,
+            methods,
+        } => {
+            let economy = economy?;
+            if methods.is_empty() || next.has_inflight_queue() {
+                return None;
+            }
+            if next.pm_overrides.get(building_id) == Some(methods) {
+                return None;
+            }
+            let world = economy.world_for(&next);
+            if !world.buildings.iter().any(|b| b.id == *building_id) {
+                return None;
+            }
+            next.pm_overrides.insert(*building_id, methods.clone());
+            refresh_prices(&mut next, economy);
+        }
+        Action::AdjustTax {
+            delta,
+            balance_delta_bits,
+        } => {
+            if *delta == 0 || next.has_inflight_queue() {
+                return None;
+            }
+            let balance_delta = f64::from_bits(*balance_delta_bits);
+            if !balance_delta.is_finite() {
+                return None;
+            }
+            let balance = next.weekly_balance.filter(|v| v.is_finite())?;
+            next.tax_level = next.tax_level.saturating_add(*delta);
+            next.weekly_balance = Some(balance + balance_delta);
+        }
         Action::WaitForEvent {
             event: Event::TechCompleted { tech },
             days,
@@ -624,17 +944,7 @@ pub fn apply_action_with_economy(
                 .building_level_deltas
                 .entry(building.clone())
                 .or_default() += 1;
-            let prices = solve(
-                &economy.world_for(&next),
-                &economy.defs,
-                economy.solve_opts.clone(),
-            );
-            next.gdp = economy.modeled_gdp(&next, &prices);
-            next.good_prices = prices
-                .goods
-                .into_iter()
-                .map(|good| (good.id, good.price))
-                .collect();
+            refresh_prices(&mut next, economy);
         }
         Action::WaitForEvent {
             event: Event::InterestDeclared { kind, id },
@@ -668,6 +978,17 @@ pub fn apply_action_with_economy(
             next.army_power_projection = next.army_power_projection.max(target);
         }
         Action::WaitForEvent {
+            event: Event::LawEnacted { law },
+            days,
+        } => {
+            if *days == 0 || next.queued_law.as_deref() != Some(law.as_str()) {
+                return None;
+            }
+            next.date = next.date.add_days(i32::from(*days));
+            next.queued_law = None;
+            next.laws.insert(law.clone());
+        }
+        Action::WaitForEvent {
             event: Event::Payday {},
             days,
         } => {
@@ -679,6 +1000,20 @@ pub fn apply_action_with_economy(
         }
     }
     Some(next)
+}
+
+fn refresh_prices(state: &mut PlanningState, economy: &EconomyContext) {
+    let prices = solve(
+        &economy.world_for(state),
+        &economy.defs,
+        economy.solve_opts.clone(),
+    );
+    state.gdp = economy.modeled_gdp(state, &prices);
+    state.good_prices = prices
+        .goods
+        .into_iter()
+        .map(|good| (good.id, good.price))
+        .collect();
 }
 
 /// Crate version from Cargo.
@@ -1057,6 +1392,182 @@ mod tests {
             config,
         );
         assert!(wealth_only.is_empty());
+    }
+
+    #[test]
+    fn queue_law_then_wait_reaches_has_law() {
+        let goal = compile("has_law(law_homesteading)").unwrap();
+        let start = state_at(0);
+        let config = SimConfig {
+            law_days: 40,
+            ..SimConfig::default()
+        };
+
+        let decisions = successors(&start, &goal, config);
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].days, 0);
+        assert!(matches!(
+            decisions[0].action,
+            Action::QueueLaw { ref law } if law == "law_homesteading"
+        ));
+
+        let waits = successors(&decisions[0].state, &goal, config);
+        assert_eq!(waits.len(), 1);
+        assert_eq!(waits[0].days, 40);
+        assert!(waits[0].state.has_law("homesteading"));
+        assert!(evaluate(&goal, &waits[0].state));
+    }
+
+    #[test]
+    fn adjust_tax_closes_weekly_balance() {
+        let goal = compile("weekly_balance >= 100").unwrap();
+        let start = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            weekly_balance: Some(40.0),
+            ..PlanningParts::default()
+        });
+        let config = SimConfig {
+            tax_balance_per_step: 50,
+            max_tax_steps: 3,
+            ..SimConfig::default()
+        };
+
+        let decisions = successors(&start, &goal, config);
+        assert_eq!(decisions.len(), 1);
+        assert!(matches!(
+            decisions[0].action,
+            Action::AdjustTax { delta: 1, .. }
+        ));
+        assert_eq!(decisions[0].state.weekly_balance, Some(90.0));
+        assert!(!evaluate(&goal, &decisions[0].state));
+
+        let second = successors(&decisions[0].state, &goal, config);
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].state.weekly_balance, Some(140.0));
+        assert!(evaluate(&goal, &second[0].state));
+    }
+
+    #[test]
+    fn switch_pm_then_resolves_good_price() {
+        use vic3_defs::{BuildingType, ProductionMethod};
+
+        let wood = GoodIdx::from_usize(0);
+        let mut defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        defs.buildings.insert(
+            "building_logging_camp".into(),
+            BuildingType {
+                id: "building_logging_camp".into(),
+                group: None,
+                city_type: None,
+                production_method_groups: vec!["pmg_logging".into()],
+            },
+        );
+        defs.production_method_groups.insert(
+            "pmg_logging".into(),
+            vec!["pm_low".into(), "pm_high".into()],
+        );
+        defs.production_methods.insert(
+            "pm_low".into(),
+            ProductionMethod {
+                id: "pm_low".into(),
+                outputs: vec![(wood, 5.0)],
+                ..Default::default()
+            },
+        );
+        defs.production_methods.insert(
+            "pm_high".into(),
+            ProductionMethod {
+                id: "pm_high".into(),
+                outputs: vec![(wood, 40.0)],
+                ..Default::default()
+            },
+        );
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                ..WorldState::default()
+            }],
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(1),
+                building: "building_logging_camp".into(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: vec!["pm_low".into()],
+                saved_inputs: Vec::new(),
+                saved_outputs: Vec::new(),
+            }],
+            frozen_buy: GoodsVec::from_vec(vec![20.0]),
+            ..World::default()
+        };
+        let solve_opts = SolveOpts::default();
+        let baseline = solve(&world, &defs, solve_opts.clone());
+        let switched = solve(
+            &world.with_production_methods(1, vec!["pm_high".into()]),
+            &defs,
+            solve_opts.clone(),
+        );
+        let initial_price = baseline.goods[0].price;
+        let next_price = switched.goods[0].price;
+        assert!(next_price < initial_price);
+        let target = (initial_price + next_price) / 2.0;
+        let goal = Goal::Atom(Atom::GoodPrice {
+            good: "wood".into(),
+            rel: Rel::Le,
+            value: target,
+        });
+        let state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            good_prices: vec![("wood".into(), initial_price)],
+            gdp: baseline.buildings[0].revenue,
+            ..PlanningParts::default()
+        });
+        let economy = EconomyContext::new(world, defs, solve_opts);
+        let config = SimConfig {
+            max_added_levels_per_type: 0,
+            ..SimConfig::default()
+        };
+
+        let decisions = successors_with_economy(&state, &goal, config, &economy);
+        assert!(
+            decisions.iter().any(|edge| matches!(
+                edge.action,
+                Action::SwitchPm {
+                    building_id: 1,
+                    ref methods
+                } if methods == &["pm_high".to_string()]
+            )),
+            "expected SwitchPm candidate, got {decisions:?}"
+        );
+        let switched_edge = decisions
+            .into_iter()
+            .find(|edge| matches!(edge.action, Action::SwitchPm { building_id: 1, .. }))
+            .expect("switch pm edge");
+        assert_eq!(switched_edge.days, 0);
+        assert!(evaluate(&goal, &switched_edge.state));
+        assert_eq!(
+            switched_edge.state.pm_overrides.get(&1).map(Vec::as_slice),
+            Some(["pm_high".to_string()].as_slice())
+        );
     }
 
     #[test]
