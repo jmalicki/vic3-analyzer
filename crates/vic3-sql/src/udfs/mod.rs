@@ -16,6 +16,7 @@
 //! | --- | --- | --- |
 //! | `good_price(good)` | Utf8 (runtime columnar OK) | NULL arg or unknown id → NULL |
 //! | `army_power()` | none | no `player_tag` → NULL |
+//! | `player_tag()` | none | no `player_tag` on world → NULL |
 //! | `alerts()` | none | — |
 //! | `shortage_analysis(good)` | Utf8 **or** NULL literal | NULL → all scarce-good alerts |
 //! | `building_staffing(state_id)` | non-null int | NULL / non-literal → plan error |
@@ -26,7 +27,7 @@
 //!
 //! | Module | Surface |
 //! | --- | --- |
-//! | [`scalars`] | `good_price`, `army_power` |
+//! | [`scalars`] | `good_price`, `army_power`, `player_tag` |
 //! | [`alerts`] | `alerts()` |
 //! | [`shortage`] | `shortage_analysis(good)` |
 //! | [`staffing`] | `building_staffing(state_id)` |

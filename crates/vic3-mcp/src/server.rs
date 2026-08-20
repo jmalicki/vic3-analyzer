@@ -250,7 +250,12 @@ impl Vic3McpServer {
             "Investigate goods shortages in the current Vic3 campaign.\n\
              1. Call use_save with selector latest_autosave (or latest).\n\
              2. Query saves if needed: SELECT name, kind, mtime, location FROM saves ORDER BY mtime DESC LIMIT 10.\n\
-             3. Run shortage-oriented SQL (e.g. SELECT * FROM goods WHERE shortage > 0 ORDER BY shortage DESC).\n\
+             3. Rank domestic shortages (player-owned states), e.g.\n\
+             SELECT s.region_name, g.good, g.shortage, g.price\n\
+             FROM states s JOIN goods_by_state g USING (state_id)\n\
+             WHERE s.owner_tag = player_tag() AND g.shortage > 0\n\
+             ORDER BY g.shortage DESC LIMIT 20.\n\
+             Optionally also check market-wide SELECT * FROM goods WHERE shortage > 0.\n\
              Rules: stubs not paths; read-only SQL; use_save before fact tables.",
         )]
     }

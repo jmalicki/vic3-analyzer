@@ -1,9 +1,11 @@
-//! Scalar diagnostics: `good_price(good)`, `army_power()` (`docs/sql.md`).
+//! Scalar diagnostics: `good_price(good)`, `army_power()`, `player_tag()` (`docs/sql.md`).
 //!
 //! `good_price` returns NULL for a NULL arg or unknown good id. `army_power`
 //! returns NULL when there is no `player_tag`. When a player country is bound
 //! but save IR has no army power projection fields, the UDF **errors** (and
-//! logs) instead of returning a silent NULL or false zero.
+//! logs) instead of returning a silent NULL or false zero. `player_tag`
+//! returns the bound world's played tag, or NULL if unset (no first-country
+//! fallback — matches `army_power` honesty).
 
 use std::sync::Arc;
 
@@ -17,7 +19,7 @@ use datafusion::prelude::SessionContext;
 use crate::binding::SessionBinding;
 use crate::SqlError;
 
-/// Register `good_price` / `army_power` as Stable UDFs over the bound prices snapshot.
+/// Register `good_price` / `army_power` / `player_tag` as Stable UDFs over the bound session.
 pub fn register(ctx: &SessionContext, binding: Arc<SessionBinding>) -> Result<(), SqlError> {
     let price_binding = Arc::clone(&binding);
     ctx.register_udf(create_udf(
@@ -28,13 +30,22 @@ pub fn register(ctx: &SessionContext, binding: Arc<SessionBinding>) -> Result<()
         Arc::new(move |args| good_price_invoke(price_binding.as_ref(), args)),
     ));
 
-    let army_binding = binding;
+    let army_binding = Arc::clone(&binding);
     ctx.register_udf(create_udf(
         "army_power",
         vec![],
         DataType::Float64,
         Volatility::Stable,
         Arc::new(move |_args| army_power_invoke(army_binding.as_ref())),
+    ));
+
+    let tag_binding = binding;
+    ctx.register_udf(create_udf(
+        "player_tag",
+        vec![],
+        DataType::Utf8,
+        Volatility::Stable,
+        Arc::new(move |_args| player_tag_invoke(tag_binding.as_ref())),
     ));
     Ok(())
 }
@@ -139,4 +150,10 @@ fn army_power(binding: &SessionBinding) -> DfResult<Option<f64>> {
             )
         }
     }
+}
+
+fn player_tag_invoke(binding: &SessionBinding) -> DfResult<ColumnarValue> {
+    Ok(ColumnarValue::Scalar(ScalarValue::Utf8(
+        binding.world.player_tag.clone(),
+    )))
 }

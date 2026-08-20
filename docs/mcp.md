@@ -88,7 +88,7 @@ Rescan allowlisted save dirs → `{ "count": number }`.
 
 | Prompt | Purpose |
 | --- | --- |
-| `investigate_shortages` | use_save latest → shortage-oriented SQL |
+| `investigate_shortages` | use_save → domestic `owner_tag = player_tag()` shortage join (market-wide goods optional) |
 | `compare_latest_autosave` | Catalog + bind + summary |
 | `military_readiness` | Military queries when available |
 | `what_is_loaded` | `vic3://session` + counts |

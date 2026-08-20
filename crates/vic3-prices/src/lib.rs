@@ -49,6 +49,7 @@
 mod alerts;
 mod consumption;
 mod formula;
+mod label;
 mod optimize;
 mod qualification_advice;
 mod result;

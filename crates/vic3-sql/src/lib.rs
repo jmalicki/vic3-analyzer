@@ -73,6 +73,7 @@
 //! | --- | --- | --- | --- |
 //! | `good_price(good)` | scalar | Utf8 | arg or missing id → NULL |
 //! | `army_power()` | scalar | none | no player tag → NULL |
+//! | `player_tag()` | scalar | none | no player tag → NULL |
 //! | `alerts()` | TVF | none | — |
 //! | `shortage_analysis(good)` | TVF | Utf8 or NULL | NULL = all scarce-good alerts |
 //! | `building_staffing(state_id)` | TVF | non-null int | NULL rejected |
@@ -186,6 +187,11 @@ pub fn schema_catalog_json() -> serde_json::Value {
                 "name": "army_power",
                 "signature": "army_power() → FLOAT",
                 "null": "no resolvable player_tag → NULL",
+            },
+            {
+                "name": "player_tag",
+                "signature": "player_tag() → TEXT",
+                "null": "no player_tag on bound world → NULL",
             },
         ],
         "tvfs": [

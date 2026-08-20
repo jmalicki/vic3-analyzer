@@ -133,13 +133,102 @@ async fn join_example_from_docs() {
             "SELECT s.region_name, g.good, g.shortage, g.price \
              FROM states s \
              JOIN goods_by_state g USING (state_id) \
-             WHERE g.shortage > 0 \
+             WHERE s.owner_tag = player_tag() \
+               AND g.shortage > 0 \
              ORDER BY g.shortage DESC \
              LIMIT 20",
         )
         .await
         .expect("join");
     assert!(!batches.is_empty());
+}
+
+#[tokio::test]
+async fn player_tag_scopes_owner_states() {
+    let eng = engine().await;
+    let tag = eng
+        .query("SELECT player_tag() AS t")
+        .await
+        .expect("player_tag");
+    let tags = tag[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("t");
+    assert!(!tags.is_null(0));
+    assert_eq!(tags.value(0), "GER");
+
+    let owned = eng
+        .query("SELECT state_id, owner_tag FROM states WHERE owner_tag = player_tag()")
+        .await
+        .expect("owned states");
+    let rows: usize = owned.iter().map(|b| b.num_rows()).sum();
+    assert!(rows >= 1, "expected ≥1 player-owned state");
+    for batch in &owned {
+        let col = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        for i in 0..col.len() {
+            assert_eq!(col.value(i), "GER");
+        }
+    }
+
+    let joined = eng
+        .query(
+            "SELECT s.state_id, s.owner_tag \
+             FROM states s \
+             JOIN goods_by_state g USING (state_id) \
+             WHERE s.owner_tag = player_tag()",
+        )
+        .await
+        .expect("domestic goods join");
+    for batch in &joined {
+        let col = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        for i in 0..col.len() {
+            assert_eq!(col.value(i), "GER");
+        }
+    }
+}
+
+#[tokio::test]
+async fn region_name_non_null_when_region_id_set() {
+    let eng = engine().await;
+    let batches = eng
+        .query(
+            "SELECT count(*) AS n FROM states \
+             WHERE region_id IS NOT NULL AND region_name IS NULL",
+        )
+        .await
+        .expect("null region_name");
+    let count = batches[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::Int64Array>()
+        .expect("count")
+        .value(0);
+    assert_eq!(count, 0, "region_name must fall back when region_id is set");
+}
+
+#[tokio::test]
+async fn pops_profession_not_pop_type_or_state_pops() {
+    let eng = engine().await;
+    let ok = eng
+        .query("SELECT profession FROM pops LIMIT 1")
+        .await
+        .expect("profession");
+    assert_eq!(ok[0].schema().field(0).name(), "profession");
+
+    let pop_type = eng.query("SELECT pop_type FROM pops LIMIT 1").await;
+    assert!(pop_type.is_err(), "pop_type must not be a SQL column");
+
+    let state_pops = eng.query("SELECT * FROM state_pops LIMIT 1").await;
+    assert!(state_pops.is_err(), "state_pops must not be a SQL table");
 }
 
 #[tokio::test]

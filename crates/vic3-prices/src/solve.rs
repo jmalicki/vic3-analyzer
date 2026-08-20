@@ -451,8 +451,7 @@ fn detail_rows(
             region_name: state
                 .region
                 .as_ref()
-                .and_then(|id| defs.labels.get(id))
-                .cloned(),
+                .map(|id| crate::label::script_label(defs, id)),
             country_id: state.country,
             market_id: state.market,
             arable_land: state.arable_land,

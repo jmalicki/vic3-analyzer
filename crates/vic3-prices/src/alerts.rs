@@ -18,6 +18,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use vic3_defs::GameDefs;
 
+use crate::label::{pretty_id, script_label};
 use crate::qualification_advice::{
     blocking_profession, building_staffing, id_has, is_fully_staffed, is_subsistence,
     select_levers, shortage_target, state_mix, state_profession_totals, BuildingStaffing, LeverKey,
@@ -1757,36 +1758,6 @@ fn state_label(prices: &PricesResult, world: &World, defs: &GameDefs, state_id: 
         }
     }
     format!("state {state_id}")
-}
-
-fn script_label(defs: &GameDefs, id: &str) -> String {
-    defs.labels
-        .get(id)
-        .cloned()
-        .unwrap_or_else(|| pretty_id(id))
-}
-
-fn pretty_id(id: &str) -> String {
-    let trimmed = id
-        .strip_prefix("STATE_")
-        .or_else(|| id.strip_prefix("building_"))
-        .or_else(|| id.strip_prefix("pm_"))
-        .or_else(|| id.strip_prefix("popneed_"))
-        .unwrap_or(id);
-    trimmed
-        .split('_')
-        .filter(|word| !word.is_empty())
-        .map(|word| {
-            let mut chars = word.chars();
-            match chars.next() {
-                Some(first) => {
-                    first.to_uppercase().collect::<String>() + &chars.as_str().to_ascii_lowercase()
-                }
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn building_label(prices: &PricesResult, defs: &GameDefs, type_id: &str) -> String {

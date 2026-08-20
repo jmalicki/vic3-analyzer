@@ -91,7 +91,7 @@ Identity and geography for states in scope of the active save.
 | --- | --- |
 | `state_id` | Integer Paradox id; **primary key** for joins |
 | `region_id` | Non-localized region/script key when available (`region` string as stored) |
-| `region_name` | Localized display label when available |
+| `region_name` | Localized display label when available; otherwise a humanized `region_id` (e.g. `STATE_BRANDENBURG` → `Brandenburg`) |
 | `owner_tag` | Country tag |
 | `market_id` | If modeled |
 | `infrastructure` | As exposed in prices result |
@@ -231,14 +231,14 @@ WHERE good = 'grain';
 
 Optional convenience view `production_method_goods` = that double-unnest pattern — ship in v1 if MCP examples need join-shaped SQL without teaching `unnest(unnest(…))`.
 
-### `pops` (or `state_pops`)
+### `pops`
 
-Collapsed state pops from `state_pops`.
+Collapsed state pops from the prices/JSON `state_pops` list (that name is **not** a SQL table).
 
 | Column | Notes |
 | --- | --- |
 | `state_id` | **key** (part) |
-| `pop_type` / `profession` | As modeled |
+| `profession` | Script id (game/defs often say `pop_type`; SQL column is `profession`) |
 | `workforce` / `dependents` | |
 | `literacy` | |
 | Need basket fields | Or separate `state_needs` table |
@@ -304,8 +304,7 @@ Other rules:
 | --- | --- | --- |
 | `good_price(good TEXT)` | FLOAT | Active-session market price; NULL if unknown good |
 | `army_power()` | FLOAT | Player country's `army_power_projection` when known. **NULL** only if the bound world has no `player_tag`. **Errors** (logged) if a player is bound but save IR has no projection fields — never a silent `0` / NULL for “unknown.” |
-
-Additional scalars may be added; list them here before shipping.
+| `player_tag()` | TEXT | Bound world's played country tag (`World.player_tag`). **NULL** if unset — no first-country fallback. Use with `states.owner_tag` for domestic filters. |
 
 ## Table-valued functions (diagnostics)
 
@@ -403,11 +402,14 @@ One row per predicate still failing / cleared for goal readiness (mirrors gaps C
 
 ```sql
 -- After use_save({ "name": "autosave" }) or selector latest
+-- Prefer domestic (player-owned) shortages for advice; omit the owner_tag
+-- filter only when you intentionally want world-wide rows.
 
 SELECT s.region_name, g.good, g.shortage, g.price
 FROM states s
 JOIN goods_by_state g USING (state_id)
-WHERE g.shortage > 0
+WHERE s.owner_tag = player_tag()
+  AND g.shortage > 0
 ORDER BY g.shortage DESC
 LIMIT 20;
 
@@ -453,6 +455,6 @@ The Tauri **Advanced Query** tab uses this same dialect:
 
 - Crate: `vic3-sql` registers providers on a `SessionContext` over an in-memory `SessionBinding` (`GameDefs` + `World` + `PricesResult`). Hosts hold the engine next to `vic3-api` session state and call Rust `SqlEngine::use_save` (never a mutating `SELECT`); `saves` reads `vic3-catalog`; `latest.*` loads via `vic3-api` without installing the active session.
 - Result shaping: Advanced Query uses `vic3_sql::batches_to_json` (`columns` / `rows` / `row_count`). MCP `query` uses the same JSON shape (formatter currently lives in `vic3-mcp`; keep aligned). `vic3://schema` → `schema_catalog_json()` (facts + diagnostics/planning TVFs + scalars).
-- Diagnostics: `alerts()`, `shortage_analysis(good)`, `building_staffing(state_id)`, `good_price` / `army_power` wrap `vic3-prices` alerts + market rows. TVF args must be plan-time literals (`NULL` allowed for `shortage_analysis`).
+- Diagnostics: `alerts()`, `shortage_analysis(good)`, `building_staffing(state_id)`, `good_price` / `army_power` / `player_tag` wrap `vic3-prices` alerts + market rows + session identity. TVF args must be plan-time literals (`NULL` allowed for `shortage_analysis`).
 - Planning TVFs: `plan(goal [, max_days [, label]])` and `gaps(goal)` call `vic3-plan` / `vic3-goals` against the bound snapshot. `label` is accepted for [`PlanOpts`](json-schema.md) parity and ignored in the result set. `limitations` is emitted on step 0 only.
 - Pages/wasm continues without this engine in v1.
