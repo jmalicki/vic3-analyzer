@@ -292,6 +292,10 @@ fn in_memory_files_match_filesystem_loader() {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
+                // Sibling self-contained trees (e.g. toy_economy/) must not mix in.
+                if path.file_name().is_some_and(|name| name == "toy_economy") {
+                    continue;
+                }
                 collect(root, &path, out);
             } else if path.extension().is_some_and(|extension| {
                 extension == "txt" || extension == "yml" || extension == "dds" || extension == "tga"
@@ -320,6 +324,10 @@ fn one_file_at_a_time_matches_a_single_batch() {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
+                // Sibling self-contained trees (e.g. toy_economy/) must not mix in.
+                if path.file_name().is_some_and(|name| name == "toy_economy") {
+                    continue;
+                }
                 collect(root, &path, out);
             } else if path.extension().is_some_and(|extension| {
                 extension == "txt" || extension == "yml" || extension == "dds" || extension == "tga"

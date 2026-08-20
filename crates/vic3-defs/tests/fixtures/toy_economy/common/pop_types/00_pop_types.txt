@@ -1,0 +1,36 @@
+peasants = {
+	can_always_hire = yes
+}
+
+laborers = {
+	can_always_hire = yes
+}
+
+farmers = {
+	qualifications = {
+		value = 1
+		if = {
+			limit = { is_pop_type = peasants }
+			multiply = 4
+		}
+		if = {
+			limit = { is_pop_type = laborers }
+			multiply = 2
+		}
+	}
+}
+
+machinists = {
+	qualifications = {
+		value = literacy
+		multiply = 20
+		if = {
+			limit = { is_pop_type = laborers }
+			multiply = 3
+		}
+	}
+}
+
+clerks = {
+	can_always_hire = yes
+}

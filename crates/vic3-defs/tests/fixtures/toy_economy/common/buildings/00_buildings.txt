@@ -1,0 +1,31 @@
+building_wheat_farm = {
+	building_group = bg_agriculture
+	city_type = farm
+	production_method_groups = {
+		pmg_base_building_wheat_farm
+	}
+}
+
+building_flour_mill = {
+	building_group = bg_light_industry
+	city_type = city
+	production_method_groups = {
+		pmg_base_building_flour_mill
+	}
+}
+
+building_bakery = {
+	building_group = bg_light_industry
+	city_type = city
+	production_method_groups = {
+		pmg_base_building_bakery
+	}
+}
+
+building_trade_center = {
+	building_group = bg_trade
+	city_type = city
+	production_method_groups = {
+		pmg_base_building_trade_center
+	}
+}

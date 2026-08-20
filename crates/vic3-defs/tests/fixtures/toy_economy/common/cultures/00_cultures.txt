@@ -1,0 +1,5 @@
+# Stub culture so the cultures scan has a file; no obsessions.
+
+toy_culture = {
+	religion = protestant
+}
