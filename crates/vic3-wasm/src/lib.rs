@@ -1,16 +1,40 @@
 //! In-browser facade: thin `#[wasm_bindgen]` over [`vic3_api`].
 //!
-//! Build for the browser with:
+//! # Role
+//!
+//! No filesystem. The page (or worker) supplies save / token / defs **bytes**;
+//! this crate only adapts [`vic3_api`] to `wasm_bindgen` and maps [`vic3_api::ApiError`]
+//! to [`JsError`]. clap never links here. Option and result JSON match CLI / Tauri /
+//! MCP hosts that call the same `*_json` functions.
+//!
+//! # Bindgen surface
+//!
+//! | Export | API | Notes |
+//! | --- | --- | --- |
+//! | [`parse_save`] | [`vic3_api::parse_save_json`] | summary only |
+//! | [`load_analysis`] | [`vic3_api::load_analysis_json`] | installs worker session |
+//! | [`clear_analysis`] | [`vic3_api::clear_analysis`] | |
+//! | [`loaded_prices`] … [`loaded_plan`] | matching `loaded_*_json` | need a session |
+//! | [`prices`] / [`what_if`] / [`gaps`] / [`plan`] / [`alerts`] | one-shot `*_json` | no session |
+//! | [`export_save`] | [`vic3_api::export_save_bytes`] | plaintext only |
+//! | [`build_defs_blob`] / [`DefsBlobBuilder`] | manifest → postcard | streaming for large installs |
+//! | [`defs_summary`] / [`defs_icons`] | blob introspection | |
+//! | [`what_if_schema`] / [`prices_schema`] | schemars for React forms | |
+//!
+//! Exports return JSON **text** (not `JsValue`) so native tests round-trip the
+//! same payload the CLI prints. Original `.v3` bytes stay in JS/IndexedDB;
+//! the session holds IR + world + baseline prices only.
+//!
+//! # Build
+//!
 //! ```text
 //! wasm-pack build crates/vic3-wasm --target web --out-dir web/public/wasm
 //! ```
-//! (or `npm run build:wasm` from `web/`). The crate already compiles for
-//! `wasm32-unknown-unknown` without extra `getrandom` feature flags on the
-//! current dependency set.
 //!
-//! wasm-bindgen exports return JSON text (not `JsValue`) so native tests can
-//! round-trip the same payload the CLI prints. Analysis logic lives in
-//! `vic3-api`; this crate only adapts errors to `JsError`.
+//! (or `npm run build:wasm` from `web/`). Compiles for `wasm32-unknown-unknown`
+//! without extra `getrandom` feature flags on the current dependency set.
+//!
+//! See [`docs/usage.md`](../../../docs/usage.md) and [`docs/architecture.md`](../../../docs/architecture.md).
 
 mod schema;
 
@@ -27,7 +51,7 @@ pub fn version() -> String {
 /// Parse a `.v3` (and optional token map) into an IR summary JSON.
 ///
 /// Empty / omitted `tokens_bytes` is correct for plaintext. Binary saves with
-/// no tokens return [`vic3_load::LoadError::MissingTokens`].
+/// no tokens return a missing-tokens load error (`vic3_load::LoadError::MissingTokens`).
 #[wasm_bindgen]
 pub fn parse_save(save_bytes: &[u8], tokens_bytes: Option<Vec<u8>>) -> Result<String, JsError> {
     vic3_api::parse_save_json(save_bytes, tokens_bytes.as_deref()).map_err(to_js)
@@ -76,7 +100,7 @@ pub fn loaded_military() -> Result<String, JsError> {
 ///
 /// `original_bytes` are the origin save from JS (IndexedDB). They are not
 /// mutated; the return is a new buffer. Ironman/binary saves error.
-/// `delta_json` is [`vic3_load::SavePatch`].
+/// `delta_json` is a `vic3_load::SavePatch` JSON object.
 #[wasm_bindgen]
 pub fn export_save(original_bytes: &[u8], delta_json: &str) -> Result<Vec<u8>, JsError> {
     vic3_api::export_save_bytes(original_bytes, delta_json).map_err(to_js)
@@ -88,7 +112,7 @@ pub fn loaded_what_if(what_if_opts_json: &str) -> Result<String, JsError> {
     vic3_api::loaded_what_if_json(what_if_opts_json).map_err(to_js)
 }
 
-/// Apply a [`vic3_prices::WorldDelta`] to a clone of the loaded world and re-solve (preview).
+/// Apply a `vic3_prices::WorldDelta` to a clone of the loaded world and re-solve (preview).
 ///
 /// Does not replace the loaded world or baseline prices, and does not write a save.
 #[wasm_bindgen]
@@ -217,8 +241,8 @@ pub fn defs_icons(defs_blob: &[u8]) -> Result<String, JsError> {
     vic3_api::defs_icons_json(defs_blob).map_err(to_js)
 }
 
-/// Solve market prices. `defs_blob` is a postcard blob from [`vic3_defs::encode_blob`].
-/// `solve_opts_json` is a [`vic3_prices::SolveOpts`] object; empty / `{}` uses defaults.
+/// Solve market prices. `defs_blob` is a postcard blob from `vic3_defs::encode_blob`.
+/// `solve_opts_json` is a `vic3_prices::SolveOpts` object; empty / `{}` uses defaults.
 #[wasm_bindgen]
 pub fn prices(
     save_bytes: &[u8],
@@ -237,7 +261,7 @@ pub fn prices(
 
 /// Apply a what-if building-level delta and re-solve.
 ///
-/// `what_if_opts_json` is [`vic3_prices::WhatIfOpts`] (`building`, `extra_levels`).
+/// `what_if_opts_json` is `vic3_prices::WhatIfOpts` (`building`, `extra_levels`).
 #[wasm_bindgen]
 pub fn what_if(
     save_bytes: &[u8],
@@ -256,19 +280,19 @@ pub fn what_if(
     .map_err(to_js)
 }
 
-/// JSON Schema for [`vic3_prices::WhatIfOpts`] (UI form).
+/// JSON Schema for `vic3_prices::WhatIfOpts` (UI form).
 #[wasm_bindgen]
 pub fn what_if_schema() -> String {
     schema::what_if_schema_json()
 }
 
-/// JSON Schema for [`vic3_prices::PricesResult`] (includes `residual` and `limitations`).
+/// JSON Schema for `vic3_prices::PricesResult` (includes `residual` and `limitations`).
 #[wasm_bindgen]
 pub fn prices_schema() -> String {
     schema::prices_schema_json()
 }
 
-/// Find a shortest goal-relevant plan and return [`vic3_plan::PlanResult`] JSON.
+/// Find a shortest goal-relevant plan and return `vic3_plan::PlanResult` JSON.
 #[wasm_bindgen]
 pub fn plan(
     save_bytes: &[u8],

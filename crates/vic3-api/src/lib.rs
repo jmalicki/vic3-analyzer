@@ -1,7 +1,51 @@
 //! Transport-free analysis API: bytes or paths in, JSON out.
 //!
-//! Shared by the CLI, future Tauri commands, and thin `vic3-wasm` wrappers.
-//! No `wasm_bindgen`, clap, or filesystem policy beyond optional path loaders.
+//! # Why this crate exists
+//!
+//! CLI, wasm, Tauri, SQL (`use_save` / `latest.*`), and MCP all need the **same**
+//! analysis results. Putting load + solve + serialize here keeps option and
+//! result JSON identical across hosts. Transport stays outside:
+//!
+//! | Host | Input shape | This crate |
+//! | --- | --- | --- |
+//! | `vic3-wasm` | `Vec<u8>` + JSON option strings | `*_json` / `loaded_*_json` |
+//! | Tauri / MCP | paths or catalog stubs | `*_from_paths` / session |
+//! | `vic3-cli` | clap → paths (clap only in that crate) | same shapes; CLI may call core directly |
+//!
+//! No `wasm_bindgen`, clap, or host filesystem policy beyond the optional path
+//! helpers. Pipeline: save → defs → prices → plan — see [`docs/architecture.md`](../../../docs/architecture.md).
+//!
+//! # Two call styles
+//!
+//! 1. **One-shot** — `prices_json`, `what_if_json`, `gaps_json`, `plan_json`,
+//!    `alerts_json`, … take save/defs bytes (or `*_from_paths`) and return JSON.
+//!    Does not install a session.
+//! 2. **Session** — [`load_analysis_json`] (or [`load_analysis_snapshot`] with
+//!    `install = true`) stores defs, world, baseline prices, and save IR in a
+//!    process-local cell. Follow-ups: [`loaded_prices_json`],
+//!    [`loaded_what_if_json`], [`loaded_gaps_json`], [`loaded_plan_json`],
+//!    [`loaded_alerts_json`], [`loaded_apply_delta_json`],
+//!    [`loaded_optimize_pms_json`], [`loaded_military_json`],
+//!    [`loaded_production_methods_json`]. [`clear_analysis`] drops the session.
+//!
+//! Wasm hosts the session in the analysis worker (one at a time). Native hosts
+//! share the same model. [`load_analysis_snapshot`] with `install = false` builds
+//! an owned snapshot without mutating the active session (SQL `latest.*`).
+//!
+//! # Contracts
+//!
+//! - Inner option structs ([`vic3_prices::SolveOpts`], [`vic3_prices::WhatIfOpts`],
+//!   [`vic3_plan::PlanOpts`], …) have **no** `PathBuf`; paths appear only on
+//!   path helpers and clap wrappers.
+//! - Empty / `{}` / whitespace `solve_opts_json` → [`SolveOpts::default`].
+//! - Most analysis exports return `Result<String, ApiError>` (JSON text).
+//!   [`export_save_bytes`] returns patched plaintext bytes.
+//! - Preview APIs ([`loaded_apply_delta_json`], [`loaded_optimize_pms_json`]) do
+//!   **not** replace the loaded world or baseline prices.
+//! - Errors: [`ApiError`] (load, defs, JSON, goals, plan, [`ApiError::NoLoadedAnalysis`], …).
+//!
+//! Usage overview: [`docs/usage.md`](../../../docs/usage.md). Result schemas:
+//! [`docs/json-schema.md`](../../../docs/json-schema.md).
 
 mod error;
 
@@ -38,11 +82,19 @@ thread_local! {
 }
 
 /// Read a file into memory for path-based loaders.
+///
+/// # Errors
+///
+/// [`ApiError::Io`] when the path cannot be read.
 pub fn read_bytes(path: &Path) -> Result<Vec<u8>, ApiError> {
     std::fs::read(path).map_err(|source| ApiError::io(path, source))
 }
 
-/// Load optional token-map bytes from a path (`None` / missing path → no tokens).
+/// Load optional token-map bytes from a path (`None` → no tokens).
+///
+/// # Errors
+///
+/// [`ApiError::Io`] when `tokens` is `Some` and the file cannot be read.
 pub fn read_tokens(tokens: Option<&Path>) -> Result<Option<Vec<u8>>, ApiError> {
     match tokens {
         None => Ok(None),
@@ -51,6 +103,10 @@ pub fn read_tokens(tokens: Option<&Path>) -> Result<Option<Vec<u8>>, ApiError> {
 }
 
 /// Load a save from paths (plaintext needs no tokens).
+///
+/// # Errors
+///
+/// [`ApiError::Io`] on read failure; [`ApiError::Load`] on parse / missing tokens.
 pub fn load_save_from_path(save: &Path, tokens: Option<&Path>) -> Result<Save, ApiError> {
     let save_bytes = read_bytes(save)?;
     let tokens_bytes = read_tokens(tokens)?;
@@ -58,17 +114,29 @@ pub fn load_save_from_path(save: &Path, tokens: Option<&Path>) -> Result<Save, A
 }
 
 /// Read a postcard definitions blob from disk.
+///
+/// # Errors
+///
+/// [`ApiError::Io`] when the path cannot be read.
 pub fn read_defs_blob(path: &Path) -> Result<Vec<u8>, ApiError> {
     read_bytes(path)
 }
 
 /// Build a postcard definitions blob from a Victoria 3 install / fixture tree.
+///
+/// # Errors
+///
+/// [`ApiError::Defs`] when the tree cannot be loaded or encoded.
 pub fn defs_blob_from_game(game: &Path) -> Result<Vec<u8>, ApiError> {
     let defs = vic3_defs::load_from_path(game)?;
     Ok(vic3_defs::encode_blob(&defs)?)
 }
 
 /// Path convenience for [`load_analysis_json`].
+///
+/// # Errors
+///
+/// Propagates IO, load, defs, and JSON errors from the bytes path.
 pub fn load_analysis_from_paths(
     save: &Path,
     tokens: Option<&Path>,
@@ -175,13 +243,27 @@ pub fn parse_save_from_path(save: &Path, tokens: Option<&Path>) -> Result<String
 }
 
 /// Clear the process-local analysis session.
+///
+/// Idempotent. After this, every `loaded_*` call returns [`ApiError::NoLoadedAnalysis`].
 pub fn clear_analysis() {
     LOADED_ANALYSIS.with(|loaded| {
         loaded.borrow_mut().take();
     });
 }
 
-/// Same JSON as the wasm `parse_save` export.
+/// Parse a save into a compact summary JSON (tag, date, counts, building types).
+///
+/// Same payload as the wasm `parse_save` export. Does not install a session.
+///
+/// # Arguments
+///
+/// * `save_bytes` — raw `.v3` (plaintext or binary).
+/// * `tokens_bytes` — Paradox token map; omit / empty for plaintext.
+///
+/// # Errors
+///
+/// [`ApiError::Load`] (including `MissingTokens` for binary without tokens);
+/// [`ApiError::Json`] on serialize failure.
 pub fn parse_save_json(save_bytes: &[u8], tokens_bytes: Option<&[u8]>) -> Result<String, ApiError> {
     let save = load_save(save_bytes, tokens_bytes)?;
     Ok(serde_json::to_string(&SaveSummary::from(&save))?)
@@ -242,6 +324,17 @@ fn build_loaded_analysis(
 /// When `install` is true, also replaces the process-local analysis session
 /// (same as [`load_analysis_json`]). Pass `false` for read-side caches such as
 /// SQL `latest.*` so the active session is not mutated.
+///
+/// # Arguments
+///
+/// * `defs_blob` — postcard blob from [`vic3_defs::encode_blob`] (or
+///   [`build_defs_blob_bytes`] / CLI `defs export`).
+/// * `solve_opts_json` — [`SolveOpts`] JSON; empty / `{}` uses defaults.
+/// * `install` — bind the process-local session when true.
+///
+/// # Errors
+///
+/// Load, defs decode, invalid solve opts JSON, or serialize failures.
 pub fn load_analysis_snapshot(
     save_bytes: &[u8],
     tokens_bytes: Option<&[u8]>,
@@ -292,7 +385,13 @@ pub fn load_analysis_snapshot_from_path(
 /// Load one analysis session and solve its baseline prices.
 ///
 /// Always installs the process-local session (same as
-/// [`load_analysis_snapshot`] with `install = true`).
+/// [`load_analysis_snapshot`] with `install = true`). Returns JSON
+/// `{ summary, prices }` where `prices` is a full [`PricesResult`].
+/// Icon PNG bytes are stripped from the retained defs (UI loads icons separately).
+///
+/// # Errors
+///
+/// Load, defs, invalid `solve_opts_json`, or JSON serialize failures.
 pub fn load_analysis_json(
     save_bytes: &[u8],
     tokens_bytes: Option<&[u8]>,
@@ -311,10 +410,22 @@ pub fn load_analysis_json(
     Ok(json)
 }
 
+/// Baseline [`PricesResult`] JSON from the loaded session.
+///
+/// # Errors
+///
+/// [`ApiError::NoLoadedAnalysis`] if nothing is loaded; JSON serialize failures.
 pub fn loaded_prices_json() -> Result<String, ApiError> {
     with_loaded_analysis(|loaded| Ok(serde_json::to_string(&loaded.prices)?))
 }
 
+/// Conservative military snapshot JSON for the played country.
+///
+/// Incomplete IR yields empty lists plus a limitations string.
+///
+/// # Errors
+///
+/// [`ApiError::NoLoadedAnalysis`] if nothing is loaded.
 pub fn loaded_military_json() -> Result<String, ApiError> {
     with_loaded_analysis(|loaded| {
         let player = played_country(&loaded.save).map(|(id, _)| id);
@@ -325,11 +436,25 @@ pub fn loaded_military_json() -> Result<String, ApiError> {
     })
 }
 
+/// Patch plaintext `.v3` bytes with a [`SavePatch`]; returns a new buffer.
+///
+/// Does not touch the analysis session. Ironman / binary envelopes are rejected.
+///
+/// # Errors
+///
+/// Invalid `delta_json`, or [`ApiError::Export`] (binary / patch failure).
 pub fn export_save_bytes(original_bytes: &[u8], delta_json: &str) -> Result<Vec<u8>, ApiError> {
     let patch: SavePatch = serde_json::from_str(delta_json)?;
     Ok(vic3_load::export_save(original_bytes, &patch)?)
 }
 
+/// What-if re-solve on the loaded world ([`WhatIfOpts`] JSON → [`PricesResult`]).
+///
+/// Does not replace the loaded baseline.
+///
+/// # Errors
+///
+/// [`ApiError::NoLoadedAnalysis`], invalid JSON.
 pub fn loaded_what_if_json(what_if_opts_json: &str) -> Result<String, ApiError> {
     let delta: WhatIfOpts = serde_json::from_str(what_if_opts_json)?;
     with_loaded_analysis(|loaded| {
@@ -343,6 +468,13 @@ pub fn loaded_what_if_json(what_if_opts_json: &str) -> Result<String, ApiError> 
     })
 }
 
+/// Preview a [`WorldDelta`] on a clone of the loaded world (warm-started when possible).
+///
+/// Does not replace the loaded world or baseline prices, and does not write a save.
+///
+/// # Errors
+///
+/// [`ApiError::NoLoadedAnalysis`], invalid delta JSON.
 pub fn loaded_apply_delta_json(delta_json: &str) -> Result<String, ApiError> {
     let delta: WorldDelta = serde_json::from_str(delta_json)?;
     with_loaded_analysis(|loaded| {
@@ -355,6 +487,13 @@ pub fn loaded_apply_delta_json(delta_json: &str) -> Result<String, ApiError> {
     })
 }
 
+/// Suggest production-method changes (`{"axis":"income"|"productivity"|"sol"}`).
+///
+/// Does not replace the loaded world or write a save.
+///
+/// # Errors
+///
+/// [`ApiError::NoLoadedAnalysis`], invalid axis JSON.
 pub fn loaded_optimize_pms_json(axis_json: &str) -> Result<String, ApiError> {
     let opts: OptimizePmsOpts = serde_json::from_str(axis_json)?;
     with_loaded_analysis(|loaded| {
@@ -369,6 +508,13 @@ pub fn loaded_optimize_pms_json(axis_json: &str) -> Result<String, ApiError> {
     })
 }
 
+/// Evaluate goal gaps against the loaded session (`GapsResult` JSON).
+///
+/// Shape: `{ satisfied, gaps, limitations }` — same as CLI `gaps --json`.
+///
+/// # Errors
+///
+/// [`ApiError::NoLoadedAnalysis`], goal parse, [`ApiError::NoCountry`], world projection.
 pub fn loaded_gaps_json(goal: &str) -> Result<String, ApiError> {
     let goal = vic3_goals::parse(goal)?;
     with_loaded_analysis(|loaded| {
@@ -383,6 +529,12 @@ pub fn loaded_gaps_json(goal: &str) -> Result<String, ApiError> {
     })
 }
 
+/// Plan from the loaded session ([`PlanOpts`] JSON → [`vic3_plan::PlanResult`]).
+///
+/// # Errors
+///
+/// [`ApiError::NoLoadedAnalysis`], invalid opts / goal, [`ApiError::NoCountry`],
+/// world projection, or [`ApiError::Plan`].
 pub fn loaded_plan_json(plan_opts_json: &str) -> Result<String, ApiError> {
     let plan_opts: PlanOpts = serde_json::from_str(plan_opts_json)?;
     let goal = vic3_goals::parse(&plan_opts.goal)?;
@@ -407,6 +559,11 @@ pub fn loaded_plan_json(plan_opts_json: &str) -> Result<String, ApiError> {
     })
 }
 
+/// Shortage alerts from the loaded session ([`vic3_prices::AlertsResult`] JSON).
+///
+/// # Errors
+///
+/// [`ApiError::NoLoadedAnalysis`].
 pub fn loaded_alerts_json() -> Result<String, ApiError> {
     with_loaded_analysis(|loaded| {
         let result = diagnose_alerts(&loaded.world, &loaded.defs, &loaded.prices);
@@ -427,6 +584,11 @@ struct PmFlowJson {
     qty: f64,
 }
 
+/// Production-method recipes from loaded defs (`[{id, inputs, outputs}]`).
+///
+/// # Errors
+///
+/// [`ApiError::NoLoadedAnalysis`].
 pub fn loaded_production_methods_json() -> Result<String, ApiError> {
     with_loaded_analysis(|loaded| {
         let methods: Vec<ProductionMethodJson> = loaded
@@ -470,7 +632,15 @@ fn with_loaded_analysis<T>(
     })
 }
 
-/// Solve market prices (`PricesResult` JSON).
+/// Solve market prices ([`PricesResult`] JSON). One-shot; does not install a session.
+///
+/// # Arguments
+///
+/// * `solve_opts_json` — [`SolveOpts`]; empty / `{}` → defaults.
+///
+/// # Errors
+///
+/// Load, defs, invalid opts JSON, or serialize failures.
 pub fn prices_json(
     save_bytes: &[u8],
     tokens_bytes: Option<&[u8]>,
@@ -481,7 +651,13 @@ pub fn prices_json(
     Ok(serde_json::to_string(&result)?)
 }
 
-/// Apply a what-if building-level delta and re-solve.
+/// Apply a what-if building-level delta and re-solve. One-shot.
+///
+/// `what_if_opts_json` is [`WhatIfOpts`] (`building`, `extra_levels`).
+///
+/// # Errors
+///
+/// Load, defs, invalid JSON, or serialize failures.
 pub fn what_if_json(
     save_bytes: &[u8],
     tokens_bytes: Option<&[u8]>,
@@ -498,7 +674,13 @@ pub fn what_if_json(
     Ok(serde_json::to_string(&result)?)
 }
 
-/// Find a shortest goal-relevant plan (`PlanResult` JSON).
+/// Find a shortest goal-relevant plan ([`vic3_plan::PlanResult`] JSON). One-shot.
+///
+/// `plan_opts_json` is [`PlanOpts`] (`goal`, `max_days`, optional `label`).
+///
+/// # Errors
+///
+/// Load, defs, goal/plan failures, [`ApiError::NoCountry`], or serialize failures.
 pub fn plan_json(
     save_bytes: &[u8],
     tokens_bytes: Option<&[u8]>,
@@ -529,7 +711,11 @@ pub fn plan_json(
     Ok(serde_json::to_string(&result)?)
 }
 
-/// Evaluate a goal and return unsatisfied atoms (`GapsResult` JSON).
+/// Evaluate a goal and return unsatisfied atoms (`GapsResult` JSON). One-shot.
+///
+/// # Errors
+///
+/// Load, defs, goal parse, [`ApiError::NoCountry`], world projection, or serialize failures.
 pub fn gaps_json(
     save_bytes: &[u8],
     tokens_bytes: Option<&[u8]>,
@@ -554,7 +740,11 @@ pub fn gaps_json(
     Ok(serde_json::to_string(&result)?)
 }
 
-/// Diagnose shortages (`AlertsResult` JSON).
+/// Diagnose shortages ([`vic3_prices::AlertsResult`] JSON). One-shot.
+///
+/// # Errors
+///
+/// Load, defs, invalid opts JSON, or serialize failures.
 pub fn alerts_json(
     save_bytes: &[u8],
     tokens_bytes: Option<&[u8]>,
@@ -756,6 +946,13 @@ struct DefsFileEntry {
 }
 
 /// Resolve a `{path, offset, length}` manifest against its payload.
+///
+/// Used by the browser defs builder: JS concatenates selected files and describes
+/// slices in JSON. Paths must include `common/...` (or gfx) segments the loader expects.
+///
+/// # Errors
+///
+/// [`ApiError::Json`] or [`ApiError::DefsManifest`] when a slice is out of range.
 pub fn manifest_files(
     manifest_json: &str,
     contents: &[u8],
@@ -782,6 +979,10 @@ pub fn manifest_files(
 }
 
 /// Build a postcard definitions blob from a `{path, offset, length}` manifest.
+///
+/// # Errors
+///
+/// Manifest / defs load / encode failures.
 pub fn build_defs_blob_bytes(manifest_json: &str, contents: &[u8]) -> Result<Vec<u8>, ApiError> {
     let defs = vic3_defs::load_from_files(manifest_files(manifest_json, contents)?)?;
     Ok(vic3_defs::encode_blob(&defs)?)

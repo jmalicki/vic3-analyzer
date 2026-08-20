@@ -2,6 +2,13 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 /// Failure in the transport-free analysis API.
+///
+/// Hosts map this to CLI exit messages, wasm `JsError`, Tauri invoke errors, or
+/// MCP tool errors via [`std::fmt::Display`] (stable, user-facing strings).
+///
+/// Session methods return [`Self::NoLoadedAnalysis`] when nothing is installed.
+/// Binary saves without a token map surface as [`Self::Load`]
+/// (`MissingTokens`), not a serde mystery.
 #[derive(Debug, Error)]
 pub enum ApiError {
     /// Save or token map could not be loaded.
@@ -10,7 +17,7 @@ pub enum ApiError {
     /// Plaintext save could not be patched.
     #[error(transparent)]
     Export(#[from] vic3_load::ExportError),
-    /// Defs postcard blob could not be decoded.
+    /// Defs postcard blob could not be decoded or built.
     #[error(transparent)]
     Defs(#[from] vic3_defs::DefsError),
     /// Filesystem read failed for a path-based loader.
@@ -20,7 +27,7 @@ pub enum ApiError {
         #[source]
         source: std::io::Error,
     },
-    /// Option JSON could not be parsed.
+    /// Option / delta / patch JSON could not be parsed.
     #[error("invalid JSON: {0}")]
     Json(#[from] serde_json::Error),
     /// A definitions-file manifest referenced bytes outside its payload.
@@ -35,10 +42,10 @@ pub enum ApiError {
     /// No plan fits the current model and limits.
     #[error(transparent)]
     Plan(#[from] vic3_plan::PlanError),
-    /// The save contains no playable country.
+    /// The save contains no playable country (gaps / plan need a player tag).
     #[error("save has no playable country")]
     NoCountry,
-    /// An analysis method ran before a save and definitions were loaded.
+    /// A `loaded_*` method ran before [`crate::load_analysis_json`] (or snapshot install).
     #[error("no analysis is loaded")]
     NoLoadedAnalysis,
 }

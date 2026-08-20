@@ -1,9 +1,40 @@
-//! CLI: prices, what-if, alerts, mutate, optimize, export, gaps, planning, archive.
+//! Victoria 3 analyzer CLI: clap facade over the shared analysis stack.
+//!
+//! # Role
+//!
+//! **clap lives only in this crate.** Inner option structs
+//! ([`vic3_prices::SolveOpts`], [`vic3_prices::WhatIfOpts`], [`vic3_plan::PlanOpts`], …)
+//! have no `PathBuf`; filesystem fields sit on clap wrappers (`IoArgs`, `*Cli`).
+//! wasm never links clap.
+//!
+//! JSON shapes match `vic3-api` so CLI `--json`, wasm, Tauri, and MCP stay aligned.
+//! This binary currently loads a [`vic3_load::WorldSave`] and calls
+//! `vic3-prices` / `vic3-plan` directly for speed; path helpers and session APIs
+//! in `vic3-api` are what Tauri / MCP / wasm use for the same results.
+//!
+//! # Command → analysis mapping
+//!
+//! | Subcommand | `vic3-api` counterpart | Notes |
+//! | --- | --- | --- |
+//! | `prices` | `prices_json` / `prices_from_paths` | table or `--json` [`PricesResult`] |
+//! | `what-if` | `what_if_json` | building + `extra_levels` |
+//! | `alerts` | `alerts_json` | after baseline solve |
+//! | `mutate` | `loaded_apply_delta_json` (preview) | `--delta-json` [`WorldDelta`]; no file write |
+//! | `optimize-pms` | `loaded_optimize_pms_json` | `--axis` income / productivity / sol |
+//! | `export-save` | `export_save_bytes` | writes `--out` only; never overwrites `--save` |
+//! | `gaps` | `gaps_json` | `{ satisfied, gaps, limitations }` |
+//! | `plan` | `plan_json` | also archives under XDG |
+//! | `defs export` | `defs_blob_from_game` | local postcard; do not publish |
+//! | `archive …` | `vic3-plan` records | list / show / diff / import / export |
+//!
+//! Shared IO: `--save` / `VIC3_SAVE`, optional `--tokens` / `VIC3_TOKENS`,
+//! `--game` / `VIC3_GAME` or `--defs` / `VIC3_DEFS`.
 //!
 //! `prices` / `what-if` / `alerts` / `mutate` / `optimize-pms` load `WorldSave`
 //! (not the full file-shaped `Save`) and still `solve` a complete `PricesResult`.
 //! The default table only prints goods; compact pop rows exist for the webapp.
-//! Time this path as the UI load stand-in, not as a hint to skip detail.
+//!
+//! See `docs/usage.md`.
 
 use std::fs;
 use std::io::{self, Write};
