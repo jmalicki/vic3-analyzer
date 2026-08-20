@@ -1,4 +1,7 @@
-//! `building_staffing(state_id)` table-valued function.
+//! `building_staffing(state_id)` → building×profession gaps for one state.
+//!
+//! Arithmetic mirrors `vic3-prices` employment-alert staffing
+//! (`level / staffing` scales employed counts to jobs-at-full-level).
 
 use std::any::Any;
 use std::sync::Arc;
@@ -18,6 +21,7 @@ use crate::exec::memory_exec;
 use crate::schema::building_staffing_schema;
 use crate::udfs::args::literal_i64;
 
+/// `building_staffing(state_id)` TVF over the bound session.
 #[derive(Debug)]
 pub struct BuildingStaffingTvf {
     binding: Arc<SessionBinding>,
@@ -74,6 +78,7 @@ impl BuildingStaffingProvider {
                 continue;
             }
             let name = building_label(self.binding.as_ref(), building);
+            // Scale current employed counts up to full-level job demand.
             let ratio = if building.staffing > ORDER_EPS {
                 building.level / building.staffing
             } else {
@@ -113,6 +118,7 @@ impl BuildingStaffingProvider {
                 jobs_here.append_value(jobs);
                 missing_here.append_value(missing);
                 state_jobs.append_value(qual.map(|q| q.jobs).unwrap_or(0.0));
+                // Prefer employable stock when present (same as alert expander).
                 state_stock.append_value(
                     qual.map(|q| q.employable.unwrap_or(q.qualified))
                         .unwrap_or(0.0),
@@ -121,7 +127,7 @@ impl BuildingStaffingProvider {
                 wrote = true;
             }
             if !wrote {
-                // Still emit a building row with null profession when employees empty.
+                // Keep buildings visible when employee lists are empty.
                 building_id.append_value(building.id);
                 building_name.append_value(&name);
                 type_id.append_value(&building.type_id);

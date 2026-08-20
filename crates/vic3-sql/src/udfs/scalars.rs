@@ -1,4 +1,4 @@
-//! Scalar diagnostics: `good_price(good)`, `army_power()`.
+//! Scalar diagnostics: `good_price(good)`, `army_power()` (`docs/sql.md`).
 
 use std::sync::Arc;
 
@@ -12,6 +12,7 @@ use datafusion::prelude::SessionContext;
 use crate::binding::SessionBinding;
 use crate::SqlError;
 
+/// Register `good_price` / `army_power` as Stable UDFs over the bound prices snapshot.
 pub fn register(ctx: &SessionContext, binding: Arc<SessionBinding>) -> Result<(), SqlError> {
     let price_binding = Arc::clone(&binding);
     ctx.register_udf(create_udf(
@@ -37,6 +38,7 @@ pub fn register(ctx: &SessionContext, binding: Arc<SessionBinding>) -> Result<()
     Ok(())
 }
 
+/// Market price for `good`, or NULL when the id is missing / the arg is NULL.
 fn good_price_invoke(binding: &SessionBinding, args: &[ColumnarValue]) -> DfResult<ColumnarValue> {
     let arg = args.first().ok_or_else(|| {
         datafusion::common::DataFusionError::Internal("good_price expects one argument".into())
@@ -47,6 +49,7 @@ fn good_price_invoke(binding: &SessionBinding, args: &[ColumnarValue]) -> DfResu
             Ok(ColumnarValue::Scalar(ScalarValue::Float64(price)))
         }
         ColumnarValue::Array(arr) => {
+            // Fast path for Utf8; otherwise per-row ScalarValue decode (LargeUtf8 / views).
             if let Ok(strings) = as_string_array(arr.as_ref()) {
                 let mut out = Float64Builder::with_capacity(strings.len());
                 for i in 0..strings.len() {
@@ -97,7 +100,7 @@ fn lookup_price(binding: &SessionBinding, good: &str) -> Option<f64> {
         .map(|g| g.price)
 }
 
-/// Player country's army power projection when known; otherwise `None`.
+/// Player country's `army_power_projection` when `player_tag` resolves; else NULL.
 fn army_power(binding: &SessionBinding) -> Option<f64> {
     let tag = binding.world.player_tag.as_deref()?;
     binding

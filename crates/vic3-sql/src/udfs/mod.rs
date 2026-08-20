@@ -1,4 +1,9 @@
 //! SQL scalars and TVFs (`docs/sql.md`): diagnostics + planning.
+//!
+//! Diagnostics (`good_price`, `army_power`, `alerts`, `shortage_analysis`,
+//! `building_staffing`) wrap the bound prices/alerts snapshot. Planning
+//! (`plan`, `gaps`) calls `vic3-plan` / `vic3-goals`. TVF arguments must be
+//! plan-time literals so providers can materialize fixed batches.
 
 mod alerts;
 mod args;

@@ -1,4 +1,8 @@
-//! `shortage_analysis(good)` table-valued function.
+//! `shortage_analysis(good)` → scarce-good alert rows plus market magnitudes.
+//!
+//! Filters [`alerts`] to electricity / transportation / goods shortages.
+//! `good = NULL` means all such alerts; a string literal filters by script id.
+//! Buy/sell/shortage/price/base come from the market `goods` row (not invented).
 
 use std::any::Any;
 use std::sync::Arc;
@@ -21,6 +25,7 @@ use crate::schema::shortage_analysis_schema;
 use crate::udfs::alerts::alert_kind_str;
 use crate::udfs::args::literal_utf8;
 
+/// `shortage_analysis(good)` TVF over the bound session.
 #[derive(Debug)]
 pub struct ShortageAnalysisTvf {
     binding: Arc<SessionBinding>,
@@ -111,6 +116,7 @@ impl ShortageAnalysisProvider {
                 Some(g) => {
                     buy.append_value(g.buy);
                     sell.append_value(g.sell);
+                    // Same unmet-demand formula as goods fact tables (`docs/sql.md`).
                     shortage.append_value(goods_shortage(g.buy, g.sell));
                     price.append_value(g.price);
                     base.append_value(g.base);

@@ -1,8 +1,14 @@
-//! Literal argument extraction for table-valued functions.
+//! Plan-time literal extraction for diagnostics TVF arguments.
+//!
+//! DataFusion UDTFs resolve arguments at `call` time; we only accept literals
+//! so providers can materialize a fixed batch (no deferred expression eval).
 
 use datafusion::common::{plan_err, Result as DfResult, ScalarValue};
 use datafusion::logical_expr::Expr;
 
+/// UTF-8 / LargeUtf8 / Utf8View literal, or `NULL` → [`None`].
+///
+/// Used by `shortage_analysis(good)` where `NULL` means “all scarce goods”.
 pub fn literal_utf8(expr: &Expr, arg_name: &str) -> DfResult<Option<String>> {
     match expr {
         Expr::Literal(ScalarValue::Utf8(v), _) | Expr::Literal(ScalarValue::LargeUtf8(v), _) => {
@@ -14,6 +20,7 @@ pub fn literal_utf8(expr: &Expr, arg_name: &str) -> DfResult<Option<String>> {
     }
 }
 
+/// Non-null integer literal widened to `i64` (Int32/64, UInt32/64).
 pub fn literal_i64(expr: &Expr, arg_name: &str) -> DfResult<i64> {
     match expr {
         Expr::Literal(ScalarValue::Int64(Some(v)), _) => Ok(*v),

@@ -1,4 +1,4 @@
-//! `alerts()` table-valued function.
+//! `alerts()` → one row per `vic3-prices::alerts` finding (`docs/sql.md`).
 
 use std::any::Any;
 use std::sync::Arc;
@@ -17,6 +17,7 @@ use crate::binding::SessionBinding;
 use crate::exec::memory_exec;
 use crate::schema::alerts_schema;
 
+/// Zero-arg TVF wrapping [`alerts`] for the bound session.
 #[derive(Debug)]
 pub struct AlertsTvf {
     binding: Arc<SessionBinding>,
@@ -83,6 +84,7 @@ impl AlertsProvider {
                 Some(v) => good_id.append_value(v),
                 None => good_id.append_null(),
             }
+            // JSON text matches AlertsResult nested arrays (see json-schema.md).
             evidence.append_value(
                 serde_json::to_string(&alert.evidence).unwrap_or_else(|_| "[]".into()),
             );
@@ -135,6 +137,7 @@ impl TableProvider for AlertsProvider {
     }
 }
 
+/// Snake_case `kind` strings for SQL (`docs/sql.md` / alerts JSON).
 pub(crate) fn alert_kind_str(kind: AlertKind) -> &'static str {
     match kind {
         AlertKind::ElectricityShortage => "electricity_shortage",
