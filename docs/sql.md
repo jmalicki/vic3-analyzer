@@ -123,6 +123,19 @@ From `state_goods` (state-attributed orders / MAPI blend).
 | `buy` / `sell` | Attributed orders |
 | `shortage` | As defined for state scope |
 
+### Nested columns vs child tables (normative)
+
+**Match Rust storage.** If the engine already holds a `Vec` / list on the parent row, expose it as a DataFusion **List** (array) column on that table. Do **not** invent a many↔many junction table only for SQL shape.
+
+| Prefer | When |
+| --- | --- |
+| **Array / list column** on the parent | Field is already `Vec<…>` (or small parallel vecs) on the struct we scan |
+| **Child / junction table** | We already store a separate collection keyed for lookup, **or** agents must equijoin/filter/aggregate on exploded elements as first-class rows and UNNEST is too awkward for the common query |
+
+Agents can still explode with `UNNEST` / `unnest` when needed. Optional **views** that UNNEST arrays (e.g. `building_production_methods`) are fine for convenience — not a second source of truth.
+
+Examples of good array columns: active PMs, `short_inputs`, PM-group ids on a building type, recipe input/output lists on a PM row.
+
 ### `buildings`
 
 Per-building modeled economy (from `BuildingEconomics` / `WorldBuilding`).
@@ -136,49 +149,28 @@ Per-building modeled economy (from `BuildingEconomics` / `WorldBuilding`).
 | `level` / `staffing` | Levels vs staffed levels |
 | `employees` | Summary or join to `building_staffing` TVF |
 | `profit` / `revenue` / `cost` | As modeled |
+| `production_methods` | `TEXT[]` — active PM script ids (`WorldBuilding.production_methods`) |
+| `short_inputs` | `TEXT[]` — scarce input good ids (`BuildingEconomics.short_inputs`) |
+| `input_goods` / `output_goods` | List of `{ good, qty }` (or parallel arrays) from resolved IO — same as `goods_io` / saved IO vecs |
 
-Goods IO is **not** a JSON blob on this row — use `building_goods` (and optionally `building_production_methods`).
-
-### `building_goods`
-
-Instance-level goods ↔ building map after resolve (saved IO preferred; else PM recipes × staffing — same as `WorldBuilding::goods_io`).
-
-| Column | Notes |
-| --- | --- |
-| `building_id` | FK → buildings; Exact `=` |
-| `good` | Script id; Exact `=` |
-| `good_name` | Localized; Exact `=` only |
-| `role` | `input` \| `output` |
-| `qty` | Absolute volume used in the solve for this building |
-| `short` | Bool when this input is among scarce inputs (`short_inputs`) — optional derived column |
-
-Typical joins: `building_goods` → `goods` / `goods_by_state` on `good`; → `buildings` on `building_id` for state/type.
+Filter examples without a junction table:
 
 ```sql
--- Which buildings burn tools in Alsace-ish states?
-SELECT b.building_id, b.type_id, bg.qty
-FROM building_goods bg
-JOIN buildings b USING (building_id)
-JOIN states s USING (state_id)
-WHERE bg.good = 'tools' AND bg.role = 'input'
-  AND s.region_name = 'Alsace';
+-- Buildings whose active PMs include a given method
+SELECT building_id, type_id
+FROM buildings
+WHERE array_has(production_methods, 'pm_steam_engines');  -- exact DF fn name TBD; document chosen helper
+
+-- Buildings short on tools
+SELECT building_id FROM buildings
+WHERE array_has(short_inputs, 'tools');
 ```
 
-### `building_production_methods`
+**When to add a child table anyway:** if the dominant query is “all buildings that consume good X with qty” and List-contains / UNNEST pushdown is weak, expose a **view** `building_goods` that UNNESTs `input_goods`/`output_goods` (or a materialised provider over the same vecs). Prefer view-from-array over a separate inventing HashMap of edges.
 
-Active PMs on each building instance (`WorldBuilding.production_methods` — one per PM group).
+### Defs: `building_types`, `production_methods`
 
-| Column | Notes |
-| --- | --- |
-| `building_id` | FK → buildings |
-| `pm` | Production method script id |
-| `pm_name` | Localized when available |
-
-Join to defs recipe tables below for “what does this PM produce?” without trusting instance IO (mods / missing saved IO).
-
-### Defs: `building_types`, `production_methods`, `production_method_goods`
-
-Static catalog from `GameDefs` (same for all saves once defs are loaded). Prefer these for “what *can* a rye farm make?”; use `building_goods` for “what is this instance actually ordering?”.
+Static catalog from `GameDefs` (same for all saves once defs are loaded). Prefer these for “what *can* a rye farm make?”; use instance `input_goods`/`output_goods` for “what is this building actually ordering?”
 
 #### `building_types`
 
@@ -188,14 +180,7 @@ Static catalog from `GameDefs` (same for all saves once defs are loaded). Prefer
 | `type_name` | Localized |
 | `group_id` | Building group |
 | `city_type` | If present |
-
-#### `building_type_pm_groups` (optional normalize)
-
-| Column | Notes |
-| --- | --- |
-| `type_id` | |
-| `pm_group` | Script id from `production_method_groups = { … }` |
-| `ordinal` | Order within the type |
+| `production_method_groups` | `TEXT[]` — already a `Vec` on `BuildingType`; Exact contains/`array_has` if we bother, else scan+filter |
 
 #### `production_methods`
 
@@ -203,23 +188,16 @@ Static catalog from `GameDefs` (same for all saves once defs are loaded). Prefer
 | --- | --- |
 | `pm` | Script id; **key** (`BTreeMap` → Exact `=` and range) |
 | `pm_name` | Localized |
-
-#### `production_method_goods`
-
-Recipe rows from `ProductionMethod.inputs` / `outputs`.
-
-| Column | Notes |
-| --- | --- |
-| `pm` | FK → production_methods |
-| `good` | Script id |
-| `role` | `input` \| `output` |
-| `qty` | Per-level (or as scraped) recipe quantity |
+| `inputs` / `outputs` | List of `{ good, qty }` from `ProductionMethod.inputs` / `outputs` (already `Vec<(GoodIdx, f64)>`) |
 
 ```sql
--- Defs: which PMs output grain?
-SELECT pm, qty FROM production_method_goods
-WHERE good = 'grain' AND role = 'output';
+-- Defs: PMs that output grain (unnest or list predicate — pick one helper and document)
+SELECT pm
+FROM production_methods p, UNNEST(p.outputs) AS o(good, qty)
+WHERE o.good = 'grain';
 ```
+
+Optional convenience view `production_method_goods` = UNNEST of those lists — only if MCP/docs examples need join-shaped SQL; not required if arrays are enough.
 
 ### `pops` (or `state_pops`)
 
@@ -286,7 +264,7 @@ Other rules:
 - Prefer joins on `state_id` / `good` / `building_id` (script ids); use localized names in `WHERE`.
 - Declare **output ordering** when a scan walks a btree or a vec sorted by id so sort-merge can apply.
 - Building a **HashMap** name→id at `use_save` for states is fine (states have no btree today); that enables Exact `=` only, not range.
-- `building_goods` should support Exact pushdown on `building_id` and `good` (hash or sorted vec scan — no range Exact unless keyed by btree).
+- List/`array_has` filters: Exact pushdown only if we implement contains against the in-memory vec (cheap for small lists); otherwise Unsupported and DF filters after projection.
 
 ## Scalar functions
 
