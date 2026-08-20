@@ -1,6 +1,6 @@
 # SQL interface (design spec)
 
-**Status:** Wave 3b/3c — `plan` / `gaps` TVFs, `saves` catalog table, host `use_save`, and `active.*` / `latest.*` views are implemented in `vic3-sql` (fact tables from Wave 2b). Diagnostics TVFs follow in other Wave 3 PRs.  
+**Status:** Wave 3 — diagnostics scalars/TVFs (`alerts`, `shortage_analysis`, `good_price`, `army_power`, `building_staffing`), planning TVFs (`plan`, `gaps`), `saves` catalog, host `use_save`, and `active.*` / `latest.*` views are implemented in `vic3-sql` (fact tables from Wave 2b).  
 **Engine:** Apache DataFusion (`datafusion` 51).  
 **Consumers:** MCP `query` tool, Tauri Advanced Query tab, optional `vic3-analyzer sql` debug.  
 **Related:** [`mcp.md`](mcp.md) (agent transport), [`json-schema.md`](json-schema.md) (JSON field names), [`dsl.md`](dsl.md) / [`planning.md`](planning.md) (goals / A\*).
@@ -302,8 +302,8 @@ Other rules:
 
 | Function | Returns | Notes |
 | --- | --- | --- |
-| `good_price(good TEXT)` | FLOAT | Active-session market price |
-| `army_power()` | FLOAT | If military snapshot available; else NULL + limitation |
+| `good_price(good TEXT)` | FLOAT | Active-session market price; NULL if unknown good |
+| `army_power()` | FLOAT | Player country's `army_power_projection` when `player_tag` resolves; else NULL |
 
 Additional scalars may be added; list them here before shipping.
 
@@ -318,23 +318,50 @@ One row per alert from `vic3-prices::alerts` ([`AlertsResult`](json-schema.md)).
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | text | |
-| `kind` | text | Enum as in schema |
+| `kind` | text | Enum as in schema (snake_case) |
 | `severity` | int | |
 | `title` | text | |
 | `summary` | text | |
 | `state_id` | int nullable | |
 | `building_id` | int nullable | |
 | `good_id` | text nullable | |
+| `evidence` | text | JSON array of `{label,value}` |
+| `mitigations` | text | JSON array of mitigation objects (same shape as alerts JSON) |
 
-Mitigations / staffing arrays: either JSON text columns or separate TVFs (`alert_mitigations(alert_id)`, `building_staffing(state_id)`) — pick one in implementation and update this doc.
+Nested `staffing` on employment alerts is not inlined here — use `building_staffing(state_id)`.
 
 ### `shortage_analysis(good TEXT)`
 
-Expands shortage diagnosis for one good (or document `NULL` = all scarce goods). Columns TBD to match expander evidence (state_id, building_id, magnitudes, suggested mitigations). Must not invent economics beyond existing alert/what-if helpers.
+Expands goods-shortage alerts for one good (`NULL` = all electricity / transportation / goods shortage alerts). Magnitudes come from the market `goods` row; evidence/mitigations are JSON from the alert expander (no invented economics).
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `good` | text | Script id |
+| `alert_id` | text | |
+| `kind` | text | `electricity_shortage` \| `transportation_shortage` \| `goods_shortage` |
+| `severity` | int | |
+| `title` | text | |
+| `summary` | text | |
+| `state_id` | int nullable | Hint from short-input buildings when present |
+| `building_id` | int nullable | |
+| `buy` / `sell` / `shortage` / `price` / `base` | float nullable | Market row; `shortage = max(0, buy − sell)` |
+| `evidence` | text | JSON |
+| `mitigations` | text | JSON |
 
 ### `building_staffing(state_id BIGINT)`
 
-Per-building profession gaps for a state (from employment / qualification alerts).
+One row per building×profession gap for buildings in that state (same profession arithmetic as employment-alert staffing: employed vs jobs-at-full-level, plus state qualification stock/jobs/shortage).
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `building_id` | int | |
+| `building_name` | text | Localized type label when available |
+| `type_id` | text | |
+| `staffing` / `level` | float | |
+| `profession_id` | text nullable | Null only when the building has no employee rows |
+| `profession_name` | text nullable | |
+| `employed_here` / `jobs_here` / `missing_here` | float nullable | |
+| `state_jobs` / `state_stock` / `state_shortage` | float nullable | From `state_qualifications` |
 
 ## Table-valued functions (planning)
 
@@ -410,7 +437,7 @@ The Tauri **Advanced Query** tab uses this same dialect:
 ## Open questions for review
 
 1. **Shortage formula (v1 locked):** `goods.shortage` / `goods_by_state.shortage` = `max(0, buy − sell)` (unmet demand volume). Not Paradox’s shortage flag.
-2. Mitigations as JSON columns vs child TVFs.
+2. ~~Mitigations as JSON columns vs child TVFs.~~ **Locked:** `evidence` / `mitigations` JSON text on `alerts()` / `shortage_analysis()`; staffing via `building_staffing(state_id)`.
 3. Whether unqualified names require `use_save` or may fall back to `latest.*` automatically.
 4. Military `formations` column list (wait for stable military JSON).
 5. Ambiguous `states.region_name` / region labels: return all rows vs error vs prefer player-owned.
@@ -419,12 +446,12 @@ The Tauri **Advanced Query** tab uses this same dialect:
 
 ## Deferred (Wave 3+)
 
-- Diagnostics TVFs and scalars (`feat/sql-udfs-diagnostics`)
 - `formations` military table
 - Optional convenience UNNEST views
 
 ## Implementation notes (non-normative)
 
 - Crate: `vic3-sql` registers providers on a `SessionContext` over an in-memory `SessionBinding` (`GameDefs` + `World` + `PricesResult`). Hosts hold the engine next to `vic3-api` session state and call Rust `SqlEngine::use_save` (never a mutating `SELECT`); `saves` reads `vic3-catalog`; `latest.*` loads via `vic3-api` without installing the active session.
+- Diagnostics: `alerts()`, `shortage_analysis(good)`, `building_staffing(state_id)`, `good_price` / `army_power` wrap `vic3-prices` alerts + market rows. TVF args must be plan-time literals (`NULL` allowed for `shortage_analysis`).
 - Planning TVFs: `plan(goal [, max_days [, label]])` and `gaps(goal)` call `vic3-plan` / `vic3-goals` against the bound snapshot. `label` is accepted for [`PlanOpts`](json-schema.md) parity and ignored in the result set. `limitations` is emitted on step 0 only.
 - Pages/wasm continues without this engine in v1.

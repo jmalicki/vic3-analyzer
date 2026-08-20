@@ -142,6 +142,7 @@ pub fn gaps_schema() -> SchemaRef {
     ]))
 }
 
+/// `saves` catalog columns (`docs/sql.md`).
 pub fn saves_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
         Field::new("name", DataType::Utf8, false),
@@ -155,5 +156,68 @@ pub fn saves_schema() -> SchemaRef {
         Field::new("country", DataType::Utf8, true),
         Field::new("location", DataType::Utf8, false),
         Field::new("loaded", DataType::Boolean, false),
+    ]))
+}
+
+/// `alerts()` columns (`docs/sql.md`).
+///
+/// `evidence` / `mitigations` are JSON text (not nested Arrow); employment
+/// staffing stays on `building_staffing(state_id)`.
+pub fn alerts_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Utf8, false),
+        Field::new("kind", DataType::Utf8, false),
+        Field::new("severity", DataType::Int32, false),
+        Field::new("title", DataType::Utf8, false),
+        Field::new("summary", DataType::Utf8, false),
+        Field::new("state_id", DataType::UInt32, true),
+        Field::new("building_id", DataType::UInt32, true),
+        Field::new("good_id", DataType::Utf8, true),
+        Field::new("evidence", DataType::Utf8, false),
+        Field::new("mitigations", DataType::Utf8, false),
+    ]))
+}
+
+/// `shortage_analysis(good)` columns (`docs/sql.md`).
+///
+/// Market magnitudes (`buy`/`sell`/…) may be NULL when no matching goods row.
+pub fn shortage_analysis_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("good", DataType::Utf8, false),
+        Field::new("alert_id", DataType::Utf8, false),
+        Field::new("kind", DataType::Utf8, false),
+        Field::new("severity", DataType::Int32, false),
+        Field::new("title", DataType::Utf8, false),
+        Field::new("summary", DataType::Utf8, false),
+        Field::new("state_id", DataType::UInt32, true),
+        Field::new("building_id", DataType::UInt32, true),
+        Field::new("buy", DataType::Float64, true),
+        Field::new("sell", DataType::Float64, true),
+        Field::new("shortage", DataType::Float64, true),
+        Field::new("price", DataType::Float64, true),
+        Field::new("base", DataType::Float64, true),
+        Field::new("evidence", DataType::Utf8, false),
+        Field::new("mitigations", DataType::Utf8, false),
+    ]))
+}
+
+/// `building_staffing(state_id)` columns (`docs/sql.md`).
+///
+/// Profession fields are NULL only for buildings with no employee rows.
+pub fn building_staffing_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("building_id", DataType::UInt32, false),
+        Field::new("building_name", DataType::Utf8, false),
+        Field::new("type_id", DataType::Utf8, false),
+        Field::new("staffing", DataType::Float64, false),
+        Field::new("level", DataType::Float64, false),
+        Field::new("profession_id", DataType::Utf8, true),
+        Field::new("profession_name", DataType::Utf8, true),
+        Field::new("employed_here", DataType::Float64, true),
+        Field::new("jobs_here", DataType::Float64, true),
+        Field::new("missing_here", DataType::Float64, true),
+        Field::new("state_jobs", DataType::Float64, true),
+        Field::new("state_stock", DataType::Float64, true),
+        Field::new("state_shortage", DataType::Float64, true),
     ]))
 }

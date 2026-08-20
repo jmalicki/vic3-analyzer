@@ -1,7 +1,12 @@
-//! Planning table-valued functions (`docs/sql.md`): `plan` and `gaps`.
+//! SQL scalars and TVFs (`docs/sql.md`): diagnostics + planning.
 
+mod alerts;
+mod args;
 mod gaps;
 mod plan;
+mod scalars;
+mod shortage;
+mod staffing;
 
 use std::sync::Arc;
 
@@ -15,8 +20,21 @@ use crate::SqlError;
 pub use gaps::GapsTvf;
 pub use plan::PlanTvf;
 
-/// Register `plan` and `gaps` UDTFs on `ctx` over the bound session.
+/// Register diagnostics scalars/TVFs and planning TVFs on `ctx`.
 pub fn register(ctx: &SessionContext, binding: Arc<SessionBinding>) -> Result<(), SqlError> {
+    scalars::register(ctx, Arc::clone(&binding))?;
+    ctx.register_udtf(
+        "alerts",
+        Arc::new(alerts::AlertsTvf::new(Arc::clone(&binding))),
+    );
+    ctx.register_udtf(
+        "shortage_analysis",
+        Arc::new(shortage::ShortageAnalysisTvf::new(Arc::clone(&binding))),
+    );
+    ctx.register_udtf(
+        "building_staffing",
+        Arc::new(staffing::BuildingStaffingTvf::new(Arc::clone(&binding))),
+    );
     ctx.register_udtf("plan", Arc::new(PlanTvf::new(Arc::clone(&binding))));
     ctx.register_udtf("gaps", Arc::new(GapsTvf::new(binding)));
     Ok(())

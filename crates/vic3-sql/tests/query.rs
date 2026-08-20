@@ -183,6 +183,99 @@ async fn btree_range_on_building_types() {
     }
 }
 
+#[tokio::test]
+async fn diagnostics_alerts_and_good_price() {
+    let eng = engine().await;
+    let alerts = eng
+        .query("SELECT id, kind, severity, title, evidence, mitigations FROM alerts()")
+        .await
+        .expect("alerts");
+    assert!(!alerts.is_empty());
+    let schema = alerts[0].schema();
+    assert_eq!(schema.field(0).name(), "id");
+    assert_eq!(schema.field(4).name(), "evidence");
+    assert_eq!(schema.field(5).name(), "mitigations");
+
+    let priced = eng
+        .query("SELECT good_price('grain') AS p")
+        .await
+        .expect("good_price");
+    let p = priced[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .expect("p");
+    assert!(!p.is_null(0));
+    assert!(p.value(0).is_finite());
+
+    let unknown = eng
+        .query("SELECT good_price('not_a_real_good') AS p")
+        .await
+        .expect("unknown good");
+    let u = unknown[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .unwrap();
+    assert!(u.is_null(0));
+
+    let army = eng
+        .query("SELECT army_power() AS a")
+        .await
+        .expect("army_power");
+    assert_eq!(army[0].num_rows(), 1);
+}
+
+#[tokio::test]
+async fn shortage_analysis_schema_and_filter() {
+    let eng = engine().await;
+    let all = eng
+        .query("SELECT good, alert_id, kind, shortage, evidence FROM shortage_analysis(NULL)")
+        .await
+        .expect("shortage all");
+    assert!(!all.is_empty());
+    let schema = all[0].schema();
+    assert_eq!(schema.field(0).name(), "good");
+    assert_eq!(schema.field(3).name(), "shortage");
+
+    let grain = eng
+        .query("SELECT good FROM shortage_analysis('grain')")
+        .await
+        .expect("shortage grain");
+    for batch in &grain {
+        let col = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        for i in 0..col.len() {
+            assert_eq!(col.value(i), "grain");
+        }
+    }
+}
+
+#[tokio::test]
+async fn building_staffing_for_state() {
+    let eng = engine().await;
+    let states = eng
+        .query("SELECT state_id FROM states ORDER BY state_id LIMIT 1")
+        .await
+        .expect("state");
+    let sid = states[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<UInt32Array>()
+        .unwrap()
+        .value(0);
+    let sql = format!(
+        "SELECT building_id, type_id, profession_id, employed_here, jobs_here \
+         FROM building_staffing({sid})"
+    );
+    let batches = eng.query(&sql).await.expect("staffing");
+    assert!(!batches.is_empty());
+    assert_eq!(batches[0].schema().field(0).name(), "building_id");
+}
+
 #[test]
 fn binding_arcs_are_shareable() {
     let defs = decode_blob(&defs_blob()).unwrap();
