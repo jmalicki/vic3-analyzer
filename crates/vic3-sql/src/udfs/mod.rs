@@ -1,17 +1,46 @@
 //! SQL scalars and TVFs (`docs/sql.md`): diagnostics + planning.
 //!
-//! Diagnostics (`good_price`, `army_power`, `alerts`, `shortage_analysis`,
-//! `building_staffing`) wrap the bound prices/alerts snapshot. Planning
-//! (`plan`, `gaps`) calls `vic3-plan` / `vic3-goals`. TVF arguments must be
-//! plan-time literals so providers can materialize fixed batches.
+//! # Registration
+//!
+//! [`register`] installs everything on the bound [`SessionBinding`]. Called from
+//! [`crate::SqlEngine::bind`] and again after [`crate::SqlEngine::use_save`].
+//! Catalog-only engines have no UDFs until the first successful `use_save`.
+//!
+//! # Argument contracts
+//!
+//! TVFs resolve args at UDTF `call` time. Only **plan-time literals** are
+//! accepted ([`args`], plus internal literal helpers for planning TVFs)
+//! so providers can materialize a fixed batch.
+//!
+//! | Function | Args | NULL / defaults |
+//! | --- | --- | --- |
+//! | `good_price(good)` | Utf8 (runtime columnar OK) | NULL arg or unknown id → NULL |
+//! | `army_power()` | none | no `player_tag` → NULL |
+//! | `alerts()` | none | — |
+//! | `shortage_analysis(good)` | Utf8 **or** NULL literal | NULL → all scarce-good alerts |
+//! | `building_staffing(state_id)` | non-null int | NULL / non-literal → plan error |
+//! | `plan(goal [, max_days [, label]])` | non-null str / non-neg int / optional str | `max_days` default `3650`; `label` accepted, omitted from rows |
+//! | `gaps(goal)` | non-null string | NULL → plan error |
+//!
+//! # Modules
+//!
+//! | Module | Surface |
+//! | --- | --- |
+//! | [`scalars`] | `good_price`, `army_power` |
+//! | [`alerts`] | `alerts()` |
+//! | [`shortage`] | `shortage_analysis(good)` |
+//! | [`staffing`] | `building_staffing(state_id)` |
+//! | [`plan`] | `plan(...)` → A\* steps |
+//! | [`gaps`] | `gaps(goal)` → atom status |
+//! | [`args`] | Literal extractors for diagnostics TVFs |
 
-mod alerts;
-mod args;
-mod gaps;
-mod plan;
-mod scalars;
-mod shortage;
-mod staffing;
+pub mod alerts;
+pub mod args;
+pub mod gaps;
+pub mod plan;
+pub mod scalars;
+pub mod shortage;
+pub mod staffing;
 
 use std::sync::Arc;
 
@@ -26,6 +55,11 @@ pub use gaps::GapsTvf;
 pub use plan::PlanTvf;
 
 /// Register diagnostics scalars/TVFs and planning TVFs on `ctx`.
+///
+/// # Errors
+///
+/// [`SqlError`] if scalar UDF registration fails (TVF registration is infallible
+/// at the DataFusion API layer; bad calls fail at query plan time).
 pub fn register(ctx: &SessionContext, binding: Arc<SessionBinding>) -> Result<(), SqlError> {
     scalars::register(ctx, Arc::clone(&binding))?;
     ctx.register_udtf(
@@ -45,6 +79,7 @@ pub fn register(ctx: &SessionContext, binding: Arc<SessionBinding>) -> Result<()
     Ok(())
 }
 
+/// Non-null UTF-8 string literal (planning TVFs).
 pub(crate) fn literal_str(expr: &Expr, arg_index: usize) -> DfResult<String> {
     match expr {
         Expr::Literal(scalar, _) => match scalar.try_as_str() {
@@ -63,6 +98,7 @@ pub(crate) fn literal_str(expr: &Expr, arg_index: usize) -> DfResult<String> {
     }
 }
 
+/// Non-null non-negative integer literal widened to `u32` (`plan` max_days).
 pub(crate) fn literal_u32(expr: &Expr, arg_index: usize) -> DfResult<u32> {
     match expr {
         Expr::Literal(scalar, _) => match scalar {

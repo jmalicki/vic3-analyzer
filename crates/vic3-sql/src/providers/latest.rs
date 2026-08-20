@@ -20,7 +20,7 @@ use crate::SqlError;
 
 /// Lazy view over the catalog's max-mtime save for one fact table.
 ///
-/// On scan, ensures a cached binding via [`HostState::ensure_latest_binding`]
+/// On scan, ensures a cached binding via the host `latest.*` path
 /// (`install = false`) then delegates to the concrete fact provider.
 #[derive(Debug)]
 pub struct LatestFactProvider {
@@ -30,7 +30,7 @@ pub struct LatestFactProvider {
 }
 
 impl LatestFactProvider {
-    pub fn new(host: Arc<HostState>, table: FactTable) -> Self {
+    pub(crate) fn new(host: Arc<HostState>, table: FactTable) -> Self {
         Self {
             host,
             schema: table.schema(),

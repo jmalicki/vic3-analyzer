@@ -1,8 +1,13 @@
 //! Host session state: catalog, `use_save`, and `latest.*` cache.
 //!
-//! Session binding is a Rust host API (`use_save`) — never a mutating
-//! `SELECT` (`docs/sql.md`). `active.*` tracks that bind; `latest.*` is a
-//! separate read-time cache that must not install the process analysis session.
+//! Session binding is a Rust host API ([`crate::SqlEngine::use_save`]) — never a
+//! mutating `SELECT` (`docs/sql.md`).
+//!
+//! | Namespace | Tracks | Mutates process analysis session? |
+//! | --- | --- | --- |
+//! | `active.*` | [`ActiveMeta`] after `use_save` | yes (`install = true`) |
+//! | `latest.*` | max-`mtime` cache via [`HostState::ensure_latest_binding`] | **no** (`install = false`) |
+//! | `saves` | [`vic3_catalog::SaveCatalog`] | no (`loaded` flag only) |
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -26,7 +31,7 @@ pub struct EngineLoadOpts {
 }
 
 impl EngineLoadOpts {
-    /// Defaults: no tokens, empty `SolveOpts` JSON.
+    /// Defaults: no tokens, empty `SolveOpts` JSON (`{}`).
     pub fn new(defs_blob: impl Into<PathBuf>) -> Self {
         Self {
             defs_blob: defs_blob.into(),
@@ -35,6 +40,7 @@ impl EngineLoadOpts {
         }
     }
 
+    /// Attach an optional token-map path for binary saves.
     pub fn with_tokens(mut self, tokens: impl Into<PathBuf>) -> Self {
         self.tokens = Some(tokens.into());
         self

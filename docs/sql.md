@@ -432,13 +432,13 @@ The Tauri **Advanced Query** tab uses this same dialect:
 
 - SQL editor → same engine as MCP `query` (`sql_query` invoke → `vic3-sql`)
 - Results grid; clicking cells with recognized keys navigates to companion panes (`state_id` / `building_id` → States, `good` / `good_id` → Prices, plan `step` → Timeline highlight)
-- In-app docs panel renders this document (and a UDF index) via `sql_docs` — single source with future MCP `vic3://docs/sql`
+- In-app docs panel renders this document (and a UDF index) via `sql_docs` — same markdown MCP serves as `vic3://docs/sql`
 
 ## Open questions for review
 
 1. **Shortage formula (v1 locked):** `goods.shortage` / `goods_by_state.shortage` = `max(0, buy − sell)` (unmet demand volume). Not Paradox’s shortage flag.
 2. ~~Mitigations as JSON columns vs child TVFs.~~ **Locked:** `evidence` / `mitigations` JSON text on `alerts()` / `shortage_analysis()`; staffing via `building_staffing(state_id)`.
-3. Whether unqualified names require `use_save` or may fall back to `latest.*` automatically.
+3. ~~Whether unqualified names require `use_save` or may fall back to `latest.*` automatically.~~ **Locked:** unqualified ≡ `active.*`; require `use_save` / `bind` (`SqlError::Unbound`). No auto-fallback to `latest.*`.
 4. Military `formations` column list (wait for stable military JSON).
 5. Ambiguous `states.region_name` / region labels: return all rows vs error vs prefer player-owned.
 6. Which DF array helpers we document for `TEXT[]` contains (`array_has` vs `array_has_any` vs custom UDF) — IO element type is locked: `List<Struct{good, good_name, qty}>` + `unnest(unnest(…))`.
@@ -452,6 +452,7 @@ The Tauri **Advanced Query** tab uses this same dialect:
 ## Implementation notes (non-normative)
 
 - Crate: `vic3-sql` registers providers on a `SessionContext` over an in-memory `SessionBinding` (`GameDefs` + `World` + `PricesResult`). Hosts hold the engine next to `vic3-api` session state and call Rust `SqlEngine::use_save` (never a mutating `SELECT`); `saves` reads `vic3-catalog`; `latest.*` loads via `vic3-api` without installing the active session.
+- Result shaping: Advanced Query uses `vic3_sql::batches_to_json` (`columns` / `rows` / `row_count`). MCP `query` uses the same JSON shape (formatter currently lives in `vic3-mcp`; keep aligned). `vic3://schema` → `schema_catalog_json()` (facts + diagnostics/planning TVFs + scalars).
 - Diagnostics: `alerts()`, `shortage_analysis(good)`, `building_staffing(state_id)`, `good_price` / `army_power` wrap `vic3-prices` alerts + market rows. TVF args must be plan-time literals (`NULL` allowed for `shortage_analysis`).
 - Planning TVFs: `plan(goal [, max_days [, label]])` and `gaps(goal)` call `vic3-plan` / `vic3-goals` against the bound snapshot. `label` is accepted for [`PlanOpts`](json-schema.md) parity and ignored in the result set. `limitations` is emitted on step 0 only.
 - Pages/wasm continues without this engine in v1.

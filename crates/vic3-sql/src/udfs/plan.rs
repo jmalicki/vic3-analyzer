@@ -1,4 +1,8 @@
 //! `plan(goal [, max_days [, label]])` → ordered A* step rows.
+//!
+//! Args must be plan-time literals. `max_days` defaults to `3650`. Optional
+//! `label` mirrors `PlanOpts` and is not emitted. `limitations` is joined onto
+//! **step 0 only**.
 
 use std::any::Any;
 use std::sync::Arc;

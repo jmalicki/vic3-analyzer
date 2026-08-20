@@ -1,4 +1,7 @@
 //! Scalar diagnostics: `good_price(good)`, `army_power()` (`docs/sql.md`).
+//!
+//! `good_price` returns NULL for a NULL arg or unknown good id. `army_power`
+//! returns NULL when `player_tag` does not resolve to a country row.
 
 use std::sync::Arc;
 

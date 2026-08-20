@@ -30,7 +30,7 @@ pub struct SavesProvider {
 }
 
 impl SavesProvider {
-    pub fn new(host: Arc<HostState>) -> Self {
+    pub(crate) fn new(host: Arc<HostState>) -> Self {
         Self {
             host,
             schema: saves_schema(),

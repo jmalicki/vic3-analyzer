@@ -1,7 +1,11 @@
-//! RecordBatch → JSON for MCP `query` and the Tauri Advanced Query tab.
+//! RecordBatch → JSON/CSV for the Tauri Advanced Query tab (and the shared
+//! agent payload shape).
 //!
-//! Shape matches `docs/mcp.md`:
+//! Normative JSON (`docs/mcp.md`):
 //! `{ "columns": [...], "rows": [...], "row_count": N }`.
+//!
+//! Advanced Query calls [`batches_to_json`] after [`crate::query`]. MCP currently
+//! mirrors the same shape in `vic3-mcp` (keep contracts aligned).
 
 use datafusion::arrow::array::{
     Array, BooleanArray, Float64Array, Int32Array, Int64Array, RecordBatch, StringArray,
@@ -20,6 +24,11 @@ pub enum FormatError {
 }
 
 /// Convert collected batches into the shared JSON result object.
+///
+/// # Errors
+///
+/// [`FormatError`] on inconsistent batch schemas or unsupported cell decode
+/// failures (nested types fall back to Arrow display text).
 pub fn batches_to_json(batches: &[RecordBatch]) -> Result<Value, FormatError> {
     let (columns, rows) = batches_to_rows(batches)?;
     Ok(json!({
@@ -30,6 +39,10 @@ pub fn batches_to_json(batches: &[RecordBatch]) -> Result<Value, FormatError> {
 }
 
 /// Convert collected batches into CSV text (header + rows).
+///
+/// # Errors
+///
+/// Same as [`batches_to_json`].
 pub fn batches_to_csv(batches: &[RecordBatch]) -> Result<String, FormatError> {
     let (columns, rows) = batches_to_rows(batches)?;
     let mut out = String::new();

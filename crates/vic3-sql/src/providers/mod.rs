@@ -1,8 +1,38 @@
-//! Fact-table [`TableProvider`]s plus catalog host registration.
+//! Fact-table providers plus catalog host registration.
 //!
-//! After [`register_all`], unqualified names and `active.*` share the bound
-//! snapshot. [`register_catalog_host`] leaves those unbound until `use_save`
-//! and registers lazy `latest.*` views that load without mutating the session.
+//! # Namespaces
+//!
+//! | Registration | Unqualified + `active.*` | `latest.*` | `saves` |
+//! | --- | --- | --- | --- |
+//! | [`register_all`] | bound snapshot | — | — |
+//! | `register_catalog_host` | [`UnboundFactProvider`] until `use_save` | [`LatestFactProvider`] | [`SavesProvider`] |
+//!
+//! After `use_save`, [`register_all`] replaces unbound placeholders so default
+//! search path ≡ `active`.
+//!
+//! # Pushdown (Exact vs range Exact)
+//!
+//! Each fact provider declares a [`pushdown::PushSupport`]:
+//!
+//! | Table | Exact `=` | Exact range |
+//! | --- | --- | --- |
+//! | `states` | `state_id`, `region_id`, `region_name`, `owner_tag` | — |
+//! | `goods` | `good`, `good_name` | — (hash / order index) |
+//! | `goods_by_state` | `state_id`, `good` | — |
+//! | `buildings` | `building_id`, `state_id`, `type_id` | — |
+//! | `building_types` | `type_id`, `type_name`, `group_id` | `type_id` (defs `BTreeMap`) |
+//! | `production_methods` | `pm`, `pm_name` | `pm` (defs `BTreeMap`) |
+//! | `pops` | `state_id`, `profession` | — |
+//! | `state_qualifications` | `state_id`, `profession` | — |
+//! | `countries` | `country_id`, `tag` | — |
+//!
+//! Exact means the provider filters rows itself; Unsupported predicates are
+//! left for DataFusion. `latest.*` advertises Inexact and delegates after load.
+//!
+//! # List / IO columns
+//!
+//! Built by the `arrays` helper: `TEXT[]` for PM ids / short inputs / PM groups;
+//! `List<Struct{good, good_name, qty}>` for building and PM goods IO.
 
 mod arrays;
 mod building_types;
@@ -13,7 +43,7 @@ mod goods_by_state;
 mod latest;
 mod pops;
 mod production_methods;
-mod pushdown;
+pub mod pushdown;
 mod saves;
 mod state_qualifications;
 mod states;
@@ -72,6 +102,7 @@ pub const FACT_TABLES: &[FactTable] = &[
 ];
 
 impl FactTable {
+    /// Unqualified SQL table name (`states`, `goods`, …).
     pub fn name(self) -> &'static str {
         match self {
             Self::States => "states",
@@ -86,6 +117,7 @@ impl FactTable {
         }
     }
 
+    /// Arrow schema for this fact table (`docs/sql.md`).
     pub fn schema(self) -> datafusion::arrow::datatypes::SchemaRef {
         match self {
             Self::States => states_schema(),
@@ -119,6 +151,11 @@ pub fn provider_for(table: FactTable, binding: Arc<SessionBinding>) -> Arc<dyn T
 const DEFAULT_CATALOG: &str = "datafusion";
 
 /// Ensure `active` / `latest` schemas exist on the default catalog.
+///
+/// # Errors
+///
+/// [`SqlError::Internal`] if the default DataFusion catalog is missing;
+/// schema registration failures as [`SqlError::DataFusion`].
 pub fn ensure_session_schemas(ctx: &SessionContext) -> Result<(), SqlError> {
     let catalog = ctx
         .catalog(DEFAULT_CATALOG)
@@ -140,6 +177,10 @@ fn partial(schema: &str, table: &str) -> TableReference {
 ///
 /// Called from `bind` and again after `use_save` so both namespaces track the
 /// same session (default search path ≡ `active`).
+///
+/// # Errors
+///
+/// Schema or table registration failures as [`SqlError`].
 pub async fn register_all(
     ctx: &SessionContext,
     binding: Arc<SessionBinding>,
@@ -157,7 +198,11 @@ pub async fn register_all(
 ///
 /// Until `use_save`, scanning `active.*` yields [`crate::SqlError::Unbound`].
 /// `latest.*` may load independently without installing the active session.
-pub async fn register_catalog_host(
+///
+/// # Errors
+///
+/// Schema or table registration failures as [`SqlError`].
+pub(crate) async fn register_catalog_host(
     ctx: &SessionContext,
     host: Arc<HostState>,
 ) -> Result<(), SqlError> {
