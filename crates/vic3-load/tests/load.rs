@@ -14,6 +14,105 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 #[test]
+fn toy_economy_fixture_loads() {
+    let save = load_path(fixture("toy_economy.txt"), empty_tokens()).expect("toy economy fixture");
+
+    assert_eq!(save.meta_data.version, "1.9.0");
+    assert_eq!(save.meta_data.name.as_deref(), Some("ToyEconomy"));
+
+    let toy = save.country_by_tag("TOY").expect("TOY in fixture");
+    assert_eq!(toy.definition, "TOY");
+    assert_eq!(toy.market, Some(1));
+    assert_eq!(toy.states, vec![1, 2, 3]);
+    assert_eq!(save.states.iter_present().count(), 3);
+    assert_eq!(
+        save.states
+            .database
+            .get(&1)
+            .and_then(|s| s.as_ref())
+            .and_then(|s| s.region.as_deref()),
+        Some("STATE_TOY_A")
+    );
+    assert_eq!(
+        save.states
+            .database
+            .get(&2)
+            .and_then(|s| s.as_ref())
+            .and_then(|s| s.region.as_deref()),
+        Some("STATE_TOY_B")
+    );
+    assert_eq!(
+        save.states
+            .database
+            .get(&3)
+            .and_then(|s| s.as_ref())
+            .and_then(|s| s.region.as_deref()),
+        Some("STATE_TOY_C")
+    );
+
+    let buildings: Vec<_> = save.building_manager.iter_present().collect();
+    assert_eq!(buildings.len(), 4);
+    assert!(buildings
+        .iter()
+        .any(|(_, b)| b.building == "building_wheat_farm"
+            && b.active_production_methods() == ["pm_toy_wheat"]));
+    assert!(buildings
+        .iter()
+        .any(|(_, b)| b.building == "building_flour_mill"
+            && b.active_production_methods() == ["pm_toy_mill"]));
+    assert!(buildings
+        .iter()
+        .any(|(_, b)| b.building == "building_bakery"
+            && b.active_production_methods() == ["pm_toy_bakery"]));
+    let trade = buildings
+        .iter()
+        .find(|(_, b)| b.building == "building_trade_center")
+        .map(|(_, b)| b)
+        .expect("trade center");
+    assert_eq!(trade.state, Some(3));
+    assert_eq!(trade.active_production_methods(), ["pm_toy_trade"]);
+
+    let farm = buildings
+        .iter()
+        .find(|(_, b)| b.building == "building_wheat_farm")
+        .map(|(_, b)| b)
+        .expect("wheat farm");
+    assert_eq!(farm.level, 3);
+    assert_eq!(farm.output_goods.goods.get("0"), Some(&90.0));
+
+    let mill = buildings
+        .iter()
+        .find(|(_, b)| b.building == "building_flour_mill")
+        .map(|(_, b)| b)
+        .expect("flour mill");
+    assert_eq!(mill.input_goods.goods.get("0"), Some(&40.0));
+    assert_eq!(mill.output_goods.goods.get("1"), Some(&30.0));
+
+    let bakery = buildings
+        .iter()
+        .find(|(_, b)| b.building == "building_bakery")
+        .map(|(_, b)| b)
+        .expect("bakery");
+    assert_eq!(bakery.input_goods.goods.get("1"), Some(&30.0));
+    assert_eq!(bakery.output_goods.goods.get("2"), Some(&40.0));
+
+    assert_eq!(save.pops.iter_present().count(), 4);
+    assert_eq!(save.market_manager.iter_present().count(), 1);
+    assert_eq!(
+        save.market_manager
+            .iter_present()
+            .next()
+            .and_then(|(_, market)| market.owner),
+        Some(16777216)
+    );
+    assert_eq!(WorldSnapshot::previous_played(&save).len(), 1);
+    assert_eq!(
+        WorldSnapshot::previous_played(&save)[0].idtype,
+        Some(16777216)
+    );
+}
+
+#[test]
 fn plaintext_fixture_loads() {
     let save = load_path(fixture("plaintext.txt"), empty_tokens()).expect("plaintext fixture");
 
