@@ -1,6 +1,6 @@
 # Desktop config and auto-detect (design spec)
 
-**Status:** Wave 0 design for review. Not implemented yet.  
+**Status:** Partial — `vic3-catalog` implements path auto-detect, config load/save, and save-root scanning. Tauri Settings UI and filesystem watch are not implemented yet.  
 **Applies to:** Tauri GUI + `vic3-analyzer mcp` (same config file).  
 **Does not apply to:** GitHub Pages / wasm (browser still uses pickers / drag-drop).
 
@@ -47,7 +47,7 @@ No auto-download. If binary/ironman saves are used, Settings points at a user-su
 
 ## Config file
 
-Stored in platform app data (Tauri path / XDG), e.g. `config.toml` or `config.json`.
+Stored in platform app data (same root as the CLI archive: `$XDG_DATA_HOME/vic3-analyzer/` or `dirs::data_local_dir()/vic3-analyzer`), as `config.toml` by default. `config.json` is also accepted when present.
 
 Suggested keys:
 
@@ -85,9 +85,9 @@ Allowlist only configured roots + app data. No scanning of the whole home direct
 
 1. Multiple Steam libraries: how aggressive should discovery be on Windows?
 2. Whether defs cache invalidates on game update (mtime of `game/` or version file).
-3. Config format: TOML vs JSON.
 
 ## Implementation notes (non-normative)
 
-- Shared Rust module used by catalog + Tauri commands + MCP startup.
+- Crate: `vic3-catalog` (shared by future catalog SQL provider, Tauri commands, MCP startup).
+- Config format: **TOML default**; JSON supported via extension.
 - Pages continues to use IndexedDB defs builder; this doc is native-only.

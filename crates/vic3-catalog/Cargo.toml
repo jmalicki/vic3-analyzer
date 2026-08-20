@@ -1,0 +1,21 @@
+[package]
+name = "vic3-catalog"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Save catalog scan and shared desktop/MCP app config"
+
+[lints]
+workspace = true
+
+[dependencies]
+dirs = "6"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
+serde_json.workspace = true

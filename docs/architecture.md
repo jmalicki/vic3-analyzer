@@ -22,6 +22,7 @@ License: AGPL-3.0. Saves and token maps are user-supplied and never uploaded.
 | `vic3-sim` | Goal-relevant successors; event-wait edges |
 | `vic3-plan` | `SearchNode` glue + `shortest_path`; shared option/result/archive types |
 | `vic3-api` | Transport-free analysis (bytes or paths in, JSON out); shared by CLI, wasm, future Tauri |
+| `vic3-catalog` | Save-root scan (stubs, `local`/`steam_cloud`), shared TOML/JSON app config + path auto-detect |
 | `vic3-cli` | clap only lives here |
 | `vic3-wasm` | Thin `wasm-bindgen` over `vic3-api`; no filesystem |
 | `web/` | Vite + React; IndexedDB archive; forms from JSON Schema |
