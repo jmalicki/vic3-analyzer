@@ -4,8 +4,6 @@ use vic3_defs::GameDefs;
 use vic3_prices::{PricesResult, World};
 
 /// In-memory analysis snapshot bound into DataFusion providers.
-///
-/// Full `use_save` / `saves` catalog is Wave 3 (`feat/catalog-sql`).
 #[derive(Debug, Clone)]
 pub struct SessionBinding {
     pub defs: Arc<GameDefs>,

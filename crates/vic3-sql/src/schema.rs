@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::{DataType, Field, Fields, Schema, SchemaRef};
+use datafusion::arrow::datatypes::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
 
 /// `List<Struct{good, good_name, qty}>` for building / PM IO columns.
 pub fn good_io_list_type() -> DataType {
@@ -139,5 +139,21 @@ pub fn gaps_schema() -> SchemaRef {
         Field::new("predicate", DataType::Utf8, false),
         Field::new("status", DataType::Utf8, false),
         Field::new("detail", DataType::Utf8, false),
+    ]))
+}
+
+pub fn saves_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("name", DataType::Utf8, false),
+        Field::new("kind", DataType::Utf8, false),
+        Field::new(
+            "mtime",
+            DataType::Timestamp(TimeUnit::Millisecond, None),
+            false,
+        ),
+        Field::new("in_game_date", DataType::Utf8, true),
+        Field::new("country", DataType::Utf8, true),
+        Field::new("location", DataType::Utf8, false),
+        Field::new("loaded", DataType::Boolean, false),
     ]))
 }

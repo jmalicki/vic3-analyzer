@@ -15,6 +15,8 @@ datafusion.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+vic3-api = { path = "../vic3-api" }
+vic3-catalog = { path = "../vic3-catalog" }
 vic3-defs = { path = "../vic3-defs" }
 vic3-goals = { path = "../vic3-goals" }
 vic3-plan = { path = "../vic3-plan" }
@@ -24,6 +26,7 @@ vic3-world = { path = "../vic3-world" }
 
 [dev-dependencies]
 datafusion.workspace = true
+tempfile = "3"
 vic3-defs = { path = "../vic3-defs" }
 vic3-load = { path = "../vic3-load" }
 
