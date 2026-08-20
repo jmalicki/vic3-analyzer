@@ -1,6 +1,8 @@
 # MCP server
 
-**Status:** Implemented — stdio MCP via [rmcp](https://crates.io/crates/rmcp) in `vic3-mcp`, invoked as `vic3-analyzer mcp`.  
+**Status:** Implemented (Wave 4b) — stdio MCP via official [rmcp](https://crates.io/crates/rmcp) in `vic3-mcp`, invoked as `vic3-analyzer mcp` from the **same fat binary** as the Tauri GUI.  
+**SDK:** Official Rust [rmcp](https://crates.io/crates/rmcp) 3.x.  
+**Binary (v1):** `vic3-analyzer` opens the Tauri GUI; `vic3-analyzer mcp` runs stdio MCP **without** creating a window (early argv branch before Tauri `run`). WebView libraries may still load at process start; acceptable for v1 (no second MCP artifact unless headless forces a feature-split later).  
 **SQL contract:** [`sql.md`](sql.md) — MCP exposes tables/UDFs; it does not redefine them.  
 **Config:** Same file as the GUI ([`desktop.md`](desktop.md)).
 
@@ -131,3 +133,19 @@ macOS app bundle: `…/Vic3 Analyzer.app/Contents/MacOS/vic3-analyzer` with args
 | Catalog / SQL | Same crates; separate process instance |
 | Active save | Per process |
 | Result shape | `sql_query` invoke ↔ MCP `query` JSON |
+| Catalog | Shared code; MCP process has its own instance unless later we add a daemon |
+| Active save | Per process (GUI and MCP do not share RAM session in v1) |
+| SQL engine | Same `vic3-sql` crate and [`sql.md`](sql.md) contracts |
+
+## Open questions for review
+
+1. Should `query` auto-bind `latest` if no session, or always require `use_save`?
+2. Max rows / timeout defaults for `query` and `plan(...)`.
+3. Whether GUI and MCP should ever share a long-lived daemon (out of v1).
+
+## Implementation notes
+
+- Crate: `vic3-mcp`, linked into the `vic3-analyzer` binary (`mcp` argv).
+- Tools / resources / prompts implemented; catalog watch → `list_changed` remains best-effort follow-up.
+- Shared with GUI: [`vic3_catalog::DesktopConfig`] + [`vic3_api::ensure_defs_blob`] (same config file and defs cache path). Active SQL session stays per-process.
+- Headless smoke: `./scripts/mcp-smoke.sh` (CI) asserts `mcp` reaches ready on stderr without a display / without calling Tauri `run`.

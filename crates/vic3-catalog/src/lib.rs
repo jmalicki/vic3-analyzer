@@ -49,7 +49,7 @@ mod paths;
 mod stub;
 
 pub use catalog::{scan_roots, SaveCatalog, SaveEntry};
-pub use config::{resolve_config_path, AppConfig};
+pub use config::{resolve_config_path, AppConfig, DesktopConfig};
 pub use error::CatalogError;
 pub use location::SaveLocation;
 pub use paths::{

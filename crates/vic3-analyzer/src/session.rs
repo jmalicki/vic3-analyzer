@@ -13,20 +13,21 @@
 //! ```
 //!
 //! MCP uses the same catalog/config/SQL crates via `vic3-mcp` (separate process).
+//! On-disk config and defs-cache resolution match `vic3-analyzer mcp`
+//! ([`vic3_catalog::DesktopConfig`], [`vic3_api::ensure_defs_blob`]); GUI and
+//! MCP do not share RAM.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde_json::json;
 use vic3_catalog::{
-    app_data_dir, default_game_dir_candidates, default_local_save_dir, resolve_config_path,
-    scan_roots, AppConfig, SaveCatalog, SaveEntry, SaveLocation,
+    default_game_dir_candidates, default_local_save_dir, scan_roots, AppConfig, DesktopConfig,
+    SaveCatalog, SaveEntry, SaveLocation,
 };
 use vic3_sql::{batches_to_json, EngineLoadOpts, SqlEngine, UseSaveRequest, UseSaveResult};
 
 use crate::dto::{parse_location, ConfigDto, DashboardDto, SaveStubDto};
-
-const DEFS_CACHE_NAME: &str = "defs.postcard";
 
 /// Body of `docs/sql.md` — single source with future MCP `vic3://docs/sql`.
 pub const SQL_DOCS_MD: &str = include_str!("../../../docs/sql.md");
@@ -68,6 +69,10 @@ impl AppState {
 }
 
 /// In-memory companion session backed by `vic3-catalog` + `vic3-sql` + `vic3-api`.
+///
+/// Config/defs resolution matches [`vic3_mcp::McpRuntime`] via
+/// [`DesktopConfig`] and [`vic3_api::ensure_defs_blob`] — same files on disk,
+/// separate RAM session from MCP.
 pub struct CompanionSession {
     app_data: PathBuf,
     config_path: PathBuf,
@@ -91,13 +96,11 @@ impl CompanionSession {
     ///
     /// App-data / config / initial catalog scan failures as strings.
     pub fn open(app_data: Option<PathBuf>) -> Result<Self, String> {
-        let app_data = match app_data {
-            Some(p) => p,
-            None => app_data_dir().map_err(|e| e.to_string())?,
-        };
-        std::fs::create_dir_all(&app_data).map_err(|e| e.to_string())?;
-        let config_path = resolve_config_path(&app_data);
-        let config = AppConfig::load(&config_path).map_err(|e| e.to_string())?;
+        let DesktopConfig {
+            app_data,
+            config_path,
+            config,
+        } = DesktopConfig::open(app_data).map_err(|e| e.to_string())?;
         let mut session = Self {
             app_data,
             config_path,
@@ -349,31 +352,27 @@ impl CompanionSession {
     fn defs_blob_for_engine(&self) -> Result<PathBuf, String> {
         match self.try_ensure_defs_blob() {
             Ok(path) => Ok(path),
-            Err(_) => Ok(self.app_data.join(DEFS_CACHE_NAME)),
+            Err(_) => Ok(self.app_data.join(vic3_api::DEFS_CACHE_NAME)),
         }
     }
 
+    /// Same path order as MCP bootstrap: explicit blob → app-data cache →
+    /// build from game_dir ([`vic3_api::ensure_defs_blob`]).
     fn try_ensure_defs_blob(&self) -> Result<PathBuf, String> {
-        if let Some(blob) = &self.config.defs_blob {
-            if blob.is_file() {
-                return Ok(blob.clone());
+        if let Some(game) = &self.config.game_dir {
+            if !vic3_catalog::is_valid_game_dir(game) {
+                return Err(format!(
+                    "game_dir is not a valid Victoria 3 game tree: {}",
+                    game.display()
+                ));
             }
-            return Err(format!("defs_blob not found: {}", blob.display()));
         }
-        let cache = self.app_data.join(DEFS_CACHE_NAME);
-        let game = self.config.game_dir.as_ref().ok_or_else(|| {
-            "no game_dir or defs_blob configured — set paths in Settings or enable auto-detect"
-                .to_string()
-        })?;
-        if !vic3_catalog::is_valid_game_dir(game) {
-            return Err(format!(
-                "game_dir is not a valid Victoria 3 game tree: {}",
-                game.display()
-            ));
-        }
-        let bytes = vic3_api::defs_blob_from_game(game).map_err(|e| e.to_string())?;
-        std::fs::write(&cache, &bytes).map_err(|e| e.to_string())?;
-        Ok(cache)
+        vic3_api::ensure_defs_blob(
+            self.config.defs_blob.as_deref(),
+            self.config.game_dir.as_deref(),
+            &self.app_data,
+        )
+        .map_err(|e| e.to_string())
     }
 }
 

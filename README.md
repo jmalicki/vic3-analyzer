@@ -67,7 +67,17 @@ cargo run -p vic3-cli
 cd web && npm install && npm run build:wasm && npm run build:defs && npm run dev
 ```
 
-CI runs Rust (`fmt`, `clippy`, `test`) and the web job (`npm test`, `npm run test:wasm`, `npm run build`). Pushes to `main` deploy `web/dist` to GitHub Pages. Pre-commit is `./scripts/lint.sh` (fmt, clippy, `tsc -b`); it does not run tests or wasm-pack.
+### Desktop (GUI + MCP)
+
+One fat binary (`vic3-analyzer`): companion UI by default, stdio MCP with `mcp`. Same app config and defs cache; separate process / RAM session. WebView libraries may still load in `mcp` mode (no window). Details: [`docs/desktop.md`](docs/desktop.md), [`docs/mcp.md`](docs/mcp.md).
+
+```text
+cargo run -p vic3-analyzer            # Tauri companion UI
+cargo run -p vic3-analyzer -- mcp     # stdio MCP (JSON-RPC on stdout, logs on stderr)
+./scripts/mcp-smoke.sh                # headless ready check (no display)
+```
+
+CI runs Rust (`fmt`, `clippy`, `test`, MCP smoke) and the web job (`npm test`, `npm run test:wasm`, `npm run build`). Pushes to `main` deploy `web/dist` to GitHub Pages. Pre-commit is `./scripts/lint.sh` (fmt, clippy, `tsc -b`); it does not run tests or wasm-pack.
 
 ## License
 

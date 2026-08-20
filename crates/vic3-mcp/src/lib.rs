@@ -1,8 +1,11 @@
 //! Stdio MCP server for Vic3 Analyzer (`docs/mcp.md`).
 //!
-//! Invoked as `vic3-analyzer mcp`: JSON-RPC on **stdout**, logs on **stderr**,
-//! **no window**. Shares [`vic3_catalog::AppConfig`] and [`vic3_sql::SqlEngine`]
-//! with the desktop stack (separate process / RAM session in v1).
+//! Invoked as `vic3-analyzer mcp` via the fat binary’s early argv branch:
+//! JSON-RPC on **stdout**, logs on **stderr**, **no Tauri window**. WebView
+//! native libraries may still load because the binary links Tauri (documented
+//! v1 caveat). Shares [`vic3_catalog::DesktopConfig`] /
+//! [`vic3_api::ensure_defs_blob`] with the GUI; SQL session state stays
+//! process-local.
 //!
 //! # Why a fat binary
 //!
@@ -39,8 +42,9 @@ use std::process::ExitCode;
 
 /// Binary entry for `vic3-analyzer mcp`: shared config → stdio MCP → exit code.
 ///
-/// Never opens a Tauri window. Protocol bytes stay on stdout; tracing goes to
-/// stderr only. Session RAM is process-local (not shared with a concurrent GUI).
+/// Never opens a Tauri window (callers must not invoke `vic3_analyzer_lib::run`
+/// on this path). Protocol bytes stay on stdout; tracing goes to stderr only.
+/// Session RAM is process-local (not shared with a concurrent GUI).
 ///
 /// # Errors
 ///
@@ -49,6 +53,9 @@ use std::process::ExitCode;
 /// code (it does not panic on MCP errors).
 pub fn run() -> ExitCode {
     init_stderr_logging();
+    // Emit before catalog/defs work so headless smoke can distinguish “starting”
+    // from a multi-minute first-time defs build under a real game_dir.
+    tracing::info!("vic3-analyzer mcp starting (stdio; no window)");
 
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()

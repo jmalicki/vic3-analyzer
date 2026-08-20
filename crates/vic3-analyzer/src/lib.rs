@@ -38,6 +38,8 @@ pub use mode::Mode;
 ///
 /// Registers companion invoke handlers and save-dir watch. Panics if Tauri
 /// context generation / event loop fails (same as typical Tauri apps).
+/// Must never be invoked for [`Mode::Mcp`]: the binary’s early argv branch in
+/// `main` routes MCP to `vic3_mcp::run` so this function does not run.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()

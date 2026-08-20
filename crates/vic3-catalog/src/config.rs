@@ -153,6 +153,40 @@ pub fn resolve_config_path(app_data: &Path) -> PathBuf {
     }
 }
 
+/// App-data root + loaded [`AppConfig`] shared by the Tauri GUI and MCP process.
+///
+/// Both hosts open the same allowlists from disk; they do **not** share an
+/// in-memory session (separate processes in v1). Opening here only loads the
+/// config file — catalog scan and defs resolution stay in the caller so MCP can
+/// stay free of Tauri while still matching Settings paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopConfig {
+    pub app_data: PathBuf,
+    pub config_path: PathBuf,
+    pub config: AppConfig,
+}
+
+impl DesktopConfig {
+    /// Load from platform app-data, or `app_data` override (tests).
+    ///
+    /// Creates the app-data directory when missing. Does not scan saves — that
+    /// stays in the SQL/MCP/GUI layers that own catalog refresh.
+    pub fn open(app_data: Option<PathBuf>) -> Result<Self, CatalogError> {
+        let app_data = match app_data {
+            Some(p) => p,
+            None => crate::paths::app_data_dir()?,
+        };
+        fs::create_dir_all(&app_data).map_err(|e| CatalogError::io(&app_data, e))?;
+        let config_path = resolve_config_path(&app_data);
+        let config = AppConfig::load(&config_path)?;
+        Ok(Self {
+            app_data,
+            config_path,
+            config,
+        })
+    }
+}
+
 fn parse_config_bytes(path: &Path, bytes: &[u8]) -> Result<AppConfig, CatalogError> {
     let ext = path
         .extension()
@@ -206,6 +240,17 @@ fn encode_config_bytes(path: &Path, cfg: &AppConfig) -> Result<Vec<u8>, CatalogE
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn desktop_config_open_creates_app_data() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("app");
+        let desk = DesktopConfig::open(Some(root.clone())).unwrap();
+        assert_eq!(desk.app_data, root);
+        assert!(root.is_dir());
+        assert_eq!(desk.config_path, root.join(CONFIG_FILE_TOML));
+        assert!(desk.config.auto_detect);
+    }
 
     #[test]
     fn round_trips_toml_and_json() {
