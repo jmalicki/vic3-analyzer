@@ -4,9 +4,9 @@
 //! Heuristics are documented next to each detector; they are not a full Vic3
 //! simulation.
 //!
-//! Profession adjacency when `common/pop_types` is not in defs:
-//! `peasant → farmer/laborer → miner → machinist → engineer`, with academics
-//! treated as university-adjacent.
+//! Qualification advice is filtered from `common/pop_types` (or a bundled
+//! vanilla snapshot) plus the state's current mix. Copy lives in
+//! `advice/qualifications/`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -14,6 +14,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use vic3_defs::GameDefs;
 
+use crate::qualification_advice::{
+    blocking_profession, building_staffing, id_has, is_fully_staffed, is_subsistence,
+    select_levers, shortage_target, state_mix, state_profession_totals, BuildingStaffing, LeverKey,
+    StateMix,
+};
 use crate::result::{BuildingEconomics, ExtraLevelsDelta, ProductionMethodDelta, WorldDelta};
 use crate::{
     apply_delta, market_access, price, GoodPrice, PricesResult, StateNeed, World, WorldBuilding,
@@ -22,9 +27,6 @@ use crate::{
 
 /// Market access at or below this ratio is a [`AlertKind::LowMarketAccess`].
 const ACCESS_ALERT: f64 = 0.95;
-
-/// Literacy below this (literate / demand size) is treated as far from university.
-const LITERACY_UNIVERSITY: f64 = 0.5;
 
 /// Alerts payload for wasm / CLI JSON.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -50,6 +52,9 @@ pub struct Alert {
     pub good_id: Option<String>,
     pub evidence: Vec<Evidence>,
     pub mitigations: Vec<Mitigation>,
+    /// Buildings under a state-level employment alert. Empty elsewhere.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub staffing: Vec<BuildingStaffing>,
 }
 
 /// Detector kind. Snake-case in JSON.
@@ -260,6 +265,7 @@ fn collect_goods_alerts(
             good_id: Some(good_id),
             evidence,
             mitigations,
+            staffing: Vec::new(),
         });
     }
 }
@@ -838,6 +844,7 @@ fn collect_needs_unmet(
             good_id,
             evidence,
             mitigations,
+            staffing: Vec::new(),
         });
     }
 }
@@ -1028,6 +1035,7 @@ fn collect_market_access(
                     extra_levels: Some(1),
                 },
             )]),
+            staffing: Vec::new(),
         });
     }
 }
@@ -1050,27 +1058,29 @@ fn collect_education(
         }
         let target = row.profession_id.as_str();
         let mix = state_mix(prices, row.state_id);
-        let mut items = qualification_ladder(prices, row.state_id, target, &mix);
-        if has_unstaffed_university(prices, world, row.state_id) {
+        let mut items = qualification_levers(prices, defs, row.state_id, target, &mix);
+        let wants_university = items.iter().any(is_university_build);
+        if wants_university && has_unstaffed_university(prices, world, row.state_id) {
             items.retain(|item| !is_university_build(item));
             items.push(plain(
                 format!("edu:{}:staff-uni", row.state_id),
-                "Staff the existing university",
-                "An unstaffed university is already in this state; do not queue another campus.",
+                "Staff the university already in this state",
+                "A campus here is not fully employed. Filling those academic jobs raises literacy and qualifications; another empty campus will not.",
             ));
         }
         let profession = display_prof(defs, row);
         let place = state_label(prices, world, defs, row.state_id);
+        let stock = row.employable.unwrap_or(row.qualified);
         alerts.push(Alert {
             id: format!("unfilled_education:{}:{target}", row.state_id),
             kind: AlertKind::UnfilledEducation,
             severity: 1,
-            title: format!("{profession} qualification shortage in {place}"),
+            title: format!("{place} needs {} more {profession}", format_num(row.shortage)),
             summary: format!(
-                "{place} is short {} {profession} (jobs {} vs employable/qualified {}).",
-                format_num(row.shortage),
+                "{place} has {} {profession} jobs and {} people who can take them. Need {} more qualified {profession}.",
                 format_num(row.jobs),
-                format_num(row.employable.unwrap_or(row.qualified))
+                format_num(stock),
+                format_num(row.shortage)
             ),
             state_id: Some(row.state_id),
             building_id: None,
@@ -1085,7 +1095,15 @@ fn collect_education(
                     value: profession,
                 },
                 Evidence {
-                    label: "Shortage".into(),
+                    label: "Jobs in this state".into(),
+                    value: format_num(row.jobs),
+                },
+                Evidence {
+                    label: "People who can take those jobs".into(),
+                    value: format_num(stock),
+                },
+                Evidence {
+                    label: "Still needed".into(),
                     value: format_num(row.shortage),
                 },
                 Evidence {
@@ -1093,11 +1111,12 @@ fn collect_education(
                     value: format!("{:.0}%", mix.literacy * 100.0),
                 },
                 Evidence {
-                    label: "Profession mix".into(),
+                    label: "Who lives here".into(),
                     value: mix.summary(),
                 },
             ],
             mitigations: rank(items),
+            staffing: Vec::new(),
         });
     }
 }
@@ -1118,212 +1137,327 @@ fn collect_pop_and_underemployed(
     } else {
         prices.buildings.clone()
     };
+    let mut by_state: BTreeMap<u32, Vec<&BuildingEconomics>> = BTreeMap::new();
     for building in &buildings {
-        if building.level <= ORDER_EPS || building.staffing + ORDER_EPS >= building.level {
+        if building.level <= ORDER_EPS || is_fully_staffed(building.staffing, building.level) {
             continue;
         }
-        let building_name = building_label(prices, defs, &building.type_id);
-        let place = in_state(prices, world, defs, building.state_id);
-        let profs = building_professions(defs, building);
-        let prof_clause = profession_clause(&profs);
-        let ratio = building.staffing / building.level;
-        let qual_short = has_employee_qual_shortage(prices, building);
-        if !qual_short {
+        let Some(state_id) = building.state_id else {
+            continue;
+        };
+        by_state.entry(state_id).or_default().push(building);
+    }
+    for (state_id, group) in by_state {
+        let mix = state_mix(prices, state_id);
+        let mut qual_buildings = Vec::new();
+        let mut pop_buildings = Vec::new();
+        for building in group {
+            if has_employee_qual_shortage(prices, building) {
+                qual_buildings.push(building);
+            } else {
+                pop_buildings.push(building);
+            }
+        }
+        if !pop_buildings.is_empty() {
             limitations.insert(
-                "Migration is frozen in this model; in-migration is a diagnostic label only."
+                "This tool does not simulate pops moving between states. Empty building levels will not attract migrants here."
                     .into(),
             );
-            let mix = building
-                .state_id
-                .map(|id| state_mix(prices, id))
-                .unwrap_or_default();
-            let unfilled = if profs.is_empty() {
-                format!("Unfilled pops at {building_name}{place}")
-            } else {
-                format!("Unfilled {} at {building_name}{place}", profs.join(", "))
-            };
-            alerts.push(Alert {
-                id: format!("unfilled_pops:{}", building.id),
-                kind: AlertKind::UnfilledPops,
-                severity: 1,
-                title: unfilled,
-                summary: format!(
-                    "{building_name}{place} is staffed {} / {} with no qualification shortage for its employees{prof_clause}.",
-                    format_num(building.staffing),
-                    format_num(building.level)
-                ),
-                state_id: building.state_id,
-                building_id: Some(building.id),
-                good_id: None,
-                evidence: pop_evidence(prices, world, defs, building, &mix, false),
-                mitigations: rank(pop_shortage_mitigations(prices, defs, building, &mix)),
-            });
-        }
-        alerts.push(Alert {
-            id: format!("underemployed:{}", building.id),
-            kind: AlertKind::Underemployed,
-            severity: 2,
-            title: format!("Underemployed {building_name}{place}{prof_clause}"),
-            summary: format!(
-                "Staffing/level is {:.0}% on {building_name}{place}{prof_clause}.",
-                ratio * 100.0
-            ),
-            state_id: building.state_id,
-            building_id: Some(building.id),
-            good_id: None,
-            evidence: pop_evidence(
+            push_state_employment_alert(
+                alerts,
                 prices,
                 world,
                 defs,
-                building,
-                &state_mix_opt(prices, building.state_id),
-                qual_short,
-            ),
-            mitigations: rank(if qual_short {
-                vec![plain(
-                    format!("under:{}:qual", building.id),
-                    "Fill qualifications first",
-                    "Understaffing here tracks a qualification shortage; feeder jobs outrank extra levels.",
-                )]
-                .into_iter()
-                .chain(qualification_ladder(
-                    prices,
-                    building.state_id.unwrap_or(0),
-                    building
-                        .employees
-                        .first()
-                        .map(|e| e.profession_id.as_str())
-                        .unwrap_or("machinists"),
-                    &state_mix_opt(prices, building.state_id),
-                ))
-                .collect()
-            } else {
-                pop_shortage_mitigations(prices, defs, building, &state_mix_opt(prices, building.state_id))
-            }),
-        });
+                state_id,
+                &mix,
+                &pop_buildings,
+                AlertKind::UnfilledPops,
+                1,
+                false,
+            );
+        }
+        if !qual_buildings.is_empty() {
+            push_state_employment_alert(
+                alerts,
+                prices,
+                world,
+                defs,
+                state_id,
+                &mix,
+                &qual_buildings,
+                AlertKind::Underemployed,
+                2,
+                true,
+            );
+        }
     }
 }
 
-fn pop_evidence(
+#[allow(clippy::too_many_arguments)]
+fn push_state_employment_alert(
+    alerts: &mut Vec<Alert>,
     prices: &PricesResult,
     world: &World,
     defs: &GameDefs,
-    building: &BuildingEconomics,
+    state_id: u32,
     mix: &StateMix,
+    buildings: &[&BuildingEconomics],
+    kind: AlertKind,
+    severity: u8,
     qual_short: bool,
-) -> Vec<Evidence> {
-    vec![
+) {
+    let place = state_label(prices, world, defs, state_id);
+    let staffing: Vec<BuildingStaffing> = buildings
+        .iter()
+        .map(|building| {
+            building_staffing(
+                defs,
+                prices,
+                building,
+                building_label(prices, defs, &building.type_id),
+            )
+        })
+        .collect();
+    let totals = state_profession_totals(&staffing);
+    let blocker = blocking_profession(&staffing);
+    let blocker_name = blocker.map(|row| {
+        row.profession_name
+            .clone()
+            .unwrap_or_else(|| pretty_id(&row.profession_id))
+    });
+    let building_count = staffing.len();
+    let title = if qual_short {
+        match blocker_name.as_deref() {
+            Some(name) => format!("{place} buildings cannot fill {name} jobs"),
+            None => format!("Understaffed buildings in {place}"),
+        }
+    } else {
+        format!("Not enough people for jobs in {place}")
+    };
+    let summary = if qual_short {
+        match blocker {
+            Some(row) => format!(
+                "{place} is short {} {}. {} building{} below full staffing. Extra levels add more empty jobs; the qualification shortage for this state has the next steps.",
+                format_num(row.state_shortage.max(row.missing_here)),
+                row.profession_name
+                    .as_deref()
+                    .unwrap_or(&row.profession_id),
+                building_count,
+                if building_count == 1 { "" } else { "s" }
+            ),
+            None => format!(
+                "{building_count} building{} in {place} are below full staffing because of missing qualifications.",
+                if building_count == 1 { "" } else { "s" }
+            ),
+        }
+    } else {
+        format!(
+            "{building_count} building{} in {place} have open jobs and enough qualified people. The state is short of workers, not diplomas.",
+            if building_count == 1 { "" } else { "s" }
+        )
+    };
+    let mut evidence = vec![
         Evidence {
             label: "State".into(),
-            value: building
-                .state_id
-                .map(|id| state_label(prices, world, defs, id))
-                .unwrap_or_else(|| "unknown".into()),
+            value: place.clone(),
         },
         Evidence {
-            label: "Building".into(),
-            value: building_label(prices, defs, &building.type_id),
+            label: "Buildings below full staffing".into(),
+            value: building_count.to_string(),
         },
         Evidence {
-            label: "Profession".into(),
-            value: {
-                let names = building_professions(defs, building);
-                if names.is_empty() {
-                    "unknown".into()
-                } else {
-                    names.join(", ")
-                }
-            },
+            label: "Who lives here".into(),
+            value: mix.summary(),
         },
-        Evidence {
-            label: "Staffing / level".into(),
+    ];
+    for row in totals
+        .iter()
+        .filter(|row| row.missing_here > ORDER_EPS || row.state_shortage > ORDER_EPS)
+    {
+        let name = row.profession_name.as_deref().unwrap_or(&row.profession_id);
+        evidence.push(Evidence {
+            label: format!("{name} to finish these buildings"),
+            value: format_num(row.missing_here),
+        });
+        evidence.push(Evidence {
+            label: format!("{name} still needed in the whole state"),
             value: format!(
-                "{} / {}",
-                format_num(building.staffing),
-                format_num(building.level)
+                "{} ({} jobs, {} people who can take them)",
+                format_num(row.state_shortage),
+                format_num(row.state_jobs),
+                format_num(row.state_stock)
             ),
-        },
-        Evidence {
-            label: "Qualification shortage".into(),
-            value: if qual_short {
-                "yes".into()
-            } else {
-                "no".into()
-            },
-        },
-        Evidence {
-            label: "Peasants".into(),
-            value: format_num(mix.peasants),
-        },
-        Evidence {
-            label: "In-migration".into(),
-            value: "frozen in this model".into(),
-        },
-    ]
+        });
+    }
+    let mitigations = if qual_short {
+        let target = buildings
+            .iter()
+            .find_map(|building| shortage_target(prices, building))
+            .map(|id| profession_label(defs, id, None))
+            .unwrap_or_else(|| "workers".into());
+        vec![plain(
+            format!("under:{state_id}:qual"),
+            format!("See the {target} qualification shortage for {place}"),
+            "These buildings are waiting on qualified workers who do not exist in this state. The steps that create those qualifications are listed on that shortage, not on each mill.",
+        )]
+    } else {
+        pop_shortage_mitigations(prices, defs, state_id, buildings.first().copied(), mix)
+    };
+    alerts.push(Alert {
+        id: format!("{}:{state_id}", kind_id(kind)),
+        kind,
+        severity,
+        title,
+        summary,
+        state_id: Some(state_id),
+        building_id: None,
+        good_id: None,
+        evidence,
+        mitigations: rank(mitigations),
+        staffing,
+    });
 }
 
 fn pop_shortage_mitigations(
     prices: &PricesResult,
     defs: &GameDefs,
-    building: &BuildingEconomics,
+    state_id: u32,
+    sample: Option<&BuildingEconomics>,
     mix: &StateMix,
 ) -> Vec<Mitigation> {
     let mut items = Vec::new();
-    let state_id = building.state_id;
-    let pop_goods = expensive_pop_goods(prices, defs, state_id);
+    let state = Some(state_id);
+    let pop_goods = expensive_pop_goods(prices, defs, state);
+    let sample_id = sample.map(|building| building.id).unwrap_or(state_id);
     for good_id in pop_goods.iter().take(2) {
+        let good_name = script_label(defs, good_id);
         items.push(action_mit(
-            format!("pops:{}:sol:{good_id}", building.id),
-            format!("Raise SoL via cheaper {good_id}"),
-            "Cheaper need goods raise standard of living before extra unstaffed levels help.",
+            format!("pops:{sample_id}:sol:{good_id}"),
+            format!("Lower the price of {good_name}"),
+            format!(
+                "Pops buy {good_name} as a need. A lower price raises their standard of living, which can keep workers in this state. Adding empty building levels does not hire anyone."
+            ),
             MitigationAction::SolGoods {
                 good_id: good_id.clone(),
-                state_id,
+                state_id: state,
             },
         ));
         if is_tradeable(good_id, defs) {
-            if let Some(sid) = state_id {
-                items.push(action_mit(
-                    format!("pops:{}:import:{good_id}", building.id),
-                    format!("Import {good_id} through a trade center"),
-                    "Trade-center imports of pop goods support in-migration once apply exists.",
-                    MitigationAction::TradeAlloc {
-                        state_id: sid,
-                        good_id: good_id.clone(),
-                    },
-                ));
-            }
+            items.push(action_mit(
+                format!("pops:{sample_id}:import:{good_id}"),
+                format!("Import {good_name} through a trade center"),
+                format!(
+                    "Importing {good_name} can make that need cheaper. This tool cannot actually move trade yet."
+                ),
+                MitigationAction::TradeAlloc {
+                    state_id,
+                    good_id: good_id.clone(),
+                },
+            ));
         }
     }
-    if mix.peasants > 0.0 || mix.dominant_rung() == Some(0) {
-        let farm = building_like(prices, state_id, "farm").unwrap_or("building_rye_farm");
+    if mix.peasants() > 0.0 {
+        let farm = commercial_farm(prices, defs, state).unwrap_or("building_rye_farm");
         items.push(action_mit(
-            format!("pops:{}:peasants", building.id),
-            "Employ peasants first",
-            "Hire peasants into farms (then mines) rather than adding unstaffed high-tech levels.",
+            format!("pops:{sample_id}:peasants"),
+            "Hire peasants into commercial farms",
+            "This state still has peasants. Put them in rye or wheat farms so they become farmers and laborers. Subsistence farms already hold leftover peasants and will not fill factory jobs.",
             MitigationAction::FeederJob {
                 building: farm.into(),
                 profession: "farmers".into(),
-                state_id,
+                state_id: state,
             },
         ));
     }
     items.push(plain(
-        format!("pops:{}:migration", building.id),
-        "In-migration is frozen",
-        "This model does not simulate migration; extra unstaffed levels will not attract pops here.",
+        format!("pops:{sample_id}:migration"),
+        "This tool cannot move pops between states",
+        "In the game, empty buildings can attract migrants. This analyzer does not simulate that, so extra levels will not fill jobs here.",
     ));
-    items.push(action_mit(
-        format!("pops:{}:levels", building.id),
-        "Extra levels (last resort)",
-        "More unstaffed levels do not fix a pop shortage. Ranked last on purpose.",
-        MitigationAction::Build {
-            building: building.type_id.clone(),
-            state_id,
-            extra_levels: Some(1),
-        },
+    items.push(plain(
+        format!("pops:{sample_id}:levels"),
+        "Do not add empty levels",
+        "More unstaffed levels add jobs this state cannot fill.",
     ));
     items
+}
+
+fn commercial_farm<'a>(
+    prices: &'a PricesResult,
+    defs: &GameDefs,
+    state_id: Option<u32>,
+) -> Option<&'a str> {
+    prices.buildings.iter().find_map(|building| {
+        if state_id.is_some_and(|id| building.state_id != Some(id)) {
+            return None;
+        }
+        if is_subsistence(&building.type_id, defs) {
+            return None;
+        }
+        id_has(&building.type_id, "farm").then_some(building.type_id.as_str())
+    })
+}
+
+fn qualification_levers(
+    prices: &PricesResult,
+    defs: &GameDefs,
+    state_id: u32,
+    target: &str,
+    mix: &StateMix,
+) -> Vec<Mitigation> {
+    select_levers(prices, defs, state_id, target, mix)
+        .into_iter()
+        .enumerate()
+        .map(|(index, lever)| {
+            let id = format!("ladder:{state_id}:{}:{index}", lever.key.as_str());
+            match lever.key {
+                LeverKey::University => action_mit(
+                    id,
+                    lever.title,
+                    lever.detail,
+                    MitigationAction::Build {
+                        building: lever
+                            .building
+                            .unwrap_or_else(|| "building_university".into()),
+                        state_id: Some(state_id),
+                        extra_levels: Some(1),
+                    },
+                ),
+                LeverKey::Wealth => {
+                    let good = expensive_pop_goods(prices, defs, Some(state_id))
+                        .into_iter()
+                        .next()
+                        .unwrap_or_else(|| "grain".into());
+                    action_mit(
+                        id,
+                        lever.title,
+                        lever.detail,
+                        MitigationAction::SolGoods {
+                            good_id: good,
+                            state_id: Some(state_id),
+                        },
+                    )
+                }
+                LeverKey::AlwaysHire => plain(id, lever.title, lever.detail),
+                _ => {
+                    let building = lever
+                        .building
+                        .clone()
+                        .unwrap_or_else(|| lever.key.fallback_building_owned());
+                    action_mit(
+                        id,
+                        lever.title,
+                        lever.detail,
+                        MitigationAction::FeederJob {
+                            building,
+                            profession: lever.source,
+                            state_id: Some(state_id),
+                        },
+                    )
+                }
+            }
+        })
+        .collect()
 }
 
 fn expensive_pop_goods(
@@ -1365,86 +1499,6 @@ fn expensive_pop_goods(
     } else {
         scored.into_iter().map(|(id, _)| id).collect()
     }
-}
-
-fn qualification_ladder(
-    prices: &PricesResult,
-    state_id: u32,
-    target: &str,
-    mix: &StateMix,
-) -> Vec<Mitigation> {
-    let target_rung = profession_rung(target).unwrap_or(3);
-    let current = mix.dominant_rung().unwrap_or(0);
-    let far_off = target_rung.saturating_sub(current) >= 2 || mix.literacy < LITERACY_UNIVERSITY;
-    let mut items = Vec::new();
-    let farm = building_like(prices, Some(state_id), "farm").unwrap_or("building_rye_farm");
-    let mine = building_like(prices, Some(state_id), "mine").unwrap_or("building_coal_mine");
-    let shop = building_like(prices, Some(state_id), "workshop")
-        .or_else(|| building_like(prices, Some(state_id), "manufactur"))
-        .unwrap_or("building_tooling_workshop");
-
-    if far_off || current <= 1 {
-        items.push(action_mit(
-            format!("ladder:{state_id}:farm"),
-            "Build farms (qualification ladder)",
-            "Peasants qualify toward farmers/laborers on farms before universities help machinists or engineers.",
-            MitigationAction::FeederJob {
-                building: farm.into(),
-                profession: "farmers".into(),
-                state_id: Some(state_id),
-            },
-        ));
-        items.push(action_mit(
-            format!("ladder:{state_id}:mine"),
-            "Build mines (qualification ladder)",
-            "Laborers on mines are the next step toward machinists.",
-            MitigationAction::FeederJob {
-                building: mine.into(),
-                profession: "miners".into(),
-                state_id: Some(state_id),
-            },
-        ));
-        if target_rung >= 3 {
-            items.push(action_mit(
-                format!("ladder:{state_id}:workshop"),
-                "Build workshops (qualification ladder)",
-                "Workshops hire machinists once mines have filled the lower rungs.",
-                MitigationAction::FeederJob {
-                    building: shop.into(),
-                    profession: "machinists".into(),
-                    state_id: Some(state_id),
-                },
-            ));
-        }
-    }
-    let uni_ok = !far_off
-        && mix.literacy >= LITERACY_UNIVERSITY
-        && (current + 1 >= target_rung || id_has(target, "academic"));
-    let uni = building_like(prices, Some(state_id), "university").unwrap_or("building_university");
-    if uni_ok || id_has(target, "academic") {
-        items.push(action_mit(
-            format!("ladder:{state_id}:university"),
-            "University (in range)",
-            "Literacy and nearby professions are close enough that a university can help.",
-            MitigationAction::Build {
-                building: uni.into(),
-                state_id: Some(state_id),
-                extra_levels: Some(1),
-            },
-        ));
-    } else {
-        items.push(action_mit(
-            format!("ladder:{state_id}:university"),
-            "University (after feeders)",
-            "Universities come after farms and mines when the pop mix is still peasants.",
-            MitigationAction::Build {
-                building: uni.into(),
-                state_id: Some(state_id),
-                extra_levels: Some(1),
-            },
-        ));
-    }
-    items
 }
 
 fn has_employee_qual_shortage(prices: &PricesResult, building: &BuildingEconomics) -> bool {
@@ -1543,19 +1597,6 @@ fn state_imports(world: &World, defs: &GameDefs, state_id: u32, good_id: &str) -
         .any(|trade| trade.state == state_id && trade.good == idx && trade.quantity > ORDER_EPS)
 }
 
-fn building_like<'a>(
-    prices: &'a PricesResult,
-    state_id: Option<u32>,
-    needle: &str,
-) -> Option<&'a str> {
-    prices.buildings.iter().find_map(|building| {
-        if state_id.is_some_and(|id| building.state_id != Some(id)) {
-            return None;
-        }
-        id_has(&building.type_id, needle).then_some(building.type_id.as_str())
-    })
-}
-
 fn economics_from_world(building: &WorldBuilding) -> BuildingEconomics {
     BuildingEconomics {
         id: building.id,
@@ -1571,97 +1612,6 @@ fn economics_from_world(building: &WorldBuilding) -> BuildingEconomics {
         profit: 0.0,
         short_inputs: Vec::new(),
         employees: Vec::new(),
-    }
-}
-
-#[derive(Default)]
-struct StateMix {
-    peasants: f64,
-    farmers: f64,
-    miners: f64,
-    machinists: f64,
-    engineers: f64,
-    academics: f64,
-    literacy: f64,
-}
-
-impl StateMix {
-    fn dominant_rung(&self) -> Option<u8> {
-        let ranks = [
-            (0_u8, self.peasants),
-            (1, self.farmers),
-            (2, self.miners),
-            (3, self.machinists),
-            (4, self.engineers),
-            (5, self.academics),
-        ];
-        ranks
-            .into_iter()
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-            .filter(|(_, n)| *n > 0.0)
-            .map(|(rung, _)| rung)
-    }
-
-    fn summary(&self) -> String {
-        format!(
-            "peasants {} / farmers {} / miners {} / machinists {}",
-            format_num(self.peasants),
-            format_num(self.farmers),
-            format_num(self.miners),
-            format_num(self.machinists)
-        )
-    }
-}
-
-fn state_mix_opt(prices: &PricesResult, state_id: Option<u32>) -> StateMix {
-    state_id.map(|id| state_mix(prices, id)).unwrap_or_default()
-}
-
-fn state_mix(prices: &PricesResult, state_id: u32) -> StateMix {
-    let mut mix = StateMix::default();
-    let mut literate = 0.0;
-    let mut size = 0.0;
-    for pop in prices.state_pops.iter() {
-        if pop.state_id != state_id {
-            continue;
-        }
-        let n = pop.workforce.or(pop.demand_size).unwrap_or(0.0);
-        size += pop.demand_size.unwrap_or(n);
-        literate += pop.literate.unwrap_or(0.0);
-        let Some(prof) = pop.profession_id.as_deref() else {
-            continue;
-        };
-        match profession_rung(prof) {
-            Some(0) => mix.peasants += n,
-            Some(1) => mix.farmers += n,
-            Some(2) => mix.miners += n,
-            Some(3) => mix.machinists += n,
-            Some(4) => mix.engineers += n,
-            Some(5) => mix.academics += n,
-            _ => {}
-        }
-    }
-    mix.literacy = if size > 0.0 { literate / size } else { 0.0 };
-    mix
-}
-
-/// Peasant → farmer/laborer → miner → machinist → engineer; academics at university.
-fn profession_rung(id: &str) -> Option<u8> {
-    let id = id.to_ascii_lowercase();
-    if id.contains("peasant") {
-        Some(0)
-    } else if id.contains("farmer") || id.contains("laborer") || id.contains("labourer") {
-        Some(1)
-    } else if id.contains("miner") {
-        Some(2)
-    } else if id.contains("machinist") {
-        Some(3)
-    } else if id.contains("engineer") {
-        Some(4)
-    } else if id.contains("academic") {
-        Some(5)
-    } else {
-        None
     }
 }
 
@@ -1684,18 +1634,6 @@ fn state_label(prices: &PricesResult, world: &World, defs: &GameDefs, state_id: 
         }
     }
     format!("state {state_id}")
-}
-
-fn in_state(
-    prices: &PricesResult,
-    world: &World,
-    defs: &GameDefs,
-    state_id: Option<u32>,
-) -> String {
-    match state_id {
-        Some(id) => format!(" in {}", state_label(prices, world, defs, id)),
-        None => String::new(),
-    }
 }
 
 fn script_label(defs: &GameDefs, id: &str) -> String {
@@ -1744,32 +1682,6 @@ fn profession_label(defs: &GameDefs, profession_id: &str, profession_name: Optio
         .map(str::to_string)
         .or_else(|| defs.labels.get(profession_id).cloned())
         .unwrap_or_else(|| pretty_id(profession_id))
-}
-
-fn building_professions(defs: &GameDefs, building: &BuildingEconomics) -> Vec<String> {
-    let mut names = Vec::new();
-    for row in &building.employees {
-        if row.count <= ORDER_EPS {
-            continue;
-        }
-        let name = profession_label(defs, &row.profession_id, row.profession_name.as_deref());
-        if !names.iter().any(|existing| existing == &name) {
-            names.push(name);
-        }
-    }
-    names
-}
-
-fn profession_clause(names: &[String]) -> String {
-    if names.is_empty() {
-        String::new()
-    } else {
-        format!(" ({})", names.join(", "))
-    }
-}
-
-fn id_has(id: &str, needle: &str) -> bool {
-    id.to_ascii_lowercase().contains(needle)
 }
 
 fn kind_id(kind: AlertKind) -> &'static str {
@@ -1881,6 +1793,7 @@ mod tests {
                 id: "pm_simple_farming".into(),
                 inputs: Vec::new(),
                 outputs: vec![(grain, 10.0)],
+                ..Default::default()
             },
         );
         defs.production_methods.insert(
@@ -1889,6 +1802,7 @@ mod tests {
                 id: "pm_soil_enriching_farming".into(),
                 inputs: Vec::new(),
                 outputs: vec![(grain, 25.0)],
+                ..Default::default()
             },
         );
         defs.labels.insert(
@@ -2233,29 +2147,175 @@ mod tests {
             .iter()
             .find(|alert| alert.kind == AlertKind::UnfilledEducation)
             .expect("education");
-        let farm_rank = edu
+        let titles: Vec<_> = edu
             .mitigations
             .iter()
-            .find(|mit| mit.title.to_ascii_lowercase().contains("farm"))
-            .map(|mit| mit.rank)
-            .expect("farm feeder");
-        let mine_rank = edu
-            .mitigations
-            .iter()
-            .find(|mit| mit.title.to_ascii_lowercase().contains("mine"))
-            .map(|mit| mit.rank)
-            .expect("mine feeder");
-        let uni_rank = edu
-            .mitigations
-            .iter()
-            .find(|mit| mit.title.to_ascii_lowercase().contains("university"))
-            .map(|mit| mit.rank);
-        assert!(farm_rank < uni_rank.unwrap_or(u32::MAX));
-        assert!(mine_rank < uni_rank.unwrap_or(u32::MAX));
+            .map(|mit| mit.title.to_ascii_lowercase())
+            .collect();
+        assert!(
+            titles.iter().any(|title| title.contains("farm")),
+            "machinist shortage in a peasant state should recommend commercial farms, got {titles:?}"
+        );
+        assert!(
+            titles.iter().any(|title| title.contains("mine")),
+            "machinist shortage in a peasant state should recommend mines, got {titles:?}"
+        );
+        assert!(
+            !titles.iter().any(|title| title.contains("university")),
+            "peasants are not ready for a university to produce machinists: {titles:?}"
+        );
+        assert!(
+            !titles.iter().any(|title| title.contains("workshop")),
+            "workshops hire machinists and would add empty jobs: {titles:?}"
+        );
         assert!(
             !edu.mitigations.iter().any(is_university_build),
-            "unstaffed university must not recommend another campus: {:?}",
+            "must not queue another campus: {:?}",
             edu.mitigations
+        );
+    }
+
+    #[test]
+    fn aristocrat_shortage_skips_mines_and_university() {
+        let (world, defs, mut prices) = fixture();
+        prices.state_pops = vec![crate::StatePop {
+            state_id: 1,
+            id: Some(1),
+            profession_id: Some("peasants".into()),
+            profession_name: Some("Peasants".into()),
+            demand_size: Some(20_000.0),
+            workforce: Some(12_000.0),
+            dependents: Some(8_000.0),
+            wealth: Some(8),
+            culture_id: None,
+            culture_name: None,
+            literate: Some(1_000.0),
+            workplace_id: None,
+            qualifications: Vec::new(),
+            needs: Vec::new(),
+        }]
+        .into();
+        prices.state_qualifications[0].profession_id = "aristocrats".into();
+        prices.state_qualifications[0].profession_name = Some("Aristocrats".into());
+        let result = alerts(&world, &defs, &prices);
+        let edu = result
+            .alerts
+            .iter()
+            .find(|alert| alert.kind == AlertKind::UnfilledEducation)
+            .expect("education");
+        let titles: Vec<_> = edu
+            .mitigations
+            .iter()
+            .map(|mit| mit.title.to_ascii_lowercase())
+            .collect();
+        assert!(
+            titles.iter().any(|title| title.contains("farm")),
+            "aristocrats come from farmers, got {titles:?}"
+        );
+        assert!(
+            !titles
+                .iter()
+                .any(|title| title.contains("mine") || title.contains("workshop")),
+            "mines and workshops do not produce aristocrats: {titles:?}"
+        );
+        assert!(
+            !titles.iter().any(|title| title.contains("university")),
+            "university does not turn peasants into aristocrats: {titles:?}"
+        );
+        assert!(
+            edu.summary.to_ascii_lowercase().contains("aristocrat"),
+            "summary should name aristocrats, got {}",
+            edu.summary
+        );
+    }
+
+    #[test]
+    fn engineer_shortage_with_machinists_recommends_university_not_farms() {
+        let (world, defs, mut prices) = fixture();
+        prices.state_pops = vec![StatePop {
+            state_id: 1,
+            id: Some(1),
+            profession_id: Some("machinists".into()),
+            profession_name: Some("Machinists".into()),
+            demand_size: Some(20_000.0),
+            workforce: Some(12_000.0),
+            dependents: Some(8_000.0),
+            wealth: Some(12),
+            culture_id: None,
+            culture_name: None,
+            literate: Some(16_000.0),
+            workplace_id: Some(4),
+            qualifications: Vec::new(),
+            needs: Vec::new(),
+        }]
+        .into();
+        prices.state_qualifications[0].profession_id = "engineers".into();
+        prices.state_qualifications[0].profession_name = Some("Engineers".into());
+        let result = alerts(&world, &defs, &prices);
+        let edu = result
+            .alerts
+            .iter()
+            .find(|alert| alert.kind == AlertKind::UnfilledEducation)
+            .expect("education");
+        let titles: Vec<_> = edu
+            .mitigations
+            .iter()
+            .map(|mit| mit.title.to_ascii_lowercase())
+            .collect();
+        assert!(
+            titles.iter().any(|title| title.contains("university")),
+            "engineers with machinists and literacy should get a university, got {titles:?}"
+        );
+        assert!(
+            !titles.iter().any(|title| title.contains("farm")),
+            "do not send machinists back to farms: {titles:?}"
+        );
+    }
+
+    #[test]
+    fn farmer_heavy_aristocrat_shortage_does_not_recommend_more_farms() {
+        let (world, defs, mut prices) = fixture();
+        prices.state_pops = vec![crate::StatePop {
+            state_id: 1,
+            id: Some(1),
+            profession_id: Some("farmers".into()),
+            profession_name: Some("Farmers".into()),
+            demand_size: Some(20_000.0),
+            workforce: Some(12_000.0),
+            dependents: Some(8_000.0),
+            wealth: Some(12),
+            culture_id: None,
+            culture_name: None,
+            literate: Some(12_000.0),
+            workplace_id: Some(3),
+            qualifications: Vec::new(),
+            needs: Vec::new(),
+        }]
+        .into();
+        prices.state_qualifications[0].profession_id = "aristocrats".into();
+        prices.state_qualifications[0].profession_name = Some("Aristocrats".into());
+        let result = alerts(&world, &defs, &prices);
+        let edu = result
+            .alerts
+            .iter()
+            .find(|alert| alert.kind == AlertKind::UnfilledEducation)
+            .expect("education");
+        let titles: Vec<_> = edu
+            .mitigations
+            .iter()
+            .map(|mit| mit.title.to_ascii_lowercase())
+            .collect();
+        assert!(
+            !titles
+                .iter()
+                .any(|title| title.contains("farm") && !title.contains("farmer")),
+            "farmers already exist; more farms are noise: {titles:?}"
+        );
+        assert!(
+            titles.iter().any(|title| title.contains("wealth")
+                || title.contains("university")
+                || title.contains("government")),
+            "expected wealth, university, or government, got {titles:?}"
         );
     }
 
@@ -2266,8 +2326,13 @@ mod tests {
         let farm_under = result
             .alerts
             .iter()
-            .find(|alert| alert.kind == AlertKind::Underemployed && alert.building_id == Some(3))
-            .expect("farm underemployed");
+            .find(|alert| {
+                alert.kind == AlertKind::Underemployed
+                    && alert.state_id == Some(1)
+                    && alert.staffing.iter().any(|row| row.building_id == 4)
+            })
+            .expect("state underemployed for the workshop");
+        assert!(farm_under.building_id.is_none());
         let first = farm_under.mitigations.first().expect("mitigation");
         let extra = matches!(
             first.action,
@@ -2281,32 +2346,36 @@ mod tests {
             "pop underemployment led with extra levels: {}",
             first.title
         );
+        assert!(
+            first.title.to_ascii_lowercase().contains("qualification"),
+            "qualification-blocked buildings should point at the state shortage, got {}",
+            first.title
+        );
         let pops = result
             .alerts
             .iter()
-            .find(|alert| alert.kind == AlertKind::UnfilledPops && alert.building_id == Some(3))
-            .expect("unfilled pops on farm");
+            .find(|alert| alert.kind == AlertKind::UnfilledPops && alert.state_id == Some(1))
+            .expect("unfilled pops in state");
         assert_eq!(pops.mitigations[0].rank, 1);
-        assert!(pops.evidence.iter().any(|row| row.label == "In-migration"));
+        assert!(pops.staffing.iter().any(|row| row.building_id == 3));
         assert!(
-            farm_under.title.contains("Test")
-                && farm_under.title.contains("Rye Farm")
-                && farm_under.title.contains("Farmers")
-                && !farm_under.title.contains("building_rye_farm"),
-            "underemployed title should name state, building, and profession, got {}",
+            pops.evidence
+                .iter()
+                .any(|row| row.label == "State" && row.value == "Test"),
+            "unfilled pops should name the state"
+        );
+        assert!(
+            farm_under.title.contains("Test") && !farm_under.title.contains("building_"),
+            "underemployed title should name the state, got {}",
             farm_under.title
         );
         assert!(
-            pops.title.contains("Test")
-                && pops.title.contains("Farmers")
-                && pops.title.contains("Rye Farm"),
-            "unfilled pops title should name state, profession, and building, got {}",
-            pops.title
+            farm_under.staffing.iter().any(|row| row
+                .professions
+                .iter()
+                .any(|gap| gap.profession_id == "machinists" && gap.missing_here > 0.0)),
+            "workshop should show how many more machinists it needs"
         );
-        assert!(pops
-            .evidence
-            .iter()
-            .any(|row| row.label == "State" && row.value == "Test"));
         let needs = result
             .alerts
             .iter()
@@ -2329,6 +2398,26 @@ mod tests {
             "qualification title should name the state, got {}",
             edu.title
         );
+        assert!(
+            edu.summary.to_ascii_lowercase().contains("jobs")
+                && edu.summary.to_ascii_lowercase().contains("people"),
+            "qualification summary should say jobs vs people, got {}",
+            edu.summary
+        );
+    }
+
+    #[test]
+    fn fully_staffed_building_is_not_listed_as_underemployed() {
+        let (world, defs, mut prices) = fixture();
+        for building in &mut prices.buildings {
+            building.staffing = building.level;
+        }
+        let result = alerts(&world, &defs, &prices);
+        assert!(result
+            .alerts
+            .iter()
+            .all(|alert| alert.kind != AlertKind::Underemployed
+                && alert.kind != AlertKind::UnfilledPops));
     }
 
     #[test]

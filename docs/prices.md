@@ -63,9 +63,24 @@ as `population_by_profession`, `population_workforce_by_profession`, and
 `population_employable_qualifications`; the flat `employable_qualifications` /
 `pop_workforce_by_type` names are still read first for older saves. State
 qualifications compare that stock (or the employable subset when present) to
-jobs inferred from pops with a `workplace` building id. Monthly qualification gain is not
-recomputed from `pop_types` scripts; the table omits a rate unless the save
+jobs inferred from pops with a `workplace` building id. Monthly qualification *rates*
+are still not simulated from `pop_types` scripts; the table omits a rate unless the save
 stores one.
+
+Qualification *advice* is not the old farm→mine→workshop→university ladder for every
+profession. `alerts` walks `common/pop_types` (who can qualify, literacy/wealth gates)
+and production-method employment (which commercial buildings hire those source pops).
+It then keeps only levers that apply to this state's mix: if machinists with high
+literacy already live here, an engineer shortage names a university and not farms;
+an aristocrat shortage names commercial farms (wealthy farmers) and not mines or
+universities. Subsistence farms are never a feeder — they absorb leftover peasants
+and do not create farmers who can promote. Player-facing copy lives in
+[`crates/vic3-prices/advice/qualifications/`](../crates/vic3-prices/advice/qualifications/)
+(one YAML file per profession, plus `_defaults.yml` and a `_vanilla_graph.yml` fallback
+when the defs blob has no `pop_types`). Employment alerts are **per state**, with
+collapsible per-building staffing and per-profession counts of how many more workers
+that building needs versus how many the whole state still lacks. Advancement steps
+stay on the state's qualification shortage, not on each mill.
 
 Pop `culture` is a numeric index into `cultures.database` (`0={ type=north_german }`).
 That table is not `common/cultures` file order. The defs blob already has

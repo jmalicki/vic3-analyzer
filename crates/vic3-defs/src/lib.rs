@@ -10,6 +10,8 @@
 //! - `common/goods`
 //! - `common/defines` (`NEconomy.PRICE_RANGE`)
 //! - `common/production_methods`
+//! - `common/production_method_groups`
+//! - `common/pop_types` (qualification scripts; static analysis only)
 //! - `common/buildings`
 //! - `common/building_groups`
 //! - `common/pop_needs`
@@ -51,7 +53,7 @@ pub use path_rules::{classify_defs_path, DefsPathClass, COMMON_DIRS};
 pub use substitution::{clamp_supply_share, substitution_shares, substitution_weight};
 pub use types::{
     BuildingGroup, BuildingType, BuyPackage, FlagDefinition, GameDefs, Good, NeedEntry, PopNeed,
-    ProductionMethod,
+    PopType, ProductionMethod, QualificationFactors,
 };
 
 /// Vanilla `NEconomy.PRICE_RANGE` when a defines file does not override it.

@@ -1,0 +1,45 @@
+# Qualification advice copy. Rust chooses which lever keys to show from
+# pop_types + the state's pop mix. These files only supply title/detail.
+#
+# Schema:
+#   profession: <pop type id>
+#   levers:
+#     <lever key>:
+#       title: "..."
+#       detail: "..."
+# Placeholders: {target} {source} {building}
+#
+# Lever keys used by the selector:
+#   farm mine workshop university government urban barracks wealth always_hire
+#
+# Subsistence buildings are never a farm lever. They absorb leftover peasants
+# and do not create farmers who can promote.
+
+levers:
+  farm:
+    title: "Build commercial farms"
+    detail: "Farms that hire {source} create pops who can then qualify as {target}. Subsistence farms do not; they only hold leftover peasants."
+  mine:
+    title: "Build mines"
+    detail: "Mines hire {source}, who can then qualify as {target}."
+  workshop:
+    title: "Build workshops"
+    detail: "Workshops hire {source}, who can then qualify as {target}."
+  university:
+    title: "Build a university"
+    detail: "This state already has pops who can qualify as {target}. A university speeds that up. Do not build one just to absorb peasants."
+  government:
+    title: "Expand government administration"
+    detail: "Government buildings hire {source}, who can then qualify as {target}."
+  urban:
+    title: "Expand urban centers"
+    detail: "Urban centers hire {source}, who can then qualify as {target}."
+  barracks:
+    title: "Expand barracks"
+    detail: "Barracks hire {source}, who can then qualify as {target}."
+  wealth:
+    title: "Raise wealth for pops who can become {target}"
+    detail: "Qualifying as {target} needs wealth. Cheaper everyday goods raise standard of living for those pops. Empty building levels do not."
+  always_hire:
+    title: "{target} can be hired without qualifications"
+    detail: "The game does not require a qualification stock for {target}. If jobs are empty, the state is short of people, not diplomas."

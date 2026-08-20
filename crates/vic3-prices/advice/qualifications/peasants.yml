@@ -1,0 +1,5 @@
+profession: peasants
+levers:
+  always_hire:
+    title: "Peasants do not need qualifications"
+    detail: "Peasants live on subsistence buildings. You cannot be short of peasant qualifications."

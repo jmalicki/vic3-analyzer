@@ -42,6 +42,13 @@
           "minimum": 0,
           "type": "integer"
         },
+        "staffing": {
+          "description": "Buildings under a state-level employment alert. Empty elsewhere.",
+          "items": {
+            "$ref": "#/$defs/BuildingStaffing"
+          },
+          "type": "array"
+        },
         "state_id": {
           "format": "uint32",
           "minimum": 0,
@@ -81,6 +88,44 @@
         "underemployed"
       ],
       "type": "string"
+    },
+    "BuildingStaffing": {
+      "properties": {
+        "building_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "building_name": {
+          "type": "string"
+        },
+        "level": {
+          "format": "double",
+          "type": "number"
+        },
+        "professions": {
+          "items": {
+            "$ref": "#/$defs/ProfessionGap"
+          },
+          "type": "array"
+        },
+        "staffing": {
+          "format": "double",
+          "type": "number"
+        },
+        "type_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "building_id",
+        "building_name",
+        "type_id",
+        "staffing",
+        "level",
+        "professions"
+      ],
+      "type": "object"
     },
     "Evidence": {
       "description": "Labelled observation shown under an expander.",
@@ -302,6 +347,53 @@
           "type": "object"
         }
       ]
+    },
+    "ProfessionGap": {
+      "properties": {
+        "employed_here": {
+          "format": "double",
+          "type": "number"
+        },
+        "jobs_here": {
+          "format": "double",
+          "type": "number"
+        },
+        "missing_here": {
+          "format": "double",
+          "type": "number"
+        },
+        "profession_id": {
+          "type": "string"
+        },
+        "profession_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state_jobs": {
+          "format": "double",
+          "type": "number"
+        },
+        "state_shortage": {
+          "format": "double",
+          "type": "number"
+        },
+        "state_stock": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "profession_id",
+        "employed_here",
+        "jobs_here",
+        "missing_here",
+        "state_jobs",
+        "state_stock",
+        "state_shortage"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",

@@ -1,0 +1,14 @@
+profession: aristocrats
+levers:
+  farm:
+    title: "Build commercial farms"
+    detail: "Aristocrats come from wealthy farmers. Peasants on subsistence farms, miners, and university students do not. Build rye/wheat farms, not subsistence."
+  government:
+    title: "Expand government administration"
+    detail: "Bureaucrats qualify as aristocrats much faster than other pops."
+  wealth:
+    title: "Raise farmer wealth"
+    detail: "Aristocrat qualifications need moderate wealth. Cheap food and clothes help farmers promote. A university does not create aristocrats from peasants."
+  university:
+    title: "University"
+    detail: "Literacy is a small bonus for aristocrats once wealthy farmers already exist. It will not turn peasants into nobles."

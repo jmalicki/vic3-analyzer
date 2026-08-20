@@ -1,0 +1,8 @@
+profession: shopkeepers
+levers:
+  urban:
+    title: "Expand urban centers"
+    detail: "Clerks, farmers, and laborers qualify as shopkeepers. Urban centers hire them."
+  farm:
+    title: "Build commercial farms"
+    detail: "Farmers can qualify as shopkeepers. Useful when the state is still rural."

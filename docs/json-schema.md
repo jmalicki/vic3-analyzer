@@ -355,7 +355,7 @@ Greedy production-method suggestion. `world_delta` is a [`WorldDelta`] for a lat
 
 ## AlertsResult
 
-Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent; underemployed buildings are `2`. Mitigations may include a tagged `action` used by Apply. Shortage interventions include an `effect` from a local IO perturbation (pop demand held, closed-form price step). PM advice names a specific method already in use on that building type.
+Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent; underemployed buildings are `2`. Mitigations may include a tagged `action` used by Apply. Shortage interventions include an `effect` from a local IO perturbation (pop demand held, closed-form price step). PM advice names a specific method already in use on that building type. Qualification advice is filtered from `pop_types` + the state's mix; copy is in `crates/vic3-prices/advice/qualifications/`. Employment alerts are per state and may include a `staffing` array of buildings with per-profession gaps (`employed_here` / `jobs_here` / `missing_here` and state `jobs` / `stock` / `shortage`).
 
 ```json
 {
@@ -411,6 +411,52 @@ Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent;
                 "apply_ready": { "type": "boolean" },
                 "action": { "type": "object" },
                 "effect": { "type": "string" }
+              }
+            }
+          },
+          "staffing": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "building_id",
+                "building_name",
+                "type_id",
+                "staffing",
+                "level",
+                "professions"
+              ],
+              "properties": {
+                "building_id": { "type": "integer" },
+                "building_name": { "type": "string" },
+                "type_id": { "type": "string" },
+                "staffing": { "type": "number" },
+                "level": { "type": "number" },
+                "professions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "profession_id",
+                      "employed_here",
+                      "jobs_here",
+                      "missing_here",
+                      "state_jobs",
+                      "state_stock",
+                      "state_shortage"
+                    ],
+                    "properties": {
+                      "profession_id": { "type": "string" },
+                      "profession_name": { "type": "string" },
+                      "employed_here": { "type": "number" },
+                      "jobs_here": { "type": "number" },
+                      "missing_here": { "type": "number" },
+                      "state_jobs": { "type": "number" },
+                      "state_stock": { "type": "number" },
+                      "state_shortage": { "type": "number" }
+                    }
+                  }
+                }
               }
             }
           }

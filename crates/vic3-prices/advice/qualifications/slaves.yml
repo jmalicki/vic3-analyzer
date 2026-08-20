@@ -1,0 +1,5 @@
+profession: slaves
+levers:
+  always_hire:
+    title: "Slaves do not use this qualification ladder"
+    detail: "Slave jobs are not filled by university or farm qualifications."

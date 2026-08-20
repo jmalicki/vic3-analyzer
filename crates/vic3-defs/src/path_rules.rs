@@ -6,6 +6,7 @@ pub const COMMON_DIRS: &[&str] = &[
     "goods",
     "defines",
     "production_methods",
+    "production_method_groups",
     "buildings",
     "building_groups",
     "pop_needs",
@@ -283,6 +284,13 @@ mod tests {
         );
         assert_eq!(
             classify_defs_path("game/common/pop_types/00_pop_types.txt", false),
+            DefsPathClass::Read
+        );
+        assert_eq!(
+            classify_defs_path(
+                "game/common/production_method_groups/00_production_method_groups.txt",
+                false
+            ),
             DefsPathClass::Read
         );
         assert_eq!(

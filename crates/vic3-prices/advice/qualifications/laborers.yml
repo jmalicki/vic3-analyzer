@@ -1,0 +1,8 @@
+profession: laborers
+levers:
+  always_hire:
+    title: "Laborers do not need qualifications"
+    detail: "Anyone can be hired as a laborer. If laborer jobs are empty, the state is short of people. Subsistence farms already employ leftover peasants; they are not the bottleneck."
+  farm:
+    title: "Build commercial farms"
+    detail: "Commercial farms hire laborers from peasants. Subsistence farms already do that automatically for leftover pops."

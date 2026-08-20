@@ -1,0 +1,11 @@
+profession: bureaucrats
+levers:
+  government:
+    title: "Expand government administration"
+    detail: "Clerks in government buildings qualify as bureaucrats. A university helps if clerks already exist."
+  university:
+    title: "Build a university"
+    detail: "Literacy is required for bureaucrats. Build a university when clerks or academics already live here, not while the state is mostly peasants."
+  farm:
+    title: "Build commercial farms"
+    detail: "Farms do not train bureaucrats. Skip this if clerks already exist."

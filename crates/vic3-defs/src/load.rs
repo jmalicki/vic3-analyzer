@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use jomini::text::ObjectReader;
+use jomini::text::{ObjectReader, Operator};
 use jomini::{Encoding, JominiDeserialize, TextTape};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -10,7 +10,8 @@ use crate::{
     classify_defs_path, icons,
     path_rules::{extra_icon_kind, ICON_LEAFS, LOCALIZATION_PREFIXES},
     staging::{StagingBuyPackage, StagingDefs, StagingNeed, StagingNeedEntry, StagingPm},
-    BuildingGroup, BuildingType, DefsError, DefsPathClass, GameDefs, Good, DEFAULT_PRICE_RANGE,
+    BuildingGroup, BuildingType, DefsError, DefsPathClass, GameDefs, Good, PopType,
+    QualificationFactors, DEFAULT_PRICE_RANGE,
 };
 
 /// Load definitions from a Victoria 3 install or a fixture tree.
@@ -25,8 +26,10 @@ use crate::{
 /// - `common/goods` — good id → `cost` (base price); `base_price` is also accepted
 /// - `common/defines` — `NEconomy.PRICE_RANGE` (also `NDefines.NEconomy` or top-level)
 /// - `common/production_methods` — PM ids plus `goods_input_*` / `goods_output_*`
-/// - `common/buildings` — building type → group / city type
+/// - `common/production_method_groups` — group id → production method ids
+/// - `common/buildings` — building type → group / city type / PM groups
 /// - `common/building_groups` — category, land usage, and default building
+/// - `common/pop_types` — profession qualification scripts (static analysis)
 /// - `common/pop_needs` — need substitution tables (`entry` / min & max supply share)
 /// - `common/buy_packages` — `wealth_N` packages
 /// - `common/cultures` — optional `obsessions = { good_id ... }` (empty is fine)
@@ -42,8 +45,10 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
     (defs.goods_order, defs.goods) = load_goods(&data_root)?;
     defs.labels = load_labels(&data_root)?;
     defs.production_methods = load_production_methods(&data_root)?;
+    defs.production_method_groups = load_production_method_groups(&data_root)?;
     defs.buildings = load_buildings(&data_root)?;
     defs.building_groups = load_building_groups(&data_root)?;
+    defs.pop_types = load_pop_types(&data_root)?;
     let (goods_icons, extra_icons) = load_icons(&data_root)?;
     attach_icons(&mut defs, goods_icons);
     attach_extra_icons(&mut defs, extra_icons);
@@ -278,9 +283,12 @@ fn absorb_text_file(
     defs.labels.extend(file.defs.labels.clone());
     defs.production_methods
         .extend(file.defs.production_methods.clone());
+    defs.production_method_groups
+        .extend(file.defs.production_method_groups.clone());
     defs.buildings.extend(file.defs.buildings.clone());
     defs.building_groups
         .extend(file.defs.building_groups.clone());
+    defs.pop_types.extend(file.defs.pop_types.clone());
     defs.pop_needs.extend(file.defs.pop_needs.clone());
     defs.buy_packages.extend(file.defs.buy_packages.clone());
     defs.obsessions.extend(file.defs.obsessions.clone());
@@ -320,6 +328,9 @@ fn parse_defs_text(
             for method in parse_production_methods_bytes(path, bytes)? {
                 defs.production_methods.insert(method.id.clone(), method);
             }
+        } else if relative.starts_with("common/production_method_groups/") {
+            defs.production_method_groups
+                .extend(parse_production_method_groups_bytes(path, bytes)?);
         } else if relative.starts_with("common/buildings/") {
             let raw: BTreeMap<String, RawBuilding> = parse_bytes(path, bytes)?;
             defs.buildings.extend(raw.into_iter().map(|(id, building)| {
@@ -329,9 +340,12 @@ fn parse_defs_text(
                         id,
                         group: building.building_group,
                         city_type: building.city_type,
+                        production_method_groups: building.production_method_groups,
                     },
                 )
             }));
+        } else if relative.starts_with("common/pop_types/") {
+            defs.pop_types.extend(parse_pop_types_bytes(path, bytes)?);
         } else if relative.starts_with("common/building_groups/") {
             let raw: BTreeMap<String, RawBuildingGroup> = parse_bytes(path, bytes)?;
             defs.building_groups
@@ -809,6 +823,7 @@ fn load_buildings(data_root: &Path) -> Result<BTreeMap<String, BuildingType>, De
                     id,
                     group: raw.building_group,
                     city_type: raw.city_type,
+                    production_method_groups: raw.production_method_groups,
                 },
             )
         }));
@@ -860,6 +875,9 @@ fn parse_production_methods_bytes(path: &Path, bytes: &[u8]) -> Result<Vec<Stagi
         let id = key.read_str().to_string();
         let mut inputs = BTreeMap::new();
         let mut outputs = BTreeMap::new();
+        let mut employment = BTreeMap::new();
+        let mut education_access = false;
+        let mut qualifications_boost = false;
         let mut texture = None;
         if let Ok(obj) = value.read_object() {
             for (field, _op, field_value) in obj.fields() {
@@ -870,22 +888,35 @@ fn parse_production_methods_bytes(path: &Path, bytes: &[u8]) -> Result<Vec<Stagi
                         .map(|scalar| scalar.to_string().trim_matches('"').to_string());
                 }
             }
-            collect_goods_modifiers(&obj, &mut inputs, &mut outputs);
+            collect_pm_modifiers(
+                &obj,
+                &mut inputs,
+                &mut outputs,
+                &mut employment,
+                &mut education_access,
+                &mut qualifications_boost,
+            );
         }
         out.push(StagingPm {
             id,
             texture,
             inputs,
             outputs,
+            employment,
+            education_access,
+            qualifications_boost,
         });
     }
     Ok(out)
 }
 
-fn collect_goods_modifiers<E: Encoding + Clone>(
+fn collect_pm_modifiers<E: Encoding + Clone>(
     obj: &ObjectReader<'_, '_, E>,
     inputs: &mut BTreeMap<String, f64>,
     outputs: &mut BTreeMap<String, f64>,
+    employment: &mut BTreeMap<String, f64>,
+    education_access: &mut bool,
+    qualifications_boost: &mut bool,
 ) {
     for (key, _op, value) in obj.fields() {
         let name = key.read_str();
@@ -900,10 +931,220 @@ fn collect_goods_modifiers<E: Encoding + Clone>(
             }
             continue;
         }
+        if let Some(profession) = employment_modifier_key(name.as_ref()) {
+            if let Some(num) = value.read_scalar().ok().and_then(|s| s.to_f64().ok()) {
+                *employment.entry(profession.to_string()).or_insert(0.0) += num;
+            }
+            continue;
+        }
+        let lower = name.to_ascii_lowercase();
+        if lower.contains("education_access") {
+            *education_access = true;
+        }
+        if lower.contains("qualifications") {
+            *qualifications_boost = true;
+        }
         if let Ok(nested) = value.read_object() {
-            collect_goods_modifiers(&nested, inputs, outputs);
+            collect_pm_modifiers(
+                &nested,
+                inputs,
+                outputs,
+                employment,
+                education_access,
+                qualifications_boost,
+            );
         }
     }
+}
+
+fn employment_modifier_key(key: &str) -> Option<&str> {
+    let rest = key.strip_prefix("building_employment_")?;
+    Some(rest.strip_suffix("_add").unwrap_or(rest)).filter(|id| !id.is_empty())
+}
+
+fn load_production_method_groups(
+    data_root: &Path,
+) -> Result<BTreeMap<String, Vec<String>>, DefsError> {
+    let mut groups = BTreeMap::new();
+    for path in txt_files(&data_root.join("common/production_method_groups"))? {
+        let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        groups.extend(parse_production_method_groups_bytes(&path, &bytes)?);
+    }
+    Ok(groups)
+}
+
+fn parse_production_method_groups_bytes(
+    path: &Path,
+    bytes: &[u8],
+) -> Result<BTreeMap<String, Vec<String>>, DefsError> {
+    let bytes = strip_bom(bytes);
+    if looks_empty(bytes) {
+        return Ok(BTreeMap::new());
+    }
+    let file: BTreeMap<String, RawPmg> = parse_bytes(path, bytes)?;
+    Ok(file
+        .into_iter()
+        .map(|(id, raw)| (id, raw.production_methods))
+        .collect())
+}
+
+fn load_pop_types(data_root: &Path) -> Result<BTreeMap<String, PopType>, DefsError> {
+    let mut pop_types = BTreeMap::new();
+    for path in txt_files(&data_root.join("common/pop_types"))? {
+        let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        pop_types.extend(parse_pop_types_bytes(&path, &bytes)?);
+    }
+    Ok(pop_types)
+}
+
+/// Walk `qualifications = { ... }` for `is_pop_type`, `literacy`, and `wealth`.
+/// This is not a Vic3 scripted-value interpreter.
+fn parse_pop_types_bytes(
+    path: &Path,
+    bytes: &[u8],
+) -> Result<BTreeMap<String, PopType>, DefsError> {
+    let bytes = strip_bom(bytes);
+    if looks_empty(bytes) {
+        return Ok(BTreeMap::new());
+    }
+    let tape = TextTape::from_slice(bytes).map_err(|source| DefsError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let reader = tape.utf8_reader();
+    let mut out = BTreeMap::new();
+    for (key, _op, value) in reader.fields() {
+        let id = key.read_str().to_string();
+        let mut can_always_hire = false;
+        let mut qualifications = QualificationFactors::default();
+        if let Ok(obj) = value.read_object() {
+            for (field, _op, field_value) in obj.fields() {
+                let name = field.read_str();
+                if name.as_ref() == "can_always_hire" {
+                    can_always_hire = field_value
+                        .read_scalar()
+                        .ok()
+                        .is_some_and(|scalar| scalar.to_string() == "yes");
+                } else if name.as_ref() == "qualifications" {
+                    if let Ok(block) = field_value.read_object() {
+                        walk_qualifications(&block, &mut qualifications, None, false);
+                    }
+                }
+            }
+        }
+        out.insert(
+            id.clone(),
+            PopType {
+                id,
+                can_always_hire,
+                qualifications,
+            },
+        );
+    }
+    Ok(out)
+}
+
+fn walk_qualifications<E: Encoding + Clone>(
+    obj: &ObjectReader<'_, '_, E>,
+    factors: &mut QualificationFactors,
+    current_source: Option<String>,
+    in_wealth: bool,
+) -> Option<String> {
+    let mut source = current_source;
+    let mut wealth_here = in_wealth;
+    for (key, op, value) in obj.fields() {
+        let name = key.read_str();
+        let name = name.as_ref();
+        if name == "is_pop_type" || name == "pop_type" {
+            if let Some(prof) = value
+                .read_scalar()
+                .ok()
+                .map(|scalar| scalar.to_string().trim_matches('"').to_string())
+                .filter(|id| !id.is_empty())
+            {
+                factors
+                    .source_multipliers
+                    .entry(prof.clone())
+                    .or_insert(1.0);
+                source = Some(prof);
+            }
+            continue;
+        }
+        if name.eq_ignore_ascii_case("literacy") {
+            factors.literacy = true;
+        }
+        if name.eq_ignore_ascii_case("wealth") {
+            factors.wealth = true;
+            wealth_here = true;
+        }
+        if let Ok(scalar) = value.read_scalar() {
+            let text = scalar.to_string();
+            if text.eq_ignore_ascii_case("literacy") {
+                factors.literacy = true;
+            }
+            if text.eq_ignore_ascii_case("wealth") {
+                factors.wealth = true;
+                wealth_here = true;
+            }
+            if let Ok(num) = scalar.to_f64() {
+                if name == "multiply" {
+                    if let Some(prof) = source.as_deref() {
+                        factors.source_multipliers.insert(prof.to_string(), num);
+                    }
+                }
+                if name == "subtract" && wealth_here && factors.wealth_floor.is_none() {
+                    factors.wealth_floor = Some(num);
+                }
+                // `wealth < N` / `wealth <= N` gates in limit blocks.
+                if name.eq_ignore_ascii_case("wealth")
+                    && matches!(op, Some(Operator::LessThan) | Some(Operator::LessThanEqual))
+                    && factors.wealth_floor.is_none()
+                {
+                    factors.wealth_floor = Some(num);
+                }
+            }
+        }
+        if let Ok(nested) = value.read_object() {
+            if name == "multiply" {
+                if let Some(num) = object_numeric_value(&nested) {
+                    if let Some(prof) = source.as_deref() {
+                        factors.source_multipliers.insert(prof.to_string(), num);
+                    }
+                }
+            }
+            if name == "subtract" && wealth_here && factors.wealth_floor.is_none() {
+                if let Some(num) = object_numeric_value(&nested) {
+                    factors.wealth_floor = Some(num);
+                }
+            }
+            if let Some(child) = walk_qualifications(&nested, factors, source.clone(), wealth_here)
+            {
+                source = Some(child);
+                if name == "multiply" {
+                    // already applied above if numeric
+                }
+            }
+        }
+    }
+    source
+}
+
+fn object_numeric_value<E: Encoding + Clone>(obj: &ObjectReader<'_, '_, E>) -> Option<f64> {
+    for (key, _op, value) in obj.fields() {
+        if key.read_str().as_ref() == "value" {
+            return value
+                .read_scalar()
+                .ok()
+                .and_then(|scalar| scalar.to_f64().ok());
+        }
+    }
+    None
 }
 
 fn load_pop_needs(
@@ -1098,6 +1339,14 @@ struct RawGood {
 struct RawBuilding {
     building_group: Option<String>,
     city_type: Option<String>,
+    #[serde(default)]
+    production_method_groups: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawPmg {
+    #[serde(default)]
+    production_methods: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

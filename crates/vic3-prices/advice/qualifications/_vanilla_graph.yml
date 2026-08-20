@@ -1,0 +1,76 @@
+# Fallback when GameDefs has no pop_types (sparse tests / old blobs).
+# Live installs use parsed common/pop_types instead.
+
+professions:
+  peasants:
+    can_always_hire: true
+  laborers:
+    can_always_hire: true
+  slaves:
+    can_always_hire: true
+  soldiers:
+    can_always_hire: true
+  farmers:
+    sources:
+      peasants: 4
+      laborers: 2
+  machinists:
+    literacy: true
+    sources:
+      laborers: 3
+      farmers: 1.5
+  engineers:
+    literacy: true
+    sources:
+      machinists: 4
+      academics: 2
+  academics:
+    literacy: true
+    sources:
+      bureaucrats: 2
+      engineers: 2
+      clerks: 1.5
+  aristocrats:
+    literacy: true
+    wealth: true
+    wealth_floor: 10
+    sources:
+      farmers: 2
+      bureaucrats: 5
+      officers: 5
+      capitalists: 2
+      clergymen: 2
+  bureaucrats:
+    literacy: true
+    sources:
+      clerks: 3
+      academics: 2
+      clergymen: 1.5
+  capitalists:
+    wealth: true
+    wealth_floor: 10
+    sources:
+      shopkeepers: 3
+      aristocrats: 2
+      engineers: 1.5
+  clergymen:
+    literacy: true
+    sources:
+      peasants: 2
+      farmers: 1.5
+  clerks:
+    literacy: true
+    sources:
+      laborers: 2
+      machinists: 1.5
+  officers:
+    literacy: true
+    sources:
+      soldiers: 3
+      aristocrats: 2
+      bureaucrats: 2
+  shopkeepers:
+    sources:
+      clerks: 2
+      farmers: 1.5
+      laborers: 1

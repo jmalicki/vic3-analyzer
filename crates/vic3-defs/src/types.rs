@@ -51,6 +51,13 @@ pub struct GameDefs {
     pub package_ladder: Vec<NeedsVec>,
     /// Culture id → obsessed good indices. Empty when the tree has no obsessions.
     pub obsessions: BTreeMap<String, Vec<GoodIdx>>,
+    /// Profession id → qualification script summary (`common/pop_types`).
+    /// Empty when those files were not in the selected game files.
+    #[serde(default)]
+    pub pop_types: BTreeMap<String, PopType>,
+    /// Production-method group id → PM ids (`common/production_method_groups`).
+    #[serde(default)]
+    pub production_method_groups: BTreeMap<String, Vec<String>>,
 }
 
 impl Default for GameDefs {
@@ -72,6 +79,8 @@ impl Default for GameDefs {
             buy_packages: BTreeMap::new(),
             package_ladder: Vec::new(),
             obsessions: BTreeMap::new(),
+            pop_types: BTreeMap::new(),
+            production_method_groups: BTreeMap::new(),
         }
     }
 }
@@ -206,11 +215,20 @@ pub struct Good {
 }
 
 /// A production method with goods inputs/outputs scraped from building modifiers.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ProductionMethod {
     pub id: String,
     pub inputs: Vec<(GoodIdx, f64)>,
     pub outputs: Vec<(GoodIdx, f64)>,
+    /// `building_employment_{profession}_add` totals scraped from modifiers.
+    #[serde(default)]
+    pub employment: Vec<(String, f64)>,
+    /// True when any modifier adds `state_education_access_*`.
+    #[serde(default)]
+    pub education_access: bool,
+    /// True when any modifier name contains `qualifications`.
+    #[serde(default)]
+    pub qualifications_boost: bool,
 }
 
 /// A constructable building definition (`common/buildings`).
@@ -219,6 +237,40 @@ pub struct BuildingType {
     pub id: String,
     pub group: Option<String>,
     pub city_type: Option<String>,
+    /// Script ids from `production_method_groups = { ... }`.
+    #[serde(default)]
+    pub production_method_groups: Vec<String>,
+}
+
+/// One profession from `common/pop_types`.
+///
+/// [`Self::qualifications`] is a static walk of the scripted-value block, not a
+/// Vic3 interpreter: nested `if`/`limit`/`is_pop_type` and `literacy`/`wealth`
+/// mentions are recorded, but full trigger logic is not evaluated.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct PopType {
+    pub id: String,
+    #[serde(default)]
+    pub can_always_hire: bool,
+    #[serde(default)]
+    pub qualifications: QualificationFactors,
+}
+
+/// Who can qualify into a profession, and which gates the script mentions.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct QualificationFactors {
+    /// Script mentions `literacy` as a factor.
+    #[serde(default)]
+    pub literacy: bool,
+    /// Script mentions `wealth` as a factor.
+    #[serde(default)]
+    pub wealth: bool,
+    /// `subtract` next to wealth, or a `wealth < N` limit, when present.
+    #[serde(default)]
+    pub wealth_floor: Option<f64>,
+    /// `is_pop_type` / `pop_type` multipliers (default 1 when mentioned without a number).
+    #[serde(default)]
+    pub source_multipliers: BTreeMap<String, f64>,
 }
 
 /// A Vic3 building group (`common/building_groups`).

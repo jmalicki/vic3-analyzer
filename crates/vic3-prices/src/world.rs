@@ -933,6 +933,7 @@ mod tests {
                     id: "pm_smithy".into(),
                     inputs: vec![(GoodIdx::from_usize(0), 2.0)],
                     outputs: vec![(GoodIdx::from_usize(1), 3.0)],
+                    ..Default::default()
                 },
             ),
             (
@@ -941,6 +942,7 @@ mod tests {
                     id: "pm_steam".into(),
                     inputs: vec![(GoodIdx::from_usize(2), 5.0), (GoodIdx::from_usize(0), 1.0)],
                     outputs: Vec::new(),
+                    ..Default::default()
                 },
             ),
         ]);
@@ -973,6 +975,7 @@ mod tests {
                 id: "pm_mine".into(),
                 inputs: vec![(GoodIdx::from_usize(0), 10.0)],
                 outputs: vec![(GoodIdx::from_usize(1), 20.0)],
+                ..Default::default()
             },
         )]);
         let world = World {
@@ -1006,6 +1009,7 @@ mod tests {
                     id: "pm_wood".into(),
                     inputs: Vec::new(),
                     outputs: vec![(wood, 10.0)],
+                    ..Default::default()
                 },
             ),
             (
@@ -1014,6 +1018,7 @@ mod tests {
                     id: "pm_grain".into(),
                     inputs: Vec::new(),
                     outputs: vec![(grain, 7.0)],
+                    ..Default::default()
                 },
             ),
         ]);

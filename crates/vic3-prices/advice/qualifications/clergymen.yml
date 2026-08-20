@@ -1,0 +1,8 @@
+profession: clergymen
+levers:
+  urban:
+    title: "Expand urban centers"
+    detail: "Urban centers hire clergymen and the farmers/peasants who qualify into clergy."
+  university:
+    title: "Build a university"
+    detail: "Literacy helps pops qualify as clergymen once farmers or peasants are employed in towns."

@@ -241,6 +241,8 @@ section[aria-labelledby] { margin-top: 1rem; }
 .alert-staffing details { border: 1px solid #314033; padding: .45rem .65rem; background: #111713; }
 .alert-staffing summary { display: flex; gap: .45rem; align-items: center; flex-wrap: wrap; cursor: pointer; }
 .alert-staffing summary span { color: #9ba79d; font-size: .9rem; }
+.alert-staffing-link { margin: .35rem 0 .15rem; }
+.alert-staffing-link a { color: #9ec4a6; }
 .alert-profession-gaps { list-style: none; padding: .4rem 0 0; margin: 0; display: grid; gap: .45rem; }
 .alert-profession-gaps li { display: flex; gap: .45rem; align-items: flex-start; color: #c8ccc5; font-size: .92rem; }
 .alert-profession-gaps li.blocking { color: #e2a06f; }

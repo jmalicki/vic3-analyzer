@@ -171,15 +171,35 @@ describe('AlertsPane', () => {
               mitigations: [],
             },
             {
-              id: 'underemployed:3',
+              id: 'underemployed:1',
               kind: 'underemployed',
               severity: 2,
-              title: 'Underemployed Rye Farm in Test (Farmers)',
-              summary: 'Staffing/level is 33% on Rye Farm in Test (Farmers).',
-              building_id: 3,
+              title: 'Test buildings cannot fill Machinists jobs',
+              summary: 'Test is short 40 Machinists. 1 building below full staffing.',
               state_id: 1,
               evidence: [],
               mitigations: [],
+              staffing: [
+                {
+                  building_id: 3,
+                  building_name: 'Textile Mills',
+                  type_id: 'building_textile_mill',
+                  staffing: 6,
+                  level: 8,
+                  professions: [
+                    {
+                      profession_id: 'machinists',
+                      profession_name: 'Machinists',
+                      employed_here: 200,
+                      jobs_here: 240,
+                      missing_here: 40,
+                      state_jobs: 240,
+                      state_stock: 200,
+                      state_shortage: 40,
+                    },
+                  ],
+                },
+              ],
             },
           ],
         }}
@@ -190,9 +210,9 @@ describe('AlertsPane', () => {
     expect(screen.getByText('Unmet needs')).toBeInTheDocument()
     expect(screen.getByText('Employment')).toBeInTheDocument()
     expect(hrefForAlert(result.alerts[0])).toBe('#/prices/good/electricity')
-    expect(screen.getByRole('link', { name: /Underemployed Rye Farm/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /Test buildings cannot fill Machinists/ })).toHaveAttribute(
       'href',
-      '#/buildings/building/3',
+      '#/states/1',
     )
     expect(screen.getByRole('link', { name: /Unmet pop needs/ })).toHaveAttribute(
       'href',
@@ -204,7 +224,7 @@ describe('AlertsPane', () => {
     await user.click(shortageGroup!.querySelector('summary')!)
     expect(shortageGroup).not.toHaveAttribute('open')
     expect(screen.getByText('Unmet pop needs in Test')).toBeInTheDocument()
-    expect(screen.getByText('Underemployed Rye Farm in Test (Farmers)')).toBeInTheDocument()
+    expect(screen.getByText('Test buildings cannot fill Machinists jobs')).toBeInTheDocument()
   })
 })
 
@@ -244,5 +264,103 @@ describe('LocalRecommendations', () => {
     expect(screen.getByText(/Estimated effect: 0 extra electricity from imports/)).toBeInTheDocument()
     expect(screen.getByText(/Estimated effect: ~\+10 grain sell/)).toBeInTheDocument()
     expect(screen.getByText(/Estimated effect: 0 extra electricity in this model/)).toBeInTheDocument()
+  })
+
+  it('nests collapsible buildings under a state employment alert', async () => {
+    const user = userEvent.setup()
+    render(
+      <LocalRecommendations
+        alerts={[
+          {
+            id: 'underemployed:1',
+            kind: 'underemployed',
+            severity: 2,
+            title: 'Test buildings cannot fill Machinists jobs',
+            summary: 'Test is short 90 Machinists. Extra levels add more empty jobs.',
+            state_id: 1,
+            evidence: [],
+            mitigations: [
+              {
+                id: 'under:1:qual',
+                title: 'See the Machinists qualification shortage for Test',
+                detail:
+                  'These buildings are waiting on qualified workers who do not exist in this state. The steps that create those qualifications are listed on that shortage, not on each mill.',
+                rank: 1,
+                apply_ready: false,
+              },
+            ],
+            staffing: [
+              {
+                building_id: 4,
+                building_name: 'Textile Mills',
+                type_id: 'building_textile_mill',
+                staffing: 6,
+                level: 8,
+                professions: [
+                  {
+                    profession_id: 'laborers',
+                    profession_name: 'Laborers',
+                    employed_here: 400,
+                    jobs_here: 400,
+                    missing_here: 0,
+                    state_jobs: 400,
+                    state_stock: 500,
+                    state_shortage: 0,
+                  },
+                  {
+                    profession_id: 'machinists',
+                    profession_name: 'Machinists',
+                    employed_here: 200,
+                    jobs_here: 240,
+                    missing_here: 40,
+                    state_jobs: 340,
+                    state_stock: 250,
+                    state_shortage: 90,
+                  },
+                ],
+              },
+              {
+                building_id: 5,
+                building_name: 'Tooling Workshops',
+                type_id: 'building_tooling_workshops',
+                staffing: 1,
+                level: 2,
+                professions: [
+                  {
+                    profession_id: 'machinists',
+                    profession_name: 'Machinists',
+                    employed_here: 50,
+                    jobs_here: 100,
+                    missing_here: 50,
+                    state_jobs: 340,
+                    state_stock: 250,
+                    state_shortage: 90,
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    await user.click(screen.getByText('Test buildings cannot fill Machinists jobs'))
+    expect(screen.getAllByRole('link', { name: 'Open building' })[0]).toHaveAttribute(
+      'href',
+      '#/buildings/building/4',
+    )
+    expect(screen.getByText(/40 more Machinists/)).toBeInTheDocument()
+    expect(screen.getAllByText(/this is blocking/).length).toBeGreaterThanOrEqual(1)
+    expect(
+      screen.getByText(/See the Machinists qualification shortage for Test/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/listed on that shortage, not on each mill/),
+    ).toBeInTheDocument()
+
+    const mill = document.querySelector('.alert-staffing details')
+    expect(mill).toHaveAttribute('open')
+    await user.click(mill!.querySelector('span')!)
+    expect(mill).not.toHaveAttribute('open')
   })
 })
