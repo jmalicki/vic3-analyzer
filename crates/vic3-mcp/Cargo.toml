@@ -1,0 +1,30 @@
+[package]
+name = "vic3-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Stdio MCP server (rmcp) over vic3-sql + shared desktop config"
+
+[lints]
+workspace = true
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+datafusion.workspace = true
+rmcp = { workspace = true }
+schemars.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "io-std"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+vic3-api = { path = "../vic3-api" }
+vic3-catalog = { path = "../vic3-catalog" }
+vic3-sql = { path = "../vic3-sql" }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+vic3-defs = { path = "../vic3-defs" }

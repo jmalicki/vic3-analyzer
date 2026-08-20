@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Tauri desktop shell (GUI + mcp argv stub)"
+description = "Tauri desktop shell (GUI + stdio MCP via vic3-mcp)"
 default-run = "vic3-analyzer"
 
 [lints]
@@ -29,6 +29,7 @@ serde_json.workspace = true
 tauri = { workspace = true, features = [] }
 vic3-api = { path = "../vic3-api" }
 vic3-catalog = { path = "../vic3-catalog" }
+vic3-mcp = { path = "../vic3-mcp" }
 
 [dev-dependencies]
 serde_json.workspace = true

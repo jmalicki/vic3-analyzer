@@ -1,7 +1,7 @@
 # MCP server (design spec)
 
-**Status:** Wave 0 design for review. Not implemented yet.  
-**SDK (planned):** Official Rust [rmcp](https://crates.io/crates/rmcp) (Model Context Protocol).  
+**Status:** Wave 3d — stdio MCP via official [rmcp](https://crates.io/crates/rmcp) in crate `vic3-mcp`, invoked as `vic3-analyzer mcp`.  
+**SDK:** Official Rust [rmcp](https://crates.io/crates/rmcp) 3.x.  
 **Binary (v1):** Single fat desktop binary — `vic3-analyzer` opens the Tauri GUI; `vic3-analyzer mcp` runs stdio MCP **without** creating a window (early argv branch before Tauri `run`). WebView libraries may still load at process start; acceptable for v1.  
 **SQL contract:** [`sql.md`](sql.md) — MCP does not redefine tables/UDFs; it exposes them.
 
@@ -56,7 +56,7 @@ query: …
 
 ## Tools
 
-JSON Schema for arguments should be generated from Rust types (rmcp + schemars). Normative shapes below.
+JSON Schema for arguments is generated from Rust types (rmcp + schemars). Normative shapes below.
 
 ### `query`
 
@@ -128,8 +128,8 @@ Prompt text should remind the model: stubs not paths; read-only SQL; call `use_s
 
 ## Completions
 
-- `use_save.name`: catalog stubs
-- Optional: SQL table/column names from schema registry
+- Prompt / resource args named `name` / `stub` / `save`: catalog stubs
+- Optional: SQL table names from schema registry (`table` argument)
 
 ## Logging and notifications
 
@@ -179,7 +179,7 @@ On macOS app bundles, `command` may be `…/Vic3 Analyzer.app/Contents/MacOS/vic
 2. Max rows / timeout defaults for `query` and `plan(...)`.
 3. Whether GUI and MCP should ever share a long-lived daemon (out of v1).
 
-## Implementation notes (non-normative)
+## Implementation notes
 
-- Crate: part of the desktop binary or `vic3-mcp` module linked into it.
-- Wave order: implement after [`sql.md`](sql.md) review and `feat/catalog-sql` / DataFusion land.
+- Crate: `vic3-mcp`, linked into the `vic3-analyzer` binary (`mcp` argv).
+- Tools / resources / prompts implemented in Wave 3d; catalog watch → `list_changed` remains best-effort follow-up.

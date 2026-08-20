@@ -51,11 +51,9 @@ recorded directly on each trade-center state.
 | [prices](docs/prices.md) | Equilibrium, Basin, limitations |
 | [planning](docs/planning.md) | `PlanningState`, A* |
 | [archive](docs/archive.md) | Past saves and alternative plans |
-| [sql](docs/sql.md) | **Design (review):** DataFusion SQL tables / UDFs / `plan()` TVF |
-| [mcp](docs/mcp.md) | **Design (review):** stdio MCP tools / resources / agent flow |
-| [desktop](docs/desktop.md) | Desktop auto-detect, `vic3-catalog` config, Settings |
-| [desktop](docs/desktop.md) | **Design (review):** Tauri auto-detect, config, Settings |
-| [desktop](docs/desktop.md) | Tauri shell build/run + **design (review):** auto-detect, config, Settings |
+| [sql](docs/sql.md) | DataFusion SQL tables / UDFs / `plan()` TVF |
+| [mcp](docs/mcp.md) | Stdio MCP tools / resources / agent flow (`vic3-mcp` / rmcp) |
+| [desktop](docs/desktop.md) | Tauri shell build/run + auto-detect, config, Settings |
 | [libraries](docs/libraries.md) | Locked deps and selection bar |
 | [invariants](docs/invariants.md) | I1–I9 property tests |
 | [json-schema](docs/json-schema.md) | Result/option contract (draft) |
