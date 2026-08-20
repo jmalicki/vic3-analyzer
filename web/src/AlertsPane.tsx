@@ -388,11 +388,18 @@ function LocalAlertCard({
               <details open>
                 <summary>
                   <GameIcon kind="building" id={row.type_id} icons={icons} />
-                  <a href={hashForBuilding(row.building_id)}>{row.building_name}</a>
+                  <strong>{row.building_name}</strong>
                   <span>{buildingStaffingSummary(row)}</span>
                 </summary>
+                <p className="alert-staffing-link">
+                  <a href={hashForBuilding(row.building_id)}>Open building</a>
+                </p>
                 {row.professions.length === 0 ? (
-                  <p>No employee counts on this building, so the missing profession mix is unknown.</p>
+                  <p>
+                    {row.staffing <= 0.05
+                      ? 'This building has no workers yet, so the save does not list which professions it needs.'
+                      : 'No employee counts on this building, so the missing profession mix is unknown.'}
+                  </p>
                 ) : (
                   <ul className="alert-profession-gaps">
                     {row.professions.map((gap) => {

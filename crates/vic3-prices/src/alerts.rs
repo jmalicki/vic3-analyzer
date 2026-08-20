@@ -1293,7 +1293,8 @@ fn push_state_employment_alert(
         let target = buildings
             .iter()
             .find_map(|building| shortage_target(prices, building))
-            .unwrap_or("workers");
+            .map(|id| profession_label(defs, id, None))
+            .unwrap_or_else(|| "workers".into());
         vec![plain(
             format!("under:{state_id}:qual"),
             format!("See the {target} qualification shortage for {place}"),
@@ -1373,18 +1374,11 @@ fn pop_shortage_mitigations(
         "This tool cannot move pops between states",
         "In the game, empty buildings can attract migrants. This analyzer does not simulate that, so extra levels will not fill jobs here.",
     ));
-    if let Some(building) = sample {
-        items.push(action_mit(
-            format!("pops:{}:levels", building.id),
-            "Do not add empty levels",
-            "More unstaffed levels add jobs this state cannot fill.",
-            MitigationAction::Build {
-                building: building.type_id.clone(),
-                state_id: state,
-                extra_levels: Some(1),
-            },
-        ));
-    }
+    items.push(plain(
+        format!("pops:{sample_id}:levels"),
+        "Do not add empty levels",
+        "More unstaffed levels add jobs this state cannot fill.",
+    ));
     items
 }
 

@@ -276,13 +276,13 @@ describe('LocalRecommendations', () => {
             kind: 'underemployed',
             severity: 2,
             title: 'Test buildings cannot fill Machinists jobs',
-            summary: 'Test is short 40 Machinists. Extra levels add more empty jobs.',
+            summary: 'Test is short 90 Machinists. Extra levels add more empty jobs.',
             state_id: 1,
             evidence: [],
             mitigations: [
               {
                 id: 'under:1:qual',
-                title: 'See the machinists qualification shortage for Test',
+                title: 'See the Machinists qualification shortage for Test',
                 detail:
                   'These buildings are waiting on qualified workers who do not exist in this state. The steps that create those qualifications are listed on that shortage, not on each mill.',
                 rank: 1,
@@ -313,9 +313,9 @@ describe('LocalRecommendations', () => {
                     employed_here: 200,
                     jobs_here: 240,
                     missing_here: 40,
-                    state_jobs: 240,
-                    state_stock: 200,
-                    state_shortage: 40,
+                    state_jobs: 340,
+                    state_stock: 250,
+                    state_shortage: 90,
                   },
                 ],
               },
@@ -332,9 +332,9 @@ describe('LocalRecommendations', () => {
                     employed_here: 50,
                     jobs_here: 100,
                     missing_here: 50,
-                    state_jobs: 240,
-                    state_stock: 200,
-                    state_shortage: 40,
+                    state_jobs: 340,
+                    state_stock: 250,
+                    state_shortage: 90,
                   },
                 ],
               },
@@ -345,14 +345,14 @@ describe('LocalRecommendations', () => {
     )
 
     await user.click(screen.getByText('Test buildings cannot fill Machinists jobs'))
-    expect(screen.getByRole('link', { name: 'Textile Mills' })).toHaveAttribute(
+    expect(screen.getAllByRole('link', { name: 'Open building' })[0]).toHaveAttribute(
       'href',
       '#/buildings/building/4',
     )
     expect(screen.getByText(/40 more Machinists/)).toBeInTheDocument()
     expect(screen.getAllByText(/this is blocking/).length).toBeGreaterThanOrEqual(1)
     expect(
-      screen.getByText(/See the machinists qualification shortage for Test/),
+      screen.getByText(/See the Machinists qualification shortage for Test/),
     ).toBeInTheDocument()
     expect(
       screen.getByText(/listed on that shortage, not on each mill/),

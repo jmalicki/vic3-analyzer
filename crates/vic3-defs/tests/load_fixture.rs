@@ -190,6 +190,9 @@ fn fixture_pop_types_record_qualification_sources() {
     assert!(aristocrats.qualifications.wealth);
     assert!(aristocrats.qualifications.literacy);
     assert_eq!(aristocrats.qualifications.wealth_floor, Some(10.0));
+    let capitalists = defs.pop_types.get("capitalists").expect("capitalists");
+    assert!(capitalists.qualifications.wealth);
+    assert_eq!(capitalists.qualifications.wealth_floor, Some(20.0));
     assert_eq!(
         aristocrats.qualifications.source_multipliers.get("farmers"),
         Some(&2.0)

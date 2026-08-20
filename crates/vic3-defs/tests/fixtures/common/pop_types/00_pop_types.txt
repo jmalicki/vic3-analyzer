@@ -95,3 +95,17 @@ aristocrats = {
 		}
 	}
 }
+
+capitalists = {
+	qualifications = {
+		value = 1
+		if = {
+			limit = { wealth < 20 }
+			multiply = 0
+		}
+		if = {
+			limit = { is_pop_type = shopkeepers }
+			multiply = 2
+		}
+	}
+}

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use jomini::text::ObjectReader;
+use jomini::text::{ObjectReader, Operator};
 use jomini::{Encoding, JominiDeserialize, TextTape};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -1058,7 +1058,7 @@ fn walk_qualifications<E: Encoding + Clone>(
 ) -> Option<String> {
     let mut source = current_source;
     let mut wealth_here = in_wealth;
-    for (key, _op, value) in obj.fields() {
+    for (key, op, value) in obj.fields() {
         let name = key.read_str();
         let name = name.as_ref();
         if name == "is_pop_type" || name == "pop_type" {
@@ -1099,6 +1099,13 @@ fn walk_qualifications<E: Encoding + Clone>(
                     }
                 }
                 if name == "subtract" && wealth_here && factors.wealth_floor.is_none() {
+                    factors.wealth_floor = Some(num);
+                }
+                // `wealth < N` / `wealth <= N` gates in limit blocks.
+                if name.eq_ignore_ascii_case("wealth")
+                    && matches!(op, Some(Operator::LessThan) | Some(Operator::LessThanEqual))
+                    && factors.wealth_floor.is_none()
+                {
                     factors.wealth_floor = Some(num);
                 }
             }

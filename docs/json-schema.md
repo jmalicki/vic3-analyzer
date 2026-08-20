@@ -444,7 +444,17 @@ Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent;
                       "state_jobs",
                       "state_stock",
                       "state_shortage"
-                    ]
+                    ],
+                    "properties": {
+                      "profession_id": { "type": "string" },
+                      "profession_name": { "type": "string" },
+                      "employed_here": { "type": "number" },
+                      "jobs_here": { "type": "number" },
+                      "missing_here": { "type": "number" },
+                      "state_jobs": { "type": "number" },
+                      "state_stock": { "type": "number" },
+                      "state_shortage": { "type": "number" }
+                    }
                   }
                 }
               }
