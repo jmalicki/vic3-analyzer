@@ -30,8 +30,7 @@ impl SqlEngine {
         let config = SessionConfig::new().with_information_schema(true);
         let ctx = SessionContext::new_with_config(config);
         providers::register_all(&ctx, Arc::clone(&binding)).await?;
-        // Wave 3 registers diagnostics / plan TVFs; keep an explicit empty hook.
-        register_udf_stubs(&ctx)?;
+        crate::udfs::register(&ctx, Arc::clone(&binding))?;
         Ok(Self { ctx, binding })
     }
 
@@ -51,9 +50,4 @@ impl SqlEngine {
         let df = self.ctx.sql(sql).await?;
         Ok(df.collect().await?)
     }
-}
-
-/// Placeholder so Wave 3 UDF PRs have a stable registration site.
-fn register_udf_stubs(_ctx: &SessionContext) -> Result<(), SqlError> {
-    Ok(())
 }

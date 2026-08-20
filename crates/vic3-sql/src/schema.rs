@@ -121,3 +121,23 @@ pub fn countries_schema() -> SchemaRef {
         Field::new("name", DataType::Utf8, true),
     ]))
 }
+
+/// `plan(goal [, …])` columns (`docs/sql.md`).
+pub fn plan_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("step", DataType::Int32, false),
+        Field::new("day", DataType::UInt32, false),
+        Field::new("action", DataType::Utf8, false),
+        Field::new("detail", DataType::Utf8, false),
+        Field::new("limitations", DataType::Utf8, true),
+    ]))
+}
+
+/// `gaps(goal)` columns (`docs/sql.md`).
+pub fn gaps_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("predicate", DataType::Utf8, false),
+        Field::new("status", DataType::Utf8, false),
+        Field::new("detail", DataType::Utf8, false),
+    ]))
+}

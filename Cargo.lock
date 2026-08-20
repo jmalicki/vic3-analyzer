@@ -6302,11 +6302,16 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "datafusion",
+ "serde_json",
  "thiserror 2.0.20",
  "tokio",
  "vic3-defs",
+ "vic3-goals",
  "vic3-load",
+ "vic3-plan",
  "vic3-prices",
+ "vic3-sim",
+ "vic3-world",
 ]
 
 [[package]]

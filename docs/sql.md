@@ -1,6 +1,6 @@
 # SQL interface (design spec)
 
-**Status:** Wave 2b — `vic3-sql` core implemented (fact tables + read-only `query`). Catalog/`use_save`, diagnostics TVFs, and plan UDFs follow in Wave 3.  
+**Status:** Wave 3b — `plan` / `gaps` TVFs implemented on `vic3-sql` (fact tables from Wave 2b). Catalog/`use_save` and diagnostics TVFs follow in other Wave 3 PRs.  
 **Engine:** Apache DataFusion (`datafusion` 51).  
 **Consumers:** MCP `query` tool, Tauri Advanced Query tab, optional `vic3-analyzer sql` debug.  
 **Related:** [`mcp.md`](mcp.md) (agent transport), [`json-schema.md`](json-schema.md) (JSON field names), [`dsl.md`](dsl.md) / [`planning.md`](planning.md) (goals / A\*).
@@ -350,7 +350,7 @@ Runs existing A\* ([`planning.md`](planning.md)) for the active save. **Explicit
 | `detail` | text | Human-readable or compact JSON for args |
 | `limitations` | text nullable | Optional per-row or only on step 0 |
 
-Optional args (DataFusion named args or extra parameters): `max_days`, label — mirror [`PlanOpts`](json-schema.md).
+Optional args (positional): `max_days` (non-negative int, default `3650`), `label` (text, accepted for [`PlanOpts`](json-schema.md) parity, ignored in the result set).
 
 Goal language: [`dsl.md`](dsl.md).
 
@@ -359,6 +359,8 @@ SELECT step, day, action, detail
 FROM plan('research(tech=nitroglycerin)')
 ORDER BY step;
 ```
+
+`limitations` is populated on **step 0 only** (joined with `"; "`); later steps are NULL.
 
 ### `gaps(goal TEXT)`
 
@@ -418,11 +420,12 @@ The Tauri **Advanced Query** tab uses this same dialect:
 ## Deferred (Wave 3+)
 
 - `saves` catalog table, `use_save`, `active.*` / `latest.*` views (`feat/catalog-sql`)
-- Diagnostics / plan TVFs and scalars (`feat/sql-udfs-*`)
+- Diagnostics TVFs and scalars (`feat/sql-udfs-diagnostics`)
 - `formations` military table
 - Optional convenience UNNEST views
 
 ## Implementation notes (non-normative)
 
 - Crate: `vic3-sql` registers providers on a `SessionContext` over an in-memory `SessionBinding` (`GameDefs` + `World` + `PricesResult`). Hosts hold the engine next to `vic3-api` session state.
+- Planning TVFs: `plan(goal [, max_days [, label]])` and `gaps(goal)` call `vic3-plan` / `vic3-goals` against the bound snapshot. `label` is accepted for [`PlanOpts`](json-schema.md) parity and ignored in the result set. `limitations` is emitted on step 0 only.
 - Pages/wasm continues without this engine in v1.

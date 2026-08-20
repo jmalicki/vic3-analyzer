@@ -192,3 +192,120 @@ fn binding_arcs_are_shareable() {
     let b = Arc::new(vic3_sql::SessionBinding::new(defs, world, prices));
     assert!(!b.prices.goods.is_empty());
 }
+
+#[tokio::test]
+async fn plan_research_returns_ordered_steps() {
+    let eng = engine().await;
+    let batches = eng
+        .query(
+            "SELECT step, day, action, detail FROM plan('research(tech=nitroglycerin)') \
+             ORDER BY step",
+        )
+        .await
+        .expect("plan");
+    assert!(!batches.is_empty());
+    let batch = &batches[0];
+    assert!(
+        batch.num_rows() >= 2,
+        "expected queue + wait, got {}",
+        batch.num_rows()
+    );
+
+    let steps = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::Int32Array>()
+        .expect("step");
+    let days = batch
+        .column(1)
+        .as_any()
+        .downcast_ref::<UInt32Array>()
+        .expect("day");
+    let actions = batch
+        .column(2)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("action");
+
+    assert_eq!(steps.value(0), 0);
+    assert_eq!(actions.value(0), "QueueTech");
+    assert!(actions.value(1).contains("Wait") || actions.value(1) == "WaitForEvent");
+    assert!(days.value(batch.num_rows() - 1) > 0);
+
+    // Column contract including nullable limitations on the full projection.
+    let full = eng
+        .query("SELECT step, day, action, detail, limitations FROM plan('research(tech=nitroglycerin)')")
+        .await
+        .expect("plan full");
+    assert_eq!(full[0].schema().fields().len(), 5);
+    assert_eq!(full[0].schema().field(0).name(), "step");
+    assert_eq!(full[0].schema().field(4).name(), "limitations");
+}
+
+#[tokio::test]
+async fn plan_accepts_max_days_and_label() {
+    let eng = engine().await;
+    let batches = eng
+        .query(
+            "SELECT step FROM plan('research(tech=nitroglycerin)', 3650, 'fixture') \
+             ORDER BY step",
+        )
+        .await
+        .expect("plan opts");
+    assert!(batches[0].num_rows() >= 1);
+}
+
+#[tokio::test]
+async fn gaps_research_marks_tech_predicate() {
+    let eng = engine().await;
+    let batches = eng
+        .query("SELECT predicate, status, detail FROM gaps('research(tech=nitroglycerin)')")
+        .await
+        .expect("gaps");
+    assert_eq!(batches[0].num_rows(), 1);
+    let preds = batches[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("predicate");
+    let statuses = batches[0]
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("status");
+    assert_eq!(preds.value(0), "has_tech(nitroglycerin)");
+    assert!(
+        statuses.value(0) == "failing" || statuses.value(0) == "cleared",
+        "{}",
+        statuses.value(0)
+    );
+    assert_eq!(batches[0].schema().field(0).name(), "predicate");
+    assert_eq!(batches[0].schema().field(1).name(), "status");
+    assert_eq!(batches[0].schema().field(2).name(), "detail");
+}
+
+#[tokio::test]
+async fn gaps_declare_war_exposes_interest_army_munitions_solvent() {
+    let eng = engine().await;
+    let batches = eng
+        .query(
+            "SELECT predicate, status FROM gaps(\
+             'declare-war(tag=FRA, wargoal=conquer_state, state=alsace)')",
+        )
+        .await
+        .expect("gaps war");
+    assert_eq!(batches[0].num_rows(), 4);
+    let preds = batches[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("predicate");
+    let mut seen = std::collections::HashSet::new();
+    for i in 0..preds.len() {
+        seen.insert(preds.value(i).to_string());
+    }
+    assert!(seen.iter().any(|p| p.starts_with("interest_in")));
+    assert!(seen.iter().any(|p| p.starts_with("army_power_projection")));
+    assert!(seen.iter().any(|p| p.starts_with("good_price(ammunition)")));
+    assert!(seen.contains("solvent"));
+}

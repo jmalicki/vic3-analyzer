@@ -1,7 +1,7 @@
 //! Read-only DataFusion SQL over a loaded campaign (`docs/sql.md`).
 //!
-//! Wave 2b: fact-table providers + `query(sql) → rows`. Catalog/`use_save` and
-//! rich UDFs land in later waves; scalar/TVF registration is an empty stub.
+//! Fact-table providers + `query(sql) → rows`, plus planning TVFs `plan` /
+//! `gaps`. Catalog/`use_save` and diagnostics UDFs land in other waves.
 
 mod binding;
 mod error;
@@ -11,6 +11,7 @@ mod providers;
 mod readonly;
 mod schema;
 mod session;
+mod udfs;
 
 pub use binding::SessionBinding;
 pub use error::SqlError;
