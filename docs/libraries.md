@@ -23,6 +23,7 @@ Where to look: [crates.io](https://crates.io), [lib.rs](https://lib.rs), [docs.r
 | UI tests | Vitest + React Testing Library; wasm mocked. Playwright **deferred** (no dep, no CI job). |
 | Price solver | [Basin](https://crates.io/crates/basin) + successive substitution warm start. Not HiGHS/Clarabel/NLopt/IPOPT. |
 | Archive | CLI: serde_json files under XDG. UI: IndexedDB. Never uploaded. |
+| Desktop config / save catalog | `vic3-catalog`: `dirs`, `toml` (+ `serde_json` for `config.json`). No network. |
 
 ## Open (decide before the phase)
 
