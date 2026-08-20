@@ -1,0 +1,24 @@
+[package]
+name = "vic3-sql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Read-only DataFusion SQL over a loaded World + PricesResult"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = "0.1"
+datafusion.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+vic3-defs = { path = "../vic3-defs" }
+vic3-prices = { path = "../vic3-prices" }
+
+[dev-dependencies]
+datafusion.workspace = true
+vic3-defs = { path = "../vic3-defs" }
+vic3-load = { path = "../vic3-load" }
+

@@ -12,6 +12,7 @@ members = [
     "crates/vic3-api",
     "crates/vic3-catalog",
     "crates/vic3-analyzer",
+    "crates/vic3-sql",
     "crates/vic3-wasm",
 ]
 
@@ -28,6 +29,7 @@ basin = "1.5"
 bcdec_rs = "0.2"
 chumsky = "0.13"
 clap = { version = "4", features = ["derive", "env"] }
+datafusion = "51"
 jomini = { version = "0.35", features = ["envelope"] }
 png = "0.18"
 postcard = { version = "1.1", default-features = false, features = ["use-std"] }
@@ -39,6 +41,7 @@ serde_yaml = "0.9"
 thiserror = "2"
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
+tokio = { version = "1", features = ["rt", "macros"] }
 vic3save = { git = "https://github.com/pdx-tools/pdx-tools", rev = "092edec7a853f67eea892c0d3a145329b924e103", package = "vic3save" }
 rust-advanced-heaps = { git = "https://github.com/jmalicki/rust-advanced-heaps", rev = "445818b845ad8daa1146df4c1215a88fb49f8d8f" }
 

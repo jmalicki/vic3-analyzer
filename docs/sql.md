@@ -1,7 +1,7 @@
 # SQL interface (design spec)
 
-**Status:** Wave 0 design for review. Not implemented yet.  
-**Engine (planned):** Apache DataFusion.  
+**Status:** Wave 2b — `vic3-sql` core implemented (fact tables + read-only `query`). Catalog/`use_save`, diagnostics TVFs, and plan UDFs follow in Wave 3.  
+**Engine:** Apache DataFusion (`datafusion` 51).  
 **Consumers:** MCP `query` tool, Tauri Advanced Query tab, optional `vic3-analyzer sql` debug.  
 **Related:** [`mcp.md`](mcp.md) (agent transport), [`json-schema.md`](json-schema.md) (JSON field names), [`dsl.md`](dsl.md) / [`planning.md`](planning.md) (goals / A\*).
 
@@ -407,7 +407,7 @@ The Tauri **Advanced Query** tab uses this same dialect:
 
 ## Open questions for review
 
-1. Exact `shortage` column formula on `goods` / `goods_by_state`.
+1. **Shortage formula (v1 locked):** `goods.shortage` / `goods_by_state.shortage` = `max(0, buy − sell)` (unmet demand volume). Not Paradox’s shortage flag.
 2. Mitigations as JSON columns vs child TVFs.
 3. Whether unqualified names require `use_save` or may fall back to `latest.*` automatically.
 4. Military `formations` column list (wait for stable military JSON).
@@ -415,7 +415,14 @@ The Tauri **Advanced Query** tab uses this same dialect:
 6. Which DF array helpers we document for `TEXT[]` contains (`array_has` vs `array_has_any` vs custom UDF) — IO element type is locked: `List<Struct{good, good_name, qty}>` + `unnest(unnest(…))`.
 7. Whether convenience UNNEST views (`building_goods`, `production_method_goods`) ship in v1 or stay doc-only patterns.
 
+## Deferred (Wave 3+)
+
+- `saves` catalog table, `use_save`, `active.*` / `latest.*` views (`feat/catalog-sql`)
+- Diagnostics / plan TVFs and scalars (`feat/sql-udfs-*`)
+- `formations` military table
+- Optional convenience UNNEST views
+
 ## Implementation notes (non-normative)
 
-- Crate sketch: `vic3-sql` registering providers + UDFs on a `SessionContext` held next to `vic3-api` session state.
+- Crate: `vic3-sql` registers providers on a `SessionContext` over an in-memory `SessionBinding` (`GameDefs` + `World` + `PricesResult`). Hosts hold the engine next to `vic3-api` session state.
 - Pages/wasm continues without this engine in v1.
