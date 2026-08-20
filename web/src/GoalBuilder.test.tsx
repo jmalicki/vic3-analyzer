@@ -36,4 +36,25 @@ describe('GoalBuilder', () => {
     await user.type(screen.getByLabelText('Plan price'), '25')
     expect(onChange).toHaveBeenLastCalledWith('good_price(wood) >= 25')
   })
+
+  it('builds declare-war readiness without ignored tag or wargoal args', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(
+      <GoalBuilder
+        idPrefix="Gaps"
+        goods={[]}
+        value=""
+        onChange={onChange}
+        initialKind="declare-war"
+      />,
+    )
+
+    expect(onChange).toHaveBeenCalledWith('declare-war(state=alsace)')
+    await user.clear(screen.getByLabelText('Gaps target state'))
+    await user.type(screen.getByLabelText('Gaps target state'), 'bavaria')
+    expect(onChange).toHaveBeenLastCalledWith('declare-war(state=bavaria)')
+    expect(screen.queryByLabelText('Gaps target country')).not.toBeInTheDocument()
+    expect(onChange.mock.calls.flat().join('\n')).not.toMatch(/tag=|wargoal=/)
+  })
 })

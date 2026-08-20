@@ -21,7 +21,6 @@ export function GoalBuilder({ goods, value, onChange, idPrefix, initialKind = 'r
   const [good, setGood] = useState(goods[0] ?? 'grain')
   const [relation, setRelation] = useState('<=')
   const [price, setPrice] = useState(20)
-  const [country, setCountry] = useState('FRA')
   const [state, setState] = useState('alsace')
 
   useEffect(() => {
@@ -37,11 +36,13 @@ export function GoalBuilder({ goods, value, onChange, idPrefix, initialKind = 'r
       case 'good-price':
         return `good_price(${cleanId(good)}) ${relation} ${price}`
       case 'declare-war':
-        return `declare-war(tag=${cleanId(country)}, wargoal=conquer_state, state=${cleanId(state)})`
+        // tag= / wargoal= are accepted by the parser for forward compatibility but
+        // ignored by compile today — do not collect or emit them from the UI.
+        return `declare-war(state=${cleanId(state)})`
       case 'advanced':
         return value
     }
-  }, [country, gdp, good, kind, price, relation, state, technology, value])
+  }, [gdp, good, kind, price, relation, state, technology, value])
 
   useEffect(() => {
     if (kind !== 'advanced') onChange(builtGoal)
@@ -60,7 +61,7 @@ export function GoalBuilder({ goods, value, onChange, idPrefix, initialKind = 'r
           <option value="research">Research technology</option>
           <option value="gdp">Reach GDP</option>
           <option value="good-price">Reach a goods price</option>
-          <option value="declare-war">Prepare to declare war</option>
+          <option value="declare-war">War readiness (gaps)</option>
           <option value="advanced">Advanced DSL</option>
         </select>
       </label>
@@ -130,25 +131,18 @@ export function GoalBuilder({ goods, value, onChange, idPrefix, initialKind = 'r
         </div>
       )}
       {kind === 'declare-war' && (
-        <div className="goal-row">
-          <label>
-            Target country tag
-            <input
-              aria-label={`${idPrefix} target country`}
-              value={country}
-              maxLength={3}
-              onChange={(event) => setCountry(event.target.value.toUpperCase())}
-            />
-          </label>
-          <label>
-            Target state
-            <input
-              aria-label={`${idPrefix} target state`}
-              value={state}
-              onChange={(event) => setState(event.target.value)}
-            />
-          </label>
-        </div>
+        <label>
+          Target state
+          <input
+            aria-label={`${idPrefix} target state`}
+            value={state}
+            onChange={(event) => setState(event.target.value)}
+          />
+          <span className="field-hint">
+            Compiles to interest, army, munitions-price, and solvent readiness atoms. Use Goal gaps;
+            timelines need army/interest actions first.
+          </span>
+        </label>
       )}
       {kind === 'advanced' && (
         <label>

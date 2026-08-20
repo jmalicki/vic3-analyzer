@@ -266,6 +266,7 @@ section[aria-labelledby] { margin-top: 1rem; }
 .goal-builder { display: grid; gap: .9rem; margin: 0; padding: 1rem; }
 .goal-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; }
 .goal-preview { color: #9ba79d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; overflow-wrap: anywhere; }
+.field-hint { color: #9ba79d; font-size: .85rem; line-height: 1.4; }
 .demo-warning { border-left: 3px solid #c3a65d; padding-left: .8rem; color: #d8c793; }
 .model-info { color: #9ba79d; font-size: .85rem; margin-top: 1rem; }
 .model-info a { color: #b9c78c; }

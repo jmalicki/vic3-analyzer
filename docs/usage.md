@@ -21,7 +21,7 @@ vic3-cli alerts --save game.v3 --game /path/to/Victoria3 --json
 vic3-cli mutate --save game.v3 --game /path/to/Victoria3 --delta-json '{...WorldDelta...}' --json
 vic3-cli optimize-pms --save game.v3 --game /path/to/Victoria3 --axis income --json
 vic3-cli export-save --save game.v3 --delta-json '{...SavePatch...}' --out new.v3
-vic3-cli gaps --save game.v3 --goal 'declare-war(tag=FRA, wargoal=conquer_state, state=alsace)' --json
+vic3-cli gaps --save game.v3 --goal 'declare-war(state=alsace)' --json
 vic3-cli plan --save game.v3 --goal research(tech=nitroglycerin) --label 'rush explosives' --json
 vic3-cli archive list
 vic3-cli archive show <id>
@@ -57,15 +57,19 @@ growth, avoiding default, maximizing revenue, and standard of living. Choosing
 an available preset fills both its goal and archive label; its fields remain
 editable in the goal builder.
 
-The current DSL can evaluate war readiness, an army-power target, GDP, credit
-headroom / solvency from saved principal and credit, the latest saved net
-weekly-budget sample, and a population-weighted saved-pop-wealth SoL proxy.
-Missing fiscal or population metrics remain unavailable rather than being
-treated as zero. Research, modeled GDP growth, and supported goods-price goals
-can produce timelines; economic goals use bounded building-level expansions,
-fixed modeled construction time, and a price re-solve. Military, fiscal, and
-saved-wealth goals remain readiness diagnostics until their transition models
-or save IR exist.
+**Gaps** can evaluate war readiness (`declare-war` → interest, army,
+munitions-price, solvent), army power, GDP, credit headroom / solvency from
+saved principal and credit, the latest saved net weekly-budget sample, and a
+population-weighted saved-pop-wealth SoL proxy. Missing fiscal or population
+metrics remain unavailable rather than being treated as zero.
+
+**Timelines** today close only research, modeled GDP growth, and supported
+goods-price goals (bounded building-level expansions, fixed modeled
+construction time, and a price re-solve). The Timeline preset picker marks
+declare-war, military-size, fiscal, and SoL presets as gaps-only and will not
+offer Build timeline for them until sim actions exist. Optional `tag=` /
+`wargoal=` on `declare-war` still parse but are ignored by compile; the UI
+emits `declare-war(state=…)` only.
 
 ## Defs
 

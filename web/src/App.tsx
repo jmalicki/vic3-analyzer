@@ -107,9 +107,16 @@ interface PlanTemplatePickerProps {
   idPrefix: string
   value: string
   onChange: (id: string) => void
+  /** Timeline mode disables presets A* cannot close yet (gaps still OK). */
+  timelineMode?: boolean
 }
 
-function PlanTemplatePicker({ idPrefix, value, onChange }: PlanTemplatePickerProps) {
+function PlanTemplatePicker({
+  idPrefix,
+  value,
+  onChange,
+  timelineMode = false,
+}: PlanTemplatePickerProps) {
   const selected = planTemplate(value)
   return (
     <div className="plan-template-picker">
@@ -121,17 +128,29 @@ function PlanTemplatePicker({ idPrefix, value, onChange }: PlanTemplatePickerPro
           onChange={(event) => onChange(event.target.value)}
         >
           <option value="">Custom goal</option>
-          {PLAN_TEMPLATES.map((template) => (
-            <option key={template.id} value={template.id} disabled={!template.goal}>
-              {template.title}{template.goal ? '' : ' (coming soon)'}
-            </option>
-          ))}
+          {PLAN_TEMPLATES.map((template) => {
+            const gapsOnly = timelineMode && !template.closesTimeline
+            const disabled = !template.goal || gapsOnly
+            const suffix = !template.goal
+              ? ' (coming soon)'
+              : gapsOnly
+                ? ' (gaps only)'
+                : ''
+            return (
+              <option key={template.id} value={template.id} disabled={disabled}>
+                {template.title}
+                {suffix}
+              </option>
+            )
+          })}
         </select>
       </label>
       {selected && (
         <p className="template-description">
           {selected.description}
           {!selected.goal && ' This preset cannot be run yet.'}
+          {timelineMode && selected.goal && !selected.closesTimeline &&
+            ' Use Goal gaps for this preset; Build timeline cannot close it yet.'}
         </p>
       )}
     </div>
@@ -1254,6 +1273,7 @@ function App({ wasmApi }: Props) {
               idPrefix="Plan"
               value={selectedTemplateId}
               onChange={applyPlanTemplate}
+              timelineMode
             />
             <GoalBuilder
               key={`plan-${selectedTemplateId}`}
@@ -1272,7 +1292,15 @@ function App({ wasmApi }: Props) {
                 placeholder="e.g. Rush explosives"
               />
             </label>
-            <button disabled={!ready || busy || !goal.trim()} type="submit">
+            <button
+              disabled={
+                !ready ||
+                busy ||
+                !goal.trim() ||
+                Boolean(selectedTemplate && !selectedTemplate.closesTimeline)
+              }
+              type="submit"
+            >
               Build timeline
             </button>
           </form>
