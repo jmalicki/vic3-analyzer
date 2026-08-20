@@ -25,7 +25,7 @@ License: AGPL-3.0. Saves and token maps are user-supplied and never uploaded.
 | `vic3-api` | Transport-free analysis (bytes or paths in, JSON out); shared by CLI, wasm, Tauri |
 | `vic3-catalog` | Save-root scan (stubs, `local`/`steam_cloud`), shared TOML/JSON app config + path auto-detect |
 | `vic3-cli` | clap only lives here |
-| `vic3-analyzer` | Tauri 2 desktop binary (`gui` / `mcp` argv); placeholder invoke into `vic3-api` |
+| `vic3-analyzer` | Tauri 2 desktop binary (`gui` / `mcp` argv); companion Settings/catalog + `vic3-api` JSON invokes |
 | `vic3-wasm` | Thin `wasm-bindgen` over `vic3-api`; no filesystem |
 | `web/` | Vite + React; IndexedDB archive; forms from JSON Schema |
 
@@ -55,7 +55,7 @@ flowchart LR
   api --> desktop[vic3-analyzer Tauri]
   cli --> xdg[XDG archive]
   wasm --> ui[React]
-  desktop --> uiShell[minimal ui or web]
+  desktop --> uiShell[companion ui or web]
   ui --> idb[IndexedDB origins timelines steps]
 ```
 

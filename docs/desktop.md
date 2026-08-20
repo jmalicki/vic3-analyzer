@@ -1,25 +1,25 @@
 # Desktop config and auto-detect (design spec)
 
-**Status:** Partial — `vic3-catalog` implements path auto-detect, config load/save, and save-root scanning. Tauri 2 shell (`vic3-analyzer`) exists with `gui`/`mcp` argv; Settings UI and filesystem watch are not implemented yet.  
+**Status:** Companion UI landed — Settings + save stubs + optional watch + `vic3-api` JSON invokes in `vic3-analyzer`. Advanced Query is Wave 4.  
 **Applies to:** Tauri GUI + `vic3-analyzer mcp` (same config file).  
 **Does not apply to:** GitHub Pages / wasm (browser still uses pickers / drag-drop).
 
-## Build / run (skeleton)
+## Build / run
 
 Desktop crate: `crates/vic3-analyzer` (Tauri 2). Default argv opens the GUI; `mcp` is a no-window stub.
 
 ```text
 cargo check -p vic3-analyzer
 cargo test -p vic3-analyzer
-cargo run -p vic3-analyzer            # GUI (minimal ui/ shell)
+cargo run -p vic3-analyzer            # companion UI (Dashboard / Saves / Settings)
 cargo run -p vic3-analyzer -- mcp     # stderr stub; does not open a window
 ```
 
 Linux CI installs WebKitGTK 4.1 and related packages (see `.github/workflows/ci.yml`). Locally, follow [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
-The WebView currently ships a minimal `ui/` page (placeholder `api_ping` invoke into `vic3-api`). To load the Vite `web/` workbench instead, point `build.frontendDist` / `build.devUrl` in `tauri.conf.json` at `web/dist` or the Vite server (set Vite `base` to `/` for the desktop target).
+The WebView ships `ui/` (companion shell). Invokes use filename stubs in, JSON out via `vic3-api` (paths stay in Rust). To load the Vite `web/` workbench instead, point `build.frontendDist` / `build.devUrl` in `tauri.conf.json` at `web/dist` or the Vite server (set Vite `base` to `/` for the desktop target).
 
-Capability allowlist: `capabilities/default.json` — `core:default` plus `allow-api-ping`. Future game/save path scopes land there.
+Capability allowlist: `capabilities/default.json` — `core:default` plus `allow-companion` (config, catalog, analysis JSON).
 
 ## Goals
 
@@ -82,17 +82,27 @@ GUI Settings and MCP both read/write this file. Changing Settings should not req
 
 | Control | Behavior |
 | --- | --- |
-| Game folder | Browse + show detected path |
-| Use live install vs defs blob | Toggle / path field |
-| Save folders | List add/remove; show local vs steam_cloud |
-| Token map | Optional file picker |
+| Game folder | Path field + show detected path |
+| Use live install vs defs blob | Optional defs postcard path (when set, skips live install) |
+| Save folders | Multiline path list (add/remove lines) |
+| Token map | Optional path field |
 | Reset to auto-detect | Clears overrides and re-runs discovery |
 
-If detection fails: one modal with pasteable path hints (Cmd+Shift+G / etc.), then write config.
+If detection fails: Dashboard “Path hints” modal with pasteable candidates (Cmd+Shift+G / etc.), then write config.
+
+## Tauri commands
+
+| Command | Role |
+| --- | --- |
+| `get_config` / `save_config` / `reset_config` | Settings round-trip |
+| `list_saves` / `get_dashboard` / `detection_hints` | Catalog + status |
+| `use_save` | Stub → `vic3-api::load_analysis_from_paths` JSON |
+| `loaded_prices` / `loaded_alerts` / `loaded_gaps` | Session analysis JSON |
+| `api_ping` | Smoke link to `vic3-api` |
 
 ## Watch
 
-Desktop watches configured `save_dirs` (debounce create/rename). Updates catalog for GUI list and MCP notifications (`vic3://saves`). Does **not** auto-run A\* / `plan(...)`.
+Desktop watches configured `save_dirs` (debounced). Emits WebView event `saves-changed` so the GUI list refreshes. MCP `vic3://saves` notifications come with the rmcp server. Does **not** auto-run A\* / `plan(...)`.
 
 ## Privacy
 
