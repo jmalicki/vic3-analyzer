@@ -1,7 +1,9 @@
 //! Qualification-shortage levers: game-data graph + YAML copy.
 //!
 //! Relevance comes from `pop_types` (or a bundled vanilla snapshot) and the
-//! state's current mix. Wording is in `advice/qualifications/*.yml`.
+//! state's current mix. Wording is in `advice/qualifications/*.yml`. Used by
+//! [`crate::alerts`] employment expanders ([`BuildingStaffing`], profession
+//! gaps) — not a monthly qualification-rate simulator.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
@@ -621,6 +623,7 @@ pub(crate) fn is_fully_staffed(staffing: f64, level: f64) -> bool {
     level - staffing < STAFFED_LEVEL_EPS || staffing / level >= STAFFED_RATIO
 }
 
+/// Per-profession shortfall on one building vs the whole state stock.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ProfessionGap {
     pub profession_id: String,
@@ -634,6 +637,7 @@ pub struct ProfessionGap {
     pub state_shortage: f64,
 }
 
+/// Per-building staffing rows under a state-level employment alert.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct BuildingStaffing {
     pub building_id: u32,

@@ -1,4 +1,21 @@
-//! Synthetic (and later IR-backed) market: pops, buildings, frozen orders.
+//! Owned market snapshot for the price loop and planning projection.
+//!
+//! [`World::from_save`] projects `vic3-load` IR into pops, buildings, states,
+//! countries, and post-1.9 state trade. Callers keep this type (not `Save`)
+//! across [`crate::solve`], [`crate::preview`], and
+//! `PlanningState::from_world_with_prices`.
+//!
+//! # What is frozen
+//!
+//! During a solve, **building employment** ([`WorldBuilding::staffing`]),
+//! **wages**, and **trade volumes** ([`World::frozen_buy`] / [`World::frozen_sell`]
+//! / [`World::state_trade`], plus saved building IO) do not move. Pop
+//! consumption adjusts inside the residual. What-if / [`crate::WorldDelta`] may
+//! change levels or PMs on a **clone**; staffing ratio and trade still stay put
+//! unless a later phase models them.
+//!
+//! That freeze is intentional for planning: price atoms and munitions goals
+//! re-solve demand against fixed supply-side orders, not a labor market.
 
 use std::collections::HashMap;
 
@@ -43,12 +60,16 @@ impl Intern {
     }
 }
 
-/// Market snapshot owned by this crate. Can be filled from `vic3-load` IR later.
+/// Market snapshot owned by this crate (synthetic tests or [`World::from_save`]).
 ///
 /// After [`World::from_save`], callers keep this type (not `Save`). Pops are
 /// stored once as [`WorldStatePop`]; [`WorldPop`] is a `Copy` view for the
 /// residual (`pop.size`, `pop.wealth`). A second modeled `pops` table was
 /// dropped to avoid dual alloc on late-game saves.
+///
+/// `frozen_buy` / `frozen_sell` hold non-building / non-pop orders that stay
+/// fixed in the NLS; building IO is reconstructed each residual eval from saved
+/// volumes or PM recipes × staffed levels.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct World {
     pub states: Vec<WorldState>,

@@ -193,7 +193,7 @@
     },
     "WorldDelta": {
       "additionalProperties": false,
-      "description": "Preview mutation: extra levels, then production methods. Does not write a save.\n\n[`crate::apply_delta`] clones the world; [`crate::preview`] re-solves without\ncommitting. Subsidy entries are accepted and ignored (no IR flag).",
+      "description": "Preview mutation: extra levels, then production methods. Does not write a save.\n\n[`crate::apply_delta`] clones the world; [`crate::preview`] re-solves without\ncommitting. Subsidy entries are accepted and ignored (no IR flag) and cause\n[`crate::SUBSIDY_NOT_MODELED`] on the result.\n\nOrder of application: all `extra_levels`, then all `production_methods`.\nPM swaps clear that building’s saved IO so recipes × staffed levels apply.",
       "properties": {
         "extra_levels": {
           "items": {

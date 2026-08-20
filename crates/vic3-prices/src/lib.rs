@@ -1,8 +1,50 @@
-//! Price equilibrium. Inner problem: pop consumption at local prices in the loop, buildings frozen.
+//! Market-price equilibrium for a Victoria 3 save snapshot.
 //!
-//! Solver: `min ‖r − r_formula(orders(r))‖²` with box bounds on relative
-//! prices, via Basin **trust-region-reflective** (`Trf`, Vec backend) and
-//! successive substitution as warm start / fallback.
+//! # Pipeline
+//!
+//! `vic3-load` + `vic3-defs` → [`World`] + [`vic3_defs::GameDefs`] → [`solve`] /
+//! [`preview`] / [`alerts`] → [`PricesResult`]. Downstream:
+//!
+//! - `vic3-world::PlanningState::from_world_with_prices` copies good prices
+//!   (and modeled GDP) into the compact planning IR.
+//! - `vic3-api` exposes the same JSON to CLI, wasm, Tauri, and MCP/SQL hosts
+//!   (`prices`, `what_if`, `preview`, `alerts`, planning/gaps paths).
+//! - `vic3-sql` diagnostics (`good_price`, `shortage_analysis`, …) and MCP
+//!   `query` read that session’s last solve; they do not re-derive the NLS.
+//!
+//! Narrative design notes: [`docs/prices.md`](../../../docs/prices.md).
+//!
+//! # Inner problem
+//!
+//! Find relative prices `r` (price / base) such that pop consumption at each
+//! state’s MAPI-blended **local** prices is consistent with the closed-form
+//! market formula. Building IO, employment, wages, and trade volumes are
+//! **frozen** except explicit [`WorldDelta`] / what-if edits. Pop demand is
+//! **not** frozen — it sits inside the residual.
+//!
+//! ```text
+//! min ‖r − r_formula(orders(r))‖²
+//! subject to r ∈ [1 − PRICE_RANGE, 1 + PRICE_RANGE]
+//! ```
+//!
+//! # Why Basin + successive substitution
+//!
+//! - **Successive substitution** `r ← (1−α)r + α P(c(r))` is cheap and usually
+//!   lands near the fixed point; it is the warm start and the polish / fallback
+//!   when Basin reports failure or after a bound-clamped TRF finish.
+//! - **Basin `Trf`** (trust-region-reflective, dense Vec Jacobian) finishes the
+//!   bound-constrained NLS. Wasm-safe (no BLAS). When [`SolveOpts::warm_rel`]
+//!   matches the goods vector length, Basin starts from that vector and skips
+//!   successive substitution (CLI `mutate` / wasm apply-delta do this).
+//!
+//! Residual and [`LIMITATIONS`] are always part of the answer (I5).
+//!
+//! # Frozen labor / trade (planning implication)
+//!
+//! Plans that only change building levels or PMs re-equilibrate **prices and
+//! pop baskets**, not hire/fire, wages, or trade-center volumes. That keeps
+//! the inner problem convex-ish and fast, and matches the architecture freeze
+//! list: employment and trade are outer-loop / later-phase work.
 
 mod alerts;
 mod consumption;
@@ -38,7 +80,10 @@ pub use world::{
     WorldStatePop, WorldStateTrade, POP_SCALE,
 };
 
-/// Solver caveats copied into CLI JSON and the UI.
+/// Solver caveats copied into every [`PricesResult::limitations`] (CLI / UI / SQL).
+///
+/// Strings must stay aligned with [`docs/prices.md`](../../../docs/prices.md)
+/// “Limitations”. Tests assert the exact wording.
 ///
 /// 1. Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.
 /// 2. Prices are clamped to ±PRICE_RANGE; the clamp is part of the model.
@@ -60,6 +105,16 @@ pub const SUBSIDY_NOT_MODELED: &str = "Subsidies are not modeled; subsidy toggle
 ///
 /// Subsidy entries are accepted and ignored (no IR subsidy flag). Unknown
 /// building ids are no-ops. Does not mutate `world`.
+///
+/// # Arguments
+///
+/// * `world` — baseline snapshot; left unchanged.
+/// * `delta` — see [`WorldDelta`]: PM swaps clear that building’s saved IO;
+///   extra levels keep and scale saved IO; `subsidize` is ignored here.
+///
+/// # Returns
+///
+/// A new [`World`]. Pair with [`solve`] or use [`preview`] to re-solve in one call.
 pub fn apply_delta(world: &World, delta: &WorldDelta) -> World {
     let mut next = world.clone();
     for extra in &delta.extra_levels {
@@ -84,6 +139,25 @@ pub fn apply_delta(world: &World, delta: &WorldDelta) -> World {
 }
 
 /// Apply [`WorldDelta`] to a clone of `world` and re-solve. `world` is unchanged.
+///
+/// Prefer passing the baseline [`PricesResult::relative`] as
+/// [`SolveOpts::warm_rel`] so Basin skips successive substitution (what
+/// `vic3-api` mutate / apply-delta paths do).
+///
+/// # Arguments
+///
+/// * `world` / `defs` — same contract as [`solve`].
+/// * `delta` — applied via [`apply_delta`] before the solve.
+/// * `opts` — residual / iteration / warm-start controls.
+///
+/// # Returns
+///
+/// A full [`PricesResult`]. If `delta.subsidize` is non-empty,
+/// [`SUBSIDY_NOT_MODELED`] is appended to `limitations` (goods unchanged vs a
+/// subsidy-free delta).
+///
+/// Never fails with a Rust `Err`; insolvable markets surface as
+/// [`SolveStatus::Failed`] / [`SolveStatus::MaxIters`] plus residual.
 pub fn preview(
     world: &World,
     defs: &GameDefs,

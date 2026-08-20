@@ -1,4 +1,11 @@
-//! Closed-form Vic3 market price.
+//! Closed-form Vic3 market price and MAPI blend helpers.
+//!
+//! [`price`] / [`market_ratio`] implement the wiki formula with a documented
+//! zero-order convention ([`ORDER_EPS`]). [`market_access`] → [`effective_mapi`]
+//! → [`local_price`] are the Milestone-1 local blend used inside the residual
+//! (pops shop locally; state orders are then access-scaled into one whole-save
+//! market). Extra MAPI modifiers and overseas convoy constraints are out of
+//! scope until the IR carries them.
 
 /// Orders at or below this are treated as empty so `min(buy, sell)` never
 /// divides by a numerical zero. I1–I3 are required only for strictly larger
@@ -6,6 +13,8 @@
 pub const ORDER_EPS: f64 = 1e-12;
 
 /// Base market-access price impact, before multiplying by infrastructure access.
+///
+/// Vanilla uses `0.75`; [`effective_mapi`] = `BASE_MAPI * market_access`.
 pub const BASE_MAPI: f64 = 0.75;
 
 /// Buy/sell imbalance used by [`price`].
@@ -60,8 +69,9 @@ pub fn price(base: f64, buy: f64, sell: f64, price_range: f64) -> f64 {
 
 /// Infrastructure-only market access in `[0, 1]`.
 ///
-/// Missing data and zero usage default to full access. Overseas convoy and
-/// shipping-lane constraints are not represented in the current save IR.
+/// `clamp(infrastructure / infrastructure_usage, 0, 1)`. Missing data and zero
+/// usage default to full access (`1.0`). Overseas convoy and shipping-lane
+/// constraints are not represented in the current save IR.
 pub fn market_access(infrastructure: Option<f64>, usage: Option<f64>) -> f64 {
     match (infrastructure, usage) {
         (Some(infrastructure), Some(usage)) if usage > 0.0 => {
@@ -73,7 +83,9 @@ pub fn market_access(infrastructure: Option<f64>, usage: Option<f64>) -> f64 {
 
 /// Blend a pure state price with its market price using effective MAPI.
 ///
-/// Vic3 uses `local = mapi * market + (1 - mapi) * state`.
+/// Vic3: `local = mapi * market + (1 - mapi) * state`. Wage pops and building
+/// economics in the residual use this local price; substitution shares still
+/// come from **world** sell orders.
 pub fn local_price(effective_mapi: f64, market_price: f64, state_price: f64) -> f64 {
     let mapi = effective_mapi.clamp(0.0, 1.0);
     mapi * market_price + (1.0 - mapi) * state_price

@@ -2,6 +2,9 @@
 
 Inner problem: find relative prices `p` such that **pop consumption in the loop** is consistent with the wiki/game formula. Not an LP. Not “maximize welfare.”
 
+Crate API and solver rationale live in `vic3-prices` rustdoc (`solve`, `preview`, `alerts`, `warm_rel`, MAPI helpers, `LIMITATIONS`). This page is the design narrative; keep the numbered limitations list in sync with that const.
+
+Solved prices feed `PlanningState` (`good_prices` / modeled GDP) and, via `vic3-api`, the CLI/wasm/Tauri JSON surface plus SQL diagnostics and MCP `query` — those hosts do not re-derive the NLS.
 ## Market formula
 
 With `PRICE_RANGE` from defines (typically `0.75`):

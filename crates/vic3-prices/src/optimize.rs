@@ -2,7 +2,8 @@
 //!
 //! Candidates are PMs already used by the same building type in the world.
 //! Each trial replaces one PM slot on a type-aggregated clone and re-solves
-//! with a warm start. This is a heuristic, not a full combinatorial search.
+//! via [`crate::preview`] with a warm start. Heuristic only — see
+//! [`PM_SEARCH_HEURISTIC`] / [`MAX_PM_TRIALS`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -95,6 +96,19 @@ struct Scores {
 ///
 /// `world` is not mutated. Each trial calls [`preview`] with `opts.warm_rel`
 /// taken from `baseline.relative` when that vector is non-empty.
+///
+/// # Arguments
+///
+/// * `world` / `defs` — same as [`crate::solve`].
+/// * `baseline` — prior solve on `world` (scores + warm_rel source).
+/// * `opts` — residual / iteration budget for each trial preview.
+/// * `axis` — [`OptimizeAxis`] objective.
+///
+/// # Returns
+///
+/// [`OptimizeResult`] with suggested changes, score deltas, a compact prices
+/// summary, `limitations` (crate list + heuristic / tech-gating notes), and a
+/// [`WorldDelta`] suitable for a later apply. No Rust `Err`.
 pub fn optimize_pms(
     world: &World,
     defs: &GameDefs,
