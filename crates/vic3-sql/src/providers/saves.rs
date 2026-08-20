@@ -1,4 +1,7 @@
 //! Read-only `saves` catalog table (`docs/sql.md`).
+//!
+//! Rows come from [`crate::host::HostState`]'s in-memory catalog; `loaded` is
+//! true only for the entry identity currently bound by `use_save`.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -19,6 +22,7 @@ use crate::exec::memory_exec;
 use crate::host::HostState;
 use crate::schema::saves_schema;
 
+/// Table provider for `SELECT … FROM saves`.
 #[derive(Debug)]
 pub struct SavesProvider {
     host: Arc<HostState>,
@@ -57,6 +61,7 @@ impl SavesProvider {
                 None => country.append_null(),
             }
             location.append_value(entry.location.as_str());
+            // Identity without path: agent-facing columns only (name/location/mtime).
             let is_loaded = active.as_ref().is_some_and(|a| {
                 a.entry.name == entry.name
                     && a.entry.location == entry.location

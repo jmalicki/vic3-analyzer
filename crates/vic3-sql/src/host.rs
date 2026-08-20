@@ -1,6 +1,8 @@
 //! Host session state: catalog, `use_save`, and `latest.*` cache.
 //!
-//! Binding is a Rust API — never a mutating `SELECT` (`docs/sql.md`).
+//! Session binding is a Rust host API (`use_save`) — never a mutating
+//! `SELECT` (`docs/sql.md`). `active.*` tracks that bind; `latest.*` is a
+//! separate read-time cache that must not install the process analysis session.
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -24,6 +26,7 @@ pub struct EngineLoadOpts {
 }
 
 impl EngineLoadOpts {
+    /// Defaults: no tokens, empty `SolveOpts` JSON.
     pub fn new(defs_blob: impl Into<PathBuf>) -> Self {
         Self {
             defs_blob: defs_blob.into(),
@@ -39,6 +42,10 @@ impl EngineLoadOpts {
 }
 
 /// Host `use_save` arguments (`docs/mcp.md`) — Rust API, not SQL.
+///
+/// Provide exactly one of [`Self::name`] or [`Self::selector`]. `location` /
+/// `mtime` only apply to stub resolution when the same name appears under more
+/// than one allowlisted root.
 #[derive(Debug, Clone, Default)]
 pub struct UseSaveRequest {
     /// Filename stub (`autosave` or `autosave.v3`).
@@ -58,15 +65,18 @@ pub struct UseSaveResult {
     pub kind: String,
     pub in_game_date: Option<String>,
     pub country: Option<String>,
+    /// Always `true` on success (mirrors MCP / `saves.loaded` semantics).
     pub loaded: bool,
 }
 
+/// Bound session identity for `saves.loaded` and `active.*` providers.
 #[derive(Debug, Clone)]
 pub(crate) struct ActiveMeta {
     pub entry: SaveEntry,
     pub binding: Arc<SessionBinding>,
 }
 
+/// Cached max-mtime load for `latest.*` (independent of [`ActiveMeta`]).
 #[derive(Debug)]
 struct LatestCache {
     entry: SaveEntry,
@@ -78,6 +88,7 @@ struct LatestCache {
 pub(crate) struct HostState {
     catalog: RwLock<SaveCatalog>,
     active: RwLock<Option<ActiveMeta>>,
+    /// Invalidated on [`Self::refresh_catalog`]; keyed by entry identity.
     latest: RwLock<Option<LatestCache>>,
     load: EngineLoadOpts,
 }
@@ -116,6 +127,8 @@ impl HostState {
         *self.active.write().expect("active lock") = Some(meta);
     }
 
+    /// Rescan allowlisted roots and drop the `latest.*` cache so the next read
+    /// re-resolves max-mtime against the fresh catalog.
     pub(crate) fn refresh_catalog(&self, roots: &[SaveRoot]) -> Result<usize, SqlError> {
         let catalog = SaveCatalog::refresh(roots)?;
         let n = catalog.len();
@@ -124,6 +137,7 @@ impl HostState {
         Ok(n)
     }
 
+    /// Resolve stub XOR selector; map catalog ambiguity to [`SqlError::Ambiguous`].
     pub(crate) fn resolve_request(&self, req: &UseSaveRequest) -> Result<SaveEntry, SqlError> {
         let catalog = self.catalog.read().expect("catalog lock");
         match (&req.name, &req.selector) {
@@ -144,6 +158,11 @@ impl HostState {
         }
     }
 
+    /// Load + solve via `vic3-api`.
+    ///
+    /// `install == true` replaces the process-local analysis session (`use_save`);
+    /// `false` is for `latest.*` so querying convenience views does not mutate
+    /// the bound active save.
     pub(crate) fn load_entry(
         &self,
         entry: &SaveEntry,
@@ -168,7 +187,8 @@ impl HostState {
 
     /// Ensure `latest.*` binding for the current catalog max-mtime save.
     ///
-    /// Does **not** change the active session (`install = false`).
+    /// Does **not** change the active session (`install = false`). Reuses the
+    /// cache when the selected entry identity is unchanged.
     pub(crate) fn ensure_latest_binding(&self) -> Result<Arc<SessionBinding>, SqlError> {
         let entry = {
             let catalog = self.catalog.read().expect("catalog lock");
@@ -204,6 +224,7 @@ pub(crate) struct LoadedSave {
     pub country: Option<String>,
 }
 
+/// Cache key: stub + location + mtime + path (path guards against root moves).
 fn same_entry(a: &SaveEntry, b: &SaveEntry) -> bool {
     a.name == b.name && a.location == b.location && a.mtime == b.mtime && a.path == b.path
 }

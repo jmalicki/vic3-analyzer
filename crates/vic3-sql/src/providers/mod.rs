@@ -1,4 +1,8 @@
-//! Fact-table [`TableProvider`]s for a bound [`SessionBinding`].
+//! Fact-table [`TableProvider`]s plus catalog host registration.
+//!
+//! After [`register_all`], unqualified names and `active.*` share the bound
+//! snapshot. [`register_catalog_host`] leaves those unbound until `use_save`
+//! and registers lazy `latest.*` views that load without mutating the session.
 
 mod arrays;
 mod building_types;
@@ -54,6 +58,7 @@ pub enum FactTable {
     Countries,
 }
 
+/// All campaign fact tables registered for a binding.
 pub const FACT_TABLES: &[FactTable] = &[
     FactTable::States,
     FactTable::Goods,
@@ -96,6 +101,7 @@ impl FactTable {
     }
 }
 
+/// Concrete provider for one fact table over an in-memory binding.
 pub fn provider_for(table: FactTable, binding: Arc<SessionBinding>) -> Arc<dyn TableProvider> {
     match table {
         FactTable::States => Arc::new(StatesProvider::new(binding)),
@@ -130,7 +136,10 @@ fn partial(schema: &str, table: &str) -> TableReference {
     TableReference::partial(schema, table)
 }
 
-/// Register unqualified fact tables for the active in-memory binding.
+/// Register unqualified + `active.*` fact tables for the bound snapshot.
+///
+/// Called from `bind` and again after `use_save` so both namespaces track the
+/// same session (default search path ≡ `active`).
 pub async fn register_all(
     ctx: &SessionContext,
     binding: Arc<SessionBinding>,
@@ -144,7 +153,10 @@ pub async fn register_all(
     Ok(())
 }
 
-/// Register `saves` plus unbound `active.*` and lazy `latest.*` views.
+/// Register `saves`, unbound `active.*` / unqualified facts, and lazy `latest.*`.
+///
+/// Until `use_save`, scanning `active.*` yields [`crate::SqlError::Unbound`].
+/// `latest.*` may load independently without installing the active session.
 pub async fn register_catalog_host(
     ctx: &SessionContext,
     host: Arc<HostState>,

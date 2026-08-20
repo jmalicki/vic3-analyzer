@@ -202,10 +202,13 @@ pub struct AnalysisSnapshot {
     pub defs: vic3_defs::GameDefs,
     pub world: World,
     pub prices: PricesResult,
+    /// Played country tag when known.
     pub tag: Option<String>,
+    /// In-game date string when known.
     pub date: Option<String>,
 }
 
+/// Shared load + solve path for JSON install and owned snapshots.
 fn build_loaded_analysis(
     save_bytes: &[u8],
     tokens_bytes: Option<&[u8]>,
@@ -264,6 +267,9 @@ pub fn load_analysis_snapshot(
 }
 
 /// Path convenience for [`load_analysis_snapshot`].
+///
+/// Same `install` contract: `true` for session bind (`use_save`), `false` for
+/// read-side caches (`latest.*`).
 pub fn load_analysis_snapshot_from_path(
     save: &Path,
     tokens: Option<&Path>,
@@ -284,6 +290,9 @@ pub fn load_analysis_snapshot_from_path(
 }
 
 /// Load one analysis session and solve its baseline prices.
+///
+/// Always installs the process-local session (same as
+/// [`load_analysis_snapshot`] with `install = true`).
 pub fn load_analysis_json(
     save_bytes: &[u8],
     tokens_bytes: Option<&[u8]>,

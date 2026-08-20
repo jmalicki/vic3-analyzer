@@ -142,6 +142,7 @@ pub fn gaps_schema() -> SchemaRef {
     ]))
 }
 
+/// `saves` catalog columns (`docs/sql.md`).
 pub fn saves_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
         Field::new("name", DataType::Utf8, false),
