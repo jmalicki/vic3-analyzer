@@ -1,7 +1,15 @@
 //! Canonical browser/CLI allowlist for definition source paths.
+//!
+//! Rust owns this list. Browser walkers call the wasm export before reading a
+//! file; [`crate::load_from_files`] / [`crate::DefsBuilder`] apply it again as
+//! the trust boundary. Paths outside [`COMMON_DIRS`], English localization
+//! prefixes, and allowlisted icon / CoA leaf folders are skipped or pruned so
+//! a full install walk does not pull sound, map data, or unrelated `common/`
+//! trees into memory.
 
 use serde::{Deserialize, Serialize};
 
+/// `common/` subdirectories that definition loaders read.
 pub const COMMON_DIRS: &[&str] = &[
     "goods",
     "defines",
@@ -87,8 +95,15 @@ pub enum DefsPathClass {
 
 /// Classify a game-relative or arbitrarily rooted path.
 ///
-/// Rust owns this list. Browser walkers call the wasm export before reading a
-/// file, while `load_from_files` applies it again as the trust boundary.
+/// # Arguments
+///
+/// * `path` — any absolute or relative game path (`\` and `/` accepted)
+/// * `is_directory` — walkers pass `true` for directories so prune/descend apply
+///
+/// # Returns
+///
+/// How the walker or loader should treat the path. Only [`DefsPathClass::Read`]
+/// files are parsed into [`crate::GameDefs`].
 pub fn classify_defs_path(path: &str, is_directory: bool) -> DefsPathClass {
     let normalized = path.replace('\\', "/").to_lowercase();
     let segments = normalized

@@ -48,7 +48,7 @@ silently replaced). The flag tooltip is the localized country name when present.
 
 ## Pop consumption
 
-Pops buy from **need packages** by wealth. Substitution uses `min_supply_share` / `max_supply_share` (**I4**). SoL / real income can move requested quantities; that feedback sits inside the equilibrium, not as a frozen demand vector.
+Pops buy from **need packages** by wealth. Substitution uses `min_supply_share` / `max_supply_share` (**I4**; implemented in `vic3-defs::substitution_shares`). SoL / real income can move requested quantities; that feedback sits inside the equilibrium, not as a frozen demand vector.
 
 Current saves store pop size as `workforce` / `dependents`; both count as full
 household members for demand. Fixture/legacy saves may still use `size`,

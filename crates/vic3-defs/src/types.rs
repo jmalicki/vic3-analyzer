@@ -6,8 +6,15 @@ use crate::{GoodIdx, NeedIdx, NeedsVec, DEFAULT_PRICE_RANGE};
 
 /// Parsed Victoria 3 definitions used by the price solver and wasm UI.
 ///
-/// Built with [`crate::load_from_path`] from a game install or fixture tree, or
-/// with [`crate::decode_blob`] from a compact in-memory snapshot.
+/// Built with [`crate::load_from_path`] from a game install or fixture tree,
+/// [`crate::load_from_files`] / [`crate::DefsBuilder`] from an allowlisted
+/// in-memory selection, or [`crate::decode_blob`] from a postcard snapshot
+/// (wasm). Dense [`crate::GoodIdx`] / [`crate::NeedIdx`] vectors align with
+/// [`Self::goods_order`] / [`Self::needs_order`].
+///
+/// Icons and flags are PNG bytes ready for the browser; DDS stays on disk
+/// during load. Localization may be empty when English goods/country files
+/// were not selected.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameDefs {
     /// `NEconomy.PRICE_RANGE` (typically `0.75`).

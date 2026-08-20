@@ -3,6 +3,11 @@
 //! Full Clausewitz heraldry (masks, cantons, every trigger) is out of scope.
 //! This renders a small PNG from `pattern` + `color1` and optional centered
 //! colored/textured emblems so foreign states can show a recognizable flag.
+//!
+//! [`select_flag_coa`] picks among [`crate::FlagDefinition`] rows already on
+//! [`crate::GameDefs`]; [`select_coa`] is the load-time equivalent over a
+//! [`CoaLibrary`]. Unsupported triggers are skipped, never silently replaced
+//! (see [`docs/prices.md`](../../../docs/prices.md)).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -79,6 +84,17 @@ pub enum FlagTrigger {
 }
 
 /// Select the current CoA id for a country tag given enacted laws.
+///
+/// Prefers the highest-priority eligible definition whose rendered PNG is
+/// already present in `flags`. Unsupported triggers are skipped. Falls back
+/// to a flag keyed by the country tag when present.
+///
+/// # Arguments
+///
+/// * `flag_defs` — tag → prioritized definitions (from [`crate::GameDefs`])
+/// * `flags` — CoA id → PNG bytes
+/// * `tag` — country definition / tag string
+/// * `laws` — active law ids for the country
 pub fn select_flag_coa(
     flag_defs: &BTreeMap<String, Vec<crate::FlagDefinition>>,
     flags: &BTreeMap<String, Vec<u8>>,

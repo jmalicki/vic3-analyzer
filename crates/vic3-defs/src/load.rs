@@ -1,3 +1,33 @@
+//! Load Clausewitz definition trees into [`crate::GameDefs`].
+//!
+//! # Install vs fixture
+//!
+//! [`load_from_path`] accepts either:
+//! - a **game install** whose data lives under `game/` (Steam / PDX launcher)
+//! - a **fixture** / unpacked `game` directory that already has `common/` at
+//!   its root
+//!
+//! Resolution looks for `common/goods` (or `game/common/goods`) and fails with
+//! [`crate::DefsError::NotAGameRoot`] otherwise.
+//!
+//! # In-memory / wasm path
+//!
+//! [`load_from_files`] and [`DefsBuilder`] apply [`crate::classify_defs_path`] as
+//! the trust boundary, then resolve string good/need ids into dense indices via
+//! staging. Prefer [`DefsBuilder`] when CoA art must arrive in batches so a
+//! browser tab never buffers hundreds of megabytes at once.
+//!
+//! # Expected layout
+//!
+//! Relative paths under the data root (also listed on the crate root):
+//! - `common/goods`, `common/defines`, `common/production_methods`, …
+//! - `gfx/coat_of_arms/{patterns,colored_emblems,textured_emblems}`
+//! - allowlisted `gfx/interface/icons/…` leaf dirs
+//! - `localization/english/*_l_*_english.yml` for selected prefixes
+//!
+//! All `*.txt` files in those directories merge in sorted path order; later
+//! files override the same id.
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -16,13 +46,8 @@ use crate::{
 
 /// Load definitions from a Victoria 3 install or a fixture tree.
 ///
-/// # Expected layout
-///
-/// `root` may be either:
-/// - a game install whose data lives under `game/` (Steam/PDX launcher layout)
-/// - a fixture / unpacked `game` directory that already contains `common/`
-///
-/// Relative paths under the data root:
+/// See the module overview for install vs fixture roots. Relative paths under
+/// the data root:
 /// - `common/goods` — good id → `cost` (base price); `base_price` is also accepted
 /// - `common/defines` — `NEconomy.PRICE_RANGE` (also `NDefines.NEconomy` or top-level)
 /// - `common/production_methods` — PM ids plus `goods_input_*` / `goods_output_*`
@@ -36,6 +61,11 @@ use crate::{
 ///
 /// All `*.txt` files in those directories are merged in sorted path order; later
 /// files override the same id.
+///
+/// # Errors
+///
+/// - [`DefsError::NotAGameRoot`] — neither `common/goods` nor `game/common/goods`
+/// - [`DefsError::Io`] / [`DefsError::Parse`] — read or Clausewitz failures
 pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
     let data_root = resolve_data_root(root.as_ref())?;
     let mut defs = StagingDefs {
@@ -63,7 +93,13 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
 ///
 /// Paths may be rooted anywhere, but must contain `common/...` (for example
 /// `game/common/goods/00_goods.txt`). Goods localization under
-/// `localization/**/goods_l_*.yml` is optional.
+/// `localization/**/goods_l_*.yml` is optional. Unsupported paths are dropped
+/// via [`crate::classify_defs_path`].
+///
+/// # Errors
+///
+/// - [`DefsError::NotAGameRoot`] — no `common/goods` file in the selection
+/// - [`DefsError::Parse`] — Clausewitz / localization parse failure
 pub fn load_from_files(
     files: impl IntoIterator<Item = (String, Vec<u8>)>,
 ) -> Result<GameDefs, DefsError> {
@@ -117,6 +153,10 @@ impl DefsBuilder {
     /// Absorb one batch. Unsupported paths are dropped, as they are on the
     /// one-shot path, so the allowlist stays the trust boundary. Text is
     /// parsed here; a later merge in path order still applies overrides.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DefsError::Parse`] when an allowlisted text file is invalid.
     pub fn add_files(
         &mut self,
         files: impl IntoIterator<Item = (String, Vec<u8>)>,
@@ -233,6 +273,12 @@ impl DefsBuilder {
         Ok(names)
     }
 
+    /// Merge parses, render remaining coats, and resolve string ids into
+    /// dense [`crate::GoodIdx`] / [`crate::NeedIdx`] indices.
+    ///
+    /// # Errors
+    ///
+    /// Same class of failures as [`load_from_files`].
     pub fn finish(mut self) -> Result<GameDefs, DefsError> {
         self.merge_texts()?;
         let ParsedTexts {

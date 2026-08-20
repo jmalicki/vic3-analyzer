@@ -1,8 +1,19 @@
 //! Surgical plaintext patches of Vic3 `.v3` gamestate text.
 //!
-//! This module never round-trips the serde IR (lossy). It locates
-//! `building_manager.database` entries in the original uncompressed text and
-//! rewrites `production_methods` / `levels` in place.
+//! # Why text patching (not IR round-trip)
+//!
+//! Serializing [`crate::Save`] back to Clausewitz would drop unknown keys and
+//! reorder maps. Instead, [`export_save`] locates
+//! `building_manager.database` entries in the **original uncompressed** text
+//! and rewrites `production_methods` / `levels` in place. Origin bytes are
+//! never written; the return value is a new buffer.
+//!
+//! Zip saves are re-emitted as a single `gamestate` member. Raw text stays raw
+//! text. Ironman / binary envelopes return [`ExportError::BinaryNotSupported`].
+//!
+//! Contrasts with `vic3_prices::preview` / `WorldDelta`: those mutate a cloned
+//! world in memory and re-solve prices without writing a file. See
+//! [`docs/architecture.md`](../../../docs/architecture.md) (patch-export).
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -10,9 +21,10 @@ use std::io::{Cursor, Read, Write};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-/// JSON delta applied to a plaintext save.
+/// JSON delta applied to a plaintext save by [`export_save`].
 ///
 /// `extra_levels` is additive on the saved `levels` / `level` field.
+/// Unknown building ids error rather than inventing entries.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct SavePatch {
     #[serde(default)]
@@ -21,12 +33,14 @@ pub struct SavePatch {
     pub extra_levels: Vec<ExtraLevelsPatch>,
 }
 
+/// Replace a building's active production-method list (one id per PM group).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ProductionMethodPatch {
     pub building_id: u32,
     pub methods: Vec<String>,
 }
 
+/// Add levels on top of the saved `levels` / `level` field.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ExtraLevelsPatch {
     pub building_id: u32,
@@ -66,7 +80,15 @@ pub enum ExportError {
 /// Patch `original` and return new bytes. The input slice is never written.
 ///
 /// Zip input is re-emitted as a single `gamestate` member. Raw text input
-/// stays raw text.
+/// stays raw text. An empty [`SavePatch`] returns a copy of `original`.
+///
+/// # Errors
+///
+/// - [`ExportError::BinaryNotSupported`] — ironman / binary envelope
+/// - [`ExportError::BuildingNotFound`] — patch names a missing building id
+/// - [`ExportError::MissingBuildingManager`] / [`ExportError::MissingField`] /
+///   [`ExportError::Malformed`] — text shape does not match expectations
+/// - [`ExportError::MissingGamestate`] / [`ExportError::Zip`] — zip issues
 pub fn export_save(original: &[u8], patch: &SavePatch) -> Result<Vec<u8>, ExportError> {
     if patch.is_empty() {
         return Ok(original.to_vec());

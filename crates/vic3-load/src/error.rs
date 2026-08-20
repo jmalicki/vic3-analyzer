@@ -2,6 +2,10 @@ use std::io;
 use vic3save::{Vic3Error, Vic3ErrorKind};
 
 /// Failure while loading a Vic3 save or token map.
+///
+/// Distinguished from serde field errors: [`Self::MissingTokens`] means the
+/// envelope is binary and no resolver was supplied, not that a key failed to
+/// deserialize.
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
     /// Binary (ironman) save encountered without a token map.

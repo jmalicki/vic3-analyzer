@@ -20,7 +20,11 @@ impl NeedIdx {
         u16::try_from(index).ok().map(Self)
     }
 
-    /// Construct from a position in `needs_order`. Panics if `index` exceeds `u16::MAX`.
+    /// Construct from a position in `needs_order`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` exceeds `u16::MAX`.
     #[inline]
     pub fn from_usize(index: usize) -> Self {
         Self::try_from_usize(index).expect("need count fits in u16")

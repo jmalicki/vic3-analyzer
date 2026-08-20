@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use crate::{DefsError, GameDefs};
 
 /// Postcard blob format version. Bump when [`GameDefs`] is not backward compatible.
+///
+/// [`decode_blob`] checks this **before** deserializing the payload so a stale
+/// blob reports [`DefsError::BlobVersion`] instead of a confusing field error.
 pub const BLOB_VERSION: u32 = 11;
 
 #[derive(Serialize, Deserialize)]
@@ -13,8 +16,13 @@ struct DefsBlob {
 
 /// Encode definitions into a compact, filesystem-free blob (postcard).
 ///
-/// Intended for wasm: the CLI builds this from a game install; the UI only
-/// calls [`decode_blob`].
+/// Intended for wasm: the CLI / desktop builds this from a game install or
+/// fixture; the UI only calls [`decode_blob`]. Icons and flags are PNG bytes
+/// already; DDS stays on disk at load time.
+///
+/// # Errors
+///
+/// Returns [`DefsError::BlobEncode`] on postcard failure.
 pub fn encode_blob(defs: &GameDefs) -> Result<Vec<u8>, DefsError> {
     postcard::to_stdvec(&DefsBlob {
         version: BLOB_VERSION,
@@ -29,6 +37,11 @@ pub fn encode_blob(defs: &GameDefs) -> Result<Vec<u8>, DefsError> {
 /// format does not deserialize as the current [`GameDefs`], so decoding both at
 /// once would report whatever the payload happened to trip over — an invalid
 /// UTF-8 string, say — instead of the version mismatch that actually explains it.
+///
+/// # Errors
+///
+/// - [`DefsError::BlobVersion`] — `found !=` [`BLOB_VERSION`]
+/// - [`DefsError::BlobDecode`] — corrupt or truncated bytes
 pub fn decode_blob(bytes: &[u8]) -> Result<GameDefs, DefsError> {
     let (version, payload) =
         postcard::take_from_bytes::<u32>(bytes).map_err(DefsError::BlobDecode)?;
