@@ -14,14 +14,16 @@ It is **not** the full save. Hash it. **I8:** identical state ⇒ identical hash
 | --- | --- |
 | `date`, `country` | `meta_data.game_date`; country `definition` / tag |
 | `techs` | Country tech fields + top-level `technology` manager (`acquired_technologies`) |
+| `laws` | Active law script ids from the law manager for the country |
+| `infamy` | Country `infamy` when present and finite |
 | `queued_tech` | Country `currently_researching`, else `technology.research_technology` |
 | `queued_building` | First private, then government, construction order in owned states |
 | `good_prices`, `gdp` | Last price solve (`gdp` only via `*_with_prices`) |
 | `treasury`, `weekly_balance`, `debt_*`, `credit_*`, `solvent` | Country budget |
 | `population_weighted_wealth` | Pops in states owned by the country |
 | `army_power_projection`, `interest_states` / `interest_regions` | Country `cached_total_army_power_projection` (else army formation `power_projection`); `interest_marker_manager` + country `declared_interests` (normalized for DSL `state=` / `region=`) |
-| `building_level_deltas` | Empty at load; sim branches fill deltas |
-| `queued_interest`, `queued_army_target` | Empty at load; sim-only in-flight interest / army expansion |
+| `building_level_deltas`, `pm_overrides`, `tax_level` | Empty / zero at load; sim branches fill them |
+| `queued_interest`, `queued_army_target`, `queued_law` | Empty at load; sim-only in-flight interest / army / law |
 
 `from_world` reads the same projected fields off [`WorldCountry`](../crates/vic3-prices/src/world.rs) after `World::from_save`.
 
@@ -30,12 +32,12 @@ It is **not** the full save. Hash it. **I8:** identical state ⇒ identical hash
 Nodes: `PlanningState`.  
 Edges:
 
-- **Decision** (0 days): queue a tech, start a building, declare interest, expand army power, switch PM, enact a law checkpoint, adjust a tax that the goal cares about, …
-- **At most one event-wait** per expansion: wait until tech finishes, a construction slot frees, interest establishes, army expansion completes, a law checkpoint, or payday **only if solvency is an open atom**.
+- **Decision** (0 days): queue a tech, start a building, declare interest, expand army power, **switch PM**, **queue a law checkpoint**, **adjust tax** when `weekly_balance` is open, …
+- **At most one event-wait** per expansion: wait until tech finishes, a construction slot frees, interest establishes, army expansion completes, a **law** enacts, or payday **only if solvency is an open atom**.
 
 **I6:** event-wait never decreases date. No wait edge if nothing is in flight and solvency is not open.
 
-Successors are **goal-relevant** only (the compiled predicate’s atoms). Do not enumerate the whole game.
+Successors are **goal-relevant** only (the compiled predicate’s atoms). Do not enumerate the whole game. PM switches and building-level adds are capped (`max_pm_candidates` / `max_pm_overrides` / `max_added_levels_per_type`); tax steps are capped (`max_tax_steps`).
 
 After build/PM edges, re-solve prices (frozen labor/trade still apply).
 
@@ -56,14 +58,16 @@ Heuristic `h`: admissible estimate of remaining **days**. **I7:** on tiny constr
 Event-wait and decision edges are just `successors()`. Goal/defs ride on the node (or an `Arc` it holds).
 
 Production `Vic3Node` uses the compiled goal as a dependency DAG relaxation.
-Research, interest, and raisable army-power atoms contribute their fixed model
+Research, interest, raisable army-power, and law atoms contribute their fixed model
 durations whenever still open, independent of which item (if any) is queued; AND
 takes the maximum child bound (actions may overlap), OR takes the minimum, and
-NOT / atoms without a proven timing model (construction, munitions price,
-fiscal, SoL, …) contribute zero. Keeping the bound stable across zero-day queue
-edges preserves A* consistency when closed nodes are not reopened.
-Property tests compare this bound with true remaining costs for reachable
-research formulas.
+NOT / atoms without a proven timing model (fiscal payday, SoL, tax, …) contribute
+zero. Open `good_price` / `gdp` atoms contribute `construction_days` when no
+zero-day SwitchPm candidate exists for those atoms; otherwise they contribute
+zero so a free PM close stays admissible. Keeping the bound stable across
+zero-day queue edges preserves A* consistency when closed nodes are not
+reopened. Property tests compare this bound with true remaining costs for
+reachable research formulas.
 
 ## Non-tech action readiness
 
@@ -77,10 +81,12 @@ Paradox treasury simulation:
 - Each payday applies the **frozen** saved `weekly_balance` sample to treasury
   and debt principal (surplus pays principal first, then raises cash; deficit
   spends cash then borrows), then refreshes `credit_headroom` / `solvent`.
-- `weekly_balance` itself is an input, not a transition target: unmet income
-  goals stay gaps-only until tax/PM actions (later). SoL wealth is unchanged.
-- No interest rate schedule, gold reserve floor, credit-limit growth, or
-  investment pool — only the frozen balance vs known principal/credit book.
+- Open `weekly_balance` goals use **AdjustTax**: a zero-day step shifts the
+  frozen balance sample by `tax_balance_per_step` (default 50) and records a
+  `tax_level` offset capped by `max_tax_steps`. This is not Paradox’s tax UI.
+- SoL wealth is unchanged. No interest rate schedule, gold reserve floor,
+  credit-limit growth, or investment pool — only the frozen balance vs known
+  principal/credit book, plus the compact tax offset.
 
 Declared interest and army power projection both **project from save IR** and
 have compact sim actions: queue a goal-relevant interest (`state=` / `region=`)
@@ -89,20 +95,36 @@ duration (`interest_days` / `army_expansion_days`, defaults 90 / 180). Completin
 interest inserts the id into `interest_states` or `interest_regions`; completing
 army sets `army_power_projection` to at least the queued target (aligned with
 `DECLARE_WAR_ARMY_THRESHOLD` / `army_power_projection >= 100` compile constants).
-These queues share the single in-flight slot with tech and building, so a
+These queues share the single in-flight slot with tech, building, and law, so a
 declare-war branch that still needs both interest and army pays the sum of the
 two waits even though the heuristic AND-bound is their maximum.
 
-The first economy action is a building-level decision followed by a fixed-time
-construction event and price re-solve. `vic3-prices` preserves the building's
-staffing ratio and scales absolute saved IO per level, while leaving unrelated
-employment, wages, and trade frozen. `PlanningState` hashes compact per-type
-level deltas and its single queued building; immutable world/defs/solver inputs
-ride outside the A* key. Successors select only producers/consumers relevant to
-an open `good_price` atom; increasing GDP goals consider the three highest
-current output-value building types. Added levels are capped per type, keeping
-the search finite. Construction timing is a model constant, not a claim about
-Paradox's queue.
+**Law checkpoints:** `has_law(…)` reads projected active laws (`law_` prefix
+insensitive). Successors queue the missing law then event-wait `law_days`
+(default 180). Infamy is projected onto `PlanningState` for later declare-war
+extras but is not yet an atom or action.
+
+**Switch PM:** when economy context is present and an open `good_price` / `gdp`
+atom can be helped by an alternate production method from defs groups (or
+observed peer PMs), emit a capped set of zero-day `SwitchPm` decisions. Applying
+one stores a per-building override, clears that building’s saved IO via the
+world clone, and re-solves prices. Branching is bounded by
+`max_pm_candidates` / `max_pm_overrides`.
+
+The first economy construction action is a building-level decision followed by a
+fixed-time construction event and price re-solve. `vic3-prices` preserves the
+building's staffing ratio and scales absolute saved IO per level, while leaving
+unrelated employment, wages, and trade frozen. `PlanningState` hashes compact
+per-type level deltas, PM overrides, tax level, and its single queued
+building/law; immutable world/defs/solver inputs ride outside the A* key.
+Successors select only producers/consumers relevant to an open `good_price`
+atom; increasing GDP goals consider the three highest current output-value
+building types. Added levels are capped per type, keeping the search finite.
+Construction timing is a model constant, not a claim about Paradox's queue.
+
+**Research innovation capacity** (queued-tech throughput gates beyond a single
+queue head) stays **sim-only / undocumented as compile conjuncts** for now —
+`research(tech=…)` still compiles to `has_tech` alone.
 
 ## P9a vs P9b
 

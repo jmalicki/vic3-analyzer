@@ -58,6 +58,16 @@ pub struct PlanningParts {
     pub queued_interest: Option<QueuedInterest>,
     /// Target army power projection after the in-flight expansion completes.
     pub queued_army_target: Option<f64>,
+    /// Active law script ids (`law_autocracy`, …).
+    pub laws: Vec<String>,
+    /// Law currently being enacted (sim branch only).
+    pub queued_law: Option<String>,
+    /// Country infamy when present on the save.
+    pub infamy: Option<f64>,
+    /// Building-id → production methods overridden on this branch.
+    pub pm_overrides: BTreeMap<u32, Vec<String>>,
+    /// Tax level offset from the saved baseline (`0` at load).
+    pub tax_level: i8,
 }
 
 impl Default for PlanningParts {
@@ -83,6 +93,11 @@ impl Default for PlanningParts {
             queued_building: None,
             queued_interest: None,
             queued_army_target: None,
+            laws: Vec::new(),
+            queued_law: None,
+            infamy: None,
+            pm_overrides: BTreeMap::new(),
+            tax_level: 0,
         }
     }
 }
@@ -131,6 +146,16 @@ pub struct PlanningState {
     pub queued_interest: Option<QueuedInterest>,
     /// Army power target currently in flight (sim branch only).
     pub queued_army_target: Option<f64>,
+    /// Active law script ids projected from the save / sim enactments.
+    pub laws: BTreeSet<String>,
+    /// Law enactment currently in flight (sim branch only).
+    pub queued_law: Option<String>,
+    /// Country infamy when present on the save (`None` when missing).
+    pub infamy: Option<f64>,
+    /// Per-building production-method overrides applied on this branch.
+    pub pm_overrides: BTreeMap<u32, Vec<String>>,
+    /// Tax level offset from the saved baseline (`0` at load).
+    pub tax_level: i8,
 }
 
 impl Default for PlanningState {
@@ -164,6 +189,11 @@ impl PartialEq for PlanningState {
             && self.queued_building == other.queued_building
             && self.queued_interest == other.queued_interest
             && f64_option_bits_eq(self.queued_army_target, other.queued_army_target)
+            && self.laws == other.laws
+            && self.queued_law == other.queued_law
+            && f64_option_bits_eq(self.infamy, other.infamy)
+            && self.pm_overrides == other.pm_overrides
+            && self.tax_level == other.tax_level
     }
 }
 
@@ -195,6 +225,15 @@ impl Hash for PlanningState {
         self.queued_building.hash(state);
         self.queued_interest.hash(state);
         hash_f64_option(self.queued_army_target, state);
+        self.laws.hash(state);
+        self.queued_law.hash(state);
+        hash_f64_option(self.infamy, state);
+        self.pm_overrides.len().hash(state);
+        for (id, methods) in &self.pm_overrides {
+            id.hash(state);
+            methods.hash(state);
+        }
+        self.tax_level.hash(state);
     }
 }
 
@@ -284,6 +323,11 @@ impl PlanningState {
             queued_building: parts.queued_building,
             queued_interest: parts.queued_interest,
             queued_army_target: parts.queued_army_target,
+            laws: parts.laws.into_iter().collect(),
+            queued_law: parts.queued_law,
+            infamy: parts.infamy,
+            pm_overrides: parts.pm_overrides,
+            tax_level: parts.tax_level,
         }
     }
 
@@ -293,6 +337,7 @@ impl PlanningState {
             || self.queued_building.is_some()
             || self.queued_interest.is_some()
             || self.queued_army_target.is_some()
+            || self.queued_law.is_some()
     }
 
     /// Project the player country and last price solve into a planning node.
@@ -304,7 +349,8 @@ impl PlanningState {
     /// `interest_marker_manager` / country `declared_interests`. Weekly balance
     /// is the last saved sample; population-weighted wealth is computed from
     /// pops in states owned by this country. Solvency requires known principal
-    /// and credit. Missing metrics remain `None`. GDP defaults to `0` here; use
+    /// and credit. Active laws and infamy come from country / law manager rows.
+    /// Missing metrics remain `None`. GDP defaults to `0` here; use
     /// [`Self::from_save_with_prices`] for modeled GDP.
     pub fn from_save(
         save: &Save,
@@ -376,9 +422,18 @@ impl PlanningState {
             credit_headroom,
             building_level_deltas: BTreeMap::new(),
             queued_building: save.queued_building_for(country_id),
-            // Interest/army queues are sim-only; saves do not expose them.
+            // Interest/army/law queues and PM/tax deltas are sim-only.
             queued_interest: None,
             queued_army_target: None,
+            laws: save
+                .active_laws(country_id)
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            queued_law: None,
+            infamy: country.infamy.filter(|value| value.is_finite()),
+            pm_overrides: BTreeMap::new(),
+            tax_level: 0,
         })
     }
 
@@ -421,10 +476,10 @@ impl PlanningState {
     ///
     /// Techs and research/construction queue heads come from [`WorldCountry`]
     /// (filled by [`World::from_save`] from save IR). Army power and declared
-    /// interest are projected the same way. Population-weighted wealth uses pops
-    /// in states owned by this country. Solvency and budget lines come from
-    /// [`WorldCountry`]. GDP defaults to `0`; use [`Self::from_world_with_prices`]
-    /// for modeled GDP.
+    /// interest are projected the same way. Laws and infamy come from
+    /// [`WorldCountry`]. Population-weighted wealth uses pops in states owned
+    /// by this country. Solvency and budget lines come from [`WorldCountry`].
+    /// GDP defaults to `0`; use [`Self::from_world_with_prices`] for modeled GDP.
     pub fn from_world(
         world: &World,
         country_tag: &str,
@@ -454,6 +509,11 @@ impl PlanningState {
             queued_building: country.queued_building.clone(),
             queued_interest: None,
             queued_army_target: None,
+            laws: country.laws.iter().cloned().collect(),
+            queued_law: None,
+            infamy: country.infamy,
+            pm_overrides: BTreeMap::new(),
+            tax_level: 0,
         })
     }
 
@@ -515,6 +575,21 @@ impl PlanningState {
     pub fn has_interest_region(&self, id: &str) -> bool {
         self.interest_regions.contains(id)
     }
+
+    /// Whether `has_law(id)` holds (case / `law_` prefix insensitive).
+    pub fn has_law(&self, id: &str) -> bool {
+        let key = law_key(id);
+        self.laws.iter().any(|law| law_key(law) == key)
+    }
+}
+
+/// Compact law id for DSL matching (`law_autocracy` ↔ `autocracy`).
+pub fn law_key(raw: &str) -> String {
+    let lower = raw.trim().to_ascii_lowercase();
+    lower
+        .strip_prefix("law_")
+        .unwrap_or(lower.as_str())
+        .to_string()
 }
 
 fn owned_state_ids(world: &World, country: &WorldCountry) -> BTreeSet<u32> {
@@ -739,10 +814,13 @@ mod tests {
         assert!(!state.has_tech("nitroglycerin"));
         assert!(state.queued_tech.is_none());
         assert!(state.queued_building.is_none());
+        assert!(state.has_law("law_autocracy") || state.has_law("autocracy"));
+        assert_eq!(state.infamy, Some(12.5));
 
         let world = World::from_save(&save, &vic3_defs::GameDefs::default());
         let from_world = PlanningState::from_world(&world, "GER", BTreeMap::new()).unwrap();
         assert_eq!(from_world, state);
+        assert_eq!(world.countries[0].infamy, Some(12.5));
     }
 
     #[test]

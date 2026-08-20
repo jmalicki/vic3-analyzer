@@ -207,6 +207,11 @@ fn compile_pred(pred: RawPred) -> Result<Goal, GoalError> {
             let tech = first_ident(&pred, "tech").ok_or(GoalError::ResearchTech)?;
             Ok(Goal::Atom(Atom::HasTech(tech)))
         }
+        "has_law" => {
+            let law = first_ident(&pred, "law")
+                .ok_or_else(|| GoalError::Parse("has_law requires a law id".into()))?;
+            Ok(Goal::Atom(Atom::HasLaw(law)))
+        }
         "solvent" if pred.args.is_empty() && pred.rel.is_none() => Ok(Goal::Atom(Atom::Solvent)),
         "interest_in" => {
             if let Some(id) = named(&pred, "state") {
