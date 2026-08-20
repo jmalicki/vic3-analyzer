@@ -89,6 +89,7 @@ fn gaps_batch(goal: &vic3_goals::Goal, state: &PlanningState) -> DfResult<Record
 fn format_atom(atom: &Atom) -> String {
     match atom {
         Atom::HasTech(tech) => format!("has_tech({tech})"),
+        Atom::HasLaw(law) => format!("has_law({law})"),
         Atom::GoodPrice { good, rel, value } => {
             format!("good_price({good}) {} {value}", rel_str(*rel))
         }
