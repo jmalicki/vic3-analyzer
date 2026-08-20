@@ -1,4 +1,7 @@
 //! `latest.*` fact tables: resolve max-mtime save at read time without mutating session.
+//!
+//! Distinct from `active.*`: a `SELECT` here must not call `use_save` or install
+//! the process analysis session (`docs/sql.md`).
 
 use std::any::Any;
 use std::sync::Arc;
@@ -15,6 +18,10 @@ use crate::host::HostState;
 use crate::providers::{self, FactTable};
 use crate::SqlError;
 
+/// Lazy view over the catalog's max-mtime save for one fact table.
+///
+/// On scan, ensures a cached binding via [`HostState::ensure_latest_binding`]
+/// (`install = false`) then delegates to the concrete fact provider.
 #[derive(Debug)]
 pub struct LatestFactProvider {
     host: Arc<HostState>,
@@ -69,7 +76,10 @@ impl TableProvider for LatestFactProvider {
     }
 }
 
-/// Fact table that errors until `use_save` / `bind` installs a provider.
+/// Placeholder for `active.*` / unqualified facts until `use_save` / `bind`.
+///
+/// Schema is still advertised so information_schema and planning see columns;
+/// scans fail with [`SqlError::Unbound`].
 #[derive(Debug)]
 pub struct UnboundFactProvider {
     schema: SchemaRef,

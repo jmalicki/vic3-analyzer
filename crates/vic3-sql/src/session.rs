@@ -1,4 +1,7 @@
 //! [`SqlEngine`]: DataFusion [`SessionContext`] + catalog / session binding.
+//!
+//! Two construction paths: [`SqlEngine::bind`] (in-memory snapshot, no catalog)
+//! and [`SqlEngine::with_catalog`] (host `use_save` + `saves` / `latest.*`).
 
 use std::sync::Arc;
 
@@ -20,6 +23,7 @@ pub struct SqlEngine {
     ctx: SessionContext,
     /// Direct bind path (no catalog).
     binding: Option<Arc<SessionBinding>>,
+    /// Present when constructed with [`Self::with_catalog`].
     host: Option<Arc<HostState>>,
 }
 
@@ -42,7 +46,10 @@ impl SqlEngine {
         })
     }
 
-    /// Open with a save catalog; fact tables require [`Self::use_save`] (or `latest.*`).
+    /// Open with a save catalog; `active.*` / unqualified facts need [`Self::use_save`].
+    ///
+    /// `latest.*` and `saves` are queryable immediately. Binding is never done
+    /// via SQL mutation.
     pub async fn with_catalog(
         catalog: SaveCatalog,
         load: EngineLoadOpts,
