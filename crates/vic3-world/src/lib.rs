@@ -1,6 +1,32 @@
-//! Compact [`PlanningState`] projection of a save plus last price solve.
+//! Compact [`PlanningState`] — the planning stack's world node.
 //!
-//! This is **not** the full save. Hash it: identical state ⇒ identical hash (I8).
+//! # Role
+//!
+//! Downstream crates never search the full save IR. They read this projection:
+//! - `vic3-goals` evaluates DSL atoms against it
+//! - `vic3-sim` emits goal-relevant successors that mutate a clone
+//! - `vic3-plan` interns A* nodes by [`PlanningState::fingerprint`] (I8)
+//!
+//! This is **not** the full save. Identical state ⇒ identical hash (I8).
+//!
+//! # Fill: save vs default
+//!
+//! | Field | At load (`from_save` / `from_world`) | Default / sim-only |
+//! | --- | --- | --- |
+//! | `date`, `country` | save meta / tag | `1836.1.1` / empty |
+//! | `techs`, `queued_tech`, `queued_building` | tech manager + construction heads | empty |
+//! | `laws`, `infamy` | law manager / country | empty / `None` |
+//! | `good_prices` | last price solve | empty map |
+//! | `gdp` | `0` unless `*_with_prices` (owned building revenue) | `0` |
+//! | budget / `solvent` / SoL proxy | country budget + owned-state pops | false / `0` / `None` |
+//! | army / interest | country cache + interest markers | `0` / empty |
+//! | `building_level_deltas`, `pm_overrides`, `tax_level` | empty / `0` | sim branches |
+//! | `queued_interest`, `queued_army_target`, `queued_law` | always `None` | sim in-flight queues |
+//!
+//! Missing principal/credit leaves `solvent` false (no treasury-sign guess).
+//! Unknown country tag → [`WorldError::UnknownCountry`].
+//!
+//! See [`docs/planning.md`](../../../docs/planning.md).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
@@ -102,59 +128,59 @@ impl Default for PlanningParts {
     }
 }
 
-/// Compact world used by the goal DSL and (later) A*.
+/// Compact world node for DSL eval, sim successors, and A* intern keys.
 ///
-/// Fields are exactly the atoms the compiled goal can read in phase 7a, plus
-/// treasury / queued-tech so later successors can wait on payday or research.
+/// Fields cover every atom `vic3-goals` can read, plus queue / delta slots
+/// `vic3-sim` needs for waits and re-solves. Hash/eq use `f64::to_bits` (I8).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningState {
     pub date: Vic3Date,
     /// Country tag (`GER`, `FRA`, …).
     pub country: String,
-    /// Researched technology ids.
+    /// Researched technology ids (save + completed sim research).
     pub techs: BTreeSet<String>,
     /// Market prices after the last solve (good id → price).
     pub good_prices: BTreeMap<String, f64>,
-    /// Known remaining credit before exhaustion (`principal < credit`).
+    /// True only when known `credit_headroom > 0` (not treasury sign).
     pub solvent: bool,
     pub treasury: f64,
-    /// Army power projection. Default `0` when the save does not expose it.
+    /// Army power projection. `0` when the save does not expose it.
     pub army_power_projection: f64,
-    /// State-region / state ids in which the country has declared interest.
+    /// Normalized state ids for DSL `interest_in(state=…)`.
     pub interest_states: BTreeSet<String>,
-    /// Strategic-region ids in which the country has declared interest.
+    /// Normalized strategic-region ids for DSL `interest_in(region=…)`.
     pub interest_regions: BTreeSet<String>,
-    /// Technology currently in the research queue, if any.
+    /// Research queue head from save, or sim `QueueTech`.
     pub queued_tech: Option<String>,
-    /// Current GDP after prices (model series, not Paradox’s binary).
+    /// Modeled GDP (`*_with_prices` / sim re-solve); else `0` at load.
     pub gdp: f64,
     /// Most recent finite saved net weekly-budget sample.
     pub weekly_balance: Option<f64>,
-    /// Population-weighted saved pop wealth, exposed as an SoL proxy.
+    /// Population-weighted saved pop wealth (SoL proxy); `None` if unknown.
     pub population_weighted_wealth: Option<f64>,
     /// Outstanding debt principal when present on the save budget.
     pub debt_principal: Option<f64>,
     /// Credit limit when present on the save budget.
     pub credit_limit: Option<f64>,
-    /// Remaining credit (`credit_limit - debt_principal`) when both are known.
+    /// `credit_limit - debt_principal` when both are known.
     pub credit_headroom: Option<f64>,
-    /// Explicit added levels by building type in this simulated branch.
+    /// Added levels by building type on this simulated branch (empty at load).
     pub building_level_deltas: BTreeMap<String, u32>,
-    /// Building type currently in the compact construction queue.
+    /// Construction queue head from save, or sim `QueueBuildingLevel`.
     pub queued_building: Option<String>,
-    /// Interest declaration currently in flight (sim branch only).
+    /// Interest in flight — sim-only (`None` at load).
     pub queued_interest: Option<QueuedInterest>,
-    /// Army power target currently in flight (sim branch only).
+    /// Army expansion target in flight — sim-only (`None` at load).
     pub queued_army_target: Option<f64>,
-    /// Active law script ids projected from the save / sim enactments.
+    /// Active law script ids from save / completed enactments.
     pub laws: BTreeSet<String>,
-    /// Law enactment currently in flight (sim branch only).
+    /// Law enactment in flight — sim-only (`None` at load).
     pub queued_law: Option<String>,
-    /// Country infamy when present on the save (`None` when missing).
+    /// Country infamy when present (`None` when missing); not yet a DSL atom.
     pub infamy: Option<f64>,
-    /// Per-building production-method overrides applied on this branch.
+    /// Per-building PM overrides on this branch (empty at load).
     pub pm_overrides: BTreeMap<u32, Vec<String>>,
-    /// Tax level offset from the saved baseline (`0` at load).
+    /// Tax offset from saved baseline (`0` at load; sim `AdjustTax`).
     pub tax_level: i8,
 }
 

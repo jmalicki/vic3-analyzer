@@ -1,4 +1,7 @@
-//! Chumsky combinators for [`docs/dsl.md`](../../../docs/dsl.md). Keep this small.
+//! Chumsky combinators for [`docs/dsl.md`](../../../docs/dsl.md).
+//!
+//! Grammar → [`Expr`] → [`compile_expr`] sugar. Keep this module small; richer
+//! error recovery is optional.
 
 use chumsky::prelude::*;
 
