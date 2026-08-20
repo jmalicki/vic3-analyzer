@@ -89,32 +89,27 @@ Identity and geography for states in scope of the active save.
 
 | Column | Notes |
 | --- | --- |
-| `state_id` | Integer Paradox id; **primary key** for joins (alerts, buildings, pops already use this) |
-| `name` | Localized / region label (`region_name` / `region`); **secondary index** when a name→id map exists (see below) |
+| `state_id` | Integer Paradox id; **primary key** for joins |
+| `region_id` | Non-localized region/script key when available (`region` string as stored) |
+| `region_name` | Localized display label when available |
 | `owner_tag` | Country tag |
 | `market_id` | If modeled |
 | `infrastructure` | As exposed in prices result |
 | `arable_land` | If present |
 
-**Storage today (Rust):** `World.states` / `PricesResult.states` are a **`Vec` of rows**, each with its own `id: u32`. Not a dense `states[state_id]` array (ids can be sparse). Save IR uses `HashMap<u32, Option<State>>`.
+**Storage today (Rust):** `World.states` / `PricesResult.states` are a **`Vec` of rows**, each with its own `id: u32`. Sparse Paradox ids. Save IR: `HashMap<u32, Option<State>>`. No state name btree today — SQL may build a **HashMap** for Exact `region_id` / `region_name` equality at bind (not range Exact).
 
-**Ordering:** provider full scans should advertise a stable order (prefer sorted by `state_id`) so equijoins on `state_id` can use sort-merge.
-
-**Name index:** If the SQL layer keeps (or builds) a `BTreeMap<name, state_id>` / multi-map for ambiguous labels, treat `name` (and aliases) as an **indexed** column for filter pushdown — `WHERE name = 'Alsace'` → map lookup, not a full vec scan. Tell DataFusion via `supports_filters_pushdown` (Exact on name equality), same as keyed id lookups. Duplicate display names → return all matches or require disambiguation; document the chosen rule.
+**Ordering:** prefer scan ordered by `state_id` for sort-merge on id joins.
 
 ### `goods`
 
-Market-level goods from `PricesResult.goods`.
+Market-level goods from `PricesResult.goods` / `GameDefs`.
 
 | Column | Notes |
 | --- | --- |
-| `good` | Good id string; **key** (and naturally indexed — goods also have contiguous `GoodIdx` + `goods_order`) |
-| `name` | Localized; secondary index if a name→id map is maintained |
-| `base` | Base price |
-| `price` | Solved market price |
-| `buy` | Buy orders |
-| `sell` | Sell orders |
-| `shortage` | Derived when useful (`buy - sell` clamped or engine-defined); document formula in implementation |
+| `good` | Script id; **key** — `goods_order` + `index_of` (Exact `=`). Defs also keep a `BTreeMap` by script id → if that map is the scan source, Exact **range** on `good` is allowed |
+| `good_name` | Localized (`labels`); Exact `=` via inverse hash if built — **no** range Exact unless a btree of labels exists |
+| `base` / `price` / `buy` / `sell` / `shortage` | As modeled; document shortage formula in implementation |
 
 ### `goods_by_state`
 
@@ -183,21 +178,30 @@ Conservative military snapshot fields once exposed by the analysis API (manpower
 
 ## Keys, indexes, and joins
 
-Do not tell agents to `CREATE INDEX`. Speed comes from **provider pushdown** into Rust structures:
+Do not tell agents to `CREATE INDEX`. Speed comes from **provider pushdown** into Rust structures. DataFusion has no “hash index” type — you advertise filter pushdown and implement the lookup yourself.
 
-| Access path | Typical backing | Filter to push down |
-| --- | --- | --- |
-| Primary id | Row `id` / `state_id` / `building_id` (vec of rows, optional `HashMap`/`BTreeMap` id→row) | `state_id = ?`, `building_id = ?` |
-| Name / label btree | `BTreeMap<String, Id>` or multi-map built for SQL (may not exist on `World` yet — provider may construct on bind) | `name = ?`, `region_name = ?`, localized `good` name |
-| Contiguous intern | `Intern` / `goods_order` (`u16` / `GoodIdx` ↔ string) | id or name equality either direction |
-| Ordered vec scan | `Vec<WorldState>` sorted by id for the scan | full scan + sort-merge when DF knows output order |
+**Pushdown policy (normative)**
 
-Rules:
+| Backing already in Rust | Equality (`col = ?`) | Range (`<`, `>`, `BETWEEN`, …) | Output ordering |
+| --- | --- | --- | --- |
+| **BTreeMap** (or other ordered map we already keep) | **Exact** | **Exact** (use `range`) | Yes, when scanning in key order |
+| **HashMap** / intern / linear `index_of` / name→id hash built at bind | **Exact** | **Do not push** (Unsupported) — let DataFusion filter after scan if needed | Only if we explicitly sort the scan |
 
-- Equality on **primary keys** and on **name indexes** both advertise Exact (or Inexact if multi-match) pushdown to DataFusion.
-- Prefer joins on `state_id` / `good` id columns; use names in `WHERE` for humans/LLMs, then join by id.
-- Declare **output ordering** (e.g. by `state_id`) on scans that walk a sorted vec or btree so sort-merge joins can apply.
-- If a name btree is only needed for SQL, building it once at `use_save` / session bind is fine — still document it here as an indexed column.
+Examples:
+
+- Goods/needs script ids via `goods_order` / `index_of`: Exact on `=`; no range Exact unless we add an ordered id index.
+- Localized labels (`labels`, display names) and state **region/name** hash indexes: Exact on `=` only.
+- Any existing `BTreeMap` keyed by something we expose as a column (e.g. defs keyed by script id if we treat that map as ordered): Exact on `=` **and** Exact on ranges; declare scan ordering on that key.
+
+**Exact vs Inexact:** Exact means every returned row satisfies the predicate (DF will not re-filter). Prefer Exact for our lookups. Use Inexact only for true over-fetch pruning, not because the structure is a hash map.
+
+**Labels:** Expose **both** non-localized script/region ids and localized display names as separate columns (e.g. `good` + `good_name`, `region_id` / script region key + `region_name`). Index pushdown on whichever side we have a map for; typically script id is denser/stabler for joins, localized name for human/`WHERE` filters (Exact equality only unless a btree exists).
+
+Other rules:
+
+- Prefer joins on `state_id` / `good` (script id); use localized names in `WHERE`.
+- Declare **output ordering** when a scan walks a btree or a vec sorted by id so sort-merge can apply.
+- Building a **HashMap** name→id at `use_save` for states is fine (states have no btree today); that enables Exact `=` only, not range.
 
 ## Scalar functions
 
