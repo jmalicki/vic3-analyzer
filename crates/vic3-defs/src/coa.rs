@@ -1229,7 +1229,11 @@ TAG = {
             start.elapsed() < std::time::Duration::from_secs(2),
             "clipping must bound the blit to the canvas"
         );
-        assert!(canvas.chunks_exact(4).all(|px| px == [255, 255, 255, 255]));
+        assert!(canvas
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|px| px == &[255, 255, 255, 255]));
 
         let offscreen = EmblemInstance {
             position: [50.0, 50.0],

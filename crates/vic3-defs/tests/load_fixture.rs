@@ -383,8 +383,10 @@ fn live_game_renders_representative_flags_without_magenta() {
         let pixels = &pixels[..info.buffer_size()];
         assert!(
             !pixels
-                .chunks_exact(4)
-                .any(|pixel| pixel == [200, 0, 200, 255]),
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|pixel| pixel == &[200, 0, 200, 255]),
             "{id} must not contain the old unknown-color placeholder"
         );
     }
