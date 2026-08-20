@@ -332,6 +332,33 @@ mod tests {
     }
 
     #[test]
+    fn payday_plan_closes_solvent() {
+        let start = Vic3Node::new(
+            PlanningState::from_parts(PlanningParts {
+                country: "GER".into(),
+                debt_principal: Some(1_000.0),
+                credit_limit: Some(1_000.0),
+                credit_headroom: Some(0.0),
+                solvent: false,
+                weekly_balance: Some(100.0),
+                treasury: 0.0,
+                ..PlanningParts::default()
+            }),
+            compile("solvent").unwrap(),
+            SimConfig {
+                payday_days: 7,
+                ..SimConfig::default()
+            },
+        );
+        let (path, cost) =
+            shortest_path::<_, PairingHeap<_, _>>(&start).expect("solvent is reachable");
+        assert_eq!(cost, 7);
+        assert!(path.last().is_some_and(|node| node.is_goal()));
+        assert!(path.last().unwrap().state().solvent);
+        assert_eq!(path.last().unwrap().state().credit_headroom, Some(100.0));
+    }
+
+    #[test]
     fn shortest_path_agrees_with_lazy_on_tech_fixture() {
         let start = tech_fixture(37);
         let pairing = shortest_path::<_, PairingHeap<_, _>>(&start).map(|(_, cost)| cost);

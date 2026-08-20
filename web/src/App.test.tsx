@@ -420,7 +420,7 @@ describe('prices UI', () => {
     expect(screen.getByText('Goal: population_weighted_wealth >= 20')).toBeInTheDocument()
   })
 
-  it('marks war and fiscal presets as gaps-only on the timeline picker', async () => {
+  it('marks war and income/SoL presets as gaps-only on the timeline picker', async () => {
     const user = userEvent.setup()
     render(<App wasmApi={mockApi()} />)
     await selectSave(user)
@@ -431,9 +431,12 @@ describe('prices UI', () => {
     expect(picker).toHaveTextContent('Build a good-sized military')
     expect(picker).toHaveTextContent('Increase weekly income (gaps only)')
     expect(picker).toHaveTextContent('Raise standard of living (gaps only)')
+    expect(picker).toHaveTextContent('Avoid default')
+    expect(picker).not.toHaveTextContent('Avoid default (gaps only)')
     expect(picker).toHaveTextContent('Grow the economy')
     expect(picker.querySelector('option[value="war-readiness"]')).toBeDisabled()
     expect(picker.querySelector('option[value="military-size"]')).not.toBeDisabled()
+    expect(picker.querySelector('option[value="avoid-default"]')).not.toBeDisabled()
     expect(picker.querySelector('option[value="economic-growth"]')).not.toBeDisabled()
   })
 

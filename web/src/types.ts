@@ -247,6 +247,7 @@ export type PlanAction =
         event:
           | { TechCompleted: { tech: string } }
           | { BuildingCompleted: { building: string } }
+          | { Payday: Record<string, never> }
         days: number
       }
     }

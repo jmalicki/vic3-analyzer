@@ -91,8 +91,9 @@ highest current solved output value per added level.
 | `research` / `has_tech` | yes | yes (`QueueTech` + wait) |
 | `gdp` / supported `good_price` | yes | yes (bounded building levels + re-solve) |
 | `interest_in` / `army_power_projection` | yes | yes (`QueueInterest` / `QueueArmyPower` + wait) |
-| `declare-war` | yes | yes when munitions + solvent already hold (interest/army actions); solvent still diagnostic to *become* true |
-| fiscal (`weekly_balance`, `credit_headroom`, `solvent`) | yes | **not yet** (need budget/debt model) |
+| `declare-war` | yes | yes when munitions + solvent hold (interest/army); solvent can become true via payday |
+| `solvent` / `credit_headroom` / `debt_principal` | yes | yes (payday waits on frozen weekly balance) |
+| `weekly_balance` | yes | **not yet** (needs tax/PM; balance is payday input only) |
 | SoL proxy (`population_weighted_wealth`) | yes | **not yet** (need wage model) |
 
 ## Default plan presets
@@ -106,20 +107,22 @@ evaluation:
 | Good-sized military | `army_power_projection >= 100` | closable |
 | Economic growth | `gdp >= 100000000` | closable |
 | Increase weekly income | `weekly_balance >= 100` | gaps only |
-| Avoid default | `credit_headroom > 0` | gaps only |
+| Avoid default | `credit_headroom > 0` | closable (payday model) |
 | Raise standard of living | `population_weighted_wealth >= 20` | gaps only |
 
 The state and numeric targets are starting values, not fixed policy.
-`weekly_balance` reads the most recent finite saved net-budget sample.
-`population_weighted_wealth` averages saved pop wealth by household population
-in states owned by the country; it is a compact SoL proxy, not a recomputed
-living-standard equilibrium. `credit_headroom` is `credit - principal` when both
-are present; `solvent` is true only when that headroom is strictly positive.
-`army_power_projection` reads country cache or army-formation power from the
-save. `interest_in(state=…)` / `interest_in(region=…)` match projected state vs
-strategic-region interest ids separately (Clausewitz ids are normalized, e.g.
-`STATE_ALSACE` → `alsace`). Missing metrics remain unavailable and do not
-satisfy comparisons. A valid
+`weekly_balance` reads the most recent finite saved net-budget sample and is
+applied unchanged on each modeled payday; raising that sample itself is not yet
+a sim action. `population_weighted_wealth` averages saved pop wealth by household
+population in states owned by the country; it is a compact SoL proxy, not a
+recomputed living-standard equilibrium. `credit_headroom` is `credit - principal`
+when both are present; `solvent` is true only when that headroom is strictly
+positive. Under the payday model, surplus balance pays down principal before
+increasing treasury, then headroom/solvent refresh. `army_power_projection` reads
+country cache or army-formation power from the save. `interest_in(state=…)` /
+`interest_in(region=…)` match projected state vs strategic-region interest ids
+separately (Clausewitz ids are normalized, e.g. `STATE_ALSACE` → `alsace`).
+Missing metrics remain unavailable and do not satisfy comparisons. A valid
 preset can still be unreachable when `vic3-sim` has no action capable of
 closing its open atoms.
 

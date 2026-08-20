@@ -209,7 +209,10 @@ function actionLabel(action: PlanAction): string {
   if ('TechCompleted' in event) {
     return `Wait ${days} days for ${event.TechCompleted.tech}`
   }
-  return `Wait ${days} days for ${event.BuildingCompleted.building}`
+  if ('BuildingCompleted' in event) {
+    return `Wait ${days} days for ${event.BuildingCompleted.building}`
+  }
+  return `Wait ${days} days for payday`
 }
 
 function kindLabel(kind: AnalysisKind): string {

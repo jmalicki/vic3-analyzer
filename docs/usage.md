@@ -64,11 +64,13 @@ population-weighted saved-pop-wealth SoL proxy. Missing fiscal or population
 metrics remain unavailable rather than being treated as zero.
 
 **Timelines** today close research, modeled GDP growth, supported goods-price
-goals (bounded building-level expansions), army power projection, and declared
-interest. A full `declare-war` timeline is reachable when munitions-price and
-solvent already hold; the Timeline preset picker still marks declare-war as
-gaps-only because solvent cannot yet *become* true under the model. Fiscal and
-SoL presets remain gaps-only. Optional `tag=` / `wargoal=` on `declare-war`
+goals (bounded building-level expansions, fixed modeled construction time, and a
+price re-solve), army power projection, declared interest, and solvency /
+credit-headroom goals via the compact payday debt model. A full `declare-war`
+timeline is reachable when munitions-price and solvent hold or solvent can close
+via payday; the Timeline preset picker may still mark declare-war as gaps-only
+depending on preset policy. Weekly income and SoL presets remain gaps-only.
+Optional `tag=` / `wargoal=` on `declare-war`
 still parse but are ignored by compile; the UI emits `declare-war(state=…)`
 only.
 
