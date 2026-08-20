@@ -132,22 +132,33 @@ From `state_goods` (state-attributed orders / MAPI blend).
 | **Array / list column** on the parent | Field is already `Vec<…>` (or small parallel vecs) on the struct we scan |
 | **Child / junction table** | We already store a separate collection keyed for lookup, **or** agents must equijoin/filter/aggregate on exploded elements as first-class rows and UNNEST is too awkward for the common query |
 
-**Arrays stand in for junction tables.** DataFusion can explode lists into rows with `unnest` / `UNNEST` (and `unnest_outer` when empty/NULL parents should keep a row). That is the join-shaped path when you need one row per element:
+**Arrays stand in for junction tables.** DataFusion can explode lists into rows with `unnest` / `UNNEST` (and `unnest_outer` when empty/NULL parents should keep a row).
+
+Goods IO and PM recipes use **`List<Struct{good, good_name, qty}>`** (script id — never bare `GoodIdx` as the only key; localized label; quantity):
 
 ```sql
--- SELECT-list unnest (supported; correlates with the parent row)
-SELECT building_id, unnest(production_methods) AS pm
+-- One unnest → rows of structs; double unnest → multi-column (list then struct)
+SELECT building_id, unnest(unnest(input_goods))
 FROM buildings;
+-- → building_id | good | good_name | qty
 
-SELECT pm, unnest(outputs) AS out   -- struct fields → columns, or list of structs
+SELECT pm, unnest(unnest(outputs))
 FROM production_methods;
+-- → pm | good | good_name | qty
 ```
 
-**Caveat (DataFusion today):** `FROM parent p, UNNEST(p.col)` lateral style is **not** supported yet — use `unnest(col)` in the **SELECT** list (or a view that does that). Document the working form in examples; do not teach the Postgres-only lateral FROM pattern.
+Simple `TEXT[]` columns need only one unnest:
 
-Optional **views** that wrap the SELECT-list unnest (e.g. `building_production_methods`) are fine for agents who want a fake junction table — same data, not a second store.
+```sql
+SELECT building_id, unnest(production_methods) AS pm
+FROM buildings;
+```
 
-Examples of good array columns: active PMs, `short_inputs`, PM-group ids on a building type, recipe input/output lists on a PM row.
+**Caveat (DataFusion today):** `FROM parent p, UNNEST(p.col)` lateral style is **not** supported yet — use `unnest` in the **SELECT** list (or a view that does that). Do not teach the Postgres-only lateral FROM pattern.
+
+Optional **views** that wrap double unnest (e.g. `building_goods`, `production_method_goods`) are fine for agents who want a fake junction table — same data, not a second store.
+
+Examples of good array columns: active PMs, `short_inputs`, PM-group ids on a building type, recipe/IO `List<Struct{…}>`.
 
 ### `buildings`
 
@@ -164,7 +175,7 @@ Per-building modeled economy (from `BuildingEconomics` / `WorldBuilding`).
 | `profit` / `revenue` / `cost` | As modeled |
 | `production_methods` | `TEXT[]` — active PM script ids (`WorldBuilding.production_methods`) |
 | `short_inputs` | `TEXT[]` — scarce input good ids (`BuildingEconomics.short_inputs`) |
-| `input_goods` / `output_goods` | List of `{ good, qty }` (or parallel arrays) from resolved IO — same as `goods_io` / saved IO vecs |
+| `input_goods` / `output_goods` | `List<Struct{good, good_name, qty}>` — script id (**not** raw `GoodIdx`), localized label, quantity. Project from resolved IO / `goods_io`. See nested-column unnest notes. |
 
 Filter examples without a junction table:
 
@@ -201,19 +212,24 @@ Static catalog from `GameDefs` (same for all saves once defs are loaded). Prefer
 | --- | --- |
 | `pm` | Script id; **key** (`BTreeMap` → Exact `=` and range) |
 | `pm_name` | Localized |
-| `inputs` / `outputs` | List of `{ good, qty }` from `ProductionMethod.inputs` / `outputs` (already `Vec<(GoodIdx, f64)>`) |
+| `inputs` / `outputs` | `List<Struct{good, good_name, qty}>` — project `GoodIdx` → script id + `labels`; never expose bare idx as the only key |
 
 ```sql
--- Defs: PMs that output grain (SELECT-list unnest — not lateral FROM)
-SELECT pm, out.good, out.qty
+-- Double unnest: list → rows, then struct → columns
+SELECT pm, unnest(unnest(outputs))
+FROM production_methods;
+-- → pm | good | good_name | qty
+
+-- Filter after explode
+SELECT pm, good, qty
 FROM (
-  SELECT pm, unnest(outputs) AS out
+  SELECT pm, unnest(unnest(outputs))
   FROM production_methods
 )
-WHERE out.good = 'grain';
+WHERE good = 'grain';
 ```
 
-Optional convenience view `production_method_goods` = that unnest pattern — only if MCP/docs examples want join-shaped SQL; not required if arrays + `unnest` are enough.
+Optional convenience view `production_method_goods` = that double-unnest pattern — ship in v1 if MCP examples need join-shaped SQL without teaching `unnest(unnest(…))`.
 
 ### `pops` (or `state_pops`)
 
@@ -396,7 +412,7 @@ The Tauri **Advanced Query** tab uses this same dialect:
 3. Whether unqualified names require `use_save` or may fall back to `latest.*` automatically.
 4. Military `formations` column list (wait for stable military JSON).
 5. Ambiguous `states.region_name` / region labels: return all rows vs error vs prefer player-owned.
-6. List element type for IO: struct `{good, qty}` vs parallel `goods[]` + `qtys[]`; which DF array helpers we document (`array_has` vs `array_has_any` vs custom UDF).
+6. Which DF array helpers we document for `TEXT[]` contains (`array_has` vs `array_has_any` vs custom UDF) — IO element type is locked: `List<Struct{good, good_name, qty}>` + `unnest(unnest(…))`.
 7. Whether convenience UNNEST views (`building_goods`, `production_method_goods`) ship in v1 or stay doc-only patterns.
 
 ## Implementation notes (non-normative)
