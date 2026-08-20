@@ -265,7 +265,7 @@ fn decode_uncompressed(
     let pixels = (width as usize).checked_mul(height as usize)?;
     let data = data.get(..pixels * 4)?;
     let mut out = Vec::with_capacity(pixels * 4);
-    for pixel in data.chunks_exact(4) {
+    for pixel in data.as_chunks::<4>().0 {
         out.push(pixel[red]);
         out.push(pixel[green]);
         out.push(pixel[blue]);

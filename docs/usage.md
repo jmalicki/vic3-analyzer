@@ -63,13 +63,14 @@ saved principal and credit, the latest saved net weekly-budget sample, and a
 population-weighted saved-pop-wealth SoL proxy. Missing fiscal or population
 metrics remain unavailable rather than being treated as zero.
 
-**Timelines** today close only research, modeled GDP growth, and supported
-goods-price goals (bounded building-level expansions, fixed modeled
-construction time, and a price re-solve). The Timeline preset picker marks
-declare-war, military-size, fiscal, and SoL presets as gaps-only and will not
-offer Build timeline for them until sim actions exist. Optional `tag=` /
-`wargoal=` on `declare-war` still parse but are ignored by compile; the UI
-emits `declare-war(state=…)` only.
+**Timelines** today close research, modeled GDP growth, supported goods-price
+goals (bounded building-level expansions), army power projection, and declared
+interest. A full `declare-war` timeline is reachable when munitions-price and
+solvent already hold; the Timeline preset picker still marks declare-war as
+gaps-only because solvent cannot yet *become* true under the model. Fiscal and
+SoL presets remain gaps-only. Optional `tag=` / `wargoal=` on `declare-war`
+still parse but are ignored by compile; the UI emits `declare-war(state=…)`
+only.
 
 ## Defs
 

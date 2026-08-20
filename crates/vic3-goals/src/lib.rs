@@ -67,7 +67,7 @@ impl Rel {
 }
 
 /// Where [`Atom::InterestIn`] points.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum InterestKind {
     State,
     Region,

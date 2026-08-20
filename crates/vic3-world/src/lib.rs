@@ -23,6 +23,15 @@ pub fn default_date() -> Vic3Date {
     Vic3Date::from_ymdh(1836, 1, 1, 0)
 }
 
+/// Compact interest declaration in flight on a planning branch.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum QueuedInterest {
+    /// DSL `interest_in(state=…)`.
+    State(String),
+    /// DSL `interest_in(region=…)`.
+    Region(String),
+}
+
 /// Inputs for [`PlanningState::from_parts`] (tests; no `.v3` required).
 #[derive(Debug, Clone)]
 pub struct PlanningParts {
@@ -46,6 +55,9 @@ pub struct PlanningParts {
     pub credit_headroom: Option<f64>,
     pub building_level_deltas: BTreeMap<String, u32>,
     pub queued_building: Option<String>,
+    pub queued_interest: Option<QueuedInterest>,
+    /// Target army power projection after the in-flight expansion completes.
+    pub queued_army_target: Option<f64>,
 }
 
 impl Default for PlanningParts {
@@ -69,6 +81,8 @@ impl Default for PlanningParts {
             credit_headroom: None,
             building_level_deltas: BTreeMap::new(),
             queued_building: None,
+            queued_interest: None,
+            queued_army_target: None,
         }
     }
 }
@@ -113,6 +127,10 @@ pub struct PlanningState {
     pub building_level_deltas: BTreeMap<String, u32>,
     /// Building type currently in the compact construction queue.
     pub queued_building: Option<String>,
+    /// Interest declaration currently in flight (sim branch only).
+    pub queued_interest: Option<QueuedInterest>,
+    /// Army power target currently in flight (sim branch only).
+    pub queued_army_target: Option<f64>,
 }
 
 impl Default for PlanningState {
@@ -144,6 +162,8 @@ impl PartialEq for PlanningState {
             && f64_option_bits_eq(self.credit_headroom, other.credit_headroom)
             && self.building_level_deltas == other.building_level_deltas
             && self.queued_building == other.queued_building
+            && self.queued_interest == other.queued_interest
+            && f64_option_bits_eq(self.queued_army_target, other.queued_army_target)
     }
 }
 
@@ -173,6 +193,8 @@ impl Hash for PlanningState {
         hash_f64_option(self.credit_headroom, state);
         self.building_level_deltas.hash(state);
         self.queued_building.hash(state);
+        self.queued_interest.hash(state);
+        hash_f64_option(self.queued_army_target, state);
     }
 }
 
@@ -260,7 +282,17 @@ impl PlanningState {
             credit_headroom: parts.credit_headroom,
             building_level_deltas: parts.building_level_deltas,
             queued_building: parts.queued_building,
+            queued_interest: parts.queued_interest,
+            queued_army_target: parts.queued_army_target,
         }
+    }
+
+    /// Whether any compact decision queue is occupied.
+    pub fn has_inflight_queue(&self) -> bool {
+        self.queued_tech.is_some()
+            || self.queued_building.is_some()
+            || self.queued_interest.is_some()
+            || self.queued_army_target.is_some()
     }
 
     /// Project the player country and last price solve into a planning node.
@@ -344,6 +376,9 @@ impl PlanningState {
             credit_headroom,
             building_level_deltas: BTreeMap::new(),
             queued_building: save.queued_building_for(country_id),
+            // Interest/army queues are sim-only; saves do not expose them.
+            queued_interest: None,
+            queued_army_target: None,
         })
     }
 
@@ -417,6 +452,8 @@ impl PlanningState {
             credit_headroom: country.credit_headroom,
             building_level_deltas: BTreeMap::new(),
             queued_building: country.queued_building.clone(),
+            queued_interest: None,
+            queued_army_target: None,
         })
     }
 

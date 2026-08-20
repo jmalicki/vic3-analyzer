@@ -27,7 +27,7 @@ export const PLAN_TEMPLATES: readonly PlanTemplate[] = [
     id: 'war-readiness',
     title: 'Prepare for war',
     description:
-      'Readiness gaps for interest, army strength, ammunition prices, and solvency. No declare-war timeline until army/interest actions exist.',
+      'Readiness for interest, army strength, ammunition prices, and solvency. Interest/army timelines exist; full declare-war still needs solvent already true (or a fiscal model).',
     goal: 'declare-war(state=alsace)',
     goalKind: 'declare-war',
     label: 'War readiness (alsace)',
@@ -37,11 +37,11 @@ export const PLAN_TEMPLATES: readonly PlanTemplate[] = [
     id: 'military-size',
     title: 'Build a good-sized military',
     description:
-      'Target the model’s initial army power threshold. Gaps only until army actions exist.',
+      'Raise army power projection to the model’s declare-war threshold via a fixed-time expansion.',
     goal: 'army_power_projection >= 100',
     goalKind: 'advanced',
     label: 'Army power 100',
-    closesTimeline: false,
+    closesTimeline: true,
   },
   {
     id: 'economic-growth',
