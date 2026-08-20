@@ -51,8 +51,12 @@ recorded directly on each trade-center state.
 | [prices](docs/prices.md) | Equilibrium, Basin, limitations |
 | [planning](docs/planning.md) | `PlanningState`, A* |
 | [archive](docs/archive.md) | Past saves and alternative plans |
+<<<<<<< HEAD
 | [sql](docs/sql.md) | **Design (review):** DataFusion SQL tables / UDFs / `plan()` TVF |
 | [mcp](docs/mcp.md) | **Design (review):** stdio MCP tools / resources / agent flow |
+=======
+| [desktop](docs/desktop.md) | **Design (review):** Tauri auto-detect, config, Settings |
+>>>>>>> 6894382 (Document desktop auto-detect and config for review.)
 | [libraries](docs/libraries.md) | Locked deps and selection bar |
 | [invariants](docs/invariants.md) | I1–I9 property tests |
 | [json-schema](docs/json-schema.md) | Result/option contract (draft) |
