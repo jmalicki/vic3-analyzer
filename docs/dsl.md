@@ -40,14 +40,18 @@ interest_in(state=alsace)
 Sugar that compiles to predicates (not evaluated as opaque strings):
 
 ```text
-declare-war(tag=FRA, wargoal=conquer_state, state=alsace)
+declare-war(state=alsace)
 research(tech=nitroglycerin)
 gdp >= 50e6
 ```
 
+Optional `tag=` / `wargoal=` on `declare-war` parse for forward compatibility but are
+**ignored by compile** today — they do not become atoms. Prefer `state=` (or
+`region=`) alone in the UI and new examples.
+
 ## Compilation: `declare-war`
 
-Always expands to (at least):
+Requires `state=` or `region=`. Always expands to (at least):
 
 - **interest** in the target strategic region / state
 - **army** power projection sufficient to start the play (model threshold, documented in rustdoc)
@@ -57,6 +61,10 @@ Always expands to (at least):
   rather than guessing from treasury sign
 
 Property (I-declare-war): compilation always includes those four conjuncts. Extra conjuncts (infamy headroom, relations, claims) may be added later without removing these.
+
+`declare-war` is a **readiness / gaps** goal until sim successors close interest and
+army. Munitions-price may move under building-level actions, but the sugar as a
+whole is not a closable timeline yet.
 
 ## Compilation: `research`
 
@@ -74,21 +82,31 @@ highest current solved output value per added level.
 
 `vic3-goals` evaluates a compiled predicate against `PlanningState`. It does not search. Gaps = unsatisfied atoms. Plans = A* until the predicate is true ([`planning.md`](planning.md)).
 
+## What search can close today
+
+| Goal family | Gaps | Timeline (A*) |
+| --- | --- | --- |
+| `research` / `has_tech` | yes | yes (`QueueTech` + wait) |
+| `gdp` / supported `good_price` | yes | yes (bounded building levels + re-solve) |
+| `declare-war` / army / interest | yes | **not yet** (need army/interest actions) |
+| fiscal (`weekly_balance`, `credit_headroom`, `solvent`) | yes | **not yet** (need budget/debt model) |
+| SoL proxy (`population_weighted_wealth`) | yes | **not yet** (need wage model) |
+
 ## Default plan presets
 
 The web UI maps default plans to ordinary DSL; presets do not bypass parsing or
 evaluation:
 
-| Preset | Goal |
-| --- | --- |
-| Prepare for war | `declare-war(tag=FRA, wargoal=conquer_state, state=alsace)` |
-| Good-sized military | `army_power_projection >= 100` |
-| Economic growth | `gdp >= 100000000` |
-| Increase weekly income | `weekly_balance >= 100` |
-| Avoid default | `credit_headroom > 0` |
-| Raise standard of living | `population_weighted_wealth >= 20` |
+| Preset | Goal | Timeline |
+| --- | --- | --- |
+| Prepare for war | `declare-war(state=alsace)` | gaps only |
+| Good-sized military | `army_power_projection >= 100` | gaps only |
+| Economic growth | `gdp >= 100000000` | closable |
+| Increase weekly income | `weekly_balance >= 100` | gaps only |
+| Avoid default | `credit_headroom > 0` | gaps only |
+| Raise standard of living | `population_weighted_wealth >= 20` | gaps only |
 
-The country, state, and numeric targets are starting values, not fixed policy.
+The state and numeric targets are starting values, not fixed policy.
 `weekly_balance` reads the most recent finite saved net-budget sample.
 `population_weighted_wealth` averages saved pop wealth by household population
 in states owned by the country; it is a compact SoL proxy, not a recomputed
@@ -102,6 +120,6 @@ closing its open atoms.
 
 | Input | Must include |
 | --- | --- |
-| `declare-war(tag=FRA, wargoal=conquer_state, state=alsace)` | interest, army, munitions-price, solvent |
+| `declare-war(tag=FRA, wargoal=conquer_state, state=alsace)` | interest, army, munitions-price, solvent (`tag`/`wargoal` ignored) |
 | `research(tech=nitroglycerin)` | `has_tech(nitroglycerin)` |
 | `good_price(ammunition) <= 40 && solvent` | those two atoms |

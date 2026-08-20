@@ -411,13 +411,28 @@ describe('prices UI', () => {
     const user = userEvent.setup()
     render(<App wasmApi={mockApi()} />)
     await selectSave(user)
-    await user.click(screen.getByRole('button', { name: 'Timeline' }))
+    await user.click(screen.getByRole('button', { name: 'Goal gaps' }))
 
-    const picker = screen.getByLabelText('Plan default plan')
+    const picker = screen.getByLabelText('Gaps default plan')
     expect(picker).toHaveTextContent('Increase weekly income')
     expect(picker).toHaveTextContent('Raise standard of living')
     await user.selectOptions(picker, 'standard-of-living')
     expect(screen.getByText('Goal: population_weighted_wealth >= 20')).toBeInTheDocument()
+  })
+
+  it('marks war and fiscal presets as gaps-only on the timeline picker', async () => {
+    const user = userEvent.setup()
+    render(<App wasmApi={mockApi()} />)
+    await selectSave(user)
+    await user.click(screen.getByRole('button', { name: 'Timeline' }))
+
+    const picker = screen.getByLabelText('Plan default plan')
+    expect(picker).toHaveTextContent('Prepare for war (gaps only)')
+    expect(picker).toHaveTextContent('Increase weekly income (gaps only)')
+    expect(picker).toHaveTextContent('Raise standard of living (gaps only)')
+    expect(picker).toHaveTextContent('Grow the economy')
+    expect(picker.querySelector('option[value="war-readiness"]')).toBeDisabled()
+    expect(picker.querySelector('option[value="economic-growth"]')).not.toBeDisabled()
   })
 
   it('compares two mocked archived plan records', async () => {
