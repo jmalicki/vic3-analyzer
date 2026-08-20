@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "allow-companion"
-description = "Companion UI commands: config, save catalog, and vic3-api JSON analysis."
+description = "Companion UI commands: config, save catalog, analysis JSON, and Advanced Query SQL."
 commands.allow = [
   "api_ping",
   "get_config",
@@ -13,4 +13,6 @@ commands.allow = [
   "loaded_prices",
   "loaded_alerts",
   "loaded_gaps",
+  "sql_query",
+  "sql_docs",
 ]

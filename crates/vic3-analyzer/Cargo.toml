@@ -27,9 +27,11 @@ notify-debouncer-mini = "0.4"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tauri = { workspace = true, features = [] }
+tokio = { workspace = true, features = ["rt"] }
 vic3-api = { path = "../vic3-api" }
 vic3-catalog = { path = "../vic3-catalog" }
 vic3-mcp = { path = "../vic3-mcp" }
+vic3-sql = { path = "../vic3-sql" }
 
 [dev-dependencies]
 serde_json.workspace = true

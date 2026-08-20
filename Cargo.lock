@@ -6316,10 +6316,12 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tempfile",
+ "tokio",
  "vic3-api",
  "vic3-catalog",
  "vic3-defs",
  "vic3-mcp",
+ "vic3-sql",
 ]
 
 [[package]]

@@ -27,7 +27,7 @@ License: AGPL-3.0. Saves and token maps are user-supplied and never uploaded.
 | `vic3-sql` | Read-only DataFusion SQL over catalog + active/latest fact tables |
 | `vic3-mcp` | Stdio MCP server (rmcp): tools `query` / `use_save` / `refresh_catalog` / `explain`, resources, prompts |
 | `vic3-cli` | clap only lives here |
-| `vic3-analyzer` | Tauri 2 desktop binary (`gui` / `mcp` argv); companion Settings/catalog + links `vic3-mcp` |
+| `vic3-analyzer` | Tauri 2 desktop binary (`gui` / `mcp` argv); companion Settings/catalog/Advanced Query + links `vic3-mcp` / `vic3-api` / `vic3-sql` |
 | `vic3-wasm` | Thin `wasm-bindgen` over `vic3-api`; no filesystem |
 | `web/` | Vite + React; IndexedDB archive; forms from JSON Schema |
 

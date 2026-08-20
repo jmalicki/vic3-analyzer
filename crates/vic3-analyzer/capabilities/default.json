@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Companion UI allowlist: config, save catalog stubs, and analysis JSON invokes (see docs/desktop.md).",
+  "description": "Companion UI allowlist: config, save catalog, analysis JSON, and Advanced Query SQL (see docs/desktop.md).",
   "windows": ["main"],
   "permissions": ["core:default", "allow-companion"]
 }

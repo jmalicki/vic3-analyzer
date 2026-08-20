@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
 use crate::dto::{ConfigDto, DashboardDto, SaveStubDto};
-use crate::session::{AppState, CompanionSession};
+use crate::session::{AppState, CompanionSession, SqlDocsDto};
 use crate::watch::{self, WatchHandle};
 
 /// Placeholder invoke proving `vic3-api` is linked into the desktop binary.
@@ -90,6 +90,20 @@ pub fn loaded_alerts(state: State<'_, AppState>) -> Result<String, String> {
 pub fn loaded_gaps(state: State<'_, AppState>, goal: String) -> Result<String, String> {
     let session = state.inner.lock().map_err(|_| "state lock poisoned")?;
     session.loaded_gaps_json(&goal)
+}
+
+/// Advanced Query: one read-only statement → `{ columns, rows, row_count }` JSON.
+#[tauri::command]
+pub fn sql_query(state: State<'_, AppState>, sql: String) -> Result<String, String> {
+    let mut session = state.inner.lock().map_err(|_| "state lock poisoned")?;
+    session.sql_query(&sql)
+}
+
+/// Advanced Query docs panel: `docs/sql.md` + UDF index (future `vic3://docs/sql`).
+#[tauri::command]
+pub fn sql_docs(state: State<'_, AppState>) -> Result<SqlDocsDto, String> {
+    let session = state.inner.lock().map_err(|_| "state lock poisoned")?;
+    Ok(session.sql_docs())
 }
 
 fn restart_watch(app: &AppHandle, state: &State<'_, AppState>) -> Result<(), String> {
