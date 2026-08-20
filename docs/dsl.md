@@ -62,9 +62,11 @@ Requires `state=` or `region=`. Always expands to (at least):
 
 Property (I-declare-war): compilation always includes those four conjuncts. Extra conjuncts (infamy headroom, relations, claims) may be added later without removing these.
 
-`declare-war` is a **readiness / gaps** goal until sim successors close interest and
-army. Munitions-price may move under building-level actions, but the sugar as a
-whole is not a closable timeline yet.
+`declare-war` is closable end-to-end when interest and army still need work **and**
+munitions-price plus solvent already hold (or munitions can move under existing
+building-level actions). Interest and army use fixed-time queue + wait successors;
+solvent still needs a fiscal transition model before a typical insolvent save can
+finish the full sugar.
 
 ## Compilation: `research`
 
@@ -88,7 +90,8 @@ highest current solved output value per added level.
 | --- | --- | --- |
 | `research` / `has_tech` | yes | yes (`QueueTech` + wait) |
 | `gdp` / supported `good_price` | yes | yes (bounded building levels + re-solve) |
-| `declare-war` / army / interest | yes | **not yet** (need army/interest actions) |
+| `interest_in` / `army_power_projection` | yes | yes (`QueueInterest` / `QueueArmyPower` + wait) |
+| `declare-war` | yes | yes when munitions + solvent already hold (interest/army actions); solvent still diagnostic to *become* true |
 | fiscal (`weekly_balance`, `credit_headroom`, `solvent`) | yes | **not yet** (need budget/debt model) |
 | SoL proxy (`population_weighted_wealth`) | yes | **not yet** (need wage model) |
 
@@ -99,8 +102,8 @@ evaluation:
 
 | Preset | Goal | Timeline |
 | --- | --- | --- |
-| Prepare for war | `declare-war(state=alsace)` | gaps only |
-| Good-sized military | `army_power_projection >= 100` | gaps only |
+| Prepare for war | `declare-war(state=alsace)` | gaps only (full AND needs solvent model) |
+| Good-sized military | `army_power_projection >= 100` | closable |
 | Economic growth | `gdp >= 100000000` | closable |
 | Increase weekly income | `weekly_balance >= 100` | gaps only |
 | Avoid default | `credit_headroom > 0` | gaps only |

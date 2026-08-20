@@ -139,8 +139,9 @@ export function GoalBuilder({ goods, value, onChange, idPrefix, initialKind = 'r
             onChange={(event) => setState(event.target.value)}
           />
           <span className="field-hint">
-            Compiles to interest, army, munitions-price, and solvent readiness atoms. Use Goal gaps;
-            timelines need army/interest actions first.
+            Compiles to interest, army, munitions-price, and solvent. Interest and
+            army have sim actions; full timelines still need munitions and solvent
+            already holding (solvent cannot yet become true under the model).
           </span>
         </label>
       )}

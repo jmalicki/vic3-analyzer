@@ -119,15 +119,19 @@ impl Hash for Vic3Node {
 
 /// Admissible remaining-days bound from the compiled goal's dependency DAG.
 ///
-/// Atomic timing is currently known only for research. AND uses the longest
-/// child (actions may overlap or satisfy multiple atoms), OR uses the cheapest
-/// child, and NOT stays at zero. Missing technologies always contribute the
-/// fixed research duration, even when an unrelated tech is queued: returning
-/// zero there would drop the estimate over a zero-day queue edge and break
-/// consistency for closed-node A*. This is deliberately a relaxation of the
-/// real state graph, not a replacement for A*.
+/// Atomic timing is known for research, interest declarations, and army power
+/// expansions (fixed model durations). AND uses the longest child (actions may
+/// overlap or satisfy multiple atoms), OR uses the cheapest child, and NOT stays
+/// at zero. Missing technologies / open interest / raisable army atoms always
+/// contribute their fixed duration, even when an unrelated item is queued:
+/// returning zero there would drop the estimate over a zero-day queue edge and
+/// break consistency for closed-node A*. Construction, munitions price, fiscal,
+/// SoL, and other atoms without a proven timing model contribute zero. This is
+/// deliberately a relaxation of the real state graph, not a replacement for A*.
 fn goal_timing_lower_bound(goal: &Goal, state: &PlanningState, config: SimConfig) -> u32 {
     let research_days = u32::from(config.research_days.max(1));
+    let interest_days = u32::from(config.interest_days.max(1));
+    let army_days = u32::from(config.army_expansion_days.max(1));
     match goal {
         Goal::And(children) => children
             .iter()
@@ -145,6 +149,26 @@ fn goal_timing_lower_bound(goal: &Goal, state: &PlanningState, config: SimConfig
                 0
             } else {
                 research_days
+            }
+        }
+        Goal::Atom(Atom::InterestIn { kind, id }) => {
+            let held = match kind {
+                vic3_goals::InterestKind::State => state.has_interest_state(id),
+                vic3_goals::InterestKind::Region => state.has_interest_region(id),
+            };
+            if held {
+                0
+            } else {
+                interest_days
+            }
+        }
+        Goal::Atom(Atom::ArmyPower { rel, value }) => {
+            if vic3_sim::army_power_raise_target(*rel, *value, state.army_power_projection)
+                .is_some()
+            {
+                army_days
+            } else {
+                0
             }
         }
         Goal::Atom(_) => 0,
@@ -170,7 +194,8 @@ impl SearchNode for Vic3Node {
         evaluate(&self.context.goal, &self.state)
     }
 
-    /// Goal-DAG relaxation: exact for one research atom, conservative otherwise.
+    /// Goal-DAG relaxation: exact for research / interest / raisable army atoms,
+    /// zero for atoms without a proven timing model.
     fn heuristic(&self) -> Self::Cost {
         goal_timing_lower_bound(&self.context.goal, &self.state, self.context.config)
     }
@@ -185,7 +210,7 @@ mod tests {
     use rust_advanced_heaps::simple_binary::SimpleBinaryHeap;
     use vic3_goals::compile;
     use vic3_sim::Action;
-    use vic3_world::PlanningParts;
+    use vic3_world::{PlanningParts, PlanningState};
 
     fn tech_fixture(research_days: u16) -> Vic3Node {
         Vic3Node::new(
@@ -199,6 +224,84 @@ mod tests {
                 ..SimConfig::default()
             },
         )
+    }
+
+    #[test]
+    fn interest_and_army_plan_closes_declare_war_when_munitions_solvent_ok() {
+        let start = Vic3Node::new(
+            PlanningState::from_parts(PlanningParts {
+                country: "GER".into(),
+                solvent: true,
+                good_prices: vec![("ammunition".into(), 30.0)],
+                army_power_projection: 0.0,
+                ..PlanningParts::default()
+            }),
+            compile("declare-war(state=alsace)").unwrap(),
+            SimConfig {
+                interest_days: 30,
+                army_expansion_days: 50,
+                ..SimConfig::default()
+            },
+        );
+
+        assert_eq!(start.heuristic(), 50, "AND bound is max(interest, army)");
+        let (path, cost) =
+            shortest_path::<_, PairingHeap<_, _>>(&start).expect("declare-war reachable");
+        assert_eq!(cost, 80, "sequential interest then army under single queue");
+        let goal_node = path.last().unwrap();
+        assert!(goal_node.is_goal());
+        assert!(goal_node.state().has_interest_state("alsace"));
+        assert!(goal_node.state().army_power_projection >= 100.0);
+        assert!(path.iter().any(|node| {
+            matches!(
+                node.state().queued_interest,
+                Some(vic3_world::QueuedInterest::State(ref id)) if id == "alsace"
+            ) || node.state().has_interest_state("alsace")
+        }));
+        assert!(path.iter().any(|node| {
+            node.state().queued_army_target.is_some() || node.state().army_power_projection >= 100.0
+        }));
+    }
+
+    #[test]
+    fn army_only_plan_cost_is_queue_plus_wait_days() {
+        let start = Vic3Node::new(
+            PlanningState::from_parts(PlanningParts {
+                country: "GER".into(),
+                army_power_projection: 40.0,
+                ..PlanningParts::default()
+            }),
+            compile("army_power_projection >= 100").unwrap(),
+            SimConfig {
+                army_expansion_days: 77,
+                ..SimConfig::default()
+            },
+        );
+        assert_eq!(start.heuristic(), 77);
+        let (path, cost) =
+            shortest_path::<_, PairingHeap<_, _>>(&start).expect("army goal reachable");
+        assert_eq!(cost, 77);
+        assert_eq!(path.len(), 3);
+        assert!(path[2].is_goal());
+        assert_eq!(path[2].state().army_power_projection, 100.0);
+    }
+
+    #[test]
+    fn interest_only_plan_cost_is_queue_plus_wait_days() {
+        let start = Vic3Node::new(
+            PlanningState::default(),
+            compile("interest_in(region=region_western_europe)").unwrap(),
+            SimConfig {
+                interest_days: 25,
+                ..SimConfig::default()
+            },
+        );
+        assert_eq!(start.heuristic(), 25);
+        let (path, cost) =
+            shortest_path::<_, PairingHeap<_, _>>(&start).expect("interest goal reachable");
+        assert_eq!(cost, 25);
+        assert!(path[2].state().has_interest_region("region_western_europe"));
+        assert!(path[2].is_goal());
     }
 
     #[test]

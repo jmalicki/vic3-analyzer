@@ -28,8 +28,8 @@ describe('plan templates', () => {
 
   it('marks only closable goals as timeline-capable', () => {
     expect(planTemplate('economic-growth')?.closesTimeline).toBe(true)
+    expect(planTemplate('military-size')?.closesTimeline).toBe(true)
     expect(planTemplate('war-readiness')?.closesTimeline).toBe(false)
-    expect(planTemplate('military-size')?.closesTimeline).toBe(false)
     expect(planTemplate('maximize-revenue')?.closesTimeline).toBe(false)
     expect(planTemplate('avoid-default')?.closesTimeline).toBe(false)
     expect(planTemplate('standard-of-living')?.closesTimeline).toBe(false)

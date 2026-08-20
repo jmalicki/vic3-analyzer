@@ -7,9 +7,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use vic3_defs::GameDefs;
-use vic3_goals::{gaps, Atom, Goal, Rel};
+use vic3_goals::{gaps, Atom, Goal, InterestKind, Rel};
 use vic3_prices::{solve, PricesResult, SolveOpts, World, ORDER_EPS};
-use vic3_world::PlanningState;
+use vic3_world::{PlanningState, QueuedInterest};
 
 /// Immutable price-solver inputs shared by all nodes in one search.
 #[derive(Debug, Clone)]
@@ -158,6 +158,10 @@ pub struct SimConfig {
     pub construction_days: u16,
     /// Finite search bound for added levels of one building type.
     pub max_added_levels_per_type: u16,
+    /// Fixed duration to establish a declared interest (model constant).
+    pub interest_days: u16,
+    /// Fixed duration for one modeled army power-projection expansion.
+    pub army_expansion_days: u16,
 }
 
 impl Default for SimConfig {
@@ -166,6 +170,8 @@ impl Default for SimConfig {
             research_days: 365,
             construction_days: 180,
             max_added_levels_per_type: 10,
+            interest_days: 90,
+            army_expansion_days: 180,
         }
     }
 }
@@ -177,6 +183,10 @@ pub enum Event {
     TechCompleted { tech: String },
     /// One level of the queued building type completes.
     BuildingCompleted { building: String },
+    /// The queued interest declaration completes.
+    InterestDeclared { kind: InterestKind, id: String },
+    /// The queued army power-projection expansion completes (`f64::to_bits`).
+    ArmyPowerIncreased { target_bits: u64 },
 }
 
 /// A deterministic state transition.
@@ -186,6 +196,10 @@ pub enum Action {
     QueueTech { tech: String },
     /// Put one goal-relevant building level in the compact construction queue.
     QueueBuildingLevel { building: String },
+    /// Queue a goal-relevant interest declaration.
+    QueueInterest { kind: InterestKind, id: String },
+    /// Queue raising army power projection to at least `f64::from_bits(target_bits)`.
+    QueueArmyPower { target_bits: u64 },
     /// Advance directly to an event already in flight.
     WaitForEvent { event: Event, days: u16 },
 }
@@ -218,17 +232,80 @@ pub fn successors_with_economy(
 
 /// Generate successors from an already-computed list of open goal atoms.
 ///
-/// Technology decisions are emitted in atom order with duplicates removed.
-/// At most one wait edge is appended. A queued technology is the only in-flight
-/// event represented by the compact phase-8 state; therefore an idle state has
-/// no wait edge. Payday is intentionally not invented when no solvency model is
-/// present.
+/// Technology, building, interest, and army decisions are emitted only when no
+/// compact queue is occupied. At most one wait edge is appended from an
+/// in-flight event that still closes an open atom. Payday is intentionally not
+/// invented when no solvency model is present.
 pub fn successors_for_atoms(
     state: &PlanningState,
     open_atoms: &[Atom],
     config: SimConfig,
 ) -> Vec<Successor> {
     successors_for_atoms_with_economy(state, open_atoms, config, None)
+}
+
+fn interest_queued(kind: InterestKind, id: &str) -> QueuedInterest {
+    match kind {
+        InterestKind::State => QueuedInterest::State(id.to_string()),
+        InterestKind::Region => QueuedInterest::Region(id.to_string()),
+    }
+}
+
+fn interest_matches(queued: &QueuedInterest, kind: InterestKind, id: &str) -> bool {
+    match (queued, kind) {
+        (QueuedInterest::State(queued_id), InterestKind::State) => queued_id == id,
+        (QueuedInterest::Region(queued_id), InterestKind::Region) => queued_id == id,
+        _ => false,
+    }
+}
+
+/// Target army power that would satisfy an open comparison by raising projection.
+///
+/// Lower-bound atoms that already hold, equality from above, or upper-bound atoms
+/// that cannot be closed by increasing power, yield `None`.
+pub fn army_power_raise_target(rel: Rel, value: f64, current: f64) -> Option<f64> {
+    if !value.is_finite() {
+        return None;
+    }
+    match rel {
+        Rel::Ge => (!rel.holds(current, value)).then_some(value),
+        Rel::Eq => (current < value).then_some(value),
+        Rel::Gt => (!rel.holds(current, value)).then_some(value + 1.0),
+        Rel::Le | Rel::Lt => None,
+    }
+}
+
+fn push_decision(
+    result: &mut Vec<Successor>,
+    state: &PlanningState,
+    action: Action,
+    economy: Option<&EconomyContext>,
+) {
+    if let Some(next) = apply_action_with_economy(state, &action, economy) {
+        result.push(Successor {
+            action,
+            days: 0,
+            state: next,
+        });
+    }
+}
+
+fn push_wait(
+    result: &mut Vec<Successor>,
+    state: &PlanningState,
+    event: Event,
+    days: u16,
+    economy: Option<&EconomyContext>,
+) {
+    let days = days.max(1);
+    let action = Action::WaitForEvent { event, days };
+    if let Some(next) = apply_action_with_economy(state, &action, economy) {
+        result.push(Successor {
+            action,
+            days,
+            state: next,
+        });
+    }
 }
 
 fn successors_for_atoms_with_economy(
@@ -238,23 +315,57 @@ fn successors_for_atoms_with_economy(
     economy: Option<&EconomyContext>,
 ) -> Vec<Successor> {
     let mut result = Vec::new();
-    let mut seen_techs = std::collections::BTreeSet::new();
+    let mut seen_techs = BTreeSet::new();
+    let mut seen_interest = BTreeSet::new();
+    let mut seen_army_targets = BTreeSet::new();
 
-    if state.queued_tech.is_none() && state.queued_building.is_none() {
+    if !state.has_inflight_queue() {
         for atom in open_atoms {
-            let Atom::HasTech(tech) = atom else {
-                continue;
-            };
-            if state.has_tech(tech) || !seen_techs.insert(tech.clone()) {
-                continue;
-            }
-            let action = Action::QueueTech { tech: tech.clone() };
-            if let Some(next) = apply_action_with_economy(state, &action, economy) {
-                result.push(Successor {
-                    action,
-                    days: 0,
-                    state: next,
-                });
+            match atom {
+                Atom::HasTech(tech) => {
+                    if state.has_tech(tech) || !seen_techs.insert(tech.clone()) {
+                        continue;
+                    }
+                    push_decision(
+                        &mut result,
+                        state,
+                        Action::QueueTech { tech: tech.clone() },
+                        economy,
+                    );
+                }
+                Atom::InterestIn { kind, id } => {
+                    let key = (*kind, id.clone());
+                    if atom.eval(state) || !seen_interest.insert(key) {
+                        continue;
+                    }
+                    push_decision(
+                        &mut result,
+                        state,
+                        Action::QueueInterest {
+                            kind: *kind,
+                            id: id.clone(),
+                        },
+                        economy,
+                    );
+                }
+                Atom::ArmyPower { rel, value } => {
+                    let Some(target) =
+                        army_power_raise_target(*rel, *value, state.army_power_projection)
+                    else {
+                        continue;
+                    };
+                    let bits = target.to_bits();
+                    if !seen_army_targets.insert(bits) {
+                        continue;
+                    }
+                    push_decision(
+                        &mut result,
+                        state,
+                        Action::QueueArmyPower { target_bits: bits },
+                        economy,
+                    );
+                }
+                _ => {}
             }
         }
 
@@ -262,14 +373,12 @@ fn successors_for_atoms_with_economy(
             for building in
                 economy.building_candidates(state, open_atoms, config.max_added_levels_per_type)
             {
-                let action = Action::QueueBuildingLevel { building };
-                if let Some(next) = apply_action_with_economy(state, &action, Some(economy)) {
-                    result.push(Successor {
-                        action,
-                        days: 0,
-                        state: next,
-                    });
-                }
+                push_decision(
+                    &mut result,
+                    state,
+                    Action::QueueBuildingLevel { building },
+                    Some(economy),
+                );
             }
         }
     }
@@ -279,33 +388,52 @@ fn successors_for_atoms_with_economy(
             .iter()
             .any(|atom| atom.is_has_tech(queued.as_str()))
     }) {
-        let days = config.research_days.max(1);
-        let action = Action::WaitForEvent {
-            event: Event::TechCompleted { tech: tech.clone() },
-            days,
-        };
-        if let Some(next) = apply_action_with_economy(state, &action, economy) {
-            result.push(Successor {
-                action,
-                days,
-                state: next,
-            });
-        }
+        push_wait(
+            &mut result,
+            state,
+            Event::TechCompleted { tech: tech.clone() },
+            config.research_days,
+            economy,
+        );
     } else if let (Some(building), Some(economy)) = (state.queued_building.as_ref(), economy) {
-        let days = config.construction_days.max(1);
-        let action = Action::WaitForEvent {
-            event: Event::BuildingCompleted {
+        push_wait(
+            &mut result,
+            state,
+            Event::BuildingCompleted {
                 building: building.clone(),
             },
-            days,
+            config.construction_days,
+            Some(economy),
+        );
+    } else if let Some(queued) = state.queued_interest.as_ref().filter(|queued| {
+        open_atoms.iter().any(|atom| match atom {
+            Atom::InterestIn { kind, id } => interest_matches(queued, *kind, id),
+            _ => false,
+        })
+    }) {
+        let (kind, id) = match queued {
+            QueuedInterest::State(id) => (InterestKind::State, id.clone()),
+            QueuedInterest::Region(id) => (InterestKind::Region, id.clone()),
         };
-        if let Some(next) = apply_action_with_economy(state, &action, Some(economy)) {
-            result.push(Successor {
-                action,
-                days,
-                state: next,
-            });
-        }
+        push_wait(
+            &mut result,
+            state,
+            Event::InterestDeclared { kind, id },
+            config.interest_days,
+            economy,
+        );
+    } else if let Some(target_bits) = state.queued_army_target.map(f64::to_bits).filter(|_| {
+        open_atoms
+            .iter()
+            .any(|atom| matches!(atom, Atom::ArmyPower { .. }) && !atom.eval(state))
+    }) {
+        push_wait(
+            &mut result,
+            state,
+            Event::ArmyPowerIncreased { target_bits },
+            config.army_expansion_days,
+            economy,
+        );
     }
 
     result
@@ -328,24 +456,39 @@ pub fn apply_action_with_economy(
     let mut next = state.clone();
     match action {
         Action::QueueTech { tech } => {
-            if tech.is_empty()
-                || next.queued_tech.is_some()
-                || next.queued_building.is_some()
-                || next.has_tech(tech)
-            {
+            if tech.is_empty() || next.has_inflight_queue() || next.has_tech(tech) {
                 return None;
             }
             next.queued_tech = Some(tech.clone());
         }
         Action::QueueBuildingLevel { building } => {
-            if building.is_empty()
-                || next.queued_tech.is_some()
-                || next.queued_building.is_some()
-                || economy.is_none()
-            {
+            if building.is_empty() || next.has_inflight_queue() || economy.is_none() {
                 return None;
             }
             next.queued_building = Some(building.clone());
+        }
+        Action::QueueInterest { kind, id } => {
+            if id.is_empty() || next.has_inflight_queue() {
+                return None;
+            }
+            let already = match kind {
+                InterestKind::State => next.has_interest_state(id),
+                InterestKind::Region => next.has_interest_region(id),
+            };
+            if already {
+                return None;
+            }
+            next.queued_interest = Some(interest_queued(*kind, id));
+        }
+        Action::QueueArmyPower { target_bits } => {
+            let target = f64::from_bits(*target_bits);
+            if !target.is_finite()
+                || next.has_inflight_queue()
+                || next.army_power_projection >= target
+            {
+                return None;
+            }
+            next.queued_army_target = Some(target);
         }
         Action::WaitForEvent {
             event: Event::TechCompleted { tech },
@@ -384,6 +527,37 @@ pub fn apply_action_with_economy(
                 .map(|good| (good.id, good.price))
                 .collect();
         }
+        Action::WaitForEvent {
+            event: Event::InterestDeclared { kind, id },
+            days,
+        } => {
+            let expected = interest_queued(*kind, id);
+            if *days == 0 || next.queued_interest.as_ref() != Some(&expected) {
+                return None;
+            }
+            next.date = next.date.add_days(i32::from(*days));
+            next.queued_interest = None;
+            match kind {
+                InterestKind::State => {
+                    next.interest_states.insert(id.clone());
+                }
+                InterestKind::Region => {
+                    next.interest_regions.insert(id.clone());
+                }
+            }
+        }
+        Action::WaitForEvent {
+            event: Event::ArmyPowerIncreased { target_bits },
+            days,
+        } => {
+            let target = f64::from_bits(*target_bits);
+            if *days == 0 || next.queued_army_target.map(f64::to_bits) != Some(*target_bits) {
+                return None;
+            }
+            next.date = next.date.add_days(i32::from(*days));
+            next.queued_army_target = None;
+            next.army_power_projection = next.army_power_projection.max(target);
+        }
     }
     Some(next)
 }
@@ -414,6 +588,56 @@ mod tests {
             country: "GER".into(),
             ..PlanningParts::default()
         })
+    }
+
+    #[test]
+    fn queue_interest_then_wait_reaches_interest_in() {
+        let goal = compile("interest_in(state=alsace)").unwrap();
+        let start = state_at(0);
+        let config = SimConfig {
+            interest_days: 45,
+            ..SimConfig::default()
+        };
+
+        let decisions = successors(&start, &goal, config);
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].days, 0);
+        assert!(matches!(
+            decisions[0].action,
+            Action::QueueInterest {
+                kind: InterestKind::State,
+                ref id
+            } if id == "alsace"
+        ));
+
+        let waits = successors(&decisions[0].state, &goal, config);
+        assert_eq!(waits.len(), 1);
+        assert_eq!(waits[0].days, 45);
+        assert!(waits[0].state.has_interest_state("alsace"));
+        assert!(evaluate(&goal, &waits[0].state));
+    }
+
+    #[test]
+    fn queue_army_then_wait_reaches_army_power() {
+        let goal = compile("army_power_projection >= 100").unwrap();
+        let start = state_at(0);
+        let config = SimConfig {
+            army_expansion_days: 60,
+            ..SimConfig::default()
+        };
+
+        let decisions = successors(&start, &goal, config);
+        assert_eq!(decisions.len(), 1);
+        assert!(matches!(
+            decisions[0].action,
+            Action::QueueArmyPower { target_bits } if f64::from_bits(target_bits) == 100.0
+        ));
+
+        let waits = successors(&decisions[0].state, &goal, config);
+        assert_eq!(waits.len(), 1);
+        assert_eq!(waits[0].days, 60);
+        assert_eq!(waits[0].state.army_power_projection, 100.0);
+        assert!(evaluate(&goal, &waits[0].state));
     }
 
     #[test]
@@ -658,10 +882,7 @@ mod tests {
                 prop_assert_eq!(wait_count, 0);
             }
 
-            let idle_atoms = [Atom::ArmyPower {
-                rel: vic3_goals::Rel::Ge,
-                value: 100.0,
-            }];
+            let idle_atoms = [Atom::Solvent];
             let idle_edges = successors_for_atoms(
                 &state_at(day_offset),
                 &idle_atoms,

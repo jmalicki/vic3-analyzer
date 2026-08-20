@@ -428,10 +428,12 @@ describe('prices UI', () => {
 
     const picker = screen.getByLabelText('Plan default plan')
     expect(picker).toHaveTextContent('Prepare for war (gaps only)')
+    expect(picker).toHaveTextContent('Build a good-sized military')
     expect(picker).toHaveTextContent('Increase weekly income (gaps only)')
     expect(picker).toHaveTextContent('Raise standard of living (gaps only)')
     expect(picker).toHaveTextContent('Grow the economy')
     expect(picker.querySelector('option[value="war-readiness"]')).toBeDisabled()
+    expect(picker.querySelector('option[value="military-size"]')).not.toBeDisabled()
     expect(picker.querySelector('option[value="economic-growth"]')).not.toBeDisabled()
   })
 

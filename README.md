@@ -1,6 +1,6 @@
 # vic3-analyzer
 
-AGPL-3.0 Victoria 3 save loader and planner. Given a `.v3` and a high-level goal, it evaluates readiness gaps and — when the simulator has actions for that goal — emits a time-optimal move sequence **under our model**, not Paradox’s binary. Today A* closes `research`, modeled `gdp`, and supported goods-price goals; `declare-war`, fiscal, and SoL presets are gaps diagnostics until their actions exist (see [`docs/dsl.md`](docs/dsl.md)).
+AGPL-3.0 Victoria 3 save loader and planner. Given a `.v3` and a high-level goal, it evaluates readiness gaps and — when the simulator has actions for that goal — emits a time-optimal move sequence **under our model**, not Paradox’s binary. Today A* closes `research`, modeled `gdp`, supported goods-price goals, `interest_in`, and `army_power_projection`; full `declare-war` works when munitions and solvent already hold, while fiscal and SoL presets stay gaps diagnostics until their actions exist (see [`docs/dsl.md`](docs/dsl.md)).
 
 **CLI first**, then an in-browser UI (`wasm-bindgen` + React). Saves are never uploaded. Past runs and alternative plans live in a **local archive** (CLI: XDG; UI: IndexedDB).
 

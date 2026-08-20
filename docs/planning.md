@@ -21,6 +21,7 @@ It is **not** the full save. Hash it. **I8:** identical state ⇒ identical hash
 | `population_weighted_wealth` | Pops in states owned by the country |
 | `army_power_projection`, `interest_states` / `interest_regions` | Country `cached_total_army_power_projection` (else army formation `power_projection`); `interest_marker_manager` + country `declared_interests` (normalized for DSL `state=` / `region=`) |
 | `building_level_deltas` | Empty at load; sim branches fill deltas |
+| `queued_interest`, `queued_army_target` | Empty at load; sim-only in-flight interest / army expansion |
 
 `from_world` reads the same projected fields off [`WorldCountry`](../crates/vic3-prices/src/world.rs) after `World::from_save`.
 
@@ -29,8 +30,8 @@ It is **not** the full save. Hash it. **I8:** identical state ⇒ identical hash
 Nodes: `PlanningState`.  
 Edges:
 
-- **Decision** (0 days): queue a tech, start a building, switch PM, enact a law checkpoint, adjust a tax that the goal cares about, …
-- **At most one event-wait** per expansion: wait until tech finishes, a construction slot frees, a law checkpoint, or payday **only if solvency is an open atom**.
+- **Decision** (0 days): queue a tech, start a building, declare interest, expand army power, switch PM, enact a law checkpoint, adjust a tax that the goal cares about, …
+- **At most one event-wait** per expansion: wait until tech finishes, a construction slot frees, interest establishes, army expansion completes, a law checkpoint, or payday **only if solvency is an open atom**.
 
 **I6:** event-wait never decreases date. No wait edge if nothing is in flight and solvency is not open.
 
@@ -55,11 +56,12 @@ Heuristic `h`: admissible estimate of remaining **days**. **I7:** on tiny constr
 Event-wait and decision edges are just `successors()`. Goal/defs ride on the node (or an `Arc` it holds).
 
 Production `Vic3Node` uses the compiled goal as a dependency DAG relaxation.
-Research atoms contribute their fixed research duration whenever the technology
-is missing, independent of which tech (if any) is queued; AND takes the maximum
-child bound (actions may overlap), OR takes the minimum, and NOT / atoms without
-a proven timing model contribute zero. Keeping the bound stable across zero-day
-queue edges preserves A* consistency when closed nodes are not reopened.
+Research, interest, and raisable army-power atoms contribute their fixed model
+durations whenever still open, independent of which item (if any) is queued; AND
+takes the maximum child bound (actions may overlap), OR takes the minimum, and
+NOT / atoms without a proven timing model (construction, munitions price,
+fiscal, SoL, …) contribute zero. Keeping the bound stable across zero-day queue
+edges preserves A* consistency when closed nodes are not reopened.
 Property tests compare this bound with true remaining costs for reachable
 research formulas.
 
@@ -67,10 +69,19 @@ research formulas.
 
 Snapshot fiscal (`weekly_balance`, `credit_headroom`, `solvent`) and saved-wealth
 atoms are diagnostic-only until a budget/debt or wage transition model exists.
-Army power and declared interest **project from save IR** into `PlanningState`
-(so gaps/eval work on real saves); sim actions that change them are a later wave.
 
-The first non-tech action is a building-level decision followed by a fixed-time
+Declared interest and army power projection both **project from save IR** and
+have compact sim actions: queue a goal-relevant interest (`state=` / `region=`)
+or army expansion to the open comparison target, then event-wait a fixed model
+duration (`interest_days` / `army_expansion_days`, defaults 90 / 180). Completing
+interest inserts the id into `interest_states` or `interest_regions`; completing
+army sets `army_power_projection` to at least the queued target (aligned with
+`DECLARE_WAR_ARMY_THRESHOLD` / `army_power_projection >= 100` compile constants).
+These queues share the single in-flight slot with tech and building, so a
+declare-war branch that still needs both interest and army pays the sum of the
+two waits even though the heuristic AND-bound is their maximum.
+
+The first economy action is a building-level decision followed by a fixed-time
 construction event and price re-solve. `vic3-prices` preserves the building's
 staffing ratio and scales absolute saved IO per level, while leaving unrelated
 employment, wages, and trade frozen. `PlanningState` hashes compact per-type
