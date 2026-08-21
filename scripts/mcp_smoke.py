@@ -28,7 +28,7 @@ CLIENT_INFO = {"name": "vic3-mcp-smoke", "version": "0.1.0"}
 FALLBACK_SQL = (
     "SELECT s.region_name, g.good, g.shortage, g.price "
     "FROM states s JOIN goods_by_state g USING (state_id) "
-    "WHERE s.owner_tag = player_tag() AND g.shortage > 0 "
+    "WHERE g.shortage > 0 "
     "ORDER BY g.shortage DESC LIMIT 5"
 )
 

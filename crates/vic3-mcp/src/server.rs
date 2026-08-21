@@ -312,8 +312,9 @@ impl Vic3McpServer {
              3. If you need more detail, query e.g.\n\
              SELECT s.region_name, g.good, g.shortage, g.price\n\
              FROM states s JOIN goods_by_state g USING (state_id)\n\
-             WHERE s.owner_tag = player_tag() AND g.shortage > 0\n\
+             WHERE g.shortage > 0\n\
              ORDER BY g.shortage DESC LIMIT 20.\n\
+             (Short names are already player-scoped; use world_* for save-wide.)\n\
              Optionally also check market-wide SELECT * FROM goods WHERE shortage > 0.\n\
              Rules: stubs not paths; read-only SQL; use_save before campaign_brief / fact tables.",
         )]
