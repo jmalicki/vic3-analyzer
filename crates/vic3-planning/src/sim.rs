@@ -193,6 +193,10 @@ fn push_mil_hire_decisions(args: &mut MilitaryPpDecisionArgs<'_>, branch: Milita
 }
 
 /// Immutable price-solver inputs shared by all nodes in one search.
+///
+/// [`Self::defs`] also supplies building `required_construction` when the sim
+/// enqueues a new level (`QueueBuildingLevel`); in-flight save `remaining`
+/// still wins for ETA.
 #[derive(Debug, Clone)]
 pub struct EconomyContext {
     pub base_world: World,
@@ -658,6 +662,9 @@ pub enum Action {
     /// Put a goal-relevant technology in the empty research queue.
     QueueTech { tech: String },
     /// Put one goal-relevant building level in the compact construction queue.
+    ///
+    /// Sets head `remaining` from defs `required_construction` when present;
+    /// otherwise leaves it unset so wait ETA uses [`SimConfig::construction_days`].
     QueueBuildingLevel { building: String },
     /// Queue a goal-relevant interest declaration.
     QueueInterest { kind: InterestKind, id: String },
@@ -1005,9 +1012,10 @@ fn successors_for_atoms_with_economy(
 
 /// Days until the construction head finishes under [`PlanningState::construction_rate`].
 ///
-/// When `remaining` is present, uses [`crate::tracks::days_for_work`]. Otherwise
-/// falls back to [`SimConfig::construction_days`]. Returns [`None`] when rate is
-/// non-positive and remaining work is known (no finite ETA).
+/// When `remaining` is present (save in-flight work, or def
+/// `required_construction` set at enqueue), uses [`crate::tracks::days_for_work`].
+/// Otherwise falls back to [`SimConfig::construction_days`]. Returns [`None`]
+/// when rate is non-positive and remaining work is known (no finite ETA).
 fn construction_wait_days(state: &PlanningState, config: SimConfig) -> Option<u16> {
     let remaining = state
         .constructions
@@ -1183,16 +1191,21 @@ pub fn apply_action_with_economy(
             next.tech_days_left = Some(config.research_days);
         }
         Action::QueueBuildingLevel { building } => {
-            if building.is_empty() || next.construction_busy() || economy.is_none() {
+            let economy = economy?;
+            if building.is_empty() || next.construction_busy() {
                 return None;
             }
-            // Synthetic work so parallel ticks and ETA share one representation:
-            // `ceil(remaining / rate) == construction_days` at enqueue time.
-            let remaining = f64::from(config.construction_days) * next.construction_rate;
-            next.push_construction(building.clone());
-            if let Some(entry) = next.constructions.last_mut() {
-                entry.remaining = Some(remaining);
-            }
+            // Prefer defs `required_construction` as work points. When absent,
+            // leave `remaining` unset so [`construction_wait_days`] falls back
+            // to [`SimConfig::construction_days`] (and [`ensure_track_timers`]
+            // synthesizes work for parallel ticks).
+            let remaining = economy
+                .defs
+                .buildings
+                .get(building.as_str())
+                .and_then(|b| b.required_construction)
+                .filter(|c| c.is_finite() && *c >= 0.0);
+            next.push_construction(building.clone(), remaining);
         }
         Action::QueueInterest { kind, id } => {
             if id.is_empty() || next.interest_busy() {
@@ -2131,6 +2144,188 @@ mod tests {
         let waits = successors_with_economy(&state, &goal, SimConfig::default(), &economy);
         assert_eq!(waits.len(), 1);
         // ceil(25/10) = 3
+        assert_eq!(waits[0].days, 3);
+        assert!(matches!(
+            waits[0].action,
+            Action::WaitForEvent {
+                event: Event::BuildingCompleted { .. },
+                days: 3,
+            }
+        ));
+    }
+
+    #[test]
+    fn new_build_uses_def_required_construction_for_wait() {
+        use vic3_defs::BuildingType;
+
+        let mut defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        defs.buildings.insert(
+            "building_logging_camp".into(),
+            BuildingType {
+                id: "building_logging_camp".into(),
+                group: None,
+                city_type: None,
+                production_method_groups: Vec::new(),
+                required_construction: Some(25.0),
+            },
+        );
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                ..WorldState::default()
+            }],
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(1),
+                building: "building_logging_camp".into(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: Vec::new(),
+                saved_inputs: Vec::new(),
+                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+            }],
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            construction_rate: 10.0,
+            good_prices: vec![("wood".into(), 30.0)],
+            ..PlanningParts::default()
+        });
+        let config = SimConfig {
+            // Large fallback so a wrong path would not accidentally match ceil(25/10).
+            construction_days: 180,
+            ..SimConfig::default()
+        };
+        let queued = apply_action_with_economy(
+            &state,
+            &Action::QueueBuildingLevel {
+                building: "building_logging_camp".into(),
+            },
+            Some(&economy),
+            config,
+        )
+        .expect("enqueue");
+        assert_eq!(
+            queued.constructions.first().and_then(|row| row.remaining),
+            Some(25.0)
+        );
+        let goal = Goal::Atom(Atom::GoodPrice {
+            good: "wood".into(),
+            rel: Rel::Le,
+            value: 0.0,
+        });
+        let waits = successors_with_economy(&queued, &goal, config, &economy);
+        assert_eq!(waits.len(), 1);
+        // ceil(25/10) = 3
+        assert_eq!(waits[0].days, 3);
+        assert!(matches!(
+            waits[0].action,
+            Action::WaitForEvent {
+                event: Event::BuildingCompleted { .. },
+                days: 3,
+            }
+        ));
+    }
+
+    #[test]
+    fn in_flight_remaining_wins_over_def_required_construction() {
+        use crate::world::{ConstructionQueueKind, PlanningConstruction};
+        use vic3_defs::BuildingType;
+
+        let mut defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        defs.buildings.insert(
+            "building_logging_camp".into(),
+            BuildingType {
+                id: "building_logging_camp".into(),
+                group: None,
+                city_type: None,
+                production_method_groups: Vec::new(),
+                // Would imply ceil(999/10)=100 if wrongly preferred over remaining.
+                required_construction: Some(999.0),
+            },
+        );
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                ..WorldState::default()
+            }],
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(1),
+                building: "building_logging_camp".into(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: Vec::new(),
+                saved_inputs: Vec::new(),
+                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+            }],
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            queued_building: Some("building_logging_camp".into()),
+            constructions: vec![PlanningConstruction {
+                order_id: 1,
+                queue: ConstructionQueueKind::Government,
+                state_id: None,
+                building: "building_logging_camp".into(),
+                remaining: Some(25.0),
+            }],
+            construction_rate: 10.0,
+            good_prices: vec![("wood".into(), 30.0)],
+            ..PlanningParts::default()
+        });
+        let goal = Goal::Atom(Atom::GoodPrice {
+            good: "wood".into(),
+            rel: Rel::Le,
+            value: 0.0,
+        });
+        let waits = successors_with_economy(&state, &goal, SimConfig::default(), &economy);
+        assert_eq!(waits.len(), 1);
+        // ceil(25/10) = 3; def cost 999 must not win
         assert_eq!(waits[0].days, 3);
         assert!(matches!(
             waits[0].action,

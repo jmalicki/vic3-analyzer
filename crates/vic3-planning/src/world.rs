@@ -706,7 +706,13 @@ impl PlanningState {
     }
 
     /// Append a government construction (sim `QueueBuildingLevel`) and set the head.
-    pub fn push_construction(&mut self, building: String) {
+    ///
+    /// `remaining` is construction work points when known (typically
+    /// [`vic3_defs::BuildingType::required_construction`] for a new enqueue).
+    /// Pass [`None`] when the def omits cost so wait ETA can fall back to
+    /// [`crate::sim::SimConfig::construction_days`]. In-flight save rows keep
+    /// their own `remaining` and are not rewritten here.
+    pub fn push_construction(&mut self, building: String, remaining: Option<f64>) {
         let order_id = self
             .constructions
             .iter()
@@ -719,7 +725,7 @@ impl PlanningState {
             queue: ConstructionQueueKind::Government,
             state_id: None,
             building: building.clone(),
-            remaining: None,
+            remaining,
         });
         self.queued_building = Some(building);
     }
