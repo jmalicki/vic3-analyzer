@@ -208,12 +208,32 @@ function actionLabel(action: PlanAction): string {
   if ('QueueBuildingLevel' in action) {
     return `Queue building level: ${action.QueueBuildingLevel.building}`
   }
+  if ('QueueInterest' in action) {
+    return `Queue interest (${action.QueueInterest.kind}): ${action.QueueInterest.id}`
+  }
+  if ('QueueHireMilitary' in action) {
+    return `Hire to full: ${action.QueueHireMilitary.building}`
+  }
+  if ('QueueLaw' in action) return `Queue law: ${action.QueueLaw.law}`
+  if ('SwitchPm' in action) {
+    return `Switch PM on building ${action.SwitchPm.building_id}`
+  }
+  if ('AdjustTax' in action) return `Adjust tax by ${action.AdjustTax.delta}`
   const { days, event } = action.WaitForEvent
   if ('TechCompleted' in event) {
     return `Wait ${days} days for ${event.TechCompleted.tech}`
   }
   if ('BuildingCompleted' in event) {
     return `Wait ${days} days for ${event.BuildingCompleted.building}`
+  }
+  if ('InterestDeclared' in event) {
+    return `Wait ${days} days for interest ${event.InterestDeclared.id}`
+  }
+  if ('HireCompleted' in event) {
+    return `Wait ${days} days to staff ${event.HireCompleted.building}`
+  }
+  if ('LawEnacted' in event) {
+    return `Wait ${days} days for law ${event.LawEnacted.law}`
   }
   return `Wait ${days} days for payday`
 }

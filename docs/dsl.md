@@ -30,6 +30,7 @@ has_tech(nitroglycerin)
 has_law(law_homesteading)
 good_price(ammunition) <= 40
 army_power_projection >= 100
+navy_power_projection >= 100
 weekly_balance >= 100
 population_weighted_wealth >= 20
 credit_headroom > 0
@@ -42,6 +43,7 @@ Sugar that compiles to predicates (not evaluated as opaque strings):
 
 ```text
 declare-war(state=alsace)
+colonize(region=region_congo)
 research(tech=nitroglycerin)
 gdp >= 50e6
 ```
@@ -63,10 +65,29 @@ Requires `state=` or `region=`. Always expands to (at least):
 
 Property (I-declare-war): compilation always includes those four conjuncts. Extra conjuncts (infamy headroom, relations, claims) may be added later without removing these. Infamy is projected on `PlanningState` already; it is not yet a declare-war conjunct.
 
-`declare-war` is closable end-to-end when interest and army still need work **and**
+`declare-war` is closable end-to-end when interest still needs work **and**
 munitions-price plus solvent already hold (or munitions can move under existing
-building-level / PM actions). Interest and army use fixed-time queue + wait
-successors; solvent uses the compact payday model when credit is exhausted.
+building-level / PM actions), and army PP is known. Army PP closes via staffed
+barracks (build + hire), not a scalar bump. Solvent uses the compact payday model
+when credit is exhausted.
+
+## Compilation: `colonize`
+
+Requires `state=` or `region=`. Always expands to (I-colonize):
+
+- `has_tech(colonization)`
+- `has_law(law_colonial_resettlement) || has_law(law_colonial_exploitation)`
+- `has_tech(quinine)`
+- **interest** in the target
+- **army** power projection ≥ model threshold
+- **navy** power projection ≥ model threshold
+- **solvent**
+
+Navy PP closes via **shipyards** and **naval administrations** that are fully
+staffed (1.13 crew model). Underemployed mil buildings do not fully count.
+Hiring uses fixed training waits (not qualifications/literacy). Colonial law
+passage ignores IG/influence. Treaties, invasions, and colonial growth are not
+modeled.
 
 ## Compilation: `research`
 
@@ -96,8 +117,10 @@ UI presets and SQL `plan`/`gaps` TVFs consume the **same** compiled atoms — pr
 | `research` / `has_tech` | yes | yes (`QueueTech` + wait) |
 | `has_law` | yes | yes (`QueueLaw` + wait) |
 | `gdp` / supported `good_price` | yes | yes (bounded building levels and/or SwitchPm + re-solve) |
-| `interest_in` / `army_power_projection` | yes | yes (`QueueInterest` / `QueueArmyPower` + wait) |
+| `interest_in` | yes | yes (`QueueInterest` + wait) |
+| `army_power_projection` / `navy_power_projection` | yes | yes (barracks / shipyards / naval administrations + hire-to-full; needs economy to build) |
 | `declare-war` | yes | yes when munitions + solvent hold (interest/army); solvent via payday |
+| `colonize` | yes | yes when tech/law/interest/PP/solvent closable (navy needs economy for shipyards) |
 | `solvent` / `credit_headroom` / `debt_principal` | yes | yes (payday waits on frozen weekly balance) |
 | `weekly_balance` | yes | yes (`AdjustTax` on the frozen balance sample) |
 | SoL proxy (`population_weighted_wealth`) | yes | **not yet** (need wage model) |
@@ -110,7 +133,8 @@ evaluation:
 | Preset | Goal | Timeline |
 | --- | --- | --- |
 | Prepare for war | `declare-war(state=alsace)` | closable when munitions + solvent hold (or payday) |
-| Good-sized military | `army_power_projection >= 100` | closable when PP known |
+| Colonize equatorial Africa | `colonize(region=region_congo)` | gaps always; timeline when PP known + economy |
+| Good-sized military | `army_power_projection >= 100` | closable when PP known (staffed barracks) |
 | Economic growth | `gdp >= 100000000` | closable |
 | Increase weekly income | `weekly_balance >= 100` | closable (tax steps) |
 | Avoid default | `credit_headroom > 0` | closable (payday model) |

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-export type GoalKind = 'research' | 'gdp' | 'good-price' | 'declare-war' | 'advanced'
+export type GoalKind = 'research' | 'gdp' | 'good-price' | 'declare-war' | 'colonize' | 'advanced'
 
 interface Props {
   goods: string[]
@@ -22,6 +22,7 @@ export function GoalBuilder({ goods, value, onChange, idPrefix, initialKind = 'r
   const [relation, setRelation] = useState('<=')
   const [price, setPrice] = useState(20)
   const [state, setState] = useState('alsace')
+  const [region, setRegion] = useState('region_congo')
 
   useEffect(() => {
     if (goods.length > 0 && !goods.includes(good)) setGood(goods[0])
@@ -39,10 +40,12 @@ export function GoalBuilder({ goods, value, onChange, idPrefix, initialKind = 'r
         // tag= / wargoal= are accepted by the parser for forward compatibility but
         // ignored by compile today — do not collect or emit them from the UI.
         return `declare-war(state=${cleanId(state)})`
+      case 'colonize':
+        return `colonize(region=${cleanId(region)})`
       case 'advanced':
         return value
     }
-  }, [gdp, good, kind, price, relation, state, technology, value])
+  }, [gdp, good, kind, price, region, relation, state, technology, value])
 
   useEffect(() => {
     if (kind !== 'advanced') onChange(builtGoal)
@@ -62,6 +65,7 @@ export function GoalBuilder({ goods, value, onChange, idPrefix, initialKind = 'r
           <option value="gdp">Reach GDP</option>
           <option value="good-price">Reach a goods price</option>
           <option value="declare-war">War readiness (gaps)</option>
+          <option value="colonize">Colonize region</option>
           <option value="advanced">Advanced DSL</option>
         </select>
       </label>
@@ -139,9 +143,22 @@ export function GoalBuilder({ goods, value, onChange, idPrefix, initialKind = 'r
             onChange={(event) => setState(event.target.value)}
           />
           <span className="field-hint">
-            Compiles to interest, army, munitions-price, and solvent. Interest and
-            army have sim actions; full timelines still need munitions and solvent
-            already holding (solvent cannot yet become true under the model).
+            Compiles to interest, army, munitions-price, and solvent. Army PP closes
+            via staffed barracks when the economy context is present.
+          </span>
+        </label>
+      )}
+      {kind === 'colonize' && (
+        <label>
+          Target region
+          <input
+            aria-label={`${idPrefix} target region`}
+            value={region}
+            onChange={(event) => setRegion(event.target.value)}
+          />
+          <span className="field-hint">
+            Compiles to colonization tech, colonial law, quinine, interest, army/navy
+            PP, and solvent. Navy needs staffed shipyards and naval administrations.
           </span>
         </label>
       )}

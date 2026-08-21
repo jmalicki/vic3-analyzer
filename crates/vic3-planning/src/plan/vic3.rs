@@ -154,7 +154,8 @@ fn goal_timing_lower_bound(
 ) -> u32 {
     let research_days = u32::from(config.research_days.max(1));
     let interest_days = u32::from(config.interest_days.max(1));
-    let army_days = u32::from(config.army_expansion_days.max(1));
+    let army_train_days = u32::from(config.army_training_days.max(1));
+    let navy_crew_days = u32::from(config.navy_crew_days.max(1));
     let law_days = u32::from(config.law_days.max(1));
     let construction_days = u32::from(config.construction_days.max(1));
     match goal {
@@ -194,11 +195,28 @@ fn goal_timing_lower_bound(
                 interest_days
             }
         }
-        Goal::Atom(Atom::ArmyPower { rel, value }) => {
-            if crate::sim::army_power_raise_target(*rel, *value, state.army_power_projection)
+        Goal::Atom(atom @ Atom::ArmyPower { rel, value }) => {
+            if atom.eval(state) {
+                0
+            } else if !state.army_buildings_fully_staffed() {
+                army_train_days
+            } else if crate::sim::power_raise_needed(*rel, *value, state.army_power_projection)
                 .is_some()
             {
-                army_days
+                construction_days.saturating_add(army_train_days)
+            } else {
+                0
+            }
+        }
+        Goal::Atom(atom @ Atom::NavyPower { rel, value }) => {
+            if atom.eval(state) {
+                0
+            } else if !state.navy_buildings_fully_staffed() {
+                navy_crew_days
+            } else if crate::sim::power_raise_needed(*rel, *value, state.navy_power_projection)
+                .is_some()
+            {
+                construction_days.saturating_add(navy_crew_days)
             } else {
                 0
             }
@@ -277,26 +295,31 @@ mod tests {
 
     #[test]
     fn interest_and_army_plan_closes_declare_war_when_munitions_solvent_ok() {
+        // Army PP already meets the declare-war threshold; only interest remains.
         let start = Vic3Node::new(
             PlanningState::from_parts(PlanningParts {
                 country: "GER".into(),
                 solvent: true,
                 good_prices: vec![("ammunition".into(), 30.0)],
-                army_power_projection: Some(0.0),
+                army_power_projection: Some(150.0),
+                army_pp_baseline: Some(150.0),
                 ..PlanningParts::default()
             }),
             compile("declare-war(state=alsace)").unwrap(),
             SimConfig {
                 interest_days: 30,
-                army_expansion_days: 50,
                 ..SimConfig::default()
             },
         );
 
-        assert_eq!(start.heuristic(), 50, "AND bound is max(interest, army)");
+        assert_eq!(
+            start.heuristic(),
+            30,
+            "AND bound is interest when army holds"
+        );
         let (path, cost) =
             shortest_path::<_, PairingHeap<_, _>>(&start).expect("declare-war reachable");
-        assert_eq!(cost, 80, "sequential interest then army under single queue");
+        assert_eq!(cost, 30);
         let goal_node = path.last().unwrap();
         assert!(goal_node.is_goal());
         assert!(goal_node.state().has_interest_state("alsace"));
@@ -304,32 +327,28 @@ mod tests {
             .state()
             .army_power_projection
             .is_some_and(|p| p >= 100.0));
-        assert!(path.iter().any(|node| {
-            matches!(
-                node.state().queued_interest,
-                Some(crate::world::QueuedInterest::State(ref id)) if id == "alsace"
-            ) || node.state().has_interest_state("alsace")
-        }));
-        assert!(path.iter().any(|node| {
-            node.state().queued_army_target.is_some()
-                || node
-                    .state()
-                    .army_power_projection
-                    .is_some_and(|p| p >= 100.0)
-        }));
     }
 
     #[test]
-    fn army_only_plan_cost_is_queue_plus_wait_days() {
+    fn army_only_plan_hires_staffed_barracks() {
+        use crate::military::{ModeledMilBuilding, UnitCombatStats, BUILDING_BARRACKS};
+        let per = UnitCombatStats::army_default().full_power_projection();
+        let levels = (100.0 / per).ceil();
         let start = Vic3Node::new(
             PlanningState::from_parts(PlanningParts {
                 country: "GER".into(),
-                army_power_projection: Some(40.0),
+                army_power_projection: Some(0.0),
+                army_pp_baseline: Some(0.0),
+                mil_buildings: vec![ModeledMilBuilding {
+                    building: BUILDING_BARRACKS.into(),
+                    levels,
+                    staffing: 0.0,
+                }],
                 ..PlanningParts::default()
             }),
             compile("army_power_projection >= 100").unwrap(),
             SimConfig {
-                army_expansion_days: 77,
+                army_training_days: 77,
                 ..SimConfig::default()
             },
         );
@@ -337,9 +356,13 @@ mod tests {
         let (path, cost) =
             shortest_path::<_, PairingHeap<_, _>>(&start).expect("army goal reachable");
         assert_eq!(cost, 77);
-        assert_eq!(path.len(), 3);
-        assert!(path[2].is_goal());
-        assert_eq!(path[2].state().army_power_projection, Some(100.0));
+        assert!(path.last().unwrap().is_goal());
+        assert!(path
+            .last()
+            .unwrap()
+            .state()
+            .army_power_projection
+            .is_some_and(|p| p >= 100.0));
     }
 
     #[test]

@@ -29,11 +29,156 @@
 //! See [`docs/planning.md`](../../../docs/planning.md).
 
 use crate::goals::{gaps, Atom, Goal, InterestKind, Rel};
+use crate::military::{
+    is_barracks_building, is_military_planning_building, is_naval_admin_building,
+    is_shipyard_building, UnitCombatStats, BUILDING_BARRACKS, BUILDING_NAVAL_ADMIN,
+    BUILDING_SHIPYARD, MIL_INPUT_PRICE_FACTOR,
+};
 use crate::world::{PlanningState, QueuedInterest};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use vic3_defs::GameDefs;
 use vic3_prices::{solve, PricesResult, SolveOpts, World, ORDER_EPS};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MilitaryBranch {
+    Army,
+    Navy,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_military_pp_decisions(
+    result: &mut Vec<Successor>,
+    state: &PlanningState,
+    economy: Option<&EconomyContext>,
+    config: SimConfig,
+    branch: MilitaryBranch,
+    rel: Rel,
+    value: f64,
+    seen_builds: &mut BTreeSet<String>,
+    seen_hires: &mut BTreeSet<String>,
+) {
+    let current = match branch {
+        MilitaryBranch::Army => state.army_power_projection,
+        MilitaryBranch::Navy => state.navy_power_projection,
+    };
+    let Some(needed) = power_raise_needed(rel, value, current) else {
+        // Still may need to hire underemployed buildings so the atom can clear.
+        let underemployed = match branch {
+            MilitaryBranch::Army => !state.army_buildings_fully_staffed(),
+            MilitaryBranch::Navy => !state.navy_buildings_fully_staffed(),
+        };
+        if underemployed {
+            push_mil_hire_decisions(result, state, economy, branch, seen_hires);
+        }
+        return;
+    };
+    let staffed = match branch {
+        MilitaryBranch::Army => state.army_buildings_fully_staffed(),
+        MilitaryBranch::Navy => state.navy_buildings_fully_staffed(),
+    };
+    if needed <= 0.0 && staffed {
+        return;
+    }
+    // Prefer staffing existing underemployed capacity before building more.
+    if push_mil_hire_decisions(result, state, economy, branch, seen_hires) {
+        return;
+    }
+    let Some(economy) = economy else {
+        return;
+    };
+    let unit = match branch {
+        MilitaryBranch::Army => UnitCombatStats::army_default(),
+        MilitaryBranch::Navy => UnitCombatStats::navy_default(),
+    };
+    let per = unit.full_power_projection().max(1.0);
+    let levels_needed = (needed / per).ceil().max(1.0) as u32;
+    let cap = u32::from(config.max_added_levels_per_type);
+    match branch {
+        MilitaryBranch::Army => {
+            let have = mil_levels(state, is_barracks_building);
+            if have < levels_needed.min(cap) && seen_builds.insert(BUILDING_BARRACKS.into()) {
+                push_decision(
+                    result,
+                    state,
+                    Action::QueueBuildingLevel {
+                        building: BUILDING_BARRACKS.into(),
+                    },
+                    Some(economy),
+                );
+            }
+        }
+        MilitaryBranch::Navy => {
+            let ships_needed = levels_needed.min(cap);
+            let shipyard = mil_levels(state, is_shipyard_building);
+            let admin = mil_levels(state, is_naval_admin_building);
+            if shipyard < ships_needed && seen_builds.insert(BUILDING_SHIPYARD.into()) {
+                push_decision(
+                    result,
+                    state,
+                    Action::QueueBuildingLevel {
+                        building: BUILDING_SHIPYARD.into(),
+                    },
+                    Some(economy),
+                );
+            }
+            if admin < ships_needed && seen_builds.insert(BUILDING_NAVAL_ADMIN.into()) {
+                push_decision(
+                    result,
+                    state,
+                    Action::QueueBuildingLevel {
+                        building: BUILDING_NAVAL_ADMIN.into(),
+                    },
+                    Some(economy),
+                );
+            }
+        }
+    }
+}
+
+fn mil_levels(state: &PlanningState, pred: fn(&str) -> bool) -> u32 {
+    state
+        .mil_buildings
+        .iter()
+        .filter(|b| pred(&b.building))
+        .map(|b| b.levels.floor() as u32)
+        .sum()
+}
+
+/// Queue hire for underemployed buildings on this branch. Returns true if any hire was pushed.
+fn push_mil_hire_decisions(
+    result: &mut Vec<Successor>,
+    state: &PlanningState,
+    economy: Option<&EconomyContext>,
+    branch: MilitaryBranch,
+    seen_hires: &mut BTreeSet<String>,
+) -> bool {
+    let mut pushed = false;
+    for row in &state.mil_buildings {
+        if row.is_fully_staffed() {
+            continue;
+        }
+        let relevant = match branch {
+            MilitaryBranch::Army => is_barracks_building(&row.building),
+            MilitaryBranch::Navy => {
+                is_shipyard_building(&row.building) || is_naval_admin_building(&row.building)
+            }
+        };
+        if !relevant || !seen_hires.insert(row.building.clone()) {
+            continue;
+        }
+        push_decision(
+            result,
+            state,
+            Action::QueueHireMilitary {
+                building: row.building.clone(),
+            },
+            economy,
+        );
+        pushed = true;
+    }
+    pushed
+}
 
 /// Immutable price-solver inputs shared by all nodes in one search.
 #[derive(Debug, Clone)]
@@ -145,7 +290,100 @@ impl EconomyContext {
             });
             candidates.extend(ranked.into_iter().take(3).map(|(building, _)| building));
         }
+        // When army/navy PP is open, queue producers for expensive mil/shipyard inputs.
+        if atoms
+            .iter()
+            .any(|atom| matches!(atom, Atom::ArmyPower { .. } | Atom::NavyPower { .. }))
+        {
+            self.add_mil_input_producer_candidates(state, &world, &mut candidates, cap);
+        }
         candidates.into_iter().collect()
+    }
+
+    fn add_mil_input_producer_candidates(
+        &self,
+        state: &PlanningState,
+        world: &World,
+        candidates: &mut BTreeSet<String>,
+        cap: u16,
+    ) {
+        let mil_types: Vec<&str> = world
+            .buildings
+            .iter()
+            .map(|b| b.building.as_str())
+            .chain([BUILDING_BARRACKS, BUILDING_SHIPYARD, BUILDING_NAVAL_ADMIN])
+            .filter(|id| is_military_planning_building(id))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let mut expensive_inputs = BTreeSet::new();
+        for building in &world.buildings {
+            if !is_military_planning_building(&building.building) {
+                continue;
+            }
+            let (inputs, _) = building.goods_io(&self.defs);
+            for (good_idx, qty) in inputs.iter_indexed() {
+                if qty <= ORDER_EPS {
+                    continue;
+                }
+                let Some(good_id) = self.defs.good_by_index(good_idx) else {
+                    continue;
+                };
+                let Some(def) = self.defs.goods.get(good_id) else {
+                    continue;
+                };
+                let price = state.price(good_id).unwrap_or(def.base_price);
+                if price > def.base_price * MIL_INPUT_PRICE_FACTOR {
+                    expensive_inputs.insert(good_idx);
+                }
+            }
+        }
+        // Also consider defs for mil types not yet in the world (e.g. first shipyard).
+        for mil_id in mil_types {
+            let Some(building_type) = self.defs.buildings.get(mil_id) else {
+                continue;
+            };
+            for group_id in &building_type.production_method_groups {
+                let Some(pms) = self.defs.production_method_groups.get(group_id) else {
+                    continue;
+                };
+                for pm_id in pms {
+                    let Some(pm) = self.defs.production_methods.get(pm_id) else {
+                        continue;
+                    };
+                    for (good_idx, qty) in &pm.inputs {
+                        if *qty <= ORDER_EPS {
+                            continue;
+                        }
+                        let Some(good_id) = self.defs.good_by_index(*good_idx) else {
+                            continue;
+                        };
+                        let Some(def) = self.defs.goods.get(good_id) else {
+                            continue;
+                        };
+                        let price = state.price(good_id).unwrap_or(def.base_price);
+                        if price > def.base_price * MIL_INPUT_PRICE_FACTOR {
+                            expensive_inputs.insert(*good_idx);
+                        }
+                    }
+                }
+            }
+        }
+        for building in &world.buildings {
+            if state
+                .building_level_deltas
+                .get(&building.building)
+                .copied()
+                .unwrap_or(0)
+                >= u32::from(cap)
+            {
+                continue;
+            }
+            let (_, outputs) = building.goods_io(&self.defs);
+            if expensive_inputs.iter().any(|idx| outputs[*idx] > ORDER_EPS) {
+                candidates.insert(building.building.clone());
+            }
+        }
     }
 
     fn modeled_gdp(&self, state: &PlanningState, prices: &PricesResult) -> f64 {
@@ -346,8 +584,10 @@ pub struct SimConfig {
     pub max_added_levels_per_type: u16,
     /// Fixed duration to establish a declared interest (model constant).
     pub interest_days: u16,
-    /// Fixed duration for one modeled army power-projection expansion.
-    pub army_expansion_days: u16,
+    /// Fixed duration to hire barracks toward full employment.
+    pub army_training_days: u16,
+    /// Fixed duration to crew shipyards / naval administrations.
+    pub navy_crew_days: u16,
     /// Fixed duration for one modeled law enactment.
     pub law_days: u16,
     /// Weekly-balance change applied per tax-level step.
@@ -368,7 +608,8 @@ impl Default for SimConfig {
             payday_days: 7,
             max_added_levels_per_type: 10,
             interest_days: 90,
-            army_expansion_days: 180,
+            army_training_days: 90,
+            navy_crew_days: 180,
             law_days: 180,
             tax_balance_per_step: 50,
             max_tax_steps: 3,
@@ -387,8 +628,8 @@ pub enum Event {
     BuildingCompleted { building: String },
     /// The queued interest declaration completes.
     InterestDeclared { kind: InterestKind, id: String },
-    /// The queued army power-projection expansion completes (`f64::to_bits`).
-    ArmyPowerIncreased { target_bits: u64 },
+    /// Hire-to-full completes for a military building type.
+    HireCompleted { building: String },
     /// The queued law enactment completes.
     LawEnacted { law: String },
     /// One modeled budget tick applies the frozen weekly balance to debt/treasury.
@@ -407,8 +648,8 @@ pub enum Action {
     QueueBuildingLevel { building: String },
     /// Queue a goal-relevant interest declaration.
     QueueInterest { kind: InterestKind, id: String },
-    /// Queue raising army power projection to at least `f64::from_bits(target_bits)`.
-    QueueArmyPower { target_bits: u64 },
+    /// Queue hiring a military building type up to full employment.
+    QueueHireMilitary { building: String },
     /// Queue enacting a goal-relevant law checkpoint.
     QueueLaw { law: String },
     /// Instantly switch one building to alternate production methods and re-solve.
@@ -485,15 +726,15 @@ fn interest_matches(queued: &QueuedInterest, kind: InterestKind, id: &str) -> bo
 /// Unknown current projection (`None`), lower-bound atoms that already hold,
 /// equality from above, or upper-bound atoms that cannot be closed by increasing
 /// power, yield `None`.
-pub fn army_power_raise_target(rel: Rel, value: f64, current: Option<f64>) -> Option<f64> {
+pub fn power_raise_needed(rel: Rel, value: f64, current: Option<f64>) -> Option<f64> {
     let current = current?;
     if !value.is_finite() {
         return None;
     }
     match rel {
-        Rel::Ge => (!rel.holds(current, value)).then_some(value),
-        Rel::Eq => (current < value).then_some(value),
-        Rel::Gt => (!rel.holds(current, value)).then_some(value + 1.0),
+        Rel::Ge => (!rel.holds(current, value)).then_some(value - current),
+        Rel::Eq => (current < value).then_some(value - current),
+        Rel::Gt => (!rel.holds(current, value)).then_some(value + 1.0 - current),
         Rel::Le | Rel::Lt => None,
     }
 }
@@ -541,7 +782,8 @@ fn successors_for_atoms_with_economy(
     let mut seen_techs = BTreeSet::new();
     let mut seen_laws = BTreeSet::new();
     let mut seen_interest = BTreeSet::new();
-    let mut seen_army_targets = BTreeSet::new();
+    let mut seen_mil_builds = BTreeSet::new();
+    let mut seen_mil_hires = BTreeSet::new();
     let mut seen_tax_deltas = BTreeSet::new();
 
     if !state.has_inflight_queue() {
@@ -585,20 +827,29 @@ fn successors_for_atoms_with_economy(
                     );
                 }
                 Atom::ArmyPower { rel, value } => {
-                    let Some(target) =
-                        army_power_raise_target(*rel, *value, state.army_power_projection)
-                    else {
-                        continue;
-                    };
-                    let bits = target.to_bits();
-                    if !seen_army_targets.insert(bits) {
-                        continue;
-                    }
-                    push_decision(
+                    push_military_pp_decisions(
                         &mut result,
                         state,
-                        Action::QueueArmyPower { target_bits: bits },
                         economy,
+                        config,
+                        MilitaryBranch::Army,
+                        *rel,
+                        *value,
+                        &mut seen_mil_builds,
+                        &mut seen_mil_hires,
+                    );
+                }
+                Atom::NavyPower { rel, value } => {
+                    push_military_pp_decisions(
+                        &mut result,
+                        state,
+                        economy,
+                        config,
+                        MilitaryBranch::Navy,
+                        *rel,
+                        *value,
+                        &mut seen_mil_builds,
+                        &mut seen_mil_hires,
                     );
                 }
                 Atom::WeeklyBalance { .. } => {
@@ -692,16 +943,26 @@ fn successors_for_atoms_with_economy(
             config.interest_days,
             economy,
         );
-    } else if let Some(target_bits) = state.queued_army_target.map(f64::to_bits).filter(|_| {
-        open_atoms
+    } else if let Some(building) = state.queued_hire.as_ref().filter(|queued| {
+        open_atoms.iter().any(|atom| {
+            matches!(atom, Atom::ArmyPower { .. } | Atom::NavyPower { .. }) && !atom.eval(state)
+        }) && state
+            .mil_buildings
             .iter()
-            .any(|atom| matches!(atom, Atom::ArmyPower { .. }) && !atom.eval(state))
+            .any(|row| row.building == **queued && !row.is_fully_staffed())
     }) {
+        let days = if is_barracks_building(building) {
+            config.army_training_days
+        } else {
+            config.navy_crew_days
+        };
         push_wait(
             &mut result,
             state,
-            Event::ArmyPowerIncreased { target_bits },
-            config.army_expansion_days,
+            Event::HireCompleted {
+                building: building.clone(),
+            },
+            days,
             economy,
         );
     } else if let Some(law) = state.queued_law.as_ref().filter(|queued| {
@@ -903,16 +1164,18 @@ pub fn apply_action_with_economy(
             }
             next.queued_interest = Some(interest_queued(*kind, id));
         }
-        Action::QueueArmyPower { target_bits } => {
-            let target = f64::from_bits(*target_bits);
-            let Some(current) = next.army_power_projection else {
-                // Unknown PP — refuse modeled expand (not a measured zero army).
-                return None;
-            };
-            if !target.is_finite() || next.has_inflight_queue() || current >= target {
+        Action::QueueHireMilitary { building } => {
+            if building.is_empty() || next.has_inflight_queue() {
                 return None;
             }
-            next.queued_army_target = Some(target);
+            let row = next
+                .mil_buildings
+                .iter()
+                .find(|row| row.building == *building)?;
+            if row.is_fully_staffed() {
+                return None;
+            }
+            next.queued_hire = Some(building.clone());
         }
         Action::QueueLaw { law } => {
             if law.is_empty() || next.has_inflight_queue() || next.has_law(law) {
@@ -979,6 +1242,9 @@ pub fn apply_action_with_economy(
                 .building_level_deltas
                 .entry(building.clone())
                 .or_default() += 1;
+            if is_military_planning_building(building) {
+                next.push_mil_building_level(building);
+            }
             refresh_prices(&mut next, economy);
         }
         Action::WaitForEvent {
@@ -1001,17 +1267,15 @@ pub fn apply_action_with_economy(
             }
         }
         Action::WaitForEvent {
-            event: Event::ArmyPowerIncreased { target_bits },
+            event: Event::HireCompleted { building },
             days,
         } => {
-            let target = f64::from_bits(*target_bits);
-            if *days == 0 || next.queued_army_target.map(f64::to_bits) != Some(*target_bits) {
+            if *days == 0 || next.queued_hire.as_deref() != Some(building.as_str()) {
                 return None;
             }
             next.date = next.date.add_days(i32::from(*days));
-            next.queued_army_target = None;
-            next.army_power_projection =
-                Some(next.army_power_projection.unwrap_or(0.0).max(target));
+            next.queued_hire = None;
+            next.complete_mil_hire(building);
         }
         Action::WaitForEvent {
             event: Event::LawEnacted { law },
@@ -1108,16 +1372,69 @@ mod tests {
     }
 
     #[test]
-    fn queue_army_then_wait_reaches_army_power() {
+    fn queue_hire_navy_buildings_raises_navy_pp() {
+        use crate::military::{
+            ModeledMilBuilding, UnitCombatStats, BUILDING_NAVAL_ADMIN, BUILDING_SHIPYARD,
+        };
+        let per = UnitCombatStats::navy_default().full_power_projection();
+        let levels = (100.0 / per).ceil();
+        let goal = compile("navy_power_projection >= 100").unwrap();
+        let start = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            navy_power_projection: Some(0.0),
+            navy_pp_baseline: Some(0.0),
+            mil_buildings: vec![
+                ModeledMilBuilding {
+                    building: BUILDING_SHIPYARD.into(),
+                    levels,
+                    staffing: 0.0,
+                },
+                ModeledMilBuilding {
+                    building: BUILDING_NAVAL_ADMIN.into(),
+                    levels,
+                    staffing: 0.0,
+                },
+            ],
+            ..PlanningParts::default()
+        });
+        let config = SimConfig {
+            navy_crew_days: 40,
+            ..SimConfig::default()
+        };
+        // Hire shipyard then admin (order may vary); drain until goal holds.
+        let mut state = start;
+        for _ in 0..6 {
+            if evaluate(&goal, &state) {
+                break;
+            }
+            let edges = successors(&state, &goal, config);
+            assert!(!edges.is_empty(), "expected hire/wait edges at {state:?}");
+            state = edges[0].state.clone();
+        }
+        assert!(evaluate(&goal, &state));
+        assert!(state.navy_power_projection.is_some_and(|p| p >= 100.0));
+    }
+
+    #[test]
+    fn queue_hire_barracks_then_wait_reaches_army_power() {
+        use crate::military::{ModeledMilBuilding, UnitCombatStats, BUILDING_BARRACKS};
+        let per = UnitCombatStats::army_default().full_power_projection();
+        let levels = (100.0 / per).ceil();
         let goal = compile("army_power_projection >= 100").unwrap();
         let start = PlanningState::from_parts(PlanningParts {
             date: Vic3Date::from_ymdh(1836, 1, 1, 0),
             country: "GER".into(),
             army_power_projection: Some(0.0),
+            army_pp_baseline: Some(0.0),
+            mil_buildings: vec![ModeledMilBuilding {
+                building: BUILDING_BARRACKS.into(),
+                levels,
+                staffing: 0.0,
+            }],
             ..PlanningParts::default()
         });
         let config = SimConfig {
-            army_expansion_days: 60,
+            army_training_days: 60,
             ..SimConfig::default()
         };
 
@@ -1125,13 +1442,16 @@ mod tests {
         assert_eq!(decisions.len(), 1);
         assert!(matches!(
             decisions[0].action,
-            Action::QueueArmyPower { target_bits } if f64::from_bits(target_bits) == 100.0
+            Action::QueueHireMilitary { ref building } if building == BUILDING_BARRACKS
         ));
 
         let waits = successors(&decisions[0].state, &goal, config);
         assert_eq!(waits.len(), 1);
         assert_eq!(waits[0].days, 60);
-        assert_eq!(waits[0].state.army_power_projection, Some(100.0));
+        assert!(waits[0]
+            .state
+            .army_power_projection
+            .is_some_and(|p| p >= 100.0));
         assert!(evaluate(&goal, &waits[0].state));
     }
 
@@ -1142,9 +1462,12 @@ mod tests {
         assert_eq!(start.army_power_projection, None);
         let decisions = successors(&start, &goal, SimConfig::default());
         assert!(
-            decisions
-                .iter()
-                .all(|s| !matches!(s.action, Action::QueueArmyPower { .. })),
+            decisions.iter().all(|s| {
+                !matches!(
+                    s.action,
+                    Action::QueueHireMilitary { .. } | Action::QueueBuildingLevel { .. }
+                )
+            }),
             "unknown PP must not look like actionable zero: {decisions:?}"
         );
     }

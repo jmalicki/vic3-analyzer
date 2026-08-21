@@ -6,8 +6,10 @@
 use chumsky::prelude::*;
 
 use super::{
-    Atom, Goal, GoalError, InterestKind, Rel, DECLARE_WAR_ARMY_THRESHOLD,
-    DECLARE_WAR_MUNITIONS_PRICE_CEILING, MUNITIONS_GOOD,
+    Atom, Goal, GoalError, InterestKind, Rel, COLONIZE_ARMY_THRESHOLD, COLONIZE_NAVY_THRESHOLD,
+    COLONIZE_QUININE_TECH, COLONIZE_TECH, DECLARE_WAR_ARMY_THRESHOLD,
+    DECLARE_WAR_MUNITIONS_PRICE_CEILING, LAW_COLONIAL_EXPLOITATION, LAW_COLONIAL_RESETTLEMENT,
+    MUNITIONS_GOOD,
 };
 
 type Err<'src> = extra::Err<Rich<'src, char>>;
@@ -205,6 +207,7 @@ fn compile_expr(expr: Expr) -> Result<Goal, GoalError> {
 fn compile_pred(pred: RawPred) -> Result<Goal, GoalError> {
     match pred.name.as_str() {
         "declare-war" => compile_declare_war(&pred),
+        "colonize" => compile_colonize(&pred),
         "research" => compile_research(&pred),
         "has_tech" => {
             let tech = first_ident(&pred, "tech").ok_or(GoalError::ResearchTech)?;
@@ -249,6 +252,12 @@ fn compile_pred(pred: RawPred) -> Result<Goal, GoalError> {
                 GoalError::Parse("army_power_projection requires a comparison".into())
             })?;
             Ok(Goal::Atom(Atom::ArmyPower { rel, value }))
+        }
+        "navy_power_projection" => {
+            let (rel, value) = pred.rel.ok_or_else(|| {
+                GoalError::Parse("navy_power_projection requires a comparison".into())
+            })?;
+            Ok(Goal::Atom(Atom::NavyPower { rel, value }))
         }
         "gdp" => {
             let (rel, value) = pred
@@ -303,6 +312,35 @@ fn compile_declare_war(pred: &RawPred) -> Result<Goal, GoalError> {
             good: MUNITIONS_GOOD.into(),
             rel: Rel::Le,
             value: DECLARE_WAR_MUNITIONS_PRICE_CEILING,
+        }),
+        Goal::Atom(Atom::Solvent),
+    ]))
+}
+
+/// Expand `colonize(...)` to tech ∧ colonial-law ∨ ∧ quinine ∧ interest ∧ army ∧ navy ∧ solvent.
+fn compile_colonize(pred: &RawPred) -> Result<Goal, GoalError> {
+    let (kind, id) = if let Some(id) = named(pred, "state") {
+        (InterestKind::State, id)
+    } else if let Some(id) = named(pred, "region") {
+        (InterestKind::Region, id)
+    } else {
+        return Err(GoalError::ColonizeTarget);
+    };
+    Ok(Goal::And(vec![
+        Goal::Atom(Atom::HasTech(COLONIZE_TECH.into())),
+        Goal::Or(vec![
+            Goal::Atom(Atom::HasLaw(LAW_COLONIAL_RESETTLEMENT.into())),
+            Goal::Atom(Atom::HasLaw(LAW_COLONIAL_EXPLOITATION.into())),
+        ]),
+        Goal::Atom(Atom::HasTech(COLONIZE_QUININE_TECH.into())),
+        Goal::Atom(Atom::InterestIn { kind, id }),
+        Goal::Atom(Atom::ArmyPower {
+            rel: Rel::Ge,
+            value: COLONIZE_ARMY_THRESHOLD,
+        }),
+        Goal::Atom(Atom::NavyPower {
+            rel: Rel::Ge,
+            value: COLONIZE_NAVY_THRESHOLD,
         }),
         Goal::Atom(Atom::Solvent),
     ]))

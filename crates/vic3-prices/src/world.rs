@@ -173,6 +173,8 @@ pub struct WorldCountry {
     pub queued_building: Option<String>,
     /// Army power projection from save IR (`None` when missing / unknown).
     pub army_power_projection: Option<f64>,
+    /// Navy power projection from save IR (`None` when missing / unknown).
+    pub navy_power_projection: Option<f64>,
     /// State ids for DSL `interest_in(state=…)`.
     pub interest_states: Vec<String>,
     /// Strategic-region ids for DSL `interest_in(region=…)`.
@@ -380,6 +382,7 @@ impl World {
                     queued_tech: vic3_load::queued_tech_for(save, id),
                     queued_building: vic3_load::queued_building_for(save, id),
                     army_power_projection: vic3_load::army_power_projection_for(save, id),
+                    navy_power_projection: vic3_load::navy_power_projection_for(save, id),
                     interest_states: interest.states,
                     interest_regions: interest.regions,
                     infamy: country.infamy.filter(|value| value.is_finite()),
