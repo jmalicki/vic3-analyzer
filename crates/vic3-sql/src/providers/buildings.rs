@@ -14,6 +14,7 @@ use vic3_prices::GoodFlow;
 use crate::binding::SessionBinding;
 use crate::exec::memory_exec;
 use crate::schema::buildings_schema;
+use crate::scope::{state_in_scope, TableScope};
 
 use super::arrays::{good_io_list_column, text_list_column};
 use super::pushdown::{matches_str, matches_u32, PushSupport};
@@ -28,13 +29,15 @@ const PUSH: PushSupport = PushSupport {
 #[derive(Debug)]
 pub struct BuildingsProvider {
     binding: Arc<SessionBinding>,
+    scope: TableScope,
     schema: SchemaRef,
 }
 
 impl BuildingsProvider {
-    pub fn new(binding: Arc<SessionBinding>) -> Self {
+    pub fn new(binding: Arc<SessionBinding>, scope: TableScope) -> Self {
         Self {
             binding,
+            scope,
             schema: buildings_schema(),
         }
     }
@@ -60,6 +63,9 @@ impl BuildingsProvider {
         rows.sort_by_key(|b| b.id);
 
         for b in &rows {
+            if !state_in_scope(self.scope, self.binding.world.as_ref(), b.state_id) {
+                continue;
+            }
             if !matches_u32(&preds, "building_id", b.id) {
                 continue;
             }

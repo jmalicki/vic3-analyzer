@@ -24,7 +24,8 @@
 //!   before planning. No `set_active_save` UDF; no path arguments in SQL.
 //! - **`active.*`** — fact tables for the bound session (no `save_id` column).
 //! - **Unqualified** (e.g. `states`) — same providers as `active.*` after bind /
-//!   `use_save`; [`providers::UnboundFactProvider`] before.
+//!   `use_save`; [`providers::UnboundFactProvider`] before. Player-scoped short
+//!   names return only the played country / its states; full save is `world_*`.
 //! - **`latest.*`** — same schemas, pinned to catalog max-`mtime` at **scan**
 //!   time; must not mutate the active session (`mtime` ≠ in-game date).
 //!
@@ -37,6 +38,7 @@
 //! | [`binding`] | Snapshot held by providers/UDFs; shortage helper |
 //! | [`providers`] | Fact table providers, `saves`, `latest` / unbound wrappers |
 //! | [`providers::pushdown`] | Exact equality vs Exact range classification |
+//! | [`scope`] | Player vs `world_*` row filtering (`player_tag`) |
 //! | [`schema`] | Arrow schemas for facts + TVFs (`List<Struct{…}>` IO) |
 //! | [`udfs`] | Diagnostics scalars/TVFs + `plan` / `gaps` |
 //! | [`readonly`] | Parse-time SELECT/EXPLAIN gate |
@@ -110,6 +112,7 @@ mod host;
 pub mod providers;
 pub mod readonly;
 pub mod schema;
+pub mod scope;
 pub mod session;
 pub mod udfs;
 
@@ -130,7 +133,7 @@ pub fn schema_catalog_json() -> serde_json::Value {
     use providers::FACT_TABLES;
     let tables: Vec<serde_json::Value> = FACT_TABLES
         .iter()
-        .map(|t| {
+        .flat_map(|t| {
             let fields: Vec<serde_json::Value> = t
                 .schema()
                 .fields()
@@ -143,11 +146,33 @@ pub fn schema_catalog_json() -> serde_json::Value {
                     })
                 })
                 .collect();
-            serde_json::json!({
+            let mut entries = vec![serde_json::json!({
                 "name": t.name(),
                 "schemas": ["active", "latest", "(unqualified after use_save)"],
+                "scope": if t.is_player_scoped() { "player" } else { "session" },
                 "columns": fields,
-            })
+            })];
+            if let Some(world_name) = t.world_name() {
+                let fields: Vec<serde_json::Value> = t
+                    .schema()
+                    .fields()
+                    .iter()
+                    .map(|f| {
+                        serde_json::json!({
+                            "name": f.name(),
+                            "data_type": format!("{:?}", f.data_type()),
+                            "nullable": f.is_nullable(),
+                        })
+                    })
+                    .collect();
+                entries.push(serde_json::json!({
+                    "name": world_name,
+                    "schemas": ["active", "latest", "(unqualified after use_save)"],
+                    "scope": "world",
+                    "columns": fields,
+                }));
+            }
+            entries
         })
         .collect();
 
@@ -228,6 +253,7 @@ pub fn schema_catalog_json() -> serde_json::Value {
             "SQL is read-only: SELECT / WITH…SELECT / EXPLAIN only.",
             "Stubs are filename basenames; no filesystem path arguments.",
             "Unqualified fact names require use_save/bind; they do not fall back to latest.*.",
+            "Player-scoped short names (states, countries, …) filter to World.player_tag; use world_* for the full save.",
             "TVF arguments must be plan-time literals.",
             "IO columns are List<Struct{good, good_name, qty}>; use unnest(unnest(col)).",
         ],

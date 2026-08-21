@@ -14,6 +14,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use crate::binding::SessionBinding;
 use crate::exec::memory_exec;
 use crate::schema::states_schema;
+use crate::scope::{state_in_scope, TableScope};
 
 use super::pushdown::{matches_str, matches_u32, PushSupport};
 
@@ -27,6 +28,7 @@ const PUSH: PushSupport = PushSupport {
 #[derive(Debug)]
 pub struct StatesProvider {
     binding: Arc<SessionBinding>,
+    scope: TableScope,
     schema: SchemaRef,
     by_id: HashMap<u32, usize>,
     by_region_id: HashMap<String, Vec<usize>>,
@@ -34,7 +36,7 @@ pub struct StatesProvider {
 }
 
 impl StatesProvider {
-    pub fn new(binding: Arc<SessionBinding>) -> Self {
+    pub fn new(binding: Arc<SessionBinding>, scope: TableScope) -> Self {
         let mut rows: Vec<_> = binding.prices.states.iter().collect();
         rows.sort_by_key(|s| s.id);
         let mut by_id = HashMap::new();
@@ -52,6 +54,7 @@ impl StatesProvider {
         }
         Self {
             binding,
+            scope,
             schema: states_schema(),
             by_id,
             by_region_id,
@@ -115,6 +118,9 @@ impl StatesProvider {
         };
 
         for s in selected {
+            if !state_in_scope(self.scope, self.binding.world.as_ref(), Some(s.id)) {
+                continue;
+            }
             let tag = self.owner_tag(s.country_id);
             if !matches_u32(&preds, "state_id", s.id) {
                 continue;
