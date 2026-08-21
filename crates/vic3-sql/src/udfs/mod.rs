@@ -17,6 +17,7 @@
 //! | `good_price(good)` | Utf8 (runtime columnar OK) | NULL arg or unknown id → NULL |
 //! | `army_power()` | none | no `player_tag` → NULL |
 //! | `player_tag()` | none | no `player_tag` on world → NULL |
+//! | `is_underemployed(state_id)` | Int64 (runtime columnar OK) | NULL arg → NULL; else Underemployed alert for state |
 //! | `alerts([scope])` | optional `'all'` literal | zero-arg → player-scoped; `'all'` → full save |
 //! | `suggest_mitigations([scope])` | optional `'player'` / `'all'` | zero-arg / `'player'` → player-scoped; `'all'` → full save |
 //! | `shortage_analysis(good)` | Utf8 **or** NULL literal | NULL → all scarce-good alerts |
@@ -28,7 +29,7 @@
 //!
 //! | Module | Surface |
 //! | --- | --- |
-//! | [`scalars`] | `good_price`, `army_power`, `player_tag` |
+//! | [`scalars`] | `good_price`, `army_power`, `player_tag`, `is_underemployed` |
 //! | [`alerts`] | `alerts()` / `alerts('all')` |
 //! | [`suggest`] | `suggest_mitigations()` / `('player')` / `('all')` |
 //! | [`shortage`] | `shortage_analysis(good)` |

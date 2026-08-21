@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use datafusion::arrow::array::{Array, Float64Array, StringArray, UInt32Array};
+use datafusion::arrow::array::{Array, BooleanArray, Float64Array, StringArray, UInt32Array};
 use vic3_defs::{decode_blob, encode_blob, load_from_path};
 use vic3_load::{empty_tokens, load_slice};
 use vic3_prices::{solve, SolveOpts, World};
@@ -679,6 +679,106 @@ async fn diagnostics_alerts_and_good_price() {
         msg.contains("army power projection unknown") || msg.contains("army_power()"),
         "{msg}"
     );
+}
+
+#[tokio::test]
+async fn is_underemployed_matches_alerts() {
+    let eng = engine().await;
+
+    let null_row = eng
+        .query("SELECT is_underemployed(NULL) AS u")
+        .await
+        .expect("null arg");
+    let null_col = null_row[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .expect("bool");
+    assert!(null_col.is_null(0));
+
+    let under = eng
+        .query(
+            "SELECT state_id FROM alerts('all') \
+             WHERE kind = 'underemployed' AND state_id IS NOT NULL \
+             ORDER BY state_id LIMIT 1",
+        )
+        .await
+        .expect("underemployed alert");
+    assert!(
+        !under.is_empty() && under[0].num_rows() > 0,
+        "plaintext fixture should have at least one underemployed state"
+    );
+    let sid = under[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<UInt32Array>()
+        .unwrap()
+        .value(0);
+
+    let yes = eng
+        .query(&format!("SELECT is_underemployed({sid}) AS u"))
+        .await
+        .expect("true case");
+    let yes_col = yes[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .unwrap();
+    assert!(!yes_col.is_null(0));
+    assert!(yes_col.value(0), "state {sid} has underemployed alert");
+
+    // State present in `states` but without an underemployed alert (anti-join).
+    let other = eng
+        .query(
+            "SELECT s.state_id FROM states s \
+             WHERE NOT EXISTS ( \
+               SELECT 1 FROM alerts('all') a \
+               WHERE a.kind = 'underemployed' AND a.state_id = s.state_id \
+             ) \
+             ORDER BY s.state_id LIMIT 1",
+        )
+        .await
+        .expect("non-underemployed state");
+    let other_sid = if !other.is_empty() && other[0].num_rows() > 0 {
+        other[0]
+            .column(0)
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap()
+            .value(0)
+    } else {
+        // Every fixture state is underemployed — pick an id with no alert.
+        9_999_999
+    };
+    let no = eng
+        .query(&format!("SELECT is_underemployed({other_sid}) AS u"))
+        .await
+        .expect("false scalar");
+    let no_col = no[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .unwrap();
+    assert!(!no_col.is_null(0));
+    assert!(
+        !no_col.value(0),
+        "state {other_sid} should not be underemployed"
+    );
+
+    // Columnar path: UInt32 `states.state_id` coerces into the Int64 UDF.
+    let col = eng
+        .query(&format!(
+            "SELECT is_underemployed(state_id) AS u FROM states WHERE state_id = {sid}"
+        ))
+        .await
+        .expect("columnar");
+    let col_bool = col[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .unwrap();
+    assert_eq!(col[0].num_rows(), 1);
+    assert!(col_bool.value(0));
 }
 
 #[tokio::test]
