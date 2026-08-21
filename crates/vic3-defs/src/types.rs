@@ -247,6 +247,11 @@ pub struct BuildingType {
     /// Script ids from `production_method_groups = { ... }`.
     #[serde(default)]
     pub production_method_groups: Vec<String>,
+    /// Construction points to complete one level (`required_construction` in
+    /// script). [`None`] when the file omitted the field; planners may fall
+    /// back to a model constant.
+    #[serde(default)]
+    pub required_construction: Option<f64>,
 }
 
 /// One profession from `common/pop_types`.

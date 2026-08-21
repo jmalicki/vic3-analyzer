@@ -74,6 +74,16 @@ Do not write a third A*. Use `rust_advanced_heaps::pathfinding::{SearchNode, sho
 
 `mutate` applies a [`WorldDelta`](json-schema.md) to a cloned world and re-solves (`preview`). That preview does not write a file. `SolveOpts.warm_rel` feeds the previous relative-price vector into Basin so a second solve can skip successive substitution.
 
+## Planning framework seams
+
+The planning stack is growing **framework-shaped seams** inside the repo (not a published crate yet). See [`planning.md`](planning.md#framework-seams).
+
+| Layer | Role |
+| --- | --- |
+| **Core** | Goal DSL + solvers (`evaluate` / `gaps` / `plan`), resource tracks + ETA, prereq expansion, layered defs merge |
+| **Host (Vic3)** | Atoms, sugar, military, economy edges, Clausewitz parsers |
+| **Optional peripheral** | DataFusion `plan()` / `gaps()` TVFs, MCP/CLI/wasm adapters — first-class in this product; optional if a framework splits out |
+
 ## Out of scope (this architecture)
 
 - Fighting/winning the war (only starting the play)

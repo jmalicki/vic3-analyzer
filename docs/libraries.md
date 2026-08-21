@@ -37,3 +37,16 @@ Where to look: [crates.io](https://crates.io), [lib.rs](https://lib.rs), [docs.r
 **IndexedDB wrapper (P6):** `idb` or `idb-keyval` — pick the one whose store API is a handful of functions. Vitest: `fake-indexeddb`.
 
 **GOAP crates:** API inspiration for [`dsl.md`](dsl.md) only, not the planner.
+
+## Planning framework seams
+
+In-tree only until a second non-Vic3 consumer appears. Vocabulary and PR map: [`planning.md`](planning.md#framework-seams).
+
+| Seam | Location | Notes |
+| --- | --- | --- |
+| Tracks / ETA | `vic3-planning::tracks` | Backlog + worker rate; construction is one queue, many workers |
+| DSL + solvers | `vic3-planning::goals` / `plan` | Stable surface for SQL/API; Vic3 stays in atoms/sim |
+| Defs layers | `vic3-defs` | Code defaults → blob/install → file overlays (JSON); bump `BLOB_VERSION` on `GameDefs` shape changes |
+| Dataflow | `vic3-sql` | Product-integrated; treat as optional peripheral in a future extract |
+
+**Rustdoc:** new seam modules ship docs.rs-ready `//!` / `///` (units, edge cases, Vic3 vs generic).

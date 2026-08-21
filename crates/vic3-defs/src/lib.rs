@@ -1,5 +1,6 @@
 //! Game definitions for Victoria 3: goods, `PRICE_RANGE`, production methods,
-//! pop needs, buy packages, cultural obsessions, buildings, and UI assets.
+//! pop needs, buy packages, cultural obsessions, buildings (including
+//! optional `required_construction`), and UI assets.
 //!
 //! # Role in the pipeline
 //!
@@ -9,10 +10,11 @@
 //! IR + GameDefs → vic3-prices → … → plan → vic3-api
 //! ```
 //!
-//! This crate does **not** parse saves. It turns Clausewitz game data (or a
-//! prebuilt postcard blob) into [`GameDefs`] that the price solver and wasm UI
-//! share. Clausewitz text is parsed with **jomini** (`Deserialize` /
-//! `JominiDeserialize`); there is no custom lexer.
+//! Defs merge layers (code defaults → blob/install → file overlays) are
+//! described in [`docs/planning.md`](../../../docs/planning.md#framework-seams).
+//! This crate does **not** parse saves; it turns Clausewitz game data (or a
+//! postcard blob) into [`GameDefs`]. Overlays land in a follow-on module.
+//! Clausewitz text is parsed with **jomini**; there is no custom lexer.
 //!
 //! Architecture overview: [`docs/architecture.md`](../../../docs/architecture.md).
 //! Price formula and pop consumption:

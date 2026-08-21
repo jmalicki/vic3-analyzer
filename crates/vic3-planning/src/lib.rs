@@ -9,12 +9,18 @@
 //! `vic3-sim`, `vic3-plan`) so call sites stay obvious. Facades share this
 //! crate through [`vic3_api`](../vic3-api) / CLI / SQL.
 //!
+//! Framework-shaped seams (tracks/ETA, DSL solvers) are documented in
+//! [`docs/planning.md`](../../../docs/planning.md#framework-seams). Domain
+//! timing should prefer [`tracks`] over ad hoc day constants when work/rate
+//! data exists.
+//!
 //! Do **not** use crates.io `pathfinding`. See [`docs/planning.md`](../../../docs/planning.md).
 
 pub mod goals;
 pub mod military;
 pub mod plan;
 pub mod sim;
+pub mod tracks;
 pub mod world;
 
 pub use goals::{
@@ -39,6 +45,10 @@ pub use plan::{
 pub use sim::{
     apply_action, successors, successors_for_atoms, successors_with_economy, Action,
     EconomyContext, SimConfig, Successor,
+};
+pub use tracks::{
+    constant_rate_work, days_for_work, eta_days, eta_head_days, eta_prefix_days, next_completion,
+    Backlog, Job, TrackId, TrackState, WorkerPool, CONSTANT_RATE,
 };
 pub use world::{
     law_key, ConstructionQueueKind, PlanningParts, PlanningState, QueuedInterest, Save, Vic3Date,
