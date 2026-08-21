@@ -1,26 +1,33 @@
 # Ask your AI (MCP)
 
-Chat-driven Vic3 advice over your local autosave: Cursor, Claude Desktop, or any stdio MCP client talks to `vic3-analyzer mcp`. The model binds a save, reads a compact brief, then runs SQL / what-if tools — you stay in conversation instead of inventing queries by hand.
+Talk to your local autosave from Cursor, Claude Desktop, or any stdio MCP client. Run `vic3-analyzer mcp`: the model binds a save, reads `campaign_brief`, then uses `query` / `preview_delta`.
 
 Numbers in the [example trajectories](#example-trajectories) come from the in-repo **fixture campaign** (plaintext autosave + fixture defs).[^fixture] Your live Steam save will differ; the *shape* of the conversation is what to copy.
 
 ## Setup
 
-Point the client at the same fat binary as the desktop companion, with args `["mcp"]`:
+Add an MCP server entry (Cursor: `~/.cursor/mcp.json`; Claude Desktop: its MCP servers settings) that runs the same binary as the [desktop companion](desktop.md), with args `["mcp"]`:
 
 ```json
 {
   "mcpServers": {
     "vic3-analyzer": {
-      "command": "/path/to/vic3-analyzer",
+      "command": "/Applications/Vic3 Analyzer.app/Contents/MacOS/vic3-analyzer",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-macOS app bundle: `…/Vic3 Analyzer.app/Contents/MacOS/vic3-analyzer` with the same `["mcp"]` args. Config and save dirs are shared with the GUI ([desktop companion](desktop.md)); full client notes live in [docs/mcp.md](../mcp.md).
+Use an **absolute** `command` path. On Linux/Windows, substitute whatever `which vic3-analyzer` (or your install location) returns. Config and save dirs are shared with the GUI.
 
+If the first tool calls fail:
+
+- Open the desktop app once (or set game/save paths in its Settings) so defs and the catalog exist.
+- Call `refresh_catalog` if the save list is empty.
+- Prefer plaintext saves when you can ([Save-game editing](https://vic3.paradoxwikis.com/Save-game_editing)).
+
+Full client notes: [docs/mcp.md](../mcp.md).
 ## Flow
 
 Always bind before fact tables or planning TVFs. Prefer this order:
@@ -81,14 +88,14 @@ The server ships reusable prompt templates — ask the client to use them, or pa
 
 ## Example trajectories
 
-Polished chat shapes. Format: **User** / **Assistant** / **→ tool** / **← result** / **Assistant** interpretation.
+Format: User → Assistant → tool → result → Assistant.
 
 ### 1. Shortage triage
 
 ```text
 User: What’s short in my market, and should I worry?
 
-Assistant: I’ll bind the latest autosave, take a campaign brief, then zoom the top shortage.
+Assistant: Binding latest autosave, then campaign_brief and the top shortage row.
 
 → use_save { "selector": "latest_autosave" }
 ← { "name": "autosave", "kind": "autosave", "in_game_date": "1836.1.1",
@@ -123,9 +130,8 @@ Assistant: I’ll bind the latest autosave, take a campaign brief, then zoom the
                 (heuristic — not sized-to-fix)
 
 Assistant: Only coal is short (~0.24 buy−sell in Brandenburg) at ~52.5 vs a 30 base.
-  Severity-1 alerts agree. Mitigations suggest a trade center or local producer —
-  treat those as ranked hints, then confirm with preview_delta before you build.
-  You’re not staring at a multi-good cascade on this fixture snapshot.
+  Severity-1 alerts agree. Alert mitigations rank trade center vs local coal;
+  verify with preview_delta before you build. Fixture snapshot: coal only, not a cascade.
 ```
 
 ### 2. Building what-if (`preview_delta`)
@@ -133,7 +139,7 @@ Assistant: Only coal is short (~0.24 buy−sell in Brandenburg) at ~52.5 vs a 30
 ```text
 User: If I add one rye-farm level, does wood get cheaper?
 
-Assistant: Binding, then sugar preview_delta (session stays unchanged).
+Assistant: Binding, then preview_delta for +1 rye farm (read-only; session unchanged).
 
 → use_save { "name": "autosave" }
 ← loaded GER / 1836.1.1
@@ -157,8 +163,7 @@ Assistant: Binding, then sugar preview_delta (session stays unchanged).
   }
 
 Assistant: Model converged. Wood drops ~15.4 → ~5.6 (forestry PM on rye farm in
-  this fixture). No shortage delta. Read the limitations: labor/trade stay frozen
-  unless you encode them in the delta — this is not a full pop hire/fire sim.[^model][^pops]
+  this fixture). No shortage delta. Labor/trade frozen unless in the delta.[^model]
 ```
 
 ### 3. Prepare for war (`gaps` on `declare-war`)
@@ -166,7 +171,7 @@ Assistant: Model converged. Wood drops ~15.4 → ~5.6 (forestry PM on rye farm i
 ```text
 User: Can I declare war for Alsace yet?
 
-Assistant: War readiness is a conjunction — I’ll run gaps on declare-war sugar.
+Assistant: Checking gaps('declare-war(state=alsace)') — every conjunct must clear.
 
 → use_save { "selector": "latest_autosave" }
 ← loaded
@@ -227,7 +232,7 @@ Assistant: On the fixture, the planner stacks rye-farm levels (~200 model days
 ```text
 User: Plan research to unlock nitroglycerin.
 
-Assistant: Using the plan_research prompt pattern.
+Assistant: Queueing plan('research(tech=nitroglycerin)').
 
 → use_save { "selector": "latest" }
 ← loaded
@@ -245,10 +250,8 @@ Assistant: Using the plan_research prompt pattern.
    4  125    QueueTech      nitroglycerin
    5  225    WaitForEvent   TechCompleted nitroglycerin
 
-Assistant: Three-tech chain — manufacturies → shaft_mining → nitroglycerin —
-  finishing on model day 225. Swap the tech id in plan('research(tech=…)') for
-  other targets; optional gaps('research(tech=…)') first if you only need
-  “already done?”.
+Assistant: Unlocked on model day 225 via manufacturies → shaft_mining → nitroglycerin.
+  For “already researched?” use gaps first; swap the tech id for other targets.
 ```
 
 ### 6. Credit / avoid default
@@ -256,7 +259,7 @@ Assistant: Three-tech chain — manufacturies → shaft_mining → nitroglycerin
 ```text
 User: Am I about to default? What should I do?
 
-Assistant: Credit headroom and solvent are the avoid-default atoms.
+Assistant: Checking credit_headroom and solvent.
 
 → use_save { "name": "autosave" }
 ← loaded
@@ -279,11 +282,9 @@ Assistant: Credit headroom and solvent are the avoid-default atoms.
 ← (empty plan — goal already true)
 
 Assistant: On this fixture you’re already solvent with positive credit headroom,
-  so plan() returns no steps. If headroom were failing on a live save, plan()
-  would typically WaitForPayday on the frozen weekly balance (surplus pays down
-  principal before growing treasury) and/or AdjustTax on the balance sample —
-  not a full investment-pool / credit-limit sim.[^model] Pair with
-  weekly_balance >= … when you care about the income side.
+  so plan() returns no steps. On a live save with failing headroom, expect
+  payday / tax actions under the compact model — not a full investment-pool
+  sim.[^model] Pair with weekly_balance >= … for the income side.
 ```
 
 ## Technical reference
@@ -298,7 +299,7 @@ Related player surfaces: [desktop](desktop.md) · [web](web.md) · [overview](RE
 
 ## Model notes
 
-See [_model-notes.md](_model-notes.md). Short version: prices, what-ifs, and plans run **under our model**; results carry a `limitations` list. This MCP guide is **not** a full pop / migration planner — we surface qualifications and staffing so you can spot bottlenecks, while solves keep labor and trade **frozen** except explicit deltas.[^model][^pops]
+Prices/plans are model-scoped; labor/trade stay frozen except explicit deltas. Details: [_model-notes.md](_model-notes.md).[^model][^pops]
 
 ---
 
