@@ -69,8 +69,10 @@ async function startPreview() {
 
 /** @param {import('playwright').Page} page */
 async function waitReady(page) {
-  await page.getByRole('region', { name: 'Campaign summary' }).waitFor({ timeout: 120_000 })
-  await page.getByRole('heading', { name: 'Goods prices' }).waitFor({ timeout: 120_000 })
+  console.log('waiting for campaign summary / goods prices…')
+  await page.getByRole('region', { name: 'Campaign summary' }).waitFor({ timeout: 90_000 })
+  await page.getByRole('heading', { name: 'Goods prices' }).waitFor({ timeout: 90_000 })
+  console.log('prices ready')
 }
 
 /** @param {import('playwright').Page} page */
@@ -84,15 +86,18 @@ async function main() {
 
   const dest = outDir()
   const preview = await startPreview()
-  const browser = await chromium.launch()
+  const browser = await chromium.launch({ headless: true })
   try {
+    console.log('web capture: seeding defs…')
     const { context, page } = await newShotPage(browser)
 
-    await page.goto(preview.baseUrl, { waitUntil: 'domcontentloaded' })
+    await page.goto(preview.baseUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 })
     await seedDefsIndexedDb(page)
-    await page.reload({ waitUntil: 'domcontentloaded' })
+    console.log('web capture: reloading with seeded defs…')
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 })
     await page.getByText(/Using your file: defs\.postcard/).waitFor({ timeout: 60_000 })
 
+    console.log('web capture: loading save…')
     await page.getByLabel('Save file').setInputFiles({
       name: 'plaintext.v3',
       mimeType: 'text/plain',

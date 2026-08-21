@@ -75,6 +75,7 @@ jobs:
 
   docs-screenshots:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -106,6 +107,7 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Generate screenshots
         working-directory: scripts/docs-screenshots
+        timeout-minutes: 12
         env:
           DOCS_SCREENSHOTS_OUT: ${{ runner.temp }}/docs-screenshots-out
         run: npm run docs:screenshots
