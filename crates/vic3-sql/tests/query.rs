@@ -245,6 +245,65 @@ async fn alerts_lean_select_honors_limit() {
 }
 
 #[tokio::test]
+async fn alerts_default_is_player_scoped() {
+    let eng = engine().await;
+
+    let player_states = eng
+        .query("SELECT state_id FROM states WHERE owner_tag = player_tag()")
+        .await
+        .expect("player states");
+    let mut owned = std::collections::BTreeSet::new();
+    for batch in &player_states {
+        let col = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .expect("state_id");
+        for i in 0..col.len() {
+            owned.insert(col.value(i));
+        }
+    }
+    assert!(!owned.is_empty(), "fixture player GER should own states");
+
+    let scoped = eng
+        .query("SELECT state_id FROM alerts()")
+        .await
+        .expect("alerts()");
+    let all = eng
+        .query("SELECT state_id FROM alerts('all')")
+        .await
+        .expect("alerts('all')");
+    let scoped_n: usize = scoped.iter().map(|b| b.num_rows()).sum();
+    let all_n: usize = all.iter().map(|b| b.num_rows()).sum();
+    assert!(
+        scoped_n <= all_n,
+        "alerts() ({scoped_n}) must be ≤ alerts('all') ({all_n})"
+    );
+    assert!(all_n > 0, "alerts('all') should still return volume");
+
+    for batch in &scoped {
+        let col = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .expect("state_id");
+        for i in 0..col.len() {
+            if col.is_null(i) {
+                continue;
+            }
+            let sid = col.value(i);
+            assert!(
+                owned.contains(&sid),
+                "alerts() state_id {sid} must be player-owned"
+            );
+        }
+    }
+
+    let bad = eng.query("SELECT * FROM alerts('domestic')").await;
+    assert!(bad.is_err(), "unknown alerts() arg must plan_err");
+}
+
+#[tokio::test]
 async fn rejects_ddl() {
     let eng = engine().await;
     let err = eng.query("CREATE TABLE t (a INT)").await.expect_err("ddl");

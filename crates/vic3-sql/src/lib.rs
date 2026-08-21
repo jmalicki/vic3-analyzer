@@ -74,7 +74,7 @@
 //! | `good_price(good)` | scalar | Utf8 | arg or missing id → NULL |
 //! | `army_power()` | scalar | none | no player tag → NULL |
 //! | `player_tag()` | scalar | none | no player tag → NULL |
-//! | `alerts()` | TVF | none | — |
+//! | `alerts([scope])` | TVF | optional `'all'` | zero-arg → player-scoped; `'all'` → full save |
 //! | `shortage_analysis(good)` | TVF | Utf8 or NULL | NULL = all scarce-good alerts |
 //! | `building_staffing(state_id)` | TVF | non-null int | NULL rejected |
 //! | `plan(goal [, max_days [, label]])` | TVF | non-null strings/int | NULL rejected; `max_days` default 3650; `label` ignored in rows |
@@ -197,7 +197,8 @@ pub fn schema_catalog_json() -> serde_json::Value {
         "tvfs": [
             {
                 "name": "alerts",
-                "signature": "alerts()",
+                "signature": "alerts([scope])",
+                "scope": "zero-arg = player-owned state_id or NULL; alerts('all') = full save",
                 "columns": cols(schema::alerts_schema()),
             },
             {

@@ -34,6 +34,7 @@ Do **not** use `SELECT set_active_save(...)`.
 query:  SELECT name, kind, in_game_date, mtime, location FROM saves ORDER BY mtime DESC LIMIT 10
 use_save: { "name": "autosave" }
 query:  SELECT * FROM alerts() WHERE severity = 1
+        -- player-scoped by default; alerts('all') for the full save
 ```
 
 Or: `use_save: { "selector": "latest_autosave" }`.
