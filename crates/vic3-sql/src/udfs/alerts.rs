@@ -24,13 +24,14 @@ use datafusion::common::{plan_err, Result as DfResult};
 use datafusion::datasource::{TableProvider, TableType};
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
-use vic3_prices::{Alert, AlertKind, World};
+use vic3_prices::{Alert, AlertKind};
 
 use crate::binding::{projection_includes, SessionBinding};
 use crate::exec::memory_exec;
 use crate::filter::Pred;
 use crate::providers::pushdown::{matches_i32, matches_str, matches_u32, PushSupport};
 use crate::schema::alerts_schema;
+use crate::scope::player_owned_state_ids;
 use crate::udfs::literal_str;
 
 /// Column index of `mitigations` in [`alerts_schema`] (evidence is 8 and free).
@@ -287,22 +288,6 @@ impl TableProvider for AlertsProvider {
         let with_mitigations = projection_includes(projection, ALERTS_MITIGATIONS_COL);
         memory_exec(self.batch(with_mitigations, filters, limit)?, projection)
     }
-}
-
-/// State ids owned by [`World::player_tag`] (strict; no first-country fallback).
-///
-/// Mirrors `player_state_ids` in `vic3-prices` optimize, but only when
-/// `player_tag` is set.
-fn player_owned_state_ids(world: &World) -> Option<BTreeSet<u32>> {
-    let tag = world.player_tag.as_deref()?;
-    let country = world.country_by_tag(tag)?;
-    let mut ids: BTreeSet<u32> = country.states.iter().copied().collect();
-    for state in &world.states {
-        if state.country == Some(country.id) {
-            ids.insert(state.id);
-        }
-    }
-    Some(ids)
 }
 
 /// Snake_case `kind` strings for SQL (`docs/sql.md` / alerts JSON).

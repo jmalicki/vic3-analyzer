@@ -20,6 +20,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use crate::binding::SessionBinding;
 use crate::exec::memory_exec;
 use crate::schema::constructions_schema;
+use crate::scope::{construction_in_scope, TableScope};
 
 use super::pushdown::{matches_str, matches_u32, PushSupport};
 
@@ -33,13 +34,15 @@ const PUSH: PushSupport = PushSupport {
 #[derive(Debug)]
 pub struct ConstructionsProvider {
     binding: Arc<SessionBinding>,
+    scope: TableScope,
     schema: SchemaRef,
 }
 
 impl ConstructionsProvider {
-    pub fn new(binding: Arc<SessionBinding>) -> Self {
+    pub fn new(binding: Arc<SessionBinding>, scope: TableScope) -> Self {
         Self {
             binding,
+            scope,
             schema: constructions_schema(),
         }
     }
@@ -73,6 +76,14 @@ impl ConstructionsProvider {
             .collect();
 
         for (row, this_pos) in self.binding.world.constructions.iter().zip(positions) {
+            if !construction_in_scope(
+                self.scope,
+                self.binding.world.as_ref(),
+                row.country_id,
+                row.state_id,
+            ) {
+                continue;
+            }
             let queue_str = row.queue.as_str();
             if !matches_u32(&preds, "order_id", row.id) {
                 continue;
