@@ -22,6 +22,8 @@
 //! | army / navy / interest | country cache + formations; PP `None` when IR omits | `None` / empty |
 //! | `building_level_deltas`, `pm_overrides`, `tax_level` | empty / `0` | sim branches |
 //! | `queued_interest`, `queued_hire`, `queued_law`, `mil_buildings` | empty / `None` | sim in-flight queues |
+//! | `construction_rate` | `1.0` (save does not yet project sectors) | sim / tests |
+//! | `tech_days_left` / `interest_days_left` / `hire_days_left` / `law_days_left` | `None` at load | set on queue / decremented by [`PlanningState::tick_parallel_tracks`] |
 //!
 //! Missing principal/credit leaves `solvent` false (no treasury-sign guess).
 //! Unknown country tag → [`WorldError::UnknownCountry`].
@@ -182,6 +184,16 @@ pub struct PlanningParts {
     pub pm_overrides: BTreeMap<u32, Vec<String>>,
     /// Tax level offset from the saved baseline (`0` at load).
     pub tax_level: i8,
+    /// Construction points completed per day (default 1.0).
+    pub construction_rate: f64,
+    /// Days left on the research queue head (`None` when idle).
+    pub tech_days_left: Option<u16>,
+    /// Days left on the interest queue head.
+    pub interest_days_left: Option<u16>,
+    /// Days left on the hire queue head.
+    pub hire_days_left: Option<u16>,
+    /// Days left on the law queue head.
+    pub law_days_left: Option<u16>,
 }
 
 impl Default for PlanningParts {
@@ -217,6 +229,11 @@ impl Default for PlanningParts {
             infamy: None,
             pm_overrides: BTreeMap::new(),
             tax_level: 0,
+            construction_rate: 1.0,
+            tech_days_left: None,
+            interest_days_left: None,
+            hire_days_left: None,
+            law_days_left: None,
         }
     }
 }
@@ -291,6 +308,17 @@ pub struct PlanningState {
     pub pm_overrides: BTreeMap<u32, Vec<String>>,
     /// Tax offset from saved baseline (`0` at load; sim `AdjustTax`).
     pub tax_level: i8,
+    /// Construction worker-pool rate (work units per day). Used with queue
+    /// `remaining` for ETA; default `1.0` so points map 1:1 to days.
+    pub construction_rate: f64,
+    /// Remaining days on [`Self::queued_tech`] (model timer).
+    pub tech_days_left: Option<u16>,
+    /// Remaining days on [`Self::queued_interest`].
+    pub interest_days_left: Option<u16>,
+    /// Remaining days on [`Self::queued_hire`].
+    pub hire_days_left: Option<u16>,
+    /// Remaining days on [`Self::queued_law`].
+    pub law_days_left: Option<u16>,
 }
 
 impl Default for PlanningState {
@@ -334,6 +362,11 @@ impl PartialEq for PlanningState {
             && f64_option_bits_eq(self.infamy, other.infamy)
             && self.pm_overrides == other.pm_overrides
             && self.tax_level == other.tax_level
+            && f64_bits_eq(self.construction_rate, other.construction_rate)
+            && self.tech_days_left == other.tech_days_left
+            && self.interest_days_left == other.interest_days_left
+            && self.hire_days_left == other.hire_days_left
+            && self.law_days_left == other.law_days_left
     }
 }
 
@@ -379,6 +412,11 @@ impl Hash for PlanningState {
             methods.hash(state);
         }
         self.tax_level.hash(state);
+        self.construction_rate.to_bits().hash(state);
+        self.tech_days_left.hash(state);
+        self.interest_days_left.hash(state);
+        self.hire_days_left.hash(state);
+        self.law_days_left.hash(state);
     }
 }
 
@@ -478,16 +516,85 @@ impl PlanningState {
             infamy: parts.infamy,
             pm_overrides: parts.pm_overrides,
             tax_level: parts.tax_level,
+            construction_rate: if parts.construction_rate.is_finite()
+                && parts.construction_rate > 0.0
+            {
+                parts.construction_rate
+            } else {
+                1.0
+            },
+            tech_days_left: parts.tech_days_left,
+            interest_days_left: parts.interest_days_left,
+            hire_days_left: parts.hire_days_left,
+            law_days_left: parts.law_days_left,
         }
     }
 
-    /// Whether any compact decision queue is occupied.
+    /// Whether any track currently has an in-flight job (any queue non-empty).
     pub fn has_inflight_queue(&self) -> bool {
+        self.research_busy()
+            || self.construction_busy()
+            || self.interest_busy()
+            || self.hire_busy()
+            || self.law_busy()
+    }
+
+    /// Research track has a queued tech.
+    pub fn research_busy(&self) -> bool {
         self.queued_tech.is_some()
-            || self.queued_building.is_some()
-            || self.queued_interest.is_some()
-            || self.queued_hire.is_some()
-            || self.queued_law.is_some()
+    }
+
+    /// Construction backlog is non-empty.
+    pub fn construction_busy(&self) -> bool {
+        self.queued_building.is_some() || !self.constructions.is_empty()
+    }
+
+    /// Interest track busy.
+    pub fn interest_busy(&self) -> bool {
+        self.queued_interest.is_some()
+    }
+
+    /// Hire track busy.
+    pub fn hire_busy(&self) -> bool {
+        self.queued_hire.is_some()
+    }
+
+    /// Law track busy.
+    pub fn law_busy(&self) -> bool {
+        self.queued_law.is_some()
+    }
+
+    /// Advance parallel track timers by `days` without completing the waited event.
+    ///
+    /// Construction head `remaining` loses `days * construction_rate` work.
+    /// Fixed-day tracks decrement their `*_days_left` counters (saturating at 0).
+    /// A zero-day tick is a no-op.
+    pub fn tick_parallel_tracks(&mut self, days: u16) {
+        if days == 0 {
+            return;
+        }
+        if let Some(left) = self.tech_days_left.as_mut() {
+            *left = left.saturating_sub(days);
+        }
+        if let Some(left) = self.interest_days_left.as_mut() {
+            *left = left.saturating_sub(days);
+        }
+        if let Some(left) = self.hire_days_left.as_mut() {
+            *left = left.saturating_sub(days);
+        }
+        if let Some(left) = self.law_days_left.as_mut() {
+            *left = left.saturating_sub(days);
+        }
+        let rate = self.construction_rate;
+        if rate.is_finite() && rate > 0.0 {
+            if let Some(head) = self.constructions.first_mut() {
+                if let Some(rem) = head.remaining.as_mut() {
+                    if rem.is_finite() {
+                        *rem = (*rem - f64::from(days) * rate).max(0.0);
+                    }
+                }
+            }
+        }
     }
 
     /// Refresh army/navy PP from baselines + staffed mil buildings.
@@ -731,6 +838,11 @@ impl PlanningState {
             infamy: country.infamy.filter(|value| value.is_finite()),
             pm_overrides: BTreeMap::new(),
             tax_level: 0,
+            construction_rate: 1.0,
+            tech_days_left: None,
+            interest_days_left: None,
+            hire_days_left: None,
+            law_days_left: None,
         })
     }
 
@@ -821,6 +933,11 @@ impl PlanningState {
             infamy: country.infamy,
             pm_overrides: BTreeMap::new(),
             tax_level: 0,
+            construction_rate: 1.0,
+            tech_days_left: None,
+            interest_days_left: None,
+            hire_days_left: None,
+            law_days_left: None,
         })
     }
 
