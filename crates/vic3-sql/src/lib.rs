@@ -77,6 +77,7 @@
 //! | `army_power()` | scalar | none | no player tag → NULL |
 //! | `player_tag()` | scalar | none | no player tag → NULL |
 //! | `alerts([scope])` | TVF | optional `'all'` | zero-arg → player-scoped; `'all'` → full save |
+//! | `suggest_mitigations([scope])` | TVF | optional `'player'` / `'all'` | heuristic alert mitigations as rows (not sized-to-fix) |
 //! | `shortage_analysis(good)` | TVF | Utf8 or NULL | NULL = all scarce-good alerts |
 //! | `building_staffing(state_id)` | TVF | non-null int | NULL rejected |
 //! | `plan(goal [, max_days [, label]])` | TVF | non-null strings/int | NULL rejected; `max_days` default 3650; `label` ignored in rows |
@@ -225,6 +226,13 @@ pub fn schema_catalog_json() -> serde_json::Value {
                 "signature": "alerts([scope])",
                 "scope": "zero-arg = player-owned state_id or NULL; alerts('all') = full save",
                 "columns": cols(schema::alerts_schema()),
+            },
+            {
+                "name": "suggest_mitigations",
+                "signature": "suggest_mitigations([scope])",
+                "scope": "zero-arg / 'player' = player-scoped; 'all' = full save",
+                "limitation": "exposes existing heuristic mitigations (often +1 levels); does not size actions to clear the problem",
+                "columns": cols(schema::suggest_mitigations_schema()),
             },
             {
                 "name": "shortage_analysis",

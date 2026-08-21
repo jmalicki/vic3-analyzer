@@ -525,6 +525,75 @@ async fn alerts_default_is_player_scoped() {
 }
 
 #[tokio::test]
+async fn suggest_mitigations_player_le_all_and_columns() {
+    let eng = engine().await;
+
+    let player = eng
+        .query("SELECT * FROM suggest_mitigations()")
+        .await
+        .expect("suggest_mitigations()");
+    let player_alias = eng
+        .query("SELECT * FROM suggest_mitigations('player')")
+        .await
+        .expect("suggest_mitigations('player')");
+    let all = eng
+        .query("SELECT * FROM suggest_mitigations('all')")
+        .await
+        .expect("suggest_mitigations('all')");
+
+    let player_n: usize = player.iter().map(|b| b.num_rows()).sum();
+    let alias_n: usize = player_alias.iter().map(|b| b.num_rows()).sum();
+    let all_n: usize = all.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(player_n, alias_n, "() and ('player') must match");
+    assert!(
+        player_n <= all_n,
+        "player ({player_n}) must be ≤ all ({all_n})"
+    );
+    assert!(all_n > 0, "fixture should yield mitigations");
+
+    let schema = all[0].schema();
+    let expected = [
+        "alert_id",
+        "mitigation_id",
+        "state_id",
+        "kind",
+        "rank",
+        "action",
+        "building",
+        "good_id",
+        "extra_levels",
+        "title",
+        "detail",
+    ];
+    assert_eq!(schema.fields().len(), expected.len());
+    for (i, name) in expected.iter().enumerate() {
+        assert_eq!(schema.field(i).name(), *name);
+    }
+
+    // Smoke: detail is JSON; at least one row has a non-empty action or title.
+    let titles = all[0]
+        .column(9)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("title");
+    let details = all[0]
+        .column(10)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("detail");
+    assert!(!titles.value(0).is_empty());
+    assert!(details.value(0).starts_with('{'));
+
+    let bad = eng
+        .query("SELECT * FROM suggest_mitigations('domestic')")
+        .await;
+    assert!(
+        bad.is_err(),
+        "unknown suggest_mitigations() arg must plan_err"
+    );
+}
+
+#[tokio::test]
 async fn rejects_ddl() {
     let eng = engine().await;
     let err = eng.query("CREATE TABLE t (a INT)").await.expect_err("ddl");
