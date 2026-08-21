@@ -148,4 +148,54 @@ macOS app bundle: `…/Vic3 Analyzer.app/Contents/MacOS/vic3-analyzer` with args
 - Crate: `vic3-mcp`, linked into the `vic3-analyzer` binary (`mcp` argv).
 - Tools / resources / prompts implemented; catalog watch → `list_changed` remains best-effort follow-up.
 - Shared with GUI: [`vic3_catalog::DesktopConfig`] + [`vic3_api::ensure_defs_blob`] (same config file and defs cache path). Active SQL session stays per-process.
-- Headless smoke: `./scripts/mcp-smoke.sh` (CI) asserts `mcp` reaches ready on stderr without a display / without calling Tauri `run`.
+- Headless startup smoke: `./scripts/mcp-smoke.sh` (CI) asserts `mcp` reaches ready on stderr without a display / without calling Tauri `run`.
+- Protocol smoke client: `./scripts/mcp_smoke.py` (NDJSON stdio) — see [Smoke client](#smoke-client) below.
+
+## Smoke client
+
+In-repo NDJSON client for a full tool round-trip against a running `vic3-analyzer mcp` process ([#46](https://github.com/jmalicki/vic3-analyzer/issues/46)). Distinct from `mcp-smoke.sh` (startup / no-window only).
+
+**Flow:** `initialize` → `notifications/initialized` → `tools/list` → `use_save` → then:
+
+| Condition | Next step |
+| --- | --- |
+| `campaign_brief` in tools | call `campaign_brief` |
+| else | `query` a small domestic shortage SQL (`owner_tag = player_tag()`) |
+| `--preview-rye` and `preview_delta` present | sugar `building_rye_farm` / `extra_levels: 1` |
+
+Optional advisor tools are detected from `tools/list`, so the script works on **main** (`query` + `use_save`) and against branches that add `campaign_brief` / `preview_delta` without hard-requiring them. Prints one JSON object on stdout; exits `1` if a tool returns `isError` or the protocol fails. Server logs stay on stderr.
+
+### Invoke
+
+```bash
+# Binary: first arg, VIC3_MCP_BIN, VIC3_ANALYZER_BIN, or vic3-analyzer on PATH
+export VIC3_MCP_BIN=./target/debug/vic3-analyzer
+
+python3 scripts/mcp_smoke.py --name autosave
+python3 scripts/mcp_smoke.py --selector latest_autosave --location local
+python3 scripts/mcp_smoke.py --name autosave --preview-rye   # no-op skip if tool missing
+```
+
+### Fixture smoke (local)
+
+Use a private `XDG_DATA_HOME` so the process does not touch a live Steam install. Same fixture inputs as `vic3-mcp` tool tests:
+
+```bash
+TMP=$(mktemp -d)
+export XDG_DATA_HOME="$TMP/xdg"
+APP="$XDG_DATA_HOME/vic3-analyzer"
+mkdir -p "$APP" "$TMP/saves"
+cp crates/vic3-load/tests/fixtures/plaintext.txt "$TMP/saves/autosave.v3"
+cargo run -p vic3-defs --bin emit_fixture_blob -- "$APP/defs.postcard"
+cat >"$APP/config.toml" <<EOF
+auto_detect = false
+defs_blob = "$APP/defs.postcard"
+save_dirs = ["$TMP/saves"]
+EOF
+
+cargo build -p vic3-analyzer
+export VIC3_MCP_BIN=./target/debug/vic3-analyzer
+python3 scripts/mcp_smoke.py --name autosave
+```
+
+Without a configured catalog/defs, `use_save` errors and the script exits `1`.
