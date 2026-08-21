@@ -781,6 +781,64 @@ async fn is_underemployed_matches_alerts() {
     assert!(col_bool.value(0));
 }
 
+/// End-to-end player scope: `is_underemployed` + `suggest_mitigations()` on short `states`
+/// without `owner_tag = player_tag()`.
+#[tokio::test]
+async fn underemployed_states_join_suggest_mitigations() {
+    let eng = engine().await;
+
+    let under = eng
+        .query("SELECT state_id FROM states WHERE is_underemployed(state_id) ORDER BY state_id")
+        .await
+        .expect("underemployed via states");
+    let under_n: usize = under.iter().map(|b| b.num_rows()).sum();
+    assert!(
+        under_n > 0,
+        "plaintext fixture should have underemployed player states"
+    );
+
+    let joined = eng
+        .query(
+            "SELECT s.state_id, s.owner_tag, m.kind, m.action, m.title \
+             FROM states s \
+             JOIN suggest_mitigations() m USING (state_id) \
+             WHERE is_underemployed(s.state_id) \
+             ORDER BY s.state_id, m.rank \
+             LIMIT 40",
+        )
+        .await
+        .expect("join suggest_mitigations on underemployed states");
+
+    let mut saw_underemployed_kind = false;
+    for batch in &joined {
+        let owners = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("owner_tag");
+        let kinds = batch
+            .column(2)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("kind");
+        for i in 0..batch.num_rows() {
+            assert_eq!(
+                owners.value(i),
+                "GER",
+                "short states is player-scoped; no owner_tag filter needed"
+            );
+            if kinds.value(i) == "underemployed" {
+                saw_underemployed_kind = true;
+            }
+        }
+    }
+    let joined_n: usize = joined.iter().map(|b| b.num_rows()).sum();
+    assert!(
+        joined_n > 0 && saw_underemployed_kind,
+        "expected underemployed mitigations joined to player states (got {joined_n} rows)"
+    );
+}
+
 #[tokio::test]
 async fn shortage_analysis_schema_and_filter() {
     let eng = engine().await;

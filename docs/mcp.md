@@ -80,7 +80,7 @@ Empty args (`{}`). Requires a bound save (`use_save` first); otherwise a tool er
 | --- | --- |
 | `session` | `{ name, kind, in_game_date, country }` from the active session |
 | `player_tag` | Bound world's played country tag (may be null) |
-| `top_goods` | Up to ~10 domestic goods by summed shortage (`owner_tag` = player) |
+| `top_goods` | Up to ~10 domestic goods by summed shortage (player-owned states) |
 | `hotspots` | Up to ~15 `{ region_name, good, shortage }` rows |
 | `alert_kinds` | Kind → count histogram from **player-default** alerts (same filter as zero-arg `alerts()`, not `alerts('all')`) |
 
@@ -219,7 +219,7 @@ In-repo NDJSON client for a full tool round-trip against a running `vic3-analyze
 | Condition | Next step |
 | --- | --- |
 | `campaign_brief` in tools | call `campaign_brief` |
-| else | `query` a small domestic shortage SQL (`owner_tag = player_tag()`) |
+| else | `query` a small domestic shortage SQL (player-scoped `states` / `goods_by_state`, no `owner_tag` filter) |
 | `--preview-rye` and `preview_delta` present | sugar `building_rye_farm` / `extra_levels: 1` |
 
 Optional advisor tools are detected from `tools/list`, so the script works on **main** (`query` + `use_save`) and against branches that add `campaign_brief` / `preview_delta` without hard-requiring them. Prints one JSON object on stdout; exits `1` if a tool returns `isError` or the protocol fails. Server logs stay on stderr.

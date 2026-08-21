@@ -40,9 +40,12 @@ Registered on the active session after `use_save` (see `docs/sql.md` for columns
 ## Scalars
 - `good_price(good TEXT)` → FLOAT
 - `army_power()` → FLOAT
+- `player_tag()` → TEXT
+- `is_underemployed(state_id BIGINT)` → BOOLEAN
 
 ## Diagnostics TVFs
-- `alerts()`
+- `alerts([scope])` — default player-scoped; `'all'` = full save
+- `suggest_mitigations([scope])` — heuristic rows; `'player'` / `'all'`
 - `shortage_analysis(good TEXT)` — `NULL` = all shortage kinds
 - `building_staffing(state_id BIGINT)`
 
@@ -50,7 +53,7 @@ Registered on the active session after `use_save` (see `docs/sql.md` for columns
 - `plan(goal TEXT [, max_days [, label]])`
 - `gaps(goal TEXT)`
 
-Catalog (no session): `saves`. Fact tables: `active.*` / unqualified after bind; `latest.*` at read time.
+Catalog (no session): `saves`. Fact tables: short names / `active.*` are player-scoped; use `world_*` for the full save; `latest.*` at read time.
 "#;
 
 /// Shared GUI state (mutex for Tauri managed state).

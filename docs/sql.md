@@ -523,6 +523,23 @@ SELECT id, evidence, mitigations FROM alerts() WHERE id = 'goods:engines';
 SELECT good, alert_id, kind, shortage, price
 FROM shortage_analysis('engines');
 
+-- Underemployed domestic states (no owner_tag = player_tag() needed):
+SELECT state_id, region_name
+FROM states
+WHERE is_underemployed(state_id);
+
+SELECT state_id, title
+FROM alerts()
+WHERE kind = 'underemployed';
+
+-- Heuristic mitigations for those states (suggest_mitigations is player-scoped too):
+SELECT s.region_name, m.action, m.building, m.title
+FROM states s
+JOIN suggest_mitigations() m USING (state_id)
+WHERE is_underemployed(s.state_id)
+ORDER BY m.rank
+LIMIT 20;
+
 SELECT step, day, action, detail
 FROM plan('declare-war(tag=FRA, wargoal=conquer_state, state=alsace)')
 ORDER BY step;
