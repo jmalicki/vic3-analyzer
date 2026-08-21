@@ -20,6 +20,7 @@ use super::pushdown::{matches_str, PushSupport};
 
 const PUSH: PushSupport = PushSupport {
     eq_u32: &[],
+    eq_i32: &[],
     eq_str: &["pm", "pm_name"],
     // defs.production_methods is a BTreeMap — Exact range on pm.
     range_str: &["pm"],

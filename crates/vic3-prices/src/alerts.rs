@@ -149,17 +149,36 @@ pub enum MitigationAction {
 ///
 /// When `with_mitigations` is false, detectors still emit titles/summaries/evidence
 /// but skip expensive mitigation builders (world clones, lever ranking).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// When `mitigation_ids` is `Some`, only those alert ids get mitigation lists
+/// (detectors still run for every alert). Used by SQL filter/LIMIT pushdown so
+/// agents do not pay for tens of thousands of discarded mitigations.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AlertsOptions {
     /// Attach ranked [`Mitigation`] lists (default true for CLI/wasm parity).
     pub with_mitigations: bool,
+    /// If set, only build mitigations for these alert ids. Ignored when
+    /// `with_mitigations` is false. `None` means every alert (default).
+    pub mitigation_ids: Option<BTreeSet<String>>,
 }
 
 impl Default for AlertsOptions {
     fn default() -> Self {
         Self {
             with_mitigations: true,
+            mitigation_ids: None,
         }
+    }
+}
+
+impl AlertsOptions {
+    /// Whether mitigation builders should run for `alert_id`.
+    pub fn wants_mitigations(&self, alert_id: &str) -> bool {
+        self.with_mitigations
+            && self
+                .mitigation_ids
+                .as_ref()
+                .is_none_or(|ids| ids.contains(alert_id))
     }
 }
 
@@ -200,7 +219,7 @@ pub fn alerts_with(
         prices,
         &mut alerts,
         &mut extra_limitations,
-        opts.with_mitigations,
+        &opts,
     );
     collect_needs_unmet(
         world,
@@ -208,17 +227,17 @@ pub fn alerts_with(
         prices,
         &mut alerts,
         &mut extra_limitations,
-        opts.with_mitigations,
+        &opts,
     );
-    collect_market_access(prices, world, defs, &mut alerts, opts.with_mitigations);
-    collect_education(world, defs, prices, &mut alerts, opts.with_mitigations);
+    collect_market_access(prices, world, defs, &mut alerts, &opts);
+    collect_education(world, defs, prices, &mut alerts, &opts);
     collect_pop_and_underemployed(
         world,
         defs,
         prices,
         &mut alerts,
         &mut extra_limitations,
-        opts.with_mitigations,
+        &opts,
     );
 
     finish_alerts(prices, alerts, extra_limitations)
@@ -242,7 +261,7 @@ pub fn goods_shortage_alerts(
         prices,
         &mut alerts,
         &mut extra_limitations,
-        opts.with_mitigations,
+        &opts,
     );
     finish_alerts(prices, alerts, extra_limitations)
 }
@@ -270,7 +289,7 @@ fn collect_goods_alerts(
     prices: &PricesResult,
     alerts: &mut Vec<Alert>,
     limitations: &mut BTreeSet<String>,
-    with_mitigations: bool,
+    opts: &AlertsOptions,
 ) {
     let mut seen = BTreeSet::new();
     let mut short_goods: BTreeMap<String, GoodsShortageHint> = BTreeMap::new();
@@ -305,7 +324,9 @@ fn collect_goods_alerts(
     }
 
     // Build once per alerts pass; lean (`with_mitigations: false`) skips entirely.
-    let index = with_mitigations.then(|| MitigationIndex::build(world, defs, prices));
+    let index = opts
+        .with_mitigations
+        .then(|| MitigationIndex::build(world, defs, prices));
 
     for (good_id, hint) in short_goods {
         let kind = goods_kind(&good_id);
@@ -346,8 +367,9 @@ fn collect_goods_alerts(
                 value: "non-tradeable (local-only)".into(),
             });
         }
-        let mitigations = if let Some(index) = index.as_ref() {
-            goods_mitigations(
+        let alert_id = format!("{}:{good_id}", kind_id(kind));
+        let mitigations = match (opts.wants_mitigations(&alert_id), index.as_ref()) {
+            (true, Some(index)) => goods_mitigations(
                 &ShortageEffect {
                     world,
                     defs,
@@ -361,12 +383,11 @@ fn collect_goods_alerts(
                 hint.state_id,
                 tradeable,
                 limitations,
-            )
-        } else {
-            Vec::new()
+            ),
+            _ => Vec::new(),
         };
         alerts.push(Alert {
-            id: format!("{}:{good_id}", kind_id(kind)),
+            id: alert_id,
             kind,
             severity: 1,
             title: format!("{display} shortage"),
@@ -1032,7 +1053,7 @@ fn collect_needs_unmet(
     prices: &PricesResult,
     alerts: &mut Vec<Alert>,
     limitations: &mut BTreeSet<String>,
-    with_mitigations: bool,
+    opts: &AlertsOptions,
 ) {
     // Heuristic: a state need is unmet when any basket good has local sell
     // below the demanded quantity, or local/market prices sit at the
@@ -1066,13 +1087,14 @@ fn collect_needs_unmet(
             }
         }
         let good_id = goods.first().map(|(id, _)| id.clone());
-        let mitigations = if with_mitigations {
+        let alert_id = format!("needs_unmet:{state_id}");
+        let mitigations = if opts.wants_mitigations(&alert_id) {
             need_mitigations(state_id, &goods)
         } else {
             Vec::new()
         };
         alerts.push(Alert {
-            id: format!("needs_unmet:{state_id}"),
+            id: alert_id,
             kind: AlertKind::NeedsUnmet,
             severity: 1,
             title: format!(
@@ -1205,7 +1227,7 @@ fn collect_market_access(
     world: &World,
     defs: &GameDefs,
     alerts: &mut Vec<Alert>,
-    with_mitigations: bool,
+    opts: &AlertsOptions,
 ) {
     let states: Vec<AccessState> = if prices.states.is_empty() {
         world
@@ -1235,8 +1257,23 @@ fn collect_market_access(
         }
         let infra = state.infrastructure.unwrap_or(0.0);
         let usage = state.infrastructure_usage.unwrap_or(0.0);
+        let alert_id = format!("low_market_access:{}", state.id);
+        let mitigations = if opts.wants_mitigations(&alert_id) {
+            rank(vec![action_mit(
+                format!("access:{}:rail", state.id),
+                "Add infrastructure",
+                "Build railways or urban infrastructure so usage no longer exceeds capacity.",
+                MitigationAction::Build {
+                    building: "building_railway".into(),
+                    state_id: Some(state.id),
+                    extra_levels: Some(1),
+                },
+            )])
+        } else {
+            Vec::new()
+        };
         alerts.push(Alert {
-            id: format!("low_market_access:{}", state.id),
+            id: alert_id,
             kind: AlertKind::LowMarketAccess,
             severity: 1,
             title: format!(
@@ -1267,20 +1304,7 @@ fn collect_market_access(
                     value: format!("{:.2}", access),
                 },
             ],
-            mitigations: if with_mitigations {
-                rank(vec![action_mit(
-                    format!("access:{}:rail", state.id),
-                    "Add infrastructure",
-                    "Build railways or urban infrastructure so usage no longer exceeds capacity.",
-                    MitigationAction::Build {
-                        building: "building_railway".into(),
-                        state_id: Some(state.id),
-                        extra_levels: Some(1),
-                    },
-                )])
-            } else {
-                Vec::new()
-            },
+            mitigations,
             staffing: Vec::new(),
         });
     }
@@ -1297,7 +1321,7 @@ fn collect_education(
     defs: &GameDefs,
     prices: &PricesResult,
     alerts: &mut Vec<Alert>,
-    with_mitigations: bool,
+    opts: &AlertsOptions,
 ) {
     for row in &prices.state_qualifications {
         if row.shortage <= ORDER_EPS {
@@ -1305,7 +1329,8 @@ fn collect_education(
         }
         let target = row.profession_id.as_str();
         let mix = state_mix(prices, row.state_id);
-        let mitigations = if with_mitigations {
+        let alert_id = format!("unfilled_education:{}:{target}", row.state_id);
+        let mitigations = if opts.wants_mitigations(&alert_id) {
             let mut items = qualification_levers(prices, defs, row.state_id, target, &mix);
             let wants_university = items.iter().any(is_university_build);
             if wants_university && has_unstaffed_university(prices, world, row.state_id) {
@@ -1324,7 +1349,7 @@ fn collect_education(
         let place = state_label(prices, world, defs, row.state_id);
         let stock = row.employable.unwrap_or(row.qualified);
         alerts.push(Alert {
-            id: format!("unfilled_education:{}:{target}", row.state_id),
+            id: alert_id,
             kind: AlertKind::UnfilledEducation,
             severity: 1,
             title: format!("{place} needs {} more {profession}", format_num(row.shortage)),
@@ -1379,7 +1404,7 @@ fn collect_pop_and_underemployed(
     prices: &PricesResult,
     alerts: &mut Vec<Alert>,
     limitations: &mut BTreeSet<String>,
-    with_mitigations: bool,
+    opts: &AlertsOptions,
 ) {
     let buildings = if prices.buildings.is_empty() {
         world
@@ -1427,7 +1452,7 @@ fn collect_pop_and_underemployed(
                 AlertKind::UnfilledPops,
                 1,
                 false,
-                with_mitigations,
+                opts,
             );
         }
         if !qual_buildings.is_empty() {
@@ -1442,7 +1467,7 @@ fn collect_pop_and_underemployed(
                 AlertKind::Underemployed,
                 2,
                 true,
-                with_mitigations,
+                opts,
             );
         }
     }
@@ -1460,7 +1485,7 @@ fn push_state_employment_alert(
     kind: AlertKind,
     severity: u8,
     qual_short: bool,
-    with_mitigations: bool,
+    opts: &AlertsOptions,
 ) {
     let place = state_label(prices, world, defs, state_id);
     let staffing: Vec<BuildingStaffing> = buildings
@@ -1545,7 +1570,8 @@ fn push_state_employment_alert(
             ),
         });
     }
-    let mitigations = if !with_mitigations {
+    let alert_id = format!("{}:{state_id}", kind_id(kind));
+    let mitigations = if !opts.wants_mitigations(&alert_id) {
         Vec::new()
     } else if qual_short {
         let target = buildings
@@ -1562,7 +1588,7 @@ fn push_state_employment_alert(
         pop_shortage_mitigations(prices, defs, state_id, buildings.first().copied(), mix)
     };
     alerts.push(Alert {
-        id: format!("{}:{state_id}", kind_id(kind)),
+        id: alert_id,
         kind,
         severity,
         title,
@@ -2826,6 +2852,7 @@ mod tests {
             &prices,
             AlertsOptions {
                 with_mitigations: false,
+                mitigation_ids: None,
             },
         );
         assert!(!result.alerts.is_empty());
@@ -2834,6 +2861,50 @@ mod tests {
             .iter()
             .all(|alert| alert.mitigations.is_empty()));
         assert!(kinds(&result).contains(&AlertKind::UnfilledEducation));
+    }
+
+    #[test]
+    fn mitigation_ids_limit_which_alerts_get_lists() {
+        let (world, defs, prices) = fixture();
+        let lean = alerts_with(
+            &world,
+            &defs,
+            &prices,
+            AlertsOptions {
+                with_mitigations: false,
+                mitigation_ids: None,
+            },
+        );
+        let Some(target) = lean.alerts.first().map(|a| a.id.clone()) else {
+            return;
+        };
+        let mut ids = BTreeSet::new();
+        ids.insert(target.clone());
+        let result = alerts_with(
+            &world,
+            &defs,
+            &prices,
+            AlertsOptions {
+                with_mitigations: true,
+                mitigation_ids: Some(ids),
+            },
+        );
+        let mut saw_target = false;
+        for alert in &result.alerts {
+            if alert.id == target {
+                saw_target = true;
+                // Fixture shortages / education usually have at least one lever.
+                // Empty is allowed for kinds with no ranked advice.
+            } else {
+                assert!(
+                    alert.mitigations.is_empty(),
+                    "unexpected mitigations on {}",
+                    alert.id
+                );
+            }
+        }
+        assert!(saw_target);
+        let _ = result;
     }
 
     #[test]

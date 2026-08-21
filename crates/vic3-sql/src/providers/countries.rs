@@ -18,6 +18,7 @@ use super::pushdown::{matches_str, matches_u32, PushSupport};
 
 const PUSH: PushSupport = PushSupport {
     eq_u32: &["country_id"],
+    eq_i32: &[],
     eq_str: &["tag"],
     range_str: &[],
 };

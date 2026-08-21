@@ -3,9 +3,17 @@
 //! Zero-arg form is player-scoped: keep rows with `state_id` NULL or owned by
 //! [`World::player_tag`](vic3_prices::World::player_tag) (strict; no first-country
 //! fallback). `alerts('all')` is the unfiltered save-wide set.
+//!
+//! Projection / filter / LIMIT (speedup D, issue #37):
+//! - Mitigations builders run only when the `mitigations` column is projected
+//!   (or `SELECT *`). Projecting `evidence` alone stays on the lean path.
+//! - Exact equality on `severity`, `kind`, `good_id`, `state_id`, `building_id`,
+//!   and `id` is applied in-provider before mitigations.
+//! - `LIMIT` truncates before mitigations when every filter is Exact (or there
+//!   are no filters). Residual Unsupported filters disable early LIMIT.
 
 use std::any::Any;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,17 +22,26 @@ use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::catalog::{Session, TableFunctionImpl};
 use datafusion::common::{plan_err, Result as DfResult};
 use datafusion::datasource::{TableProvider, TableType};
-use datafusion::logical_expr::Expr;
+use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
 use vic3_prices::{Alert, AlertKind, World};
 
-use crate::binding::{projection_needs_json, SessionBinding};
+use crate::binding::{projection_includes, SessionBinding};
 use crate::exec::memory_exec;
+use crate::filter::Pred;
+use crate::providers::pushdown::{matches_i32, matches_str, matches_u32, PushSupport};
 use crate::schema::alerts_schema;
 use crate::udfs::literal_str;
 
-/// Column indices for `evidence` / `mitigations` in [`alerts_schema`].
-const ALERTS_JSON_COLS: &[usize] = &[8, 9];
+/// Column index of `mitigations` in [`alerts_schema`] (evidence is 8 and free).
+const ALERTS_MITIGATIONS_COL: usize = 9;
+
+const ALERTS_PUSH: PushSupport = PushSupport {
+    eq_u32: &["state_id", "building_id"],
+    eq_i32: &["severity"],
+    eq_str: &["kind", "good_id", "id"],
+    range_str: &[],
+};
 
 /// TVF wrapping [`SessionBinding::alerts`] for the bound session.
 #[derive(Debug)]
@@ -71,26 +88,76 @@ struct AlertsProvider {
 }
 
 impl AlertsProvider {
-    fn batch(&self, with_mitigations: bool, limit: Option<usize>) -> DfResult<RecordBatch> {
-        let result = self.binding.alerts(with_mitigations);
-        let scoped: Vec<&Alert> = if self.all {
-            result.alerts.iter().collect()
-        } else {
-            let player_states = player_owned_state_ids(self.binding.world.as_ref());
-            result
-                .alerts
-                .iter()
-                .filter(|alert| match alert.state_id {
-                    None => true,
-                    Some(id) => player_states.as_ref().is_some_and(|ids| ids.contains(&id)),
-                })
-                .collect()
-        };
-        let alerts = match limit {
-            Some(n) => &scoped[..n.min(scoped.len())],
-            None => scoped.as_slice(),
-        };
+    fn batch(
+        &self,
+        with_mitigations: bool,
+        filters: &[Expr],
+        limit: Option<usize>,
+    ) -> DfResult<RecordBatch> {
+        let preds = ALERTS_PUSH.collect_preds(filters);
+        let early_limit = filters.is_empty()
+            || filters.iter().all(|f| {
+                matches!(
+                    ALERTS_PUSH.classify(&[f]).as_slice(),
+                    [TableProviderFilterPushDown::Exact]
+                )
+            });
 
+        let lean = self.binding.alerts(false);
+        let mut ordered_ids: Vec<String> = lean
+            .alerts
+            .iter()
+            .filter(|alert| self.in_scope(alert) && alert_matches(alert, &preds))
+            .map(|alert| alert.id.clone())
+            .collect();
+
+        if early_limit {
+            if let Some(n) = limit {
+                ordered_ids.truncate(n.min(ordered_ids.len()));
+            }
+        }
+
+        if !with_mitigations {
+            return self.emit_by_ids(lean.as_ref(), &ordered_ids);
+        }
+
+        // Unfiltered full-save SELECT * — warm the shared fat cache.
+        if self.all && preds.is_empty() && early_limit && limit.is_none() {
+            let fat = self.binding.alerts(true);
+            return self.emit_by_ids(fat.as_ref(), &ordered_ids);
+        }
+
+        let id_set: BTreeSet<String> = ordered_ids.iter().cloned().collect();
+        let fat = self.binding.alerts_mitigating(id_set);
+        self.emit_by_ids(&fat, &ordered_ids)
+    }
+
+    fn in_scope(&self, alert: &Alert) -> bool {
+        if self.all {
+            return true;
+        }
+        let player_states = player_owned_state_ids(self.binding.world.as_ref());
+        match alert.state_id {
+            None => true,
+            Some(id) => player_states.as_ref().is_some_and(|ids| ids.contains(&id)),
+        }
+    }
+
+    fn emit_by_ids(
+        &self,
+        result: &vic3_prices::AlertsResult,
+        ordered_ids: &[String],
+    ) -> DfResult<RecordBatch> {
+        let by_id: BTreeMap<&str, &Alert> =
+            result.alerts.iter().map(|a| (a.id.as_str(), a)).collect();
+        let alerts: Vec<&Alert> = ordered_ids
+            .iter()
+            .filter_map(|id| by_id.get(id.as_str()).copied())
+            .collect();
+        self.emit_refs(&alerts)
+    }
+
+    fn emit_refs(&self, alerts: &[&Alert]) -> DfResult<RecordBatch> {
         let mut id = StringBuilder::new();
         let mut kind = StringBuilder::new();
         let mut severity = Int32Builder::new();
@@ -148,6 +215,47 @@ impl AlertsProvider {
     }
 }
 
+fn alert_matches(alert: &Alert, preds: &[Pred]) -> bool {
+    if !matches_i32(preds, "severity", i32::from(alert.severity)) {
+        return false;
+    }
+    if !matches_str(preds, "kind", alert_kind_str(alert.kind)) {
+        return false;
+    }
+    if !matches_str(preds, "id", &alert.id) {
+        return false;
+    }
+    // Nullable columns: equality excludes NULL rows (SQL NULL ≠ value).
+    if preds
+        .iter()
+        .any(|p| matches!(p, Pred::EqStr { column, .. } if column == "good_id"))
+    {
+        match &alert.good_id {
+            Some(g) if matches_str(preds, "good_id", g) => {}
+            _ => return false,
+        }
+    }
+    if preds
+        .iter()
+        .any(|p| matches!(p, Pred::EqU32 { column, .. } if column == "state_id"))
+    {
+        match alert.state_id {
+            Some(id) if matches_u32(preds, "state_id", id) => {}
+            _ => return false,
+        }
+    }
+    if preds
+        .iter()
+        .any(|p| matches!(p, Pred::EqU32 { column, .. } if column == "building_id"))
+    {
+        match alert.building_id {
+            Some(id) if matches_u32(preds, "building_id", id) => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
 #[async_trait]
 impl TableProvider for AlertsProvider {
     fn as_any(&self) -> &dyn Any {
@@ -162,15 +270,22 @@ impl TableProvider for AlertsProvider {
         TableType::Temporary
     }
 
+    fn supports_filters_pushdown(
+        &self,
+        filters: &[&Expr],
+    ) -> DfResult<Vec<TableProviderFilterPushDown>> {
+        Ok(ALERTS_PUSH.classify(filters))
+    }
+
     async fn scan(
         &self,
         _state: &dyn Session,
         projection: Option<&Vec<usize>>,
-        _filters: &[Expr],
+        filters: &[Expr],
         limit: Option<usize>,
     ) -> DfResult<Arc<dyn ExecutionPlan>> {
-        let with_mitigations = projection_needs_json(projection, ALERTS_JSON_COLS);
-        memory_exec(self.batch(with_mitigations, limit)?, projection)
+        let with_mitigations = projection_includes(projection, ALERTS_MITIGATIONS_COL);
+        memory_exec(self.batch(with_mitigations, filters, limit)?, projection)
     }
 }
 

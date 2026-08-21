@@ -357,9 +357,18 @@ One row per alert from `vic3-prices::alerts` ([`AlertsResult`](json-schema.md)).
 
 Nested `staffing` on employment alerts is not inlined here — use `building_staffing(state_id)`.
 
+**Projection / filter / LIMIT (agents):** Detectors are cheap; mitigation builders are not. The provider:
+
+- Runs **lean** alerts (empty `mitigations`) unless the projection includes `mitigations` or is `SELECT *`. Projecting `evidence` alone does **not** turn mitigations on.
+- Advertises Exact equality pushdown on `severity`, `kind`, `good_id`, `state_id`, `building_id`, and `id`. Those predicates filter **before** mitigations are built.
+- Applies `LIMIT` before mitigations when every `WHERE` clause is Exact (or there is no `WHERE`). If a residual Unsupported filter remains, LIMIT is left to DataFusion after the batch so filtering stays correct.
+
+Prefer triage queries that omit `mitigations` (and avoid `SELECT *`) until a shortlist of alert ids is known.
 ### `shortage_analysis(good TEXT)`
 
 Expands goods-shortage alerts for one good (`NULL` = all electricity / transportation / goods shortage alerts). Magnitudes come from the market `goods` row; evidence/mitigations are JSON from the alert expander (no invented economics).
+
+Same projection / Exact filter (`severity`, `kind`, `good`, `alert_id`, `state_id`, `building_id`) / LIMIT-before-mitigations rules as [`alerts()`](#alertsscope).
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -441,11 +450,23 @@ WHERE s.owner_tag = player_tag()
 ORDER BY g.shortage DESC
 LIMIT 20;
 
-SELECT * FROM alerts() WHERE severity = 1;
--- Full-save alerts (not player-scoped):
--- SELECT * FROM alerts('all') WHERE severity = 1;
+SELECT kind, severity, count(*) AS n
+FROM alerts()
+GROUP BY kind, severity
+ORDER BY severity, n DESC;
 
-SELECT * FROM shortage_analysis('engines');
+SELECT id, kind, title, good_id, state_id
+FROM alerts()
+WHERE severity = 1
+LIMIT 40;
+
+-- Expander (mitigations) only for a shortlist — avoid SELECT * as the first step:
+SELECT id, evidence, mitigations FROM alerts() WHERE id = 'goods:engines';
+-- Full-save alerts (not player-scoped):
+-- SELECT id, kind, title FROM alerts('all') WHERE severity = 1 LIMIT 40;
+
+SELECT good, alert_id, kind, shortage, price
+FROM shortage_analysis('engines');
 
 SELECT step, day, action, detail
 FROM plan('declare-war(tag=FRA, wargoal=conquer_state, state=alsace)')
