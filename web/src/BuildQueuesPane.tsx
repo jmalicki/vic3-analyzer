@@ -11,7 +11,10 @@ import type { ConstructionOrderSnapshot, ConstructionsSnapshot, DefsIcons } from
 export type ConstructionQueueTab = 'government' | 'private'
 
 function displayBuilding(order: ConstructionOrderSnapshot): string {
-  return order.building_name?.trim() || order.building.replace(/^building_/, '').replace(/_/g, ' ')
+  return (
+    order.building_name?.trim() ||
+    order.building.replace(/^building_/, '').replace(/_/g, ' ')
+  )
 }
 
 function OrderCard({ order, icons }: { order: ConstructionOrderSnapshot; icons?: DefsIcons }) {

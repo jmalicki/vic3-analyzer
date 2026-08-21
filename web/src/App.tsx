@@ -315,6 +315,8 @@ function App({ wasmApi }: Props) {
     setGapsResult(undefined)
     setPlanResult(undefined)
     setAlertsResult(undefined)
+    setMilitaryResult(undefined)
+    setConstructionsResult(undefined)
     setSummary(undefined)
     setAnalysisReady(false)
     setSessionBytes(undefined)
@@ -334,6 +336,9 @@ function App({ wasmApi }: Props) {
     setResult(undefined)
     setGapsResult(undefined)
     setPlanResult(undefined)
+    setAlertsResult(undefined)
+    setMilitaryResult(undefined)
+    setConstructionsResult(undefined)
     setAnalysisReady(false)
     void (file ? storeDefs(file) : clearStoredDefs()).catch(() => {
       setError('Definitions could not be saved in this browser; they last until reload.')
@@ -651,6 +656,8 @@ function App({ wasmApi }: Props) {
       setTimelineStep(step)
       setPendingApply(undefined)
       setAlertsResult(undefined)
+      setMilitaryResult(undefined)
+      setConstructionsResult(undefined)
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason)
       setPendingApply((current) => current && { ...current, error: message })
@@ -681,6 +688,8 @@ function App({ wasmApi }: Props) {
       setSessionBytes(parent?.patched_bytes)
       setTimelineStep(parent)
       setAlertsResult(undefined)
+      setMilitaryResult(undefined)
+      setConstructionsResult(undefined)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {

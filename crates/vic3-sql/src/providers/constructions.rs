@@ -54,10 +54,24 @@ impl ConstructionsProvider {
         let mut building_name = StringBuilder::new();
         let mut remaining = Float64Builder::new();
 
-        // Dense 0-based index within (country_id, queue) for UI/SQL ordering.
+        // Assign position against the full queue first so pushdown filters do
+        // not renumber later orders to 0.
         let mut pos_by_key: HashMap<(Option<u32>, &'static str), u32> = HashMap::new();
+        let positions: Vec<u32> = self
+            .binding
+            .world
+            .constructions
+            .iter()
+            .map(|row| {
+                let key = (row.country_id, row.queue.as_str());
+                let pos = pos_by_key.entry(key).or_insert(0);
+                let this_pos = *pos;
+                *pos += 1;
+                this_pos
+            })
+            .collect();
 
-        for row in &self.binding.world.constructions {
+        for (row, this_pos) in self.binding.world.constructions.iter().zip(positions) {
             let queue_str = row.queue.as_str();
             if !matches_u32(&preds, "order_id", row.id) {
                 continue;
@@ -89,11 +103,6 @@ impl ConstructionsProvider {
             if !matches_str(&preds, "building", &row.building) {
                 continue;
             }
-
-            let key = (row.country_id, queue_str);
-            let pos = pos_by_key.entry(key).or_insert(0);
-            let this_pos = *pos;
-            *pos += 1;
 
             order_id.append_value(row.id);
             queue.append_value(queue_str);

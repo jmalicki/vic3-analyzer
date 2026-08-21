@@ -480,27 +480,37 @@ Player-scoped build queues from `loaded_constructions` / Buildings → Queues. S
   "properties": {
     "private": {
       "type": "array",
-      "items": { "$ref": "#/$defs/ConstructionOrderSnapshot" }
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/ConstructionOrderSnapshot" },
+          { "properties": { "queue": { "const": "private" } } }
+        ]
+      }
     },
     "government": {
       "type": "array",
-      "items": { "$ref": "#/$defs/ConstructionOrderSnapshot" }
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/ConstructionOrderSnapshot" },
+          { "properties": { "queue": { "const": "government" } } }
+        ]
+      }
     }
   },
   "$defs": {
     "ConstructionOrderSnapshot": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "queue", "building"],
+      "required": ["id", "queue", "building", "country_id", "state_id", "state_name", "building_name", "remaining"],
       "properties": {
         "id": { "type": "integer" },
         "queue": { "type": "string", "enum": ["private", "government"] },
-        "country_id": { "type": "integer" },
-        "state_id": { "type": "integer" },
-        "state_name": { "type": "string" },
+        "country_id": { "type": ["integer", "null"] },
+        "state_id": { "type": ["integer", "null"] },
+        "state_name": { "type": ["string", "null"] },
         "building": { "type": "string" },
-        "building_name": { "type": "string" },
-        "remaining": { "type": "number" }
+        "building_name": { "type": ["string", "null"] },
+        "remaining": { "type": ["number", "null"] }
       }
     }
   }

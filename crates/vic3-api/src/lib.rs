@@ -995,6 +995,14 @@ fn constructions_snapshot(
     defs: &vic3_defs::GameDefs,
     player: Option<u32>,
 ) -> ConstructionsSnapshot {
+    // Player-scoped contract: no resolved player → empty queues (do not leak
+    // foreign/unowned rows via matches_player's permissive military fallback).
+    let Some(player_id) = player else {
+        return ConstructionsSnapshot {
+            private: Vec::new(),
+            government: Vec::new(),
+        };
+    };
     let state_name = |state_id: Option<u32>| -> Option<String> {
         let id = state_id?;
         let state = world.states.iter().find(|s| s.id == id)?;
@@ -1008,7 +1016,7 @@ fn constructions_snapshot(
     let mut private = Vec::new();
     let mut government = Vec::new();
     for row in &world.constructions {
-        if !matches_player(row.country_id, player) {
+        if row.country_id != Some(player_id) {
             continue;
         }
         let snap = ConstructionSnap {

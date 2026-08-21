@@ -383,12 +383,13 @@ export interface MilitarySnapshot {
 export interface ConstructionOrderSnapshot {
   id: number
   queue: 'private' | 'government' | string
-  country_id?: number
-  state_id?: number
-  state_name?: string
+  /** Present as JSON `null` when missing on the order. */
+  country_id: number | null
+  state_id: number | null
+  state_name: string | null
   building: string
-  building_name?: string
-  remaining?: number
+  building_name: string | null
+  remaining: number | null
 }
 
 /**

@@ -1719,15 +1719,15 @@ pub fn normalize_interest_ids(raw: &str) -> Vec<String> {
 }
 
 fn owned_state_ids(save: &impl WorldSnapshot, country_id: u32) -> std::collections::BTreeSet<u32> {
+    // Union state.country rows with Country.states — some saves omit country on
+    // a subset of state rows even when the country still lists those ids.
     let mut owned: std::collections::BTreeSet<u32> = save
         .states()
         .iter_present()
         .filter_map(|(id, state)| (state.country == Some(country_id)).then_some(id))
         .collect();
-    if owned.is_empty() {
-        if let Some(Some(country)) = save.country_manager().database.get(&country_id) {
-            owned.extend(country.states.iter().copied());
-        }
+    if let Some(Some(country)) = save.country_manager().database.get(&country_id) {
+        owned.extend(country.states.iter().copied());
     }
     owned
 }

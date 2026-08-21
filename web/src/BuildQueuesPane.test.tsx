@@ -11,6 +11,8 @@ const snapshot: ConstructionsSnapshot = {
     {
       id: 10,
       queue: 'private',
+      country_id: 1,
+      state_id: 1,
       building: 'building_logging_camp',
       building_name: 'Logging Camp',
       state_name: 'Brandenburg',
@@ -21,6 +23,8 @@ const snapshot: ConstructionsSnapshot = {
     {
       id: 1,
       queue: 'government',
+      country_id: 1,
+      state_id: 2,
       building: 'building_construction_sector',
       building_name: 'Construction Sector',
       state_name: 'Silesia',
