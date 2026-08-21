@@ -1,0 +1,166 @@
+import { createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import handler from 'serve-handler'
+import { chromium } from 'playwright'
+import {
+  DESKTOP_SHOTS,
+  desktopUiDir,
+  outDir,
+  packageRoot,
+} from './lib/paths.mjs'
+import { newShotPage, writeShot } from './lib/shot.mjs'
+
+const fixture = JSON.parse(
+  readFileSync(join(packageRoot, 'fixtures/desktop-mock-data.json'), 'utf8'),
+)
+
+/**
+ * Install window.__TAURI__ before the companion script runs.
+ * @param {import('playwright').Page} page
+ */
+async function installTauriMock(page) {
+  await page.addInitScript((data) => {
+    const queries = data.queries
+    function pick(sql) {
+      const s = String(sql).toLowerCase()
+      if (s.includes('shortage') || (s.includes('from goods') && s.includes('shortage'))) {
+        return queries.shortage
+      }
+      if (s.includes('from states')) return queries.states
+      if (s.includes('from goods where') || s.includes("good =")) return queries.prices
+      if (s.includes('plan(')) return queries.plan
+      if (s.includes('from saves')) return queries.saves
+      return queries.default
+    }
+
+    let loaded = data.dashboard.loaded_stub
+
+    window.__TAURI__ = {
+      core: {
+        invoke: async (cmd, args = {}) => {
+          switch (cmd) {
+            case 'get_dashboard':
+              return {
+                config: data.config,
+                game_detected: data.dashboard.game_detected,
+                save_root_count: data.dashboard.save_root_count,
+                save_count: data.dashboard.save_count,
+                loaded_stub: loaded,
+                detection_hints: data.dashboard.detection_hints,
+              }
+            case 'list_saves':
+              return data.saves
+            case 'use_save':
+              loaded = args.name || loaded
+              return JSON.stringify(data.use_save)
+            case 'sql_query':
+              return JSON.stringify(pick(args.sql || ''))
+            case 'sql_docs':
+              return data.sql_docs
+            case 'loaded_prices':
+              return data.loaded_prices
+            case 'loaded_alerts':
+              return data.loaded_alerts
+            case 'detection_hints':
+              return data.dashboard.detection_hints
+            case 'save_config':
+              return { ...data.config, ...(args.config || {}) }
+            case 'reset_config':
+              return data.config
+            case 'get_config':
+              return data.config
+            default:
+              throw new Error(`docs-screenshots mock: unhandled invoke ${cmd}`)
+          }
+        },
+      },
+      event: {
+        listen: async () => () => {},
+      },
+    }
+  }, fixture)
+}
+
+async function startStaticServer(root) {
+  const server = createServer((request, response) =>
+    handler(request, response, { public: root }),
+  )
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address()
+  return {
+    url: `http://127.0.0.1:${port}/index.html`,
+    close: () => new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+  }
+}
+
+async function main() {
+  const dest = outDir()
+  const server = await startStaticServer(desktopUiDir)
+  const browser = await chromium.launch()
+  try {
+    const { context, page } = await newShotPage(browser)
+    await installTauriMock(page)
+    await page.goto(server.url, { waitUntil: 'networkidle' })
+    await page.waitForSelector('#metrics .metric')
+
+    // D1 Dashboard
+    await writeShot(page, dest, DESKTOP_SHOTS[0])
+
+    // D2 Saves
+    await page.click('#tab-saves')
+    await page.waitForSelector('#saves-body tr')
+    await writeShot(page, dest, DESKTOP_SHOTS[1])
+
+    // D3 Advanced Query + shortage SQL
+    await page.click('#tab-query')
+    await page.click('button[data-ex="shortage"]')
+    await page.click('#run-sql')
+    await page.waitForSelector('#results-body td.nav-key')
+    await writeShot(page, dest, DESKTOP_SHOTS[2])
+
+    // D4 Query → States (click state_id)
+    await page.locator('#results-body td.nav-key[data-col="state_id"]').first().click()
+    await page.waitForSelector('#view-states:not(.hidden)')
+    await page.waitForSelector('#states-body td')
+    await writeShot(page, dest, DESKTOP_SHOTS[3])
+
+    // D5 Query → Prices (re-run shortage, click good)
+    await page.click('#tab-query')
+    await page.click('button[data-ex="shortage"]')
+    await page.click('#run-sql')
+    await page.waitForSelector('#results-body td.nav-key[data-col="good"]')
+    await page.locator('#results-body td.nav-key[data-col="good"]').first().click()
+    await page.waitForSelector('#view-prices:not(.hidden)')
+    await page.waitForSelector('#prices-body td')
+    await writeShot(page, dest, DESKTOP_SHOTS[4])
+
+    // D6 Timeline GDP/research plan
+    await page.click('#tab-query')
+    await page.fill(
+      '#sql-editor',
+      "SELECT step, day, action, detail FROM plan('gdp >= 100000000') ORDER BY step;",
+    )
+    await page.click('#run-sql')
+    await page.waitForSelector('#results-body td.nav-key[data-col="step"]')
+    await page.locator('#results-body td.nav-key[data-col="step"]').first().click()
+    await page.waitForSelector('#view-timeline:not(.hidden)')
+    await writeShot(page, dest, DESKTOP_SHOTS[5])
+
+    // D7 Settings
+    await page.click('#tab-settings')
+    await page.waitForSelector('#view-settings:not(.hidden)')
+    await page.waitForFunction(() => document.getElementById('cfg-game').value.length > 0)
+    await writeShot(page, dest, DESKTOP_SHOTS[6])
+
+    await context.close()
+  } finally {
+    await browser.close()
+    await server.close()
+  }
+}
+
+main().catch((err) => {
+  console.error(err)
+  process.exit(1)
+})
