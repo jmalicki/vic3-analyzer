@@ -20,6 +20,10 @@ pub enum Pred {
         column: String,
         value: u32,
     },
+    EqI32 {
+        column: String,
+        value: i32,
+    },
     EqStr {
         column: String,
         value: String,
@@ -37,6 +41,15 @@ pub fn classify_eq_u32(expr: &Expr, columns: &[&str]) -> Option<(String, u32)> {
             return None;
         }
         scalar_u32(lit).map(|v| (col, v))
+    })
+}
+
+pub fn classify_eq_i32(expr: &Expr, columns: &[&str]) -> Option<(String, i32)> {
+    match_binary(expr, Operator::Eq, |col, lit| {
+        if !columns.contains(&col.as_str()) {
+            return None;
+        }
+        scalar_i32(lit).map(|v| (col, v))
     })
 }
 
@@ -149,6 +162,18 @@ fn scalar_u32(v: &ScalarValue) -> Option<u32> {
         ScalarValue::UInt64(Some(n)) if *n <= u32::MAX as u64 => Some(*n as u32),
         ScalarValue::Int64(Some(n)) if *n >= 0 && *n <= u32::MAX as i64 => Some(*n as u32),
         ScalarValue::Int32(Some(n)) if *n >= 0 => Some(*n as u32),
+        _ => None,
+    }
+}
+
+fn scalar_i32(v: &ScalarValue) -> Option<i32> {
+    match v {
+        ScalarValue::Int32(Some(n)) => Some(*n),
+        ScalarValue::Int64(Some(n)) if *n >= i64::from(i32::MIN) && *n <= i64::from(i32::MAX) => {
+            Some(*n as i32)
+        }
+        ScalarValue::UInt32(Some(n)) if *n <= i32::MAX as u32 => Some(*n as i32),
+        ScalarValue::UInt64(Some(n)) if *n <= i32::MAX as u64 => Some(*n as i32),
         _ => None,
     }
 }

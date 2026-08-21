@@ -20,6 +20,7 @@ use super::pushdown::{matches_str, PushSupport};
 
 const PUSH: PushSupport = PushSupport {
     eq_u32: &[],
+    eq_i32: &[],
     // goods_order / index_of / name hash — Exact equality only (no range).
     eq_str: &["good", "good_name"],
     range_str: &[],

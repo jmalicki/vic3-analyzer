@@ -4,6 +4,7 @@
 //! load (`use_save` / `latest.*`). Providers hold `Arc<SessionBinding>` — they
 //! do not re-read the filesystem.
 
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use vic3_defs::GameDefs;
@@ -71,15 +72,40 @@ impl SessionBinding {
     }
 
     /// Full [`alerts_with`] result, cached per bind and mitigation mode.
+    ///
+    /// Only the unfiltered full/lean cases are cached. Selective mitigation
+    /// sets use [`Self::alerts_mitigating`] and are never stored as the fat cache.
     pub fn alerts(&self, with_mitigations: bool) -> Arc<AlertsResult> {
         cached_alerts(&self.alerts_cache, with_mitigations, || {
             alerts_with(
                 self.world.as_ref(),
                 self.defs.as_ref(),
                 self.prices.as_ref(),
-                AlertsOptions { with_mitigations },
+                AlertsOptions {
+                    with_mitigations,
+                    mitigation_ids: None,
+                },
             )
         })
+    }
+
+    /// Detector pass with mitigations only for `ids` (not cached as full fat).
+    pub fn alerts_mitigating(&self, ids: BTreeSet<String>) -> AlertsResult {
+        if ids.is_empty() {
+            return AlertsResult {
+                alerts: Vec::new(),
+                limitations: self.prices.limitations.clone(),
+            };
+        }
+        alerts_with(
+            self.world.as_ref(),
+            self.defs.as_ref(),
+            self.prices.as_ref(),
+            AlertsOptions {
+                with_mitigations: true,
+                mitigation_ids: Some(ids),
+            },
+        )
     }
 
     /// Goods / electricity / transportation shortage alerts only.
@@ -89,9 +115,31 @@ impl SessionBinding {
                 self.world.as_ref(),
                 self.defs.as_ref(),
                 self.prices.as_ref(),
-                AlertsOptions { with_mitigations },
+                AlertsOptions {
+                    with_mitigations,
+                    mitigation_ids: None,
+                },
             )
         })
+    }
+
+    /// Goods-shortage detectors with mitigations only for `ids`.
+    pub fn goods_shortage_alerts_mitigating(&self, ids: BTreeSet<String>) -> AlertsResult {
+        if ids.is_empty() {
+            return AlertsResult {
+                alerts: Vec::new(),
+                limitations: self.prices.limitations.clone(),
+            };
+        }
+        goods_shortage_alerts(
+            self.world.as_ref(),
+            self.defs.as_ref(),
+            self.prices.as_ref(),
+            AlertsOptions {
+                with_mitigations: true,
+                mitigation_ids: Some(ids),
+            },
+        )
     }
 }
 
@@ -129,12 +177,37 @@ pub fn goods_shortage(buy: f64, sell: f64) -> f64 {
     (buy - sell).max(0.0)
 }
 
-/// Whether a DataFusion projection includes heavy JSON columns.
+/// Whether a DataFusion projection includes `col` (`None` = all columns).
+pub fn projection_includes(projection: Option<&Vec<usize>>, col: usize) -> bool {
+    match projection {
+        None => true,
+        Some(cols) => cols.contains(&col),
+    }
+}
+
+/// Whether a DataFusion projection includes any of `json_cols`.
 ///
-/// `None` projection means all columns (mitigations required).
+/// Prefer [`projection_includes`] for mitigations-only checks — evidence alone
+/// must not force mitigation builders.
 pub fn projection_needs_json(projection: Option<&Vec<usize>>, json_cols: &[usize]) -> bool {
     match projection {
         None => true,
         Some(cols) => cols.iter().any(|i| json_cols.contains(i)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn evidence_projection_does_not_need_mitigations() {
+        // alerts_schema: evidence=8, mitigations=9
+        assert!(projection_includes(Some(&vec![8]), 8));
+        assert!(!projection_includes(Some(&vec![8]), 9));
+        assert!(projection_includes(Some(&vec![9]), 9));
+        assert!(projection_includes(None, 9));
+        // Legacy helper still ORs columns — do not use it for mitigations gating.
+        assert!(projection_needs_json(Some(&vec![8]), &[8, 9]));
     }
 }

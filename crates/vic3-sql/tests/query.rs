@@ -245,6 +245,104 @@ async fn alerts_lean_select_honors_limit() {
 }
 
 #[tokio::test]
+async fn alerts_evidence_projection_skips_mitigations_builders() {
+    // Evidence alone must not force the mitigations path (empty lists in lean result).
+    // Behavioral check: query succeeds and returns evidence JSON; a follow-up that
+    // projects mitigations for a filtered LIMIT still works.
+    let eng = engine().await;
+    let evidence_only = eng
+        .query("SELECT id, evidence FROM alerts() LIMIT 5")
+        .await
+        .expect("evidence-only alerts");
+    let n: usize = evidence_only.iter().map(|b| b.num_rows()).sum();
+    assert!(n <= 5);
+    assert_eq!(evidence_only[0].schema().field(1).name(), "evidence");
+
+    let with_mit = eng
+        .query(
+            "SELECT id, mitigations FROM alerts() \
+             WHERE kind = 'goods_shortage' LIMIT 1",
+        )
+        .await
+        .expect("mitigations after lean");
+    let mit_n: usize = with_mit.iter().map(|b| b.num_rows()).sum();
+    assert!(mit_n <= 1);
+    if mit_n > 0 {
+        assert_eq!(with_mit[0].schema().field(1).name(), "mitigations");
+        let col = with_mit[0]
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("mitigations text");
+        // Lean path would leave "[]"; filtered expand may be "[]" or a JSON array.
+        assert!(col.value(0).starts_with('['));
+    }
+}
+
+#[tokio::test]
+async fn alerts_severity_and_kind_filters() {
+    let eng = engine().await;
+    let all = eng
+        .query("SELECT kind FROM alerts()")
+        .await
+        .expect("all kinds");
+    let all_n: usize = all.iter().map(|b| b.num_rows()).sum();
+
+    let filtered = eng
+        .query("SELECT kind, severity FROM alerts() WHERE severity = 1 AND kind = 'goods_shortage'")
+        .await
+        .expect("filtered");
+    let filtered_n: usize = filtered.iter().map(|b| b.num_rows()).sum();
+    assert!(
+        filtered_n <= all_n,
+        "filtered ({filtered_n}) must be ≤ unfiltered ({all_n})"
+    );
+    for batch in &filtered {
+        let kinds = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let sev = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<datafusion::arrow::array::Int32Array>()
+            .unwrap();
+        for i in 0..batch.num_rows() {
+            assert_eq!(kinds.value(i), "goods_shortage");
+            assert_eq!(sev.value(i), 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn alerts_limit_applies_with_kind_filter_before_mitigations() {
+    // Documented interaction: Exact kind filter + LIMIT + mitigations projection
+    // must return at most N rows (LIMIT applied after filter, before/with selective
+    // mitigation builders — not after building every mitigation).
+    let eng = engine().await;
+    let batches = eng
+        .query(
+            "SELECT id, kind, mitigations FROM alerts() \
+             WHERE kind = 'unfilled_education' LIMIT 2",
+        )
+        .await
+        .expect("limit+filter mitigations");
+    let rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert!(rows <= 2, "expected at most 2 rows, got {rows}");
+    for batch in &batches {
+        let kinds = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        for i in 0..batch.num_rows() {
+            assert_eq!(kinds.value(i), "unfilled_education");
+        }
+    }
+}
+
+#[tokio::test]
 async fn alerts_default_is_player_scoped() {
     let eng = engine().await;
 

@@ -19,6 +19,7 @@ use super::pushdown::{matches_str, PushSupport};
 
 const PUSH: PushSupport = PushSupport {
     eq_u32: &[],
+    eq_i32: &[],
     eq_str: &["type_id", "type_name", "group_id"],
     // defs.buildings is a BTreeMap — Exact range on type_id.
     range_str: &["type_id"],
