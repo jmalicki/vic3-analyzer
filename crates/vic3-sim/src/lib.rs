@@ -482,9 +482,11 @@ fn interest_matches(queued: &QueuedInterest, kind: InterestKind, id: &str) -> bo
 
 /// Target army power that would satisfy an open comparison by raising projection.
 ///
-/// Lower-bound atoms that already hold, equality from above, or upper-bound atoms
-/// that cannot be closed by increasing power, yield `None`.
-pub fn army_power_raise_target(rel: Rel, value: f64, current: f64) -> Option<f64> {
+/// Unknown current projection (`None`), lower-bound atoms that already hold,
+/// equality from above, or upper-bound atoms that cannot be closed by increasing
+/// power, yield `None`.
+pub fn army_power_raise_target(rel: Rel, value: f64, current: Option<f64>) -> Option<f64> {
+    let current = current?;
     if !value.is_finite() {
         return None;
     }
@@ -903,10 +905,11 @@ pub fn apply_action_with_economy(
         }
         Action::QueueArmyPower { target_bits } => {
             let target = f64::from_bits(*target_bits);
-            if !target.is_finite()
-                || next.has_inflight_queue()
-                || next.army_power_projection >= target
-            {
+            let Some(current) = next.army_power_projection else {
+                // Unknown PP — refuse modeled expand (not a measured zero army).
+                return None;
+            };
+            if !target.is_finite() || next.has_inflight_queue() || current >= target {
                 return None;
             }
             next.queued_army_target = Some(target);
@@ -1007,7 +1010,8 @@ pub fn apply_action_with_economy(
             }
             next.date = next.date.add_days(i32::from(*days));
             next.queued_army_target = None;
-            next.army_power_projection = next.army_power_projection.max(target);
+            next.army_power_projection =
+                Some(next.army_power_projection.unwrap_or(0.0).max(target));
         }
         Action::WaitForEvent {
             event: Event::LawEnacted { law },
@@ -1106,7 +1110,12 @@ mod tests {
     #[test]
     fn queue_army_then_wait_reaches_army_power() {
         let goal = compile("army_power_projection >= 100").unwrap();
-        let start = state_at(0);
+        let start = PlanningState::from_parts(PlanningParts {
+            date: Vic3Date::from_ymdh(1836, 1, 1, 0),
+            country: "GER".into(),
+            army_power_projection: Some(0.0),
+            ..PlanningParts::default()
+        });
         let config = SimConfig {
             army_expansion_days: 60,
             ..SimConfig::default()
@@ -1122,8 +1131,22 @@ mod tests {
         let waits = successors(&decisions[0].state, &goal, config);
         assert_eq!(waits.len(), 1);
         assert_eq!(waits[0].days, 60);
-        assert_eq!(waits[0].state.army_power_projection, 100.0);
+        assert_eq!(waits[0].state.army_power_projection, Some(100.0));
         assert!(evaluate(&goal, &waits[0].state));
+    }
+
+    #[test]
+    fn unknown_army_power_does_not_queue_expand() {
+        let goal = compile("army_power_projection >= 100").unwrap();
+        let start = state_at(0);
+        assert_eq!(start.army_power_projection, None);
+        let decisions = successors(&start, &goal, SimConfig::default());
+        assert!(
+            decisions
+                .iter()
+                .all(|s| !matches!(s.action, Action::QueueArmyPower { .. })),
+            "unknown PP must not look like actionable zero: {decisions:?}"
+        );
     }
 
     #[test]

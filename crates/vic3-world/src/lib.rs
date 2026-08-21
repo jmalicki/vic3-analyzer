@@ -19,7 +19,7 @@
 //! | `good_prices` | last price solve | empty map |
 //! | `gdp` | `0` unless `*_with_prices` (owned building revenue) | `0` |
 //! | budget / `solvent` / SoL proxy | country budget + owned-state pops | false / `0` / `None` |
-//! | army / interest | country cache + interest markers | `0` / empty |
+//! | army / interest | country cache + interest markers; army `None` when IR omits PP | `None` / empty |
 //! | `building_level_deltas`, `pm_overrides`, `tax_level` | empty / `0` | sim branches |
 //! | `queued_interest`, `queued_army_target`, `queued_law` | always `None` | sim in-flight queues |
 //!
@@ -35,6 +35,10 @@ use serde::{Deserialize, Serialize};
 use vic3_prices::{PricesResult, World, WorldCountry};
 
 pub use vic3_load::{ConstructionQueueKind, Save, Vic3Date};
+
+/// Limitation when save IR has no army power projection (not a measured zero).
+pub const ARMY_POWER_PROJECTION_UNKNOWN: &str =
+    "army power projection unknown in save IR (not a measured zero)";
 
 /// Failure while projecting a [`PlanningState`] from save IR or [`World`].
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -130,7 +134,8 @@ pub struct PlanningParts {
     pub good_prices: Vec<(String, f64)>,
     pub solvent: bool,
     pub treasury: f64,
-    pub army_power_projection: f64,
+    /// Known army power projection; `None` when save IR omits it (not zero).
+    pub army_power_projection: Option<f64>,
     /// State ids for DSL `interest_in(state=…)`.
     pub interest: Vec<String>,
     /// Region ids for DSL `interest_in(region=…)`.
@@ -170,7 +175,7 @@ impl Default for PlanningParts {
             good_prices: Vec::new(),
             solvent: false,
             treasury: 0.0,
-            army_power_projection: 0.0,
+            army_power_projection: None,
             interest: Vec::new(),
             interest_regions: Vec::new(),
             queued_tech: None,
@@ -210,8 +215,8 @@ pub struct PlanningState {
     /// True only when known `credit_headroom > 0` (not treasury sign).
     pub solvent: bool,
     pub treasury: f64,
-    /// Army power projection. `0` when the save does not expose it.
-    pub army_power_projection: f64,
+    /// Army power projection when save IR exposes it; `None` is unknown (not zero).
+    pub army_power_projection: Option<f64>,
     /// Normalized state ids for DSL `interest_in(state=…)`.
     pub interest_states: BTreeSet<String>,
     /// Normalized strategic-region ids for DSL `interest_in(region=…)`.
@@ -272,7 +277,7 @@ impl PartialEq for PlanningState {
             && f64_map_eq(&self.good_prices, &other.good_prices)
             && self.solvent == other.solvent
             && f64_bits_eq(self.treasury, other.treasury)
-            && f64_bits_eq(self.army_power_projection, other.army_power_projection)
+            && f64_option_bits_eq(self.army_power_projection, other.army_power_projection)
             && self.interest_states == other.interest_states
             && self.interest_regions == other.interest_regions
             && self.queued_tech == other.queued_tech
@@ -312,7 +317,7 @@ impl Hash for PlanningState {
         }
         self.solvent.hash(state);
         self.treasury.to_bits().hash(state);
-        self.army_power_projection.to_bits().hash(state);
+        hash_f64_option(self.army_power_projection, state);
         self.interest_states.hash(state);
         self.interest_regions.hash(state);
         self.queued_tech.hash(state);
@@ -443,6 +448,22 @@ impl PlanningState {
             || self.queued_law.is_some()
     }
 
+    /// Limitation line when army power projection is missing from save IR.
+    pub fn army_power_unknown_limitation(&self) -> Option<&'static str> {
+        self.army_power_projection
+            .is_none()
+            .then_some(ARMY_POWER_PROJECTION_UNKNOWN)
+    }
+
+    /// Append [`ARMY_POWER_PROJECTION_UNKNOWN`] when projection is missing.
+    pub fn push_army_power_limitation(&self, limitations: &mut Vec<String>) {
+        if let Some(line) = self.army_power_unknown_limitation() {
+            if !limitations.iter().any(|existing| existing == line) {
+                limitations.push(line.to_string());
+            }
+        }
+    }
+
     /// Rebuild [`Self::queued_building`] from the first [`Self::constructions`] entry.
     pub fn sync_queued_building_from_constructions(&mut self) {
         self.queued_building = self
@@ -552,7 +573,7 @@ impl PlanningState {
             good_prices: prices.into_price_map(),
             solvent: country.budget.is_solvent(),
             treasury,
-            army_power_projection: save.army_power_projection_for(country_id).unwrap_or(0.0),
+            army_power_projection: save.army_power_projection_for(country_id),
             interest_states: interest.states.into_iter().collect(),
             interest_regions: interest.regions.into_iter().collect(),
             queued_tech: save.queued_tech_for(country_id),
@@ -641,7 +662,7 @@ impl PlanningState {
             good_prices: prices.into_price_map(),
             solvent: country.solvent,
             treasury: country.treasury,
-            army_power_projection: country.army_power_projection.unwrap_or(0.0),
+            army_power_projection: country.army_power_projection,
             interest_states: country.interest_states.iter().cloned().collect(),
             interest_regions: country.interest_regions.iter().cloned().collect(),
             queued_tech: country.queued_tech.clone(),
@@ -866,7 +887,7 @@ mod tests {
             good_prices: vec![("ammunition".into(), 32.0)],
             solvent: true,
             treasury: 1_000.0,
-            army_power_projection: 120.0,
+            army_power_projection: Some(120.0),
             interest: vec!["alsace".into()],
             queued_tech: Some("mechanized_agriculture".into()),
             gdp: 50e6,
@@ -878,7 +899,7 @@ mod tests {
         assert!(state.solvent);
         assert!(state.has_interest("alsace"));
         assert_eq!(state.queued_tech.as_deref(), Some("mechanized_agriculture"));
-        assert_eq!(state.army_power_projection, 120.0);
+        assert_eq!(state.army_power_projection, Some(120.0));
         assert_eq!(state.gdp, 50e6);
     }
 
@@ -895,7 +916,11 @@ mod tests {
         assert_eq!(state.credit_limit, Some(500.0));
         assert_eq!(state.credit_headroom, Some(500.0));
         assert_eq!(state.price("ammunition"), Some(40.0));
-        assert_eq!(state.army_power_projection, 0.0);
+        assert_eq!(state.army_power_projection, None);
+        assert_eq!(
+            state.army_power_unknown_limitation(),
+            Some(ARMY_POWER_PROJECTION_UNKNOWN)
+        );
         assert!(state.techs.is_empty());
         assert!(state.interest_states.is_empty());
         assert!(state.interest_regions.is_empty());
@@ -1261,7 +1286,7 @@ mod tests {
             good_prices: vec![("wood".into(), 20.0), ("grain".into(), 30.0)],
             solvent: true,
             treasury: 4.0,
-            army_power_projection: 10.0,
+            army_power_projection: Some(10.0),
             interest: vec!["alsace".into()],
             gdp: 1.0,
             ..PlanningParts::default()
@@ -1272,7 +1297,7 @@ mod tests {
             good_prices: vec![("grain".into(), 30.0), ("wood".into(), 20.0)],
             solvent: true,
             treasury: 4.0,
-            army_power_projection: 10.0,
+            army_power_projection: Some(10.0),
             interest: vec!["alsace".into()],
             gdp: 1.0,
             ..PlanningParts::default()
@@ -1305,7 +1330,7 @@ mod tests {
             let state = PlanningState::from_parts(PlanningParts {
                 country,
                 treasury,
-                army_power_projection: army,
+                army_power_projection: Some(army),
                 solvent,
                 gdp,
                 good_prices: vec![("ammunition".into(), ammo)],
@@ -1342,7 +1367,7 @@ mod tests {
         );
 
         let state = PlanningState::from_save(&save, "GER", BTreeMap::new()).unwrap();
-        assert_eq!(state.army_power_projection, 210.0);
+        assert_eq!(state.army_power_projection, Some(210.0));
         assert!(state.has_interest_state("alsace"));
         assert!(!state.has_interest_region("alsace"));
         assert!(state.has_interest_region("region_western_europe"));
@@ -1351,8 +1376,26 @@ mod tests {
 
         let world = World::from_save(&save, &vic3_defs::GameDefs::default());
         let from_world = PlanningState::from_world(&world, "GER", BTreeMap::new()).unwrap();
-        assert_eq!(from_world.army_power_projection, 210.0);
+        assert_eq!(from_world.army_power_projection, Some(210.0));
         assert!(from_world.has_interest_state("alsace"));
         assert!(from_world.has_interest_region("region_western_europe"));
+    }
+
+    #[test]
+    fn from_save_army_power_unknown_not_silent_zero() {
+        let save = ger_save(10_000.0);
+        let state = PlanningState::from_save(&save, "GER", BTreeMap::new()).unwrap();
+        assert_eq!(state.army_power_projection, None);
+        assert_eq!(
+            state.army_power_unknown_limitation(),
+            Some(ARMY_POWER_PROJECTION_UNKNOWN)
+        );
+        let world = World::from_save(&save, &vic3_defs::GameDefs::default());
+        let from_world = PlanningState::from_world(&world, "GER", BTreeMap::new()).unwrap();
+        assert_eq!(from_world.army_power_projection, None);
+        assert_eq!(
+            from_world.army_power_unknown_limitation(),
+            Some(ARMY_POWER_PROJECTION_UNKNOWN)
+        );
     }
 }

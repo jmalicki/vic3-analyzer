@@ -110,7 +110,7 @@ evaluation:
 | Preset | Goal | Timeline |
 | --- | --- | --- |
 | Prepare for war | `declare-war(state=alsace)` | closable when munitions + solvent hold (or payday) |
-| Good-sized military | `army_power_projection >= 100` | closable |
+| Good-sized military | `army_power_projection >= 100` | closable when PP known |
 | Economic growth | `gdp >= 100000000` | closable |
 | Increase weekly income | `weekly_balance >= 100` | closable (tax steps) |
 | Avoid default | `credit_headroom > 0` | closable (payday model) |
@@ -125,7 +125,8 @@ recomputed living-standard equilibrium. `credit_headroom` is `credit - principal
 when both are present; `solvent` is true only when that headroom is strictly
 positive. Under the payday model, surplus balance pays down principal before
 increasing treasury, then headroom/solvent refresh. `army_power_projection` reads
-country cache or army-formation power from the save. `interest_in(state=…)` /
+country cache or army-formation power from the save when present; missing
+projection is unknown (SQL `gaps` → `unknown`, not a silent zero). `interest_in(state=…)` /
 `interest_in(region=…)` match projected state vs strategic-region interest ids
 separately (Clausewitz ids are normalized, e.g. `STATE_ALSACE` → `alsace`).
 `has_law(…)` matches projected active laws (`law_` prefix insensitive).

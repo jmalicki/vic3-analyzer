@@ -1,6 +1,7 @@
-//! `gaps(goal)` → one row per goal atom with failing/cleared status.
+//! `gaps(goal)` → one row per goal atom with cleared / failing / unknown status.
 //!
-//! `goal` must be a non-null string literal. `status` is `cleared` \| `failing`;
+//! `goal` must be a non-null string literal. `status` is `cleared` \| `failing` \|
+//! `unknown` (metric missing from save IR — not a measured shortfall).
 //! `detail` is the atom JSON.
 
 use std::any::Any;
@@ -70,11 +71,7 @@ fn gaps_batch(goal: &vic3_goals::Goal, state: &PlanningState) -> DfResult<Record
 
     for atom in atoms {
         predicate.append_value(format_atom(atom));
-        if atom.eval(state) {
-            status.append_value("cleared");
-        } else {
-            status.append_value("failing");
-        }
+        status.append_value(atom.status(state).as_str());
         detail.append_value(serde_json::to_string(atom).unwrap_or_else(|_| "{}".into()));
     }
 

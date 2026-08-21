@@ -590,10 +590,14 @@ pub fn loaded_gaps_json(goal: &str) -> Result<String, ApiError> {
     with_loaded_analysis(|loaded| {
         let country = country_tag(&loaded.world)?;
         let state = PlanningState::from_world_with_prices(&loaded.world, country, &loaded.prices)?;
+        let mut limitations = loaded.prices.limitations.clone();
+        if goal.has_army_atom() {
+            state.push_army_power_limitation(&mut limitations);
+        }
         let result = GapsResult {
             satisfied: vic3_goals::evaluate(&goal, &state),
             gaps: vic3_goals::gaps(&goal, &state),
-            limitations: loaded.prices.limitations.clone(),
+            limitations,
         };
         Ok(serde_json::to_string(&result)?)
     })
@@ -802,10 +806,14 @@ pub fn gaps_json(
     drop(save);
     let state = PlanningState::from_world_with_prices(&world, country, &prices)?;
     let goal = vic3_goals::parse(goal)?;
+    let mut limitations = prices.limitations;
+    if goal.has_army_atom() {
+        state.push_army_power_limitation(&mut limitations);
+    }
     let result = GapsResult {
         satisfied: vic3_goals::evaluate(&goal, &state),
         gaps: vic3_goals::gaps(&goal, &state),
-        limitations: prices.limitations,
+        limitations,
     };
     Ok(serde_json::to_string(&result)?)
 }
@@ -1676,8 +1684,13 @@ mod tests {
             value
                 .get("limitations")
                 .and_then(Value::as_array)
-                .is_some_and(|limitations| !limitations.is_empty()),
-            "price limitations: {value}"
+                .is_some_and(|limitations| {
+                    !limitations.is_empty()
+                        && limitations.iter().any(|line| {
+                            line.as_str() == Some(vic3_world::ARMY_POWER_PROJECTION_UNKNOWN)
+                        })
+                }),
+            "army PP unknown limitation: {value}"
         );
     }
 

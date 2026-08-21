@@ -282,7 +282,7 @@ mod tests {
                 country: "GER".into(),
                 solvent: true,
                 good_prices: vec![("ammunition".into(), 30.0)],
-                army_power_projection: 0.0,
+                army_power_projection: Some(0.0),
                 ..PlanningParts::default()
             }),
             compile("declare-war(state=alsace)").unwrap(),
@@ -300,7 +300,10 @@ mod tests {
         let goal_node = path.last().unwrap();
         assert!(goal_node.is_goal());
         assert!(goal_node.state().has_interest_state("alsace"));
-        assert!(goal_node.state().army_power_projection >= 100.0);
+        assert!(goal_node
+            .state()
+            .army_power_projection
+            .is_some_and(|p| p >= 100.0));
         assert!(path.iter().any(|node| {
             matches!(
                 node.state().queued_interest,
@@ -308,7 +311,11 @@ mod tests {
             ) || node.state().has_interest_state("alsace")
         }));
         assert!(path.iter().any(|node| {
-            node.state().queued_army_target.is_some() || node.state().army_power_projection >= 100.0
+            node.state().queued_army_target.is_some()
+                || node
+                    .state()
+                    .army_power_projection
+                    .is_some_and(|p| p >= 100.0)
         }));
     }
 
@@ -317,7 +324,7 @@ mod tests {
         let start = Vic3Node::new(
             PlanningState::from_parts(PlanningParts {
                 country: "GER".into(),
-                army_power_projection: 40.0,
+                army_power_projection: Some(40.0),
                 ..PlanningParts::default()
             }),
             compile("army_power_projection >= 100").unwrap(),
@@ -332,7 +339,7 @@ mod tests {
         assert_eq!(cost, 77);
         assert_eq!(path.len(), 3);
         assert!(path[2].is_goal());
-        assert_eq!(path[2].state().army_power_projection, 100.0);
+        assert_eq!(path[2].state().army_power_projection, Some(100.0));
     }
 
     #[test]

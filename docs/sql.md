@@ -418,12 +418,12 @@ ORDER BY step;
 
 ### `gaps(goal TEXT)`
 
-One row per predicate still failing / cleared for goal readiness (mirrors gaps CLI/UI).
+One row per goal atom for readiness (mirrors gaps CLI/UI).
 
 | Column | Notes |
 | --- | --- |
 | `predicate` | |
-| `status` | e.g. `failing` \| `cleared` |
+| `status` | `cleared` \| `failing` \| `unknown` (metric missing from save IR — not a measured shortfall; e.g. army PP) |
 | `detail` | |
 
 ## Example queries

@@ -465,10 +465,14 @@ fn run_gaps(cmd: GapsCli) -> Result<()> {
         .context("save has no playable country")?;
     let state = PlanningState::from_world_with_prices(&world, country_tag, &prices)?;
     let goal = vic3_goals::parse(&cmd.goal)?;
+    let mut limitations = prices.limitations;
+    if goal.has_army_atom() {
+        state.push_army_power_limitation(&mut limitations);
+    }
     let result = GapsResult {
         satisfied: vic3_goals::evaluate(&goal, &state),
         gaps: vic3_goals::gaps(&goal, &state),
-        limitations: prices.limitations,
+        limitations,
     };
     emit_gaps(&result, cmd.json)
 }

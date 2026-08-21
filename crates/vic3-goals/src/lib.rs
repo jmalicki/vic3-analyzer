@@ -106,6 +106,26 @@ pub enum InterestKind {
     Region,
 }
 
+/// Cleared / failing / unknown for SQL `gaps()` and agent-facing honesty.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AtomStatus {
+    Cleared,
+    Failing,
+    /// Metric missing from save IR — not a measured shortfall.
+    Unknown,
+}
+
+impl AtomStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AtomStatus::Cleared => "cleared",
+            AtomStatus::Failing => "failing",
+            AtomStatus::Unknown => "unknown",
+        }
+    }
+}
+
 /// Compiled leaf predicate over [`PlanningState`].
 ///
 /// Gaps list these; sim successors branch only on open ones; SQL `gaps()`
@@ -150,41 +170,93 @@ impl Atom {
         matches!(self, Atom::HasLaw(id) if vic3_world::law_key(id) == vic3_world::law_key(law))
     }
 
+    /// Whether the atom holds. Unknown metrics (including missing army PP) are false.
     pub fn eval(&self, state: &PlanningState) -> bool {
+        matches!(self.status(state), AtomStatus::Cleared)
+    }
+
+    /// Cleared / failing / unknown — used by SQL `gaps()` so missing PP is not “failing”.
+    pub fn status(&self, state: &PlanningState) -> AtomStatus {
         match self {
-            Atom::HasTech(tech) => state.has_tech(tech),
-            Atom::HasLaw(law) => state.has_law(law),
-            Atom::GoodPrice { good, rel, value } => state
-                .price(good)
-                .map(|p| rel.holds(p, *value))
-                .unwrap_or(false),
-            Atom::ArmyPower { rel, value } => rel.holds(state.army_power_projection, *value),
-            Atom::Solvent => state.solvent,
+            Atom::HasTech(tech) => {
+                if state.has_tech(tech) {
+                    AtomStatus::Cleared
+                } else {
+                    AtomStatus::Failing
+                }
+            }
+            Atom::HasLaw(law) => {
+                if state.has_law(law) {
+                    AtomStatus::Cleared
+                } else {
+                    AtomStatus::Failing
+                }
+            }
+            Atom::GoodPrice { good, rel, value } => match state.price(good) {
+                Some(p) if rel.holds(p, *value) => AtomStatus::Cleared,
+                Some(_) => AtomStatus::Failing,
+                None => AtomStatus::Unknown,
+            },
+            Atom::ArmyPower { rel, value } => match state.army_power_projection {
+                Some(power) if rel.holds(power, *value) => AtomStatus::Cleared,
+                Some(_) => AtomStatus::Failing,
+                None => AtomStatus::Unknown,
+            },
+            Atom::Solvent => {
+                if state.solvent {
+                    AtomStatus::Cleared
+                } else {
+                    AtomStatus::Failing
+                }
+            }
             Atom::InterestIn {
                 kind: InterestKind::State,
                 id,
-            } => state.has_interest_state(id),
+            } => {
+                if state.has_interest_state(id) {
+                    AtomStatus::Cleared
+                } else {
+                    AtomStatus::Failing
+                }
+            }
             Atom::InterestIn {
                 kind: InterestKind::Region,
                 id,
-            } => state.has_interest_region(id),
-            Atom::Gdp { rel, value } => rel.holds(state.gdp, *value),
-            Atom::WeeklyBalance { rel, value } => state
-                .weekly_balance
-                .map(|balance| rel.holds(balance, *value))
-                .unwrap_or(false),
-            Atom::PopulationWeightedWealth { rel, value } => state
-                .population_weighted_wealth
-                .map(|wealth| rel.holds(wealth, *value))
-                .unwrap_or(false),
-            Atom::DebtPrincipal { rel, value } => state
-                .debt_principal
-                .map(|principal| rel.holds(principal, *value))
-                .unwrap_or(false),
-            Atom::CreditHeadroom { rel, value } => state
-                .credit_headroom
-                .map(|headroom| rel.holds(headroom, *value))
-                .unwrap_or(false),
+            } => {
+                if state.has_interest_region(id) {
+                    AtomStatus::Cleared
+                } else {
+                    AtomStatus::Failing
+                }
+            }
+            Atom::Gdp { rel, value } => {
+                if rel.holds(state.gdp, *value) {
+                    AtomStatus::Cleared
+                } else {
+                    AtomStatus::Failing
+                }
+            }
+            Atom::WeeklyBalance { rel, value } => match state.weekly_balance {
+                Some(balance) if rel.holds(balance, *value) => AtomStatus::Cleared,
+                Some(_) => AtomStatus::Failing,
+                None => AtomStatus::Unknown,
+            },
+            Atom::PopulationWeightedWealth { rel, value } => match state.population_weighted_wealth
+            {
+                Some(wealth) if rel.holds(wealth, *value) => AtomStatus::Cleared,
+                Some(_) => AtomStatus::Failing,
+                None => AtomStatus::Unknown,
+            },
+            Atom::DebtPrincipal { rel, value } => match state.debt_principal {
+                Some(principal) if rel.holds(principal, *value) => AtomStatus::Cleared,
+                Some(_) => AtomStatus::Failing,
+                None => AtomStatus::Unknown,
+            },
+            Atom::CreditHeadroom { rel, value } => match state.credit_headroom {
+                Some(headroom) if rel.holds(headroom, *value) => AtomStatus::Cleared,
+                Some(_) => AtomStatus::Failing,
+                None => AtomStatus::Unknown,
+            },
         }
     }
 }
@@ -436,7 +508,7 @@ mod tests {
             good_prices: vec![("ammunition".into(), 30.0)],
             solvent: true,
             treasury: 5_000.0,
-            army_power_projection: 150.0,
+            army_power_projection: Some(150.0),
             interest: vec!["alsace".into()],
             gdp: 60e6,
             weekly_balance: Some(125.0),
@@ -494,6 +566,41 @@ mod tests {
             &state
         ));
         assert!(!evaluate(&parse("credit_headroom > 0").unwrap(), &state));
+    }
+
+    #[test]
+    fn army_power_unknown_is_not_silent_zero() {
+        let unknown = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            ..PlanningParts::default()
+        });
+        let atom = parse("army_power_projection >= 100").unwrap();
+        assert!(matches!(
+            atom,
+            Goal::Atom(Atom::ArmyPower {
+                rel: Rel::Ge,
+                value: 100.0
+            })
+        ));
+        let Goal::Atom(army) = &atom else {
+            panic!("expected army atom");
+        };
+        assert_eq!(army.status(&unknown), AtomStatus::Unknown);
+        assert!(!army.eval(&unknown));
+
+        let known_zero = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            army_power_projection: Some(0.0),
+            ..PlanningParts::default()
+        });
+        assert_eq!(army.status(&known_zero), AtomStatus::Failing);
+
+        let ready = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            army_power_projection: Some(150.0),
+            ..PlanningParts::default()
+        });
+        assert_eq!(army.status(&ready), AtomStatus::Cleared);
     }
 
     #[test]

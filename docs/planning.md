@@ -22,7 +22,7 @@ It is **not** the full save. Hash it. **I8:** identical state ⇒ identical hash
 | `good_prices`, `gdp` | Last price solve (`gdp` only via `*_with_prices`) |
 | `treasury`, `weekly_balance`, `debt_*`, `credit_*`, `solvent` | Country budget |
 | `population_weighted_wealth` | Pops in states owned by the country |
-| `army_power_projection`, `interest_states` / `interest_regions` | Country `cached_total_army_power_projection` (else army formation `power_projection`); `interest_marker_manager` + country `declared_interests` (normalized for DSL `state=` / `region=`) |
+| `army_power_projection`, `interest_states` / `interest_regions` | Country `cached_total_army_power_projection` (else army formation `power_projection`) as `Option` — `None` when IR omits PP (not coerced to `0`); `interest_marker_manager` + country `declared_interests` (normalized for DSL `state=` / `region=`) |
 | `building_level_deltas`, `pm_overrides`, `tax_level` | Empty / zero at load; sim branches fill them |
 | `queued_interest`, `queued_army_target`, `queued_law` | Empty at load; sim-only in-flight interest / army / law |
 
@@ -109,6 +109,9 @@ duration (`interest_days` / `army_expansion_days`, defaults 90 / 180). Completin
 interest inserts the id into `interest_states` or `interest_regions`; completing
 army sets `army_power_projection` to at least the queued target (aligned with
 `DECLARE_WAR_ARMY_THRESHOLD` / `army_power_projection >= 100` compile constants).
+When save IR has no projection fields, planning keeps `None`: SQL `gaps`
+reports status `unknown` (not `failing` as if measured zero), `army_power()`
+errors, and the sim refuses `QueueArmyPower` until a known value exists.
 These queues share the single in-flight slot with tech, building, and law, so a
 declare-war branch that still needs both interest and army pays the sum of the
 two waits even though the heuristic AND-bound is their maximum.

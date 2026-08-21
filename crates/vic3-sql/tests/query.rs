@@ -569,6 +569,33 @@ async fn gaps_declare_war_exposes_interest_army_munitions_solvent() {
 }
 
 #[tokio::test]
+async fn gaps_army_power_unknown_not_silent_zero() {
+    let eng = engine().await;
+    // Fixture plaintext has a player but no PP fields (same as army_power() error).
+    let batches = eng
+        .query("SELECT predicate, status FROM gaps('army_power_projection >= 100')")
+        .await
+        .expect("gaps army");
+    assert_eq!(batches[0].num_rows(), 1);
+    let preds = batches[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("predicate");
+    let statuses = batches[0]
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("status");
+    assert_eq!(preds.value(0), "army_power_projection >= 100");
+    assert_eq!(
+        statuses.value(0),
+        "unknown",
+        "missing PP must not look like measured shortfall"
+    );
+}
+
+#[tokio::test]
 async fn constructions_table_lists_private_and_government() {
     use vic3_prices::{ConstructionQueueKind, WorldConstruction};
 
