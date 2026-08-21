@@ -26,7 +26,7 @@ On start: load config, refresh save catalog, register DataFusion + tools. No pri
 
 1. Discover saves (`query` on `saves`, or resource `vic3://saves`).
 2. Bind with `use_save` (stub or selector).
-3. `query` against `active` tables / TVFs.
+3. `query` against `active` tables / TVFs, or `preview_delta` for a compact what-if.
 
 Do **not** use `SELECT set_active_save(...)`.
 
@@ -34,6 +34,7 @@ Do **not** use `SELECT set_active_save(...)`.
 query:  SELECT name, kind, in_game_date, mtime, location FROM saves ORDER BY mtime DESC LIMIT 10
 use_save: { "name": "autosave" }
 query:  SELECT * FROM alerts() WHERE severity = 1
+preview_delta: { "building": "building_rye_farm", "extra_levels": 1 }
 ```
 
 Or: `use_save: { "selector": "latest_autosave" }`.
@@ -72,6 +73,46 @@ Rescan allowlisted save dirs → `{ "count": number }`.
 | Arg | Type | Notes |
 | --- | --- | --- |
 | `sql` | string | Returns DataFusion explain text |
+
+### `preview_delta`
+
+Session-bound what-if / [`WorldDelta`](json-schema.md) preview (same solver as CLI `mutate` / `what-if`). Requires a prior `use_save`. Warm-starts from the bound solve’s `relative` prices. Does **not** mutate the session.
+
+Provide **either** sugar **or** `delta` (not both; unknown fields rejected).
+
+| Arg | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `building` | string | sugar | Building type id (e.g. `building_rye_farm`) |
+| `extra_levels` | number | sugar | Non-negative extra levels |
+| `building_id` | number | no | Instance id (wins over `building`) |
+| `state_id` | number | no | Restrict type match to one state |
+| `delta` | object | alt | Full WorldDelta (`extra_levels` / `production_methods` / `subsidize`) |
+
+**Result (compact only — not a full PricesResult):**
+
+```json
+{
+  "status": "converged",
+  "residual": 1e-9,
+  "applied": { "extra_levels": [{ "building": "building_rye_farm", "extra_levels": 1 }] },
+  "goods": [
+    {
+      "id": "wood",
+      "price_before": 40.0,
+      "price_after": 35.0,
+      "d_price": -5.0,
+      "shortage_before": 0.0,
+      "shortage_after": 0.0,
+      "d_shortage": 0.0
+    }
+  ],
+  "limitations": ["…"]
+}
+```
+
+`goods` lists rows whose price or shortage changed. Shortage is `max(0, buy − sell)` (same as SQL goods tables).
+
+**Errors:** no active save; sugar and `delta` both set; incomplete sugar; unknown JSON fields.
 
 ## Resources
 
