@@ -18,7 +18,7 @@
 //!
 //! | Kind | Names |
 //! | --- | --- |
-//! | Tools | `query`, `use_save`, `refresh_catalog`, `explain` |
+//! | Tools | `query`, `use_save`, `refresh_catalog`, `explain`, `preview_delta` |
 //! | Resources | `vic3://schema`, `vic3://saves`, `vic3://session`, `vic3://docs/*` |
 //! | Prompts | `investigate_shortages`, `compare_latest_autosave`, `military_readiness`, `what_is_loaded`, `plan_research` |
 //!

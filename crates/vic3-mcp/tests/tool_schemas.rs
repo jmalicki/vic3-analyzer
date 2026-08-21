@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 use vic3_catalog::{AppConfig, SaveLocation, SaveRoot};
 use vic3_mcp::{McpRuntime, Vic3McpServer};
+use vic3_prices::{ExtraLevelsDelta, WorldDelta};
 use vic3_sql::{EngineLoadOpts, SqlEngine, UseSaveRequest};
 
 fn write_save(dir: &std::path::Path, name: &str) {
@@ -61,7 +62,13 @@ async fn tool_schemas_match_mcp_contract() {
     let names: BTreeSet<_> = tools.iter().map(|t| t.name.as_ref()).collect();
     assert_eq!(
         names,
-        BTreeSet::from(["query", "use_save", "refresh_catalog", "explain"])
+        BTreeSet::from([
+            "query",
+            "use_save",
+            "refresh_catalog",
+            "explain",
+            "preview_delta",
+        ])
     );
 
     let by_name = |n: &str| tools.iter().find(|t| t.name == n).expect(n);
@@ -103,6 +110,24 @@ async fn tool_schemas_match_mcp_contract() {
         .get("properties")
         .and_then(|p| p.get("sql"))
         .is_some());
+
+    let preview = by_name("preview_delta");
+    let pschema = preview.input_schema.as_ref();
+    let pprops = pschema.get("properties").expect("preview_delta properties");
+    for key in [
+        "building",
+        "extra_levels",
+        "building_id",
+        "state_id",
+        "delta",
+    ] {
+        assert!(pprops.get(key).is_some(), "missing {key} in {pschema:?}");
+    }
+    assert_eq!(
+        pschema.get("additionalProperties"),
+        Some(&serde_json::Value::Bool(false)),
+        "preview_delta must deny unknown fields: {pschema:?}"
+    );
 }
 
 #[tokio::test]
@@ -182,4 +207,74 @@ async fn query_and_use_save_tools_end_to_end() {
         .await
         .unwrap();
     let _ = eng;
+}
+
+#[tokio::test]
+async fn preview_delta_rye_drops_wood_price() {
+    let tmp = TempDir::new().unwrap();
+    let saves = tmp.path().join("saves");
+    fs::create_dir_all(&saves).unwrap();
+    fs::write(saves.join("autosave.v3"), save_fixture()).unwrap();
+    let blob = defs_blob(&tmp);
+
+    let config = AppConfig {
+        auto_detect: false,
+        save_dirs: vec![saves],
+        defs_blob: Some(blob),
+        ..Default::default()
+    };
+
+    let runtime = McpRuntime::from_config(
+        tmp.path().to_path_buf(),
+        tmp.path().join("config.toml"),
+        config,
+    )
+    .await
+    .expect("runtime");
+
+    let unbound = runtime.preview_delta(&WorldDelta::default()).await;
+    assert!(
+        unbound.unwrap_err().contains("no active save"),
+        "unbound session must error"
+    );
+
+    runtime
+        .use_save(UseSaveRequest {
+            name: Some("autosave".into()),
+            ..Default::default()
+        })
+        .await
+        .expect("use_save");
+
+    let delta = WorldDelta {
+        extra_levels: vec![ExtraLevelsDelta {
+            building: Some("building_rye_farm".into()),
+            building_id: None,
+            extra_levels: 1,
+        }],
+        ..Default::default()
+    };
+    let body = runtime.preview_delta(&delta).await.expect("preview_delta");
+
+    assert_eq!(body["status"], "converged");
+    assert!(body["residual"].as_f64().is_some());
+    assert!(body.get("limitations").and_then(|v| v.as_array()).is_some());
+    assert!(body.get("applied").is_some());
+    // Compact: no full PricesResult dump fields.
+    assert!(body.get("buildings").is_none());
+    assert!(body.get("state_pops").is_none());
+    assert!(body.get("relative").is_none());
+
+    let goods = body["goods"].as_array().expect("goods");
+    let wood = goods
+        .iter()
+        .find(|g| g["id"] == "wood")
+        .expect("wood row among changed goods");
+    let before = wood["price_before"].as_f64().unwrap();
+    let after = wood["price_after"].as_f64().unwrap();
+    assert!(
+        after < before,
+        "rye +1 (forestry PM) should drop wood price: {before} → {after}"
+    );
+    assert!(wood["d_price"].as_f64().unwrap() < 0.0);
 }

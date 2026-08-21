@@ -23,11 +23,12 @@ use rmcp::{
 use serde::Deserialize;
 use serde_json::json;
 use vic3_catalog::SaveLocation;
+use vic3_prices::WorldDelta;
 use vic3_sql::{schema_catalog_json, UseSaveRequest};
 
 use crate::error::{sql_to_tool_result, tool_err, tool_ok_json, tool_ok_text};
 use crate::format::{batches_to_csv, batches_to_json};
-use crate::runtime::McpRuntime;
+use crate::runtime::{world_delta_from_sugar, McpRuntime};
 
 /// Docs embedded for `vic3://docs/*` (paths relative to this crate).
 const DOC_SQL: &str = include_str!("../../../docs/sql.md");
@@ -38,7 +39,7 @@ const FLOW_MARKDOWN: &str = r#"# Vic3 Analyzer MCP flow
 
 1. Discover saves: tool `query` on `saves`, or read resource `vic3://saves`.
 2. Bind session: tool `use_save` with `{ "name": "autosave" }` or `{ "selector": "latest_autosave" }`.
-3. Query fact tables / TVFs: `SELECT … FROM countries`, `SELECT * FROM alerts()` (player-scoped; use `alerts('all')` for the full save), `plan('research(tech=…)')`.
+3. Query fact tables / TVFs: `SELECT … FROM countries`, `SELECT * FROM alerts()` (player-scoped; use `alerts('all')` for the full save), `plan('research(tech=…)')`. Or `preview_delta` for a what-if on the bound save.
 
 Rules:
 - Filename **stubs** only (no filesystem paths).
@@ -141,6 +142,30 @@ pub struct ExplainArgs {
     pub sql: String,
 }
 
+/// Args for tool `preview_delta`: sugar extra-levels and/or a full [`WorldDelta`].
+///
+/// Sugar (`building` / `extra_levels` / optional `building_id` / `state_id`) and
+/// `delta` are mutually exclusive. Requires a bound session (`use_save`).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewDeltaArgs {
+    /// Building type id (e.g. `building_rye_farm`). Sugar with `extra_levels`.
+    #[serde(default)]
+    pub building: Option<String>,
+    /// Extra levels to add (sugar).
+    #[serde(default)]
+    pub extra_levels: Option<u32>,
+    /// Target a single building instance (sugar; wins over `building`).
+    #[serde(default)]
+    pub building_id: Option<u32>,
+    /// Restrict sugar `building` matches to this state id.
+    #[serde(default)]
+    pub state_id: Option<u32>,
+    /// Full [`WorldDelta`] JSON (extra_levels / production_methods / subsidize).
+    #[serde(default)]
+    pub delta: Option<WorldDelta>,
+}
+
 #[tool_router]
 impl Vic3McpServer {
     /// Run one read-only SQL statement against the shared DataFusion engine.
@@ -234,6 +259,20 @@ impl Vic3McpServer {
                 Err(e) => Ok(tool_err(e.to_string())),
             },
             Err(e) => Ok(sql_to_tool_result(e)),
+        }
+    }
+
+    /// Warm-started WorldDelta / what-if preview on the bound session (compact JSON).
+    #[tool(
+        description = "Preview a WorldDelta (or sugar building + extra_levels) on the bound save. Returns compact before/after goods prices & shortages — not a full PricesResult. Requires use_save first. Sugar and delta are mutually exclusive."
+    )]
+    async fn preview_delta(
+        &self,
+        Parameters(args): Parameters<PreviewDeltaArgs>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        match resolve_preview_delta(&args, &self.runtime).await {
+            Ok(body) => Ok(tool_ok_json(&body)),
+            Err(msg) => Ok(tool_err(msg)),
         }
     }
 }
@@ -333,7 +372,7 @@ impl ServerHandler for Vic3McpServer {
                 .build(),
         )
         .with_instructions(
-            "Vic3 Analyzer MCP: discover saves → use_save → query read-only SQL. \
+            "Vic3 Analyzer MCP: discover saves → use_save → query / preview_delta. \
              Stubs only (no paths). Resources: vic3://schema|saves|session|docs/*."
                 .to_string(),
         )
@@ -489,6 +528,46 @@ impl Vic3McpServer {
 
 fn resource(uri: &str, name: &str, description: &str) -> Resource {
     Resource::new(uri, name).with_description(description)
+}
+
+async fn resolve_preview_delta(
+    args: &PreviewDeltaArgs,
+    runtime: &McpRuntime,
+) -> Result<serde_json::Value, String> {
+    let has_sugar = args.building.is_some()
+        || args.extra_levels.is_some()
+        || args.building_id.is_some()
+        || args.state_id.is_some();
+    let has_delta = args.delta.is_some();
+    if has_sugar && has_delta {
+        return Err(
+            "preview_delta: provide either sugar (building/extra_levels/…) or delta, not both"
+                .into(),
+        );
+    }
+    if !has_sugar && !has_delta {
+        return Err(
+            "preview_delta: provide sugar (building + extra_levels) or a delta object".into(),
+        );
+    }
+
+    let delta = if let Some(delta) = &args.delta {
+        delta.clone()
+    } else {
+        let binding = runtime
+            .active_binding()
+            .await
+            .ok_or_else(|| "no active save; call use_save first".to_string())?;
+        world_delta_from_sugar(
+            &binding,
+            args.building.as_deref(),
+            args.extra_levels,
+            args.building_id,
+            args.state_id,
+        )?
+    };
+
+    runtime.preview_delta(&delta).await
 }
 
 fn build_use_save_request(args: &UseSaveArgs) -> Result<UseSaveRequest, String> {
