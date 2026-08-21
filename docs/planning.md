@@ -22,9 +22,9 @@ It is **not** the full save. Hash it. **I8:** identical state ⇒ identical hash
 | `good_prices`, `gdp` | Last price solve (`gdp` only via `*_with_prices`) |
 | `treasury`, `weekly_balance`, `debt_*`, `credit_*`, `solvent` | Country budget |
 | `population_weighted_wealth` | Pops in states owned by the country |
-| `army_power_projection`, `interest_states` / `interest_regions` | Country `cached_total_army_power_projection` (else army formation `power_projection`) as `Option` — `None` when IR omits PP (not coerced to `0`); `interest_marker_manager` + country `declared_interests` (normalized for DSL `state=` / `region=`) |
-| `building_level_deltas`, `pm_overrides`, `tax_level` | Empty / zero at load; sim branches fill them |
-| `queued_interest`, `queued_army_target`, `queued_law` | Empty at load; sim-only in-flight interest / army / law |
+| `army_power_projection`, `navy_power_projection`, `interest_states` / `interest_regions` | Country army/navy PP caches (else formation sums; navy includes `navy_manager`) as `Option` — `None` when IR omits PP; interest markers + `declared_interests` |
+| `building_level_deltas`, `pm_overrides`, `tax_level`, `mil_buildings` | Empty / zero at load; sim branches fill them |
+| `queued_interest`, `queued_hire`, `queued_law` | Empty at load; sim-only in-flight interest / hire / law |
 
 `queued_building` remains the single sim wait slot. `constructions` is the full ordered list for exposure (SQL / UI / future goals). Sim `QueueBuildingLevel` pushes a government row and sets the head; `BuildingCompleted` pops the finished row and advances the head to the next entry when the save queue had more.
 
@@ -102,19 +102,25 @@ Paradox treasury simulation:
   credit-limit growth, or investment pool — only the frozen balance vs known
   principal/credit book, plus the compact tax offset.
 
-Declared interest and army power projection both **project from save IR** and
-have compact sim actions: queue a goal-relevant interest (`state=` / `region=`)
-or army expansion to the open comparison target, then event-wait a fixed model
-duration (`interest_days` / `army_expansion_days`, defaults 90 / 180). Completing
-interest inserts the id into `interest_states` or `interest_regions`; completing
-army sets `army_power_projection` to at least the queued target (aligned with
-`DECLARE_WAR_ARMY_THRESHOLD` / `army_power_projection >= 100` compile constants).
-When save IR has no projection fields, planning keeps `None`: SQL `gaps`
-reports status `unknown` (not `failing` as if measured zero), `army_power()`
-errors, and the sim refuses `QueueArmyPower` until a known value exists.
-These queues share the single in-flight slot with tech, building, and law, so a
-declare-war branch that still needs both interest and army pays the sum of the
-two waits even though the heuristic AND-bound is their maximum.
+Declared interest projects from save IR with a compact sim action: queue a
+goal-relevant interest (`state=` / `region=`), then event-wait `interest_days`
+(default 90).
+
+Army and navy power projection also project from save IR (caches or formation
+sums; navy includes `navy_manager`). They are **not** scalar bumps. Open
+`army_power_projection` / `navy_power_projection` close by constructing and
+fully staffing military buildings:
+
+- Army: `building_barracks` levels → hire-to-full (`army_training_days`)
+- Navy (1.13): `building_shipyards` + `building_naval_administration` → crew
+  hire (`navy_crew_days`); PP uses `min(shipyard, admin)` staffed capacity
+
+Unit formula: `((offense + defense) / 2) * manpower_ratio` with model default
+stats when combat-unit defs are absent. Underemployed buildings do not fully
+count. When save IR has no projection fields, planning keeps `None`: SQL
+`gaps` reports status `unknown`, and the sim will not invent a zero army/navy.
+These queues share the single in-flight slot with tech, building, hire, and
+law.
 
 **Law checkpoints:** `has_law(…)` reads projected active laws (`law_` prefix
 insensitive). Successors queue the missing law then event-wait `law_days`
@@ -131,12 +137,15 @@ world clone, and re-solves prices. Branching is bounded by
 The first economy construction action is a building-level decision followed by a
 fixed-time construction event and price re-solve. `vic3-prices` preserves the
 building's staffing ratio and scales absolute saved IO per level, while leaving
-unrelated employment, wages, and trade frozen. `PlanningState` hashes compact
-per-type level deltas, PM overrides, tax level, and its single queued
-building/law; immutable world/defs/solver inputs ride outside the A* key.
+unrelated employment, wages, and trade frozen. Planning may still raise
+**military** staffing on the planning branch only via `QueueHireMilitary`.
+`PlanningState` hashes compact per-type level deltas, PM overrides, tax level,
+mil buildings, and its single queued building/hire/law; immutable world/defs/solver
+inputs ride outside the A* key.
 Successors select only producers/consumers relevant to an open `good_price`
-atom; increasing GDP goals consider the three highest current output-value
-building types. Added levels are capped per type, keeping the search finite.
+atom (and expensive mil/shipyard inputs when PP atoms are open); increasing GDP
+goals consider the three highest current output-value building types. Added
+levels are capped per type, keeping the search finite.
 Construction timing is a model constant, not a claim about Paradox's queue.
 
 **Research innovation capacity** (queued-tech throughput gates beyond a single

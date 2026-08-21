@@ -12,13 +12,24 @@
 //! Do **not** use crates.io `pathfinding`. See [`docs/planning.md`](../../../docs/planning.md).
 
 pub mod goals;
+pub mod military;
 pub mod plan;
 pub mod sim;
 pub mod world;
 
 pub use goals::{
     compile, evaluate, gaps, parse, Atom, Goal, GoalError, InterestKind, Rel,
-    DECLARE_WAR_ARMY_THRESHOLD, DECLARE_WAR_MUNITIONS_PRICE_CEILING,
+    COLONIZE_ARMY_THRESHOLD, COLONIZE_NAVY_THRESHOLD, COLONIZE_QUININE_TECH, COLONIZE_TECH,
+    DECLARE_WAR_ARMY_THRESHOLD, DECLARE_WAR_MUNITIONS_PRICE_CEILING, LAW_COLONIAL_EXPLOITATION,
+    LAW_COLONIAL_RESETTLEMENT,
+};
+pub use military::{
+    army_buildings_fully_staffed, army_pp_from_buildings, is_barracks_building,
+    is_military_planning_building, is_naval_admin_building, is_shipyard_building,
+    military_buildings_fully_staffed, navy_buildings_fully_staffed, navy_pp_from_buildings,
+    recompute_army_pp, recompute_navy_pp, ModeledMilBuilding, UnitCombatStats, BUILDING_BARRACKS,
+    BUILDING_NAVAL_ADMIN, BUILDING_SHIPYARD, BUILDING_SHIPYARD_ALT, MIL_INPUT_PRICE_FACTOR,
+    STAFFING_EPS,
 };
 pub use plan::{
     compare, plan, plan_with_economy, ActionDiff, AnalysisRecord, CompareResult, GapDiff,
@@ -26,12 +37,12 @@ pub use plan::{
     TimedNode, Vic3Node,
 };
 pub use sim::{
-    apply_action, army_power_raise_target, successors, successors_for_atoms,
-    successors_with_economy, Action, EconomyContext, SimConfig, Successor,
+    apply_action, successors, successors_for_atoms, successors_with_economy, Action,
+    EconomyContext, SimConfig, Successor,
 };
 pub use world::{
     law_key, ConstructionQueueKind, PlanningParts, PlanningState, QueuedInterest, Save, Vic3Date,
-    WorldError, ARMY_POWER_PROJECTION_UNKNOWN,
+    WorldError, ARMY_POWER_PROJECTION_UNKNOWN, NAVY_POWER_PROJECTION_UNKNOWN,
 };
 
 /// Crate version from Cargo.

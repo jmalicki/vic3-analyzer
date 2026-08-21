@@ -19,9 +19,9 @@
 //! | `good_prices` | last price solve | empty map |
 //! | `gdp` | `0` unless `*_with_prices` (owned building revenue) | `0` |
 //! | budget / `solvent` / SoL proxy | country budget + owned-state pops | false / `0` / `None` |
-//! | army / interest | country cache + interest markers; army `None` when IR omits PP | `None` / empty |
+//! | army / navy / interest | country cache + formations; PP `None` when IR omits | `None` / empty |
 //! | `building_level_deltas`, `pm_overrides`, `tax_level` | empty / `0` | sim branches |
-//! | `queued_interest`, `queued_army_target`, `queued_law` | always `None` | sim in-flight queues |
+//! | `queued_interest`, `queued_hire`, `queued_law`, `mil_buildings` | empty / `None` | sim in-flight queues |
 //!
 //! Missing principal/credit leaves `solvent` false (no treasury-sign guess).
 //! Unknown country tag → [`WorldError::UnknownCountry`].
@@ -34,11 +34,21 @@ use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 use vic3_prices::{PricesResult, World, WorldCountry};
 
+use crate::military::{recompute_army_pp, recompute_navy_pp, ModeledMilBuilding, UnitCombatStats};
+
 pub use vic3_load::{ConstructionQueueKind, Save, Vic3Date};
 
 /// Limitation when save IR has no army power projection (not a measured zero).
 pub const ARMY_POWER_PROJECTION_UNKNOWN: &str =
     "army power projection unknown in save IR (not a measured zero)";
+
+/// Limitation when save IR has no navy power projection (not a measured zero).
+pub const NAVY_POWER_PROJECTION_UNKNOWN: &str =
+    "navy power projection unknown in save IR (not a measured zero)";
+
+/// Limitation when military buildings on the plan path are underemployed.
+pub const MILITARY_UNDEREMPLOYED: &str =
+    "barracks / shipyards / naval administrations must be fully staffed for power projection";
 
 /// Failure while projecting a [`PlanningState`] from save IR or [`World`].
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -136,6 +146,12 @@ pub struct PlanningParts {
     pub treasury: f64,
     /// Known army power projection; `None` when save IR omits it (not zero).
     pub army_power_projection: Option<f64>,
+    /// Known navy power projection; `None` when save IR omits it (not zero).
+    pub navy_power_projection: Option<f64>,
+    /// Save baseline army PP before sim-added mil buildings.
+    pub army_pp_baseline: Option<f64>,
+    /// Save baseline navy PP before sim-added mil buildings.
+    pub navy_pp_baseline: Option<f64>,
     /// State ids for DSL `interest_in(state=…)`.
     pub interest: Vec<String>,
     /// Region ids for DSL `interest_in(region=…)`.
@@ -152,8 +168,10 @@ pub struct PlanningParts {
     /// Full private then government queue for this country (exposure / sim sync).
     pub constructions: Vec<PlanningConstruction>,
     pub queued_interest: Option<QueuedInterest>,
-    /// Target army power projection after the in-flight expansion completes.
-    pub queued_army_target: Option<f64>,
+    /// Building type currently hiring toward full employment (sim branch).
+    pub queued_hire: Option<String>,
+    /// Sim-added barracks / shipyards / naval administrations.
+    pub mil_buildings: Vec<ModeledMilBuilding>,
     /// Active law script ids (`law_autocracy`, …).
     pub laws: Vec<String>,
     /// Law currently being enacted (sim branch only).
@@ -176,6 +194,9 @@ impl Default for PlanningParts {
             solvent: false,
             treasury: 0.0,
             army_power_projection: None,
+            navy_power_projection: None,
+            army_pp_baseline: None,
+            navy_pp_baseline: None,
             interest: Vec::new(),
             interest_regions: Vec::new(),
             queued_tech: None,
@@ -189,7 +210,8 @@ impl Default for PlanningParts {
             queued_building: None,
             constructions: Vec::new(),
             queued_interest: None,
-            queued_army_target: None,
+            queued_hire: None,
+            mil_buildings: Vec::new(),
             laws: Vec::new(),
             queued_law: None,
             infamy: None,
@@ -217,6 +239,12 @@ pub struct PlanningState {
     pub treasury: f64,
     /// Army power projection when save IR exposes it; `None` is unknown (not zero).
     pub army_power_projection: Option<f64>,
+    /// Navy power projection when save IR exposes it; `None` is unknown (not zero).
+    pub navy_power_projection: Option<f64>,
+    /// Baseline army PP from save (before sim-added mil buildings).
+    pub army_pp_baseline: Option<f64>,
+    /// Baseline navy PP from save (before sim-added mil buildings).
+    pub navy_pp_baseline: Option<f64>,
     /// Normalized state ids for DSL `interest_in(state=…)`.
     pub interest_states: BTreeSet<String>,
     /// Normalized strategic-region ids for DSL `interest_in(region=…)`.
@@ -249,8 +277,10 @@ pub struct PlanningState {
     pub constructions: Vec<PlanningConstruction>,
     /// Interest in flight — sim-only (`None` at load).
     pub queued_interest: Option<QueuedInterest>,
-    /// Army expansion target in flight — sim-only (`None` at load).
-    pub queued_army_target: Option<f64>,
+    /// Hire-to-full in flight for a mil building type — sim-only.
+    pub queued_hire: Option<String>,
+    /// Sim-added barracks / shipyards / naval administrations.
+    pub mil_buildings: Vec<ModeledMilBuilding>,
     /// Active law script ids from save / completed enactments.
     pub laws: BTreeSet<String>,
     /// Law enactment in flight — sim-only (`None` at load).
@@ -278,6 +308,9 @@ impl PartialEq for PlanningState {
             && self.solvent == other.solvent
             && f64_bits_eq(self.treasury, other.treasury)
             && f64_option_bits_eq(self.army_power_projection, other.army_power_projection)
+            && f64_option_bits_eq(self.navy_power_projection, other.navy_power_projection)
+            && f64_option_bits_eq(self.army_pp_baseline, other.army_pp_baseline)
+            && f64_option_bits_eq(self.navy_pp_baseline, other.navy_pp_baseline)
             && self.interest_states == other.interest_states
             && self.interest_regions == other.interest_regions
             && self.queued_tech == other.queued_tech
@@ -294,7 +327,8 @@ impl PartialEq for PlanningState {
             && self.queued_building == other.queued_building
             && self.constructions == other.constructions
             && self.queued_interest == other.queued_interest
-            && f64_option_bits_eq(self.queued_army_target, other.queued_army_target)
+            && self.queued_hire == other.queued_hire
+            && self.mil_buildings == other.mil_buildings
             && self.laws == other.laws
             && self.queued_law == other.queued_law
             && f64_option_bits_eq(self.infamy, other.infamy)
@@ -318,6 +352,9 @@ impl Hash for PlanningState {
         self.solvent.hash(state);
         self.treasury.to_bits().hash(state);
         hash_f64_option(self.army_power_projection, state);
+        hash_f64_option(self.navy_power_projection, state);
+        hash_f64_option(self.army_pp_baseline, state);
+        hash_f64_option(self.navy_pp_baseline, state);
         self.interest_states.hash(state);
         self.interest_regions.hash(state);
         self.queued_tech.hash(state);
@@ -331,7 +368,8 @@ impl Hash for PlanningState {
         self.queued_building.hash(state);
         self.constructions.hash(state);
         self.queued_interest.hash(state);
-        hash_f64_option(self.queued_army_target, state);
+        self.queued_hire.hash(state);
+        self.mil_buildings.hash(state);
         self.laws.hash(state);
         self.queued_law.hash(state);
         hash_f64_option(self.infamy, state);
@@ -417,6 +455,9 @@ impl PlanningState {
             solvent: parts.solvent,
             treasury: parts.treasury,
             army_power_projection: parts.army_power_projection,
+            navy_power_projection: parts.navy_power_projection,
+            army_pp_baseline: parts.army_pp_baseline.or(parts.army_power_projection),
+            navy_pp_baseline: parts.navy_pp_baseline.or(parts.navy_power_projection),
             interest_states: parts.interest.into_iter().collect(),
             interest_regions: parts.interest_regions.into_iter().collect(),
             queued_tech: parts.queued_tech,
@@ -430,7 +471,8 @@ impl PlanningState {
             queued_building: parts.queued_building,
             constructions: parts.constructions,
             queued_interest: parts.queued_interest,
-            queued_army_target: parts.queued_army_target,
+            queued_hire: parts.queued_hire,
+            mil_buildings: parts.mil_buildings,
             laws: parts.laws.into_iter().collect(),
             queued_law: parts.queued_law,
             infamy: parts.infamy,
@@ -444,8 +486,65 @@ impl PlanningState {
         self.queued_tech.is_some()
             || self.queued_building.is_some()
             || self.queued_interest.is_some()
-            || self.queued_army_target.is_some()
+            || self.queued_hire.is_some()
             || self.queued_law.is_some()
+    }
+
+    /// Refresh army/navy PP from baselines + staffed mil buildings.
+    pub fn recompute_military_pp(&mut self) {
+        self.army_power_projection = recompute_army_pp(
+            self.army_pp_baseline,
+            &self.mil_buildings,
+            UnitCombatStats::army_default(),
+        );
+        self.navy_power_projection = recompute_navy_pp(
+            self.navy_pp_baseline,
+            &self.mil_buildings,
+            UnitCombatStats::navy_default(),
+        );
+    }
+
+    /// True when sim-added mil buildings are fully staffed (or none exist).
+    pub fn mil_buildings_fully_staffed(&self) -> bool {
+        crate::military::military_buildings_fully_staffed(&self.mil_buildings)
+    }
+
+    pub fn army_buildings_fully_staffed(&self) -> bool {
+        crate::military::army_buildings_fully_staffed(&self.mil_buildings)
+    }
+
+    pub fn navy_buildings_fully_staffed(&self) -> bool {
+        crate::military::navy_buildings_fully_staffed(&self.mil_buildings)
+    }
+
+    /// Add one underemployed level of a military building type.
+    pub fn push_mil_building_level(&mut self, building: &str) {
+        if let Some(row) = self
+            .mil_buildings
+            .iter_mut()
+            .find(|row| row.building == building)
+        {
+            row.levels += 1.0;
+        } else {
+            self.mil_buildings.push(ModeledMilBuilding {
+                building: building.to_string(),
+                levels: 1.0,
+                staffing: 0.0,
+            });
+        }
+        self.recompute_military_pp();
+    }
+
+    /// Raise staffing for `building` up to its levels (full hire).
+    pub fn complete_mil_hire(&mut self, building: &str) {
+        if let Some(row) = self
+            .mil_buildings
+            .iter_mut()
+            .find(|row| row.building == building)
+        {
+            row.staffing = row.levels;
+        }
+        self.recompute_military_pp();
     }
 
     /// Limitation line when army power projection is missing from save IR.
@@ -455,12 +554,39 @@ impl PlanningState {
             .then_some(ARMY_POWER_PROJECTION_UNKNOWN)
     }
 
+    /// Limitation line when navy power projection is missing from save IR.
+    pub fn navy_power_unknown_limitation(&self) -> Option<&'static str> {
+        self.navy_power_projection
+            .is_none()
+            .then_some(NAVY_POWER_PROJECTION_UNKNOWN)
+    }
+
     /// Append [`ARMY_POWER_PROJECTION_UNKNOWN`] when projection is missing.
     pub fn push_army_power_limitation(&self, limitations: &mut Vec<String>) {
         if let Some(line) = self.army_power_unknown_limitation() {
             if !limitations.iter().any(|existing| existing == line) {
                 limitations.push(line.to_string());
             }
+        }
+    }
+
+    /// Append [`NAVY_POWER_PROJECTION_UNKNOWN`] when projection is missing.
+    pub fn push_navy_power_limitation(&self, limitations: &mut Vec<String>) {
+        if let Some(line) = self.navy_power_unknown_limitation() {
+            if !limitations.iter().any(|existing| existing == line) {
+                limitations.push(line.to_string());
+            }
+        }
+    }
+
+    /// Append underemployment limitation when mil buildings are not fully staffed.
+    pub fn push_military_staffing_limitation(&self, limitations: &mut Vec<String>) {
+        if !self.mil_buildings_fully_staffed()
+            && !limitations
+                .iter()
+                .any(|existing| existing == MILITARY_UNDEREMPLOYED)
+        {
+            limitations.push(MILITARY_UNDEREMPLOYED.to_string());
         }
     }
 
@@ -574,6 +700,9 @@ impl PlanningState {
             solvent: country.budget.is_solvent(),
             treasury,
             army_power_projection: save.army_power_projection_for(country_id),
+            navy_power_projection: save.navy_power_projection_for(country_id),
+            army_pp_baseline: save.army_power_projection_for(country_id),
+            navy_pp_baseline: save.navy_power_projection_for(country_id),
             interest_states: interest.states.into_iter().collect(),
             interest_regions: interest.regions.into_iter().collect(),
             queued_tech: save.queued_tech_for(country_id),
@@ -589,9 +718,10 @@ impl PlanningState {
                 .iter()
                 .map(PlanningConstruction::from)
                 .collect(),
-            // Interest/army/law queues and PM/tax deltas are sim-only.
+            // Interest/hire/law queues and PM/tax deltas are sim-only.
             queued_interest: None,
-            queued_army_target: None,
+            queued_hire: None,
+            mil_buildings: Vec::new(),
             laws: save
                 .active_laws(country_id)
                 .into_iter()
@@ -663,6 +793,9 @@ impl PlanningState {
             solvent: country.solvent,
             treasury: country.treasury,
             army_power_projection: country.army_power_projection,
+            navy_power_projection: country.navy_power_projection,
+            army_pp_baseline: country.army_power_projection,
+            navy_pp_baseline: country.navy_power_projection,
             interest_states: country.interest_states.iter().cloned().collect(),
             interest_regions: country.interest_regions.iter().cloned().collect(),
             queued_tech: country.queued_tech.clone(),
@@ -681,7 +814,8 @@ impl PlanningState {
                 .map(PlanningConstruction::from)
                 .collect(),
             queued_interest: None,
-            queued_army_target: None,
+            queued_hire: None,
+            mil_buildings: Vec::new(),
             laws: country.laws.iter().cloned().collect(),
             queued_law: None,
             infamy: country.infamy,

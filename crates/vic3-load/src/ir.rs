@@ -116,8 +116,8 @@ pub struct Save {
 /// Technology and construction queues are kept so `vic3_prices::World` /
 /// planning can project researched techs and queue heads without a second full
 /// [`Save`] parse.
-/// Interest markers and army formations are kept so planning can project
-/// `army_power_projection` / `interest_in`.
+/// Interest markers and army/navy formations are kept so planning can project
+/// `army_power_projection` / `navy_power_projection` / `interest_in`.
 /// Skipping still does **not** avoid zlib inflate of a single-member
 /// `gamestate` zip. Keep [`Save`] when market/trade-route managers are part of
 /// the answer (`parse_save` counts).
@@ -146,13 +146,16 @@ pub struct WorldSave {
     /// Interest markers so planning can project `interest_in` without a full [`Save`].
     #[serde(default, alias = "interest_marker_mgr", alias = "interest_markers")]
     pub interest_marker_manager: Manager<InterestMarker>,
-    /// Army/navy formations used to fall back army power projection.
+    /// Army/navy formations used to fall back power projection.
     #[serde(default, alias = "military_formation_manager")]
     pub formation_manager: Manager<MilitaryFormation>,
     #[serde(default)]
     pub military_formations: Manager<MilitaryFormation>,
     #[serde(default)]
     pub armies: Manager<MilitaryFormation>,
+    /// Navy formations when the save uses a dedicated `navy_manager`.
+    #[serde(default)]
+    pub navy_manager: Manager<MilitaryFormation>,
     #[serde(default)]
     pub previous_played: Vec<Player>,
 }
@@ -178,6 +181,7 @@ pub trait WorldSnapshot {
     fn formation_manager(&self) -> &Manager<MilitaryFormation>;
     fn military_formations(&self) -> &Manager<MilitaryFormation>;
     fn armies(&self) -> &Manager<MilitaryFormation>;
+    fn navy_manager(&self) -> &Manager<MilitaryFormation>;
 }
 
 fn active_laws_in(laws: &Manager<LawEntry>, country_id: u32) -> Vec<&str> {
@@ -236,6 +240,9 @@ macro_rules! impl_world_snapshot {
             }
             fn armies(&self) -> &Manager<MilitaryFormation> {
                 &self.armies
+            }
+            fn navy_manager(&self) -> &Manager<MilitaryFormation> {
+                &self.navy_manager
             }
         }
     };
@@ -303,6 +310,14 @@ pub struct Country {
         alias = "country_army_power_projection"
     )]
     pub cached_total_army_power_projection: Option<f64>,
+    /// Cached navy power projection when the save stores it on the country.
+    #[serde(
+        default,
+        alias = "navy_power_projection",
+        alias = "country_navy_power_projection",
+        alias = "cached_total_navy_power_projection"
+    )]
+    pub cached_total_navy_power_projection: Option<f64>,
     /// Declared strategic-region interest ids when listed on the country.
     #[serde(default, deserialize_with = "deserialize_tech_ids")]
     pub declared_interests: Vec<String>,
@@ -1403,6 +1418,11 @@ impl Save {
         army_power_projection_for(self, country_id)
     }
 
+    /// Navy power projection for `country_id` (cached country value, else formations).
+    pub fn navy_power_projection_for(&self, country_id: u32) -> Option<f64> {
+        navy_power_projection_for(self, country_id)
+    }
+
     /// Declared interest targets for `country_id`, split for DSL `state=` / `region=`.
     pub fn declared_interest_for(&self, country_id: u32) -> DeclaredInterest {
         declared_interest_for(self, country_id)
@@ -1633,6 +1653,51 @@ fn is_navy_formation(kind: Option<&str>) -> bool {
             "navy" | "fleet" | "flotilla" | "naval"
         )
     })
+}
+
+/// Navy power projection for a country from save IR.
+///
+/// Prefers `cached_total_navy_power_projection` / `navy_power_projection` on the
+/// country. Falls back to the sum of navy-formation `power_projection` values
+/// (including [`WorldSnapshot::navy_manager`]). Returns [`None`] when neither is
+/// present — do not treat that as zero fleet strength.
+pub fn navy_power_projection_for(save: &impl WorldSnapshot, country_id: u32) -> Option<f64> {
+    if let Some(cached) = save
+        .country_manager()
+        .database
+        .get(&country_id)
+        .and_then(Option::as_ref)
+        .and_then(|country| country.cached_total_navy_power_projection)
+        .filter(|value| value.is_finite())
+    {
+        return Some(cached);
+    }
+    let mut total = 0.0;
+    let mut found = false;
+    for formation in save
+        .formation_manager()
+        .iter_present()
+        .chain(save.military_formations().iter_present())
+        .chain(save.armies().iter_present())
+        .chain(save.navy_manager().iter_present())
+        .map(|(_, formation)| formation)
+    {
+        if formation.country != Some(country_id) {
+            continue;
+        }
+        if !is_navy_formation(formation.kind.as_deref()) {
+            continue;
+        }
+        if let Some(power) = formation.power_projection.filter(|value| value.is_finite()) {
+            total += power;
+            found = true;
+        }
+    }
+    if found {
+        Some(total)
+    } else {
+        None
+    }
 }
 
 /// Interest markers + country `declared_interests` for planning projection.
@@ -2171,5 +2236,74 @@ armies={
         )
         .expect("no pp fields");
         assert_eq!(save.army_power_projection_for(1), None);
+    }
+
+    #[test]
+    fn navy_power_falls_back_to_navy_formations() {
+        let save = crate::load_slice(
+            br#"SAV01000000000000000000
+country_manager={
+	database={ 1={ definition="GER" } }
+}
+formation_manager={
+	database={
+		1={ type=army country=1 power_projection=25 }
+		2={ type=navy country=1 power_projection=30 }
+	}
+}
+navy_manager={
+	database={
+		3={ type=fleet country=1 power_projection=20 }
+	}
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("navy fallback");
+        assert_eq!(save.army_power_projection_for(1), Some(25.0));
+        assert_eq!(save.navy_power_projection_for(1), Some(50.0));
+    }
+
+    #[test]
+    fn navy_power_prefers_country_cache() {
+        let save = crate::load_slice(
+            br#"SAV01000000000000000000
+country_manager={
+	database={
+		1={
+			definition="GER"
+			cached_total_navy_power_projection=77.5
+		}
+	}
+}
+navy_manager={
+	database={
+		1={ type=navy country=1 power_projection=10 }
+	}
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("navy cache");
+        assert_eq!(save.navy_power_projection_for(1), Some(77.5));
+    }
+
+    #[test]
+    fn world_save_deserializes_navy_manager() {
+        let world = crate::load_slice_world(
+            br#"SAV01000000000000000000
+country_manager={
+	database={ 1={ definition="GER" } }
+}
+navy_manager={
+	database={
+		1={ type=navy country=1 power_projection=12 }
+	}
+}
+"#,
+            crate::empty_tokens(),
+        )
+        .expect("world save navy");
+        assert_eq!(crate::navy_power_projection_for(&world, 1), Some(12.0));
     }
 }

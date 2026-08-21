@@ -2,6 +2,7 @@ import type { GoalKind } from './GoalBuilder'
 
 export type PlanTemplateId =
   | 'war-readiness'
+  | 'colonize'
   | 'military-size'
   | 'economic-growth'
   | 'maximize-revenue'
@@ -27,17 +28,27 @@ export const PLAN_TEMPLATES: readonly PlanTemplate[] = [
     id: 'war-readiness',
     title: 'Prepare for war',
     description:
-      'Readiness for interest, army strength, ammunition prices, and solvency. Interest/army timelines exist; full declare-war still needs solvent already true (or a fiscal model).',
+      'Readiness for interest, army strength, ammunition prices, and solvency. Army PP closes via staffed barracks when economy context is present.',
     goal: 'declare-war(state=alsace)',
     goalKind: 'declare-war',
     label: 'War readiness (alsace)',
     closesTimeline: false,
   },
   {
+    id: 'colonize',
+    title: 'Colonize equatorial Africa',
+    description:
+      'Colonization tech, colonial law, quinine, interest, army/navy PP, and solvency. Navy needs staffed shipyards and naval administrations.',
+    goal: 'colonize(region=region_congo)',
+    goalKind: 'colonize',
+    label: 'Colonize (congo)',
+    closesTimeline: false,
+  },
+  {
     id: 'military-size',
     title: 'Build a good-sized military',
     description:
-      'Raise army power projection to the model’s declare-war threshold via a fixed-time expansion.',
+      'Raise army power projection via barracks construction and full employment (unit PP formula).',
     goal: 'army_power_projection >= 100',
     goalKind: 'advanced',
     label: 'Army power 100',

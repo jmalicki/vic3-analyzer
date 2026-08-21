@@ -74,8 +74,8 @@ pub use error::LoadError;
 pub use export::{export_save, ExportError, ExtraLevelsPatch, ProductionMethodPatch, SavePatch};
 pub use ir::{
     all_constructions, army_power_projection_for, constructions_for, declared_interest_for,
-    hydrate_country_techs, normalize_interest_ids, queued_building_for, queued_tech_for,
-    researched_techs_for, Budget, Building, BuildingGoods, ConstructionOrder,
+    hydrate_country_techs, navy_power_projection_for, normalize_interest_ids, queued_building_for,
+    queued_tech_for, researched_techs_for, Budget, Building, BuildingGoods, ConstructionOrder,
     ConstructionQueueEntry, ConstructionQueueKind, Country, Culture, DeclaredInterest, IndexQtyMap,
     InterestMarker, Manager, Market, Meta, MilitaryFormation, MilitaryHq, MilitaryUnit,
     MobilizationEntry, Player, Pop, Save, State, StatePopStatistics, TechnologyEntry, TradeRoute,

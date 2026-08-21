@@ -242,11 +242,19 @@ export interface GapsResult {
 export type PlanAction =
   | { QueueTech: { tech: string } }
   | { QueueBuildingLevel: { building: string } }
+  | { QueueInterest: { kind: string; id: string } }
+  | { QueueHireMilitary: { building: string } }
+  | { QueueLaw: { law: string } }
+  | { SwitchPm: { building_id: number; methods: string[] } }
+  | { AdjustTax: { delta: number; balance_delta_bits: number } }
   | {
       WaitForEvent: {
         event:
           | { TechCompleted: { tech: string } }
           | { BuildingCompleted: { building: string } }
+          | { InterestDeclared: { kind: string; id: string } }
+          | { HireCompleted: { building: string } }
+          | { LawEnacted: { law: string } }
           | { Payday: Record<string, never> }
         days: number
       }

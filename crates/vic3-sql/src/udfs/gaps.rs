@@ -96,6 +96,9 @@ fn format_atom(atom: &Atom) -> String {
         Atom::ArmyPower { rel, value } => {
             format!("army_power_projection {} {value}", rel_str(*rel))
         }
+        Atom::NavyPower { rel, value } => {
+            format!("navy_power_projection {} {value}", rel_str(*rel))
+        }
         Atom::Solvent => "solvent".into(),
         Atom::InterestIn {
             kind: InterestKind::State,

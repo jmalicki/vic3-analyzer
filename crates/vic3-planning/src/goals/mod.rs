@@ -14,6 +14,7 @@
 //! | Input | Compiles to |
 //! | --- | --- |
 //! | `declare-war(state=…)` or `region=` | interest ∧ army ≥ [`DECLARE_WAR_ARMY_THRESHOLD`] ∧ munitions ≤ [`DECLARE_WAR_MUNITIONS_PRICE_CEILING`] ∧ solvent (I-declare-war) |
+//! | `colonize(state=…)` or `region=` | colonization tech ∧ colonial law ∨ ∧ quinine ∧ interest ∧ army ≥ [`COLONIZE_ARMY_THRESHOLD`] ∧ navy ≥ [`COLONIZE_NAVY_THRESHOLD`] ∧ solvent (I-colonize) |
 //! | `research(tech=…)` / `has_tech(…)` | [`Atom::HasTech`] |
 //! | `gdp rel n` | [`Atom::Gdp`] on modeled GDP |
 //!
@@ -28,8 +29,8 @@
 //!
 //! # Errors
 //!
-//! [`GoalError::Parse`], [`GoalError::DeclareWarTarget`] (no `state=`/`region=`),
-//! [`GoalError::ResearchTech`] (missing tech id).
+//! [`GoalError::Parse`], [`GoalError::DeclareWarTarget`] / [`GoalError::ColonizeTarget`]
+//! (no `state=`/`region=`), [`GoalError::ResearchTech`] (missing tech id).
 
 mod parse;
 
@@ -53,6 +54,19 @@ pub const DECLARE_WAR_MUNITIONS_PRICE_CEILING: f64 = 40.0;
 /// Good id used as the munitions-price atom when compiling `declare-war`.
 pub const MUNITIONS_GOOD: &str = "ammunition";
 
+/// Colonization society tech id (model / Paradox script key).
+pub const COLONIZE_TECH: &str = "colonization";
+/// Quinine tech — gates severe-malaria colonization (model / Paradox script key).
+pub const COLONIZE_QUININE_TECH: &str = "quinine";
+/// Colonial resettlement law id.
+pub const LAW_COLONIAL_RESETTLEMENT: &str = "law_colonial_resettlement";
+/// Colonial exploitation law id.
+pub const LAW_COLONIAL_EXPLOITATION: &str = "law_colonial_exploitation";
+/// Army PP threshold compiled into `colonize(...)`.
+pub const COLONIZE_ARMY_THRESHOLD: f64 = 100.0;
+/// Navy PP threshold compiled into `colonize(...)`.
+pub const COLONIZE_NAVY_THRESHOLD: f64 = 100.0;
+
 /// Parse / compile failure (no partial [`Goal`]).
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum GoalError {
@@ -62,6 +76,9 @@ pub enum GoalError {
     /// `declare-war` / bare `interest_in` without `state=` or `region=`.
     #[error("declare-war requires state= or region=")]
     DeclareWarTarget,
+    /// `colonize` without `state=` or `region=`.
+    #[error("colonize requires state= or region=")]
+    ColonizeTarget,
     /// `research` / `has_tech` missing a tech id.
     #[error("research requires tech=")]
     ResearchTech,
@@ -136,6 +153,7 @@ pub enum Atom {
     HasLaw(String),
     GoodPrice { good: String, rel: Rel, value: f64 },
     ArmyPower { rel: Rel, value: f64 },
+    NavyPower { rel: Rel, value: f64 },
     Solvent,
     InterestIn { kind: InterestKind, id: String },
     Gdp { rel: Rel, value: f64 },
@@ -152,6 +170,10 @@ impl Atom {
 
     pub fn is_army(&self) -> bool {
         matches!(self, Atom::ArmyPower { .. })
+    }
+
+    pub fn is_navy(&self) -> bool {
+        matches!(self, Atom::NavyPower { .. })
     }
 
     pub fn is_munitions_price(&self) -> bool {
@@ -198,7 +220,16 @@ impl Atom {
                 None => AtomStatus::Unknown,
             },
             Atom::ArmyPower { rel, value } => match state.army_power_projection {
-                Some(power) if rel.holds(power, *value) => AtomStatus::Cleared,
+                Some(power) if rel.holds(power, *value) && state.army_buildings_fully_staffed() => {
+                    AtomStatus::Cleared
+                }
+                Some(_) => AtomStatus::Failing,
+                None => AtomStatus::Unknown,
+            },
+            Atom::NavyPower { rel, value } => match state.navy_power_projection {
+                Some(power) if rel.holds(power, *value) && state.navy_buildings_fully_staffed() => {
+                    AtomStatus::Cleared
+                }
                 Some(_) => AtomStatus::Failing,
                 None => AtomStatus::Unknown,
             },
@@ -312,6 +343,10 @@ impl Goal {
 
     pub fn has_army_atom(&self) -> bool {
         self.atoms().iter().any(|a| a.is_army())
+    }
+
+    pub fn has_navy_atom(&self) -> bool {
+        self.atoms().iter().any(|a| a.is_navy())
     }
 
     pub fn has_munitions_price_atom(&self) -> bool {
@@ -429,6 +464,44 @@ mod tests {
                 value,
             } if good == MUNITIONS_GOOD && *value == DECLARE_WAR_MUNITIONS_PRICE_CEILING
         )));
+    }
+
+    #[test]
+    fn golden_colonize_includes_tech_law_quinine_interest_army_navy_solvent() {
+        let goal = parse("colonize(region=region_congo)").unwrap();
+        assert!(goal.has_interest_atom(), "interest");
+        assert!(goal.has_army_atom(), "army");
+        assert!(goal.has_navy_atom(), "navy");
+        assert!(goal.has_solvent_atom(), "solvent");
+        assert!(goal.atoms().iter().any(|a| a.is_has_tech(COLONIZE_TECH)));
+        assert!(goal
+            .atoms()
+            .iter()
+            .any(|a| a.is_has_tech(COLONIZE_QUININE_TECH)));
+        assert!(goal
+            .atoms()
+            .iter()
+            .any(|a| a.is_has_law(LAW_COLONIAL_RESETTLEMENT)
+                || a.is_has_law(LAW_COLONIAL_EXPLOITATION)));
+        assert!(goal.atoms().iter().any(|a| matches!(
+            a,
+            Atom::NavyPower {
+                rel: Rel::Ge,
+                value,
+            } if *value == COLONIZE_NAVY_THRESHOLD
+        )));
+        assert!(matches!(
+            goal.atoms().iter().find(|a| a.is_interest()),
+            Some(Atom::InterestIn {
+                kind: InterestKind::Region,
+                id,
+            }) if id == "region_congo"
+        ));
+    }
+
+    #[test]
+    fn colonize_requires_target() {
+        assert_eq!(parse("colonize()").unwrap_err(), GoalError::ColonizeTarget);
     }
 
     #[test]
@@ -671,6 +744,27 @@ mod tests {
                 "munitions-price missing in {src}"
             );
             prop_assert!(goal.has_solvent_atom(), "solvent missing in {src}");
+        }
+
+        /// I-colonize: tech, colonial law, quinine, interest, army, navy, solvent.
+        #[test]
+        fn colonize_always_includes_readiness_conjuncts(
+            region in "[a-z][a-z_]{2,20}",
+        ) {
+            let src = format!("colonize(region={region})");
+            let goal = parse(&src).expect("colonize parses");
+            prop_assert!(goal.has_interest_atom(), "interest missing in {src}");
+            prop_assert!(goal.has_army_atom(), "army missing in {src}");
+            prop_assert!(goal.has_navy_atom(), "navy missing in {src}");
+            prop_assert!(goal.has_solvent_atom(), "solvent missing in {src}");
+            prop_assert!(
+                goal.atoms().iter().any(|a| a.is_has_tech(COLONIZE_TECH)),
+                "colonization tech missing in {src}"
+            );
+            prop_assert!(
+                goal.atoms().iter().any(|a| a.is_has_tech(COLONIZE_QUININE_TECH)),
+                "quinine missing in {src}"
+            );
         }
     }
 }
