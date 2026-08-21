@@ -182,6 +182,35 @@ impl AlertsOptions {
     }
 }
 
+/// Grouped arguments for alert detector collectors (`collect_*`).
+struct AlertCollectArgs<'a> {
+    world: &'a World,
+    defs: &'a GameDefs,
+    prices: &'a PricesResult,
+    opts: &'a AlertsOptions,
+    alerts: &'a mut Vec<Alert>,
+    /// Extra caveats appended by detectors that need them.
+    limitations: &'a mut BTreeSet<String>,
+}
+
+/// Grouped arguments for [`push_state_employment_alert`].
+///
+/// Shares the same world/defs/prices/opts/alerts fields as [`AlertCollectArgs`]
+/// (flatten at the call site — do not nest `&mut AlertCollectArgs` inside this type).
+struct PushEmploymentAlertArgs<'a> {
+    world: &'a World,
+    defs: &'a GameDefs,
+    prices: &'a PricesResult,
+    opts: &'a AlertsOptions,
+    alerts: &'a mut Vec<Alert>,
+    state_id: u32,
+    mix: &'a StateMix,
+    buildings: &'a [&'a BuildingEconomics],
+    kind: AlertKind,
+    severity: u8,
+    qual_short: bool,
+}
+
 /// Diagnose shortages from a solved market. Does not mutate `world` or `prices`.
 ///
 /// Needs-unmet uses a documented heuristic: a state need is unmet when any
@@ -212,33 +241,20 @@ pub fn alerts_with(
 ) -> AlertsResult {
     let mut alerts = Vec::new();
     let mut extra_limitations = BTreeSet::new();
+    let mut args = AlertCollectArgs {
+        world,
+        defs,
+        prices,
+        opts: &opts,
+        alerts: &mut alerts,
+        limitations: &mut extra_limitations,
+    };
 
-    collect_goods_alerts(
-        world,
-        defs,
-        prices,
-        &mut alerts,
-        &mut extra_limitations,
-        &opts,
-    );
-    collect_needs_unmet(
-        world,
-        defs,
-        prices,
-        &mut alerts,
-        &mut extra_limitations,
-        &opts,
-    );
-    collect_market_access(prices, world, defs, &mut alerts, &opts);
-    collect_education(world, defs, prices, &mut alerts, &opts);
-    collect_pop_and_underemployed(
-        world,
-        defs,
-        prices,
-        &mut alerts,
-        &mut extra_limitations,
-        &opts,
-    );
+    collect_goods_alerts(&mut args);
+    collect_needs_unmet(&mut args);
+    collect_market_access(&mut args);
+    collect_education(&mut args);
+    collect_pop_and_underemployed(&mut args);
 
     finish_alerts(prices, alerts, extra_limitations)
 }
@@ -255,14 +271,14 @@ pub fn goods_shortage_alerts(
 ) -> AlertsResult {
     let mut alerts = Vec::new();
     let mut extra_limitations = BTreeSet::new();
-    collect_goods_alerts(
+    collect_goods_alerts(&mut AlertCollectArgs {
         world,
         defs,
         prices,
-        &mut alerts,
-        &mut extra_limitations,
-        &opts,
-    );
+        opts: &opts,
+        alerts: &mut alerts,
+        limitations: &mut extra_limitations,
+    });
     finish_alerts(prices, alerts, extra_limitations)
 }
 
@@ -283,14 +299,15 @@ fn finish_alerts(
     }
 }
 
-fn collect_goods_alerts(
-    world: &World,
-    defs: &GameDefs,
-    prices: &PricesResult,
-    alerts: &mut Vec<Alert>,
-    limitations: &mut BTreeSet<String>,
-    opts: &AlertsOptions,
-) {
+fn collect_goods_alerts(args: &mut AlertCollectArgs<'_>) {
+    let AlertCollectArgs {
+        world,
+        defs,
+        prices,
+        opts,
+        alerts,
+        limitations,
+    } = args;
     let mut seen = BTreeSet::new();
     let mut short_goods: BTreeMap<String, GoodsShortageHint> = BTreeMap::new();
 
@@ -1047,14 +1064,15 @@ fn signed(value: f64) -> String {
     }
 }
 
-fn collect_needs_unmet(
-    world: &World,
-    defs: &GameDefs,
-    prices: &PricesResult,
-    alerts: &mut Vec<Alert>,
-    limitations: &mut BTreeSet<String>,
-    opts: &AlertsOptions,
-) {
+fn collect_needs_unmet(args: &mut AlertCollectArgs<'_>) {
+    let AlertCollectArgs {
+        world,
+        defs,
+        prices,
+        opts,
+        alerts,
+        limitations,
+    } = args;
     // Heuristic: a state need is unmet when any basket good has local sell
     // below the demanded quantity, or local/market prices sit at the
     // `base * (1 + PRICE_RANGE)` ceiling.
@@ -1222,13 +1240,15 @@ fn need_mitigations(state_id: u32, goods: &[(String, String)]) -> Vec<Mitigation
     rank(items)
 }
 
-fn collect_market_access(
-    prices: &PricesResult,
-    world: &World,
-    defs: &GameDefs,
-    alerts: &mut Vec<Alert>,
-    opts: &AlertsOptions,
-) {
+fn collect_market_access(args: &mut AlertCollectArgs<'_>) {
+    let AlertCollectArgs {
+        world,
+        defs,
+        prices,
+        opts,
+        alerts,
+        limitations: _,
+    } = args;
     let states: Vec<AccessState> = if prices.states.is_empty() {
         world
             .states
@@ -1316,13 +1336,15 @@ struct AccessState {
     infrastructure_usage: Option<f64>,
 }
 
-fn collect_education(
-    world: &World,
-    defs: &GameDefs,
-    prices: &PricesResult,
-    alerts: &mut Vec<Alert>,
-    opts: &AlertsOptions,
-) {
+fn collect_education(args: &mut AlertCollectArgs<'_>) {
+    let AlertCollectArgs {
+        world,
+        defs,
+        prices,
+        opts,
+        alerts,
+        limitations: _,
+    } = args;
     for row in &prices.state_qualifications {
         if row.shortage <= ORDER_EPS {
             continue;
@@ -1398,14 +1420,15 @@ fn collect_education(
     }
 }
 
-fn collect_pop_and_underemployed(
-    world: &World,
-    defs: &GameDefs,
-    prices: &PricesResult,
-    alerts: &mut Vec<Alert>,
-    limitations: &mut BTreeSet<String>,
-    opts: &AlertsOptions,
-) {
+fn collect_pop_and_underemployed(args: &mut AlertCollectArgs<'_>) {
+    let AlertCollectArgs {
+        world,
+        defs,
+        prices,
+        opts,
+        alerts,
+        limitations,
+    } = args;
     let buildings = if prices.buildings.is_empty() {
         world
             .buildings
@@ -1441,52 +1464,56 @@ fn collect_pop_and_underemployed(
                 "This tool does not simulate pops moving between states. Empty building levels will not attract migrants here."
                     .into(),
             );
-            push_state_employment_alert(
-                alerts,
-                prices,
+            push_state_employment_alert(&mut PushEmploymentAlertArgs {
                 world,
                 defs,
-                state_id,
-                &mix,
-                &pop_buildings,
-                AlertKind::UnfilledPops,
-                1,
-                false,
+                prices,
                 opts,
-            );
+                alerts,
+                state_id,
+                mix: &mix,
+                buildings: &pop_buildings,
+                kind: AlertKind::UnfilledPops,
+                severity: 1,
+                qual_short: false,
+            });
         }
         if !qual_buildings.is_empty() {
-            push_state_employment_alert(
-                alerts,
-                prices,
+            push_state_employment_alert(&mut PushEmploymentAlertArgs {
                 world,
                 defs,
-                state_id,
-                &mix,
-                &qual_buildings,
-                AlertKind::Underemployed,
-                2,
-                true,
+                prices,
                 opts,
-            );
+                alerts,
+                state_id,
+                mix: &mix,
+                buildings: &qual_buildings,
+                kind: AlertKind::Underemployed,
+                severity: 2,
+                qual_short: true,
+            });
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn push_state_employment_alert(
-    alerts: &mut Vec<Alert>,
-    prices: &PricesResult,
-    world: &World,
-    defs: &GameDefs,
-    state_id: u32,
-    mix: &StateMix,
-    buildings: &[&BuildingEconomics],
-    kind: AlertKind,
-    severity: u8,
-    qual_short: bool,
-    opts: &AlertsOptions,
-) {
+fn push_state_employment_alert(args: &mut PushEmploymentAlertArgs<'_>) {
+    let PushEmploymentAlertArgs {
+        world,
+        defs,
+        prices,
+        opts,
+        alerts,
+        state_id,
+        mix,
+        buildings,
+        kind,
+        severity,
+        qual_short,
+    } = args;
+    let state_id = *state_id;
+    let kind = *kind;
+    let severity = *severity;
+    let qual_short = *qual_short;
     let place = state_label(prices, world, defs, state_id);
     let staffing: Vec<BuildingStaffing> = buildings
         .iter()
