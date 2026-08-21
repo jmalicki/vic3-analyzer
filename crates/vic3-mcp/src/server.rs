@@ -39,7 +39,7 @@ const FLOW_MARKDOWN: &str = r#"# Vic3 Analyzer MCP flow
 
 1. Discover saves: tool `query` on `saves`, or read resource `vic3://saves`.
 2. Bind session: tool `use_save` with `{ "name": "autosave" }` or `{ "selector": "latest_autosave" }`.
-3. Query fact tables / TVFs, or `preview_delta` for a what-if on the bound save.
+3. Query fact tables / TVFs: `SELECT … FROM countries`, `SELECT * FROM alerts()` (player-scoped; use `alerts('all')` for the full save), `plan('research(tech=…)')`. Or `preview_delta` for a what-if on the bound save.
 
 Rules:
 - Filename **stubs** only (no filesystem paths).

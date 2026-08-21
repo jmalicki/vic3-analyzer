@@ -17,7 +17,7 @@
 //! | `good_price(good)` | Utf8 (runtime columnar OK) | NULL arg or unknown id → NULL |
 //! | `army_power()` | none | no `player_tag` → NULL |
 //! | `player_tag()` | none | no `player_tag` on world → NULL |
-//! | `alerts()` | none | — |
+//! | `alerts([scope])` | optional `'all'` literal | zero-arg → player-scoped; `'all'` → full save |
 //! | `shortage_analysis(good)` | Utf8 **or** NULL literal | NULL → all scarce-good alerts |
 //! | `building_staffing(state_id)` | non-null int | NULL / non-literal → plan error |
 //! | `plan(goal [, max_days [, label]])` | non-null str / non-neg int / optional str | `max_days` default `3650`; `label` accepted, omitted from rows |
@@ -28,7 +28,7 @@
 //! | Module | Surface |
 //! | --- | --- |
 //! | [`scalars`] | `good_price`, `army_power`, `player_tag` |
-//! | [`alerts`] | `alerts()` |
+//! | [`alerts`] | `alerts()` / `alerts('all')` |
 //! | [`shortage`] | `shortage_analysis(good)` |
 //! | [`staffing`] | `building_staffing(state_id)` |
 //! | [`plan`] | `plan(...)` → A\* steps |
