@@ -1,6 +1,7 @@
 //! Game definitions for Victoria 3: goods, `PRICE_RANGE`, production methods,
 //! pop needs, buy packages, cultural obsessions, buildings (including
-//! optional `required_construction`), and UI assets.
+//! optional `required_construction`), technologies (cost / prerequisites),
+//! and UI assets.
 //!
 //! # Role in the pipeline
 //!
@@ -71,7 +72,7 @@ pub use path_rules::{classify_defs_path, DefsPathClass, COMMON_DIRS};
 pub use substitution::{clamp_supply_share, substitution_shares, substitution_weight};
 pub use types::{
     BuildingGroup, BuildingType, BuyPackage, FlagDefinition, GameDefs, Good, NeedEntry, PopNeed,
-    PopType, ProductionMethod, QualificationFactors,
+    PopType, ProductionMethod, QualificationFactors, Technology,
 };
 
 /// Vanilla `NEconomy.PRICE_RANGE` when a defines file does not override it.

@@ -20,11 +20,12 @@ pub mod goals;
 pub mod military;
 pub mod plan;
 pub mod sim;
+pub mod tech;
 pub mod tracks;
 pub mod world;
 
 pub use goals::{
-    compile, evaluate, gaps, parse, Atom, Goal, GoalError, InterestKind, Rel,
+    compile, evaluate, gaps, gaps_with_defs, parse, Atom, Goal, GoalError, InterestKind, Rel,
     COLONIZE_ARMY_THRESHOLD, COLONIZE_NAVY_THRESHOLD, COLONIZE_QUININE_TECH, COLONIZE_TECH,
     DECLARE_WAR_ARMY_THRESHOLD, DECLARE_WAR_MUNITIONS_PRICE_CEILING, LAW_COLONIAL_EXPLOITATION,
     LAW_COLONIAL_RESETTLEMENT,
@@ -46,9 +47,8 @@ pub use sim::{
     apply_action, successors, successors_for_atoms, successors_with_economy, Action,
     EconomyContext, SimConfig, Successor,
 };
-pub use tracks::{
-    constant_rate_work, days_for_work, eta_days, eta_head_days, eta_prefix_days, next_completion,
-    Backlog, Job, TrackId, TrackState, WorkerPool, CONSTANT_RATE,
+pub use tech::{
+    expand_tech_gap_atoms, missing_tech_closure, tech_prereqs_satisfied, tech_research_cost,
 };
 pub use world::{
     law_key, ConstructionQueueKind, PlanningParts, PlanningState, QueuedInterest, Save, Vic3Date,

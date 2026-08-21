@@ -596,7 +596,7 @@ pub fn loaded_gaps_json(goal: &str) -> Result<String, ApiError> {
         }
         let result = GapsResult {
             satisfied: vic3_planning::evaluate(&goal, &state),
-            gaps: vic3_planning::gaps(&goal, &state),
+            gaps: vic3_planning::gaps_with_defs(&goal, &state, &loaded.defs),
             limitations,
         };
         Ok(serde_json::to_string(&result)?)
@@ -812,7 +812,7 @@ pub fn gaps_json(
     }
     let result = GapsResult {
         satisfied: vic3_planning::evaluate(&goal, &state),
-        gaps: vic3_planning::gaps(&goal, &state),
+        gaps: vic3_planning::gaps_with_defs(&goal, &state, &defs),
         limitations,
     };
     Ok(serde_json::to_string(&result)?)

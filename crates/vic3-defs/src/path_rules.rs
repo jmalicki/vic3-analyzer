@@ -24,6 +24,7 @@ pub const COMMON_DIRS: &[&str] = &[
     "flag_definitions",
     "named_colors",
     "pop_types",
+    "technology",
 ];
 
 /// Prefix of every interface-icon path. Only [`ICON_LEAFS`] under it are walked.
@@ -300,6 +301,17 @@ mod tests {
         assert_eq!(
             classify_defs_path("game/common/pop_types/00_pop_types.txt", false),
             DefsPathClass::Read
+        );
+        assert_eq!(
+            classify_defs_path(
+                "game/common/technology/technologies/00_technologies.txt",
+                false
+            ),
+            DefsPathClass::Read
+        );
+        assert_eq!(
+            classify_defs_path("game/common/technology", true),
+            DefsPathClass::Descend
         );
         assert_eq!(
             classify_defs_path(

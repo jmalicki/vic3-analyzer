@@ -6,7 +6,7 @@ use crate::{DefsError, GameDefs};
 ///
 /// [`decode_blob`] checks this **before** deserializing the payload so a stale
 /// blob reports [`DefsError::BlobVersion`] instead of a confusing field error.
-pub const BLOB_VERSION: u32 = 12;
+pub const BLOB_VERSION: u32 = 13;
 
 #[derive(Serialize, Deserialize)]
 struct DefsBlob {
@@ -140,6 +140,7 @@ mod tests {
             obsessions,
             pop_types: BTreeMap::new(),
             production_method_groups: BTreeMap::new(),
+            technologies: BTreeMap::new(),
         };
         defs.rebuild_package_ladder();
         defs

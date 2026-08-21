@@ -10,11 +10,14 @@
 //! # Heuristic DAG
 //!
 //! [`SearchNode::heuristic`] walks the compiled [`Goal`] as a dependency DAG:
-//! AND → max child, OR → min child, NOT → 0. Open research / interest /
-//! raisable army / law atoms contribute fixed model days even if an unrelated
-//! item is queued (returning 0 over a zero-day queue edge would break
-//! consistency). Open `good_price` / `gdp` use `construction_days` unless a
-//! zero-day SwitchPm path exists. Fiscal / SoL / tax atoms contribute 0.
+//! AND → max child, OR → min child, NOT → 0. Open research atoms contribute
+//! research ETA (defs cost at rate 1.0 when available, else `research_days`),
+//! including a serial sum over missing prerequisite ancestors when defs are
+//! present. Open interest / raisable army / law atoms contribute fixed model
+//! days even if an unrelated item is queued (returning 0 over a zero-day queue
+//! edge would break consistency). Open `good_price` / `gdp` use construction
+//! ETA from head remaining work when present, else `construction_days`, unless
+//! a zero-day SwitchPm path exists. Fiscal / SoL / tax atoms contribute 0.
 //!
 //! Admissible relaxation of the real graph (**I7** on research formulas), not
 //! a substitute for search.
@@ -146,18 +149,23 @@ impl Hash for Vic3Node {
 /// Fiscal, SoL, tax, and other atoms without a proven timing model contribute
 /// zero. This is deliberately a relaxation of the real state graph, not a
 /// replacement for A*.
+/// Goal-DAG timing lower bound used by A*.
+///
+/// AND → max, OR → min across children (independent tracks finish near the
+/// max). Open research uses defs cost / remaining-style ETA when available but
+/// never treats a missing tech as free while queued (consistency over 0-day
+/// enqueue). Construction uses head remaining ÷ rate when set.
 fn goal_timing_lower_bound(
     goal: &Goal,
     state: &PlanningState,
     config: SimConfig,
     economy: Option<&EconomyContext>,
 ) -> u32 {
-    let research_days = u32::from(config.research_days.max(1));
     let interest_days = u32::from(config.interest_days.max(1));
     let army_train_days = u32::from(config.army_training_days.max(1));
     let navy_crew_days = u32::from(config.navy_crew_days.max(1));
     let law_days = u32::from(config.law_days.max(1));
-    let construction_days = u32::from(config.construction_days.max(1));
+    let construction_days = construction_eta_days(state, config);
     match goal {
         Goal::And(children) => children
             .iter()
@@ -170,13 +178,7 @@ fn goal_timing_lower_bound(
             .min()
             .unwrap_or(0),
         Goal::Not(_) => 0,
-        Goal::Atom(Atom::HasTech(tech)) => {
-            if state.has_tech(tech) {
-                0
-            } else {
-                research_days
-            }
-        }
+        Goal::Atom(Atom::HasTech(tech)) => research_eta_for_leaf(tech, state, config, economy),
         Goal::Atom(Atom::HasLaw(law)) => {
             if state.has_law(law) {
                 0
@@ -234,6 +236,65 @@ fn goal_timing_lower_bound(
         }
         Goal::Atom(_) => 0,
     }
+}
+
+/// Serial research ETA for a leaf tech (missing ancestors sum when defs exist).
+///
+/// Queued identity is ignored: a missing tech always costs at least one research
+/// period so a 0-day `QueueTech` edge cannot drop the heuristic (A* consistency).
+fn research_eta_for_leaf(
+    tech: &str,
+    state: &PlanningState,
+    config: SimConfig,
+    economy: Option<&EconomyContext>,
+) -> u32 {
+    if state.has_tech(tech) {
+        return 0;
+    }
+    let fallback = u32::from(config.research_days.max(1));
+    let Some(defs) = economy.map(|e| &e.defs) else {
+        return fallback;
+    };
+    if defs.technologies.is_empty() {
+        return fallback;
+    }
+    let missing = crate::tech::missing_tech_closure(tech, state, defs);
+    if missing.is_empty() {
+        return 0;
+    }
+    let mut total = 0u32;
+    for id in missing {
+        total = total.saturating_add(single_tech_research_eta(&id, config, economy));
+    }
+    total.max(1)
+}
+
+fn single_tech_research_eta(
+    tech: &str,
+    config: SimConfig,
+    economy: Option<&EconomyContext>,
+) -> u32 {
+    let fallback = u32::from(config.research_days.max(1));
+    let defs = economy.map(|e| &e.defs);
+    if let Some(cost) = crate::tech::tech_research_cost(tech, defs) {
+        if let Some(days) = crate::tracks::days_for_work(cost, crate::tracks::CONSTANT_RATE) {
+            return days.max(1);
+        }
+    }
+    fallback
+}
+
+fn construction_eta_days(state: &PlanningState, config: SimConfig) -> u32 {
+    let fallback = u32::from(config.construction_days.max(1));
+    let Some(work) = state
+        .constructions
+        .first()
+        .and_then(|row| row.remaining)
+        .filter(|v| v.is_finite() && *v >= 0.0)
+    else {
+        return fallback;
+    };
+    crate::tracks::days_for_work(work, state.construction_rate).unwrap_or(fallback)
 }
 
 impl SearchNode for Vic3Node {
@@ -538,6 +599,107 @@ mod tests {
             shortest_path::<_, PairingHeap<_, _>>(&or).expect("either tech is reachable");
         assert_eq!(or.heuristic(), 40);
         assert_eq!(or_cost, 40);
+    }
+
+    fn tech_tree_defs() -> vic3_defs::GameDefs {
+        use std::collections::BTreeMap;
+        use vic3_defs::{GameDefs, Technology};
+        let mut technologies = BTreeMap::new();
+        technologies.insert(
+            "manufacturies".into(),
+            Technology {
+                id: "manufacturies".into(),
+                cost: Some(50.0),
+                prerequisites: vec![],
+            },
+        );
+        technologies.insert(
+            "shaft_mining".into(),
+            Technology {
+                id: "shaft_mining".into(),
+                cost: Some(75.0),
+                prerequisites: vec!["manufacturies".into()],
+            },
+        );
+        technologies.insert(
+            "nitroglycerin".into(),
+            Technology {
+                id: "nitroglycerin".into(),
+                cost: Some(100.0),
+                prerequisites: vec!["shaft_mining".into()],
+            },
+        );
+        GameDefs {
+            technologies,
+            ..GameDefs::default()
+        }
+    }
+
+    #[test]
+    fn plan_queues_tech_ancestors_before_leaf() {
+        use crate::sim::EconomyContext;
+        use vic3_prices::{SolveOpts, World};
+
+        let economy = EconomyContext::new(World::default(), tech_tree_defs(), SolveOpts::default());
+        let start = Vic3Node::new_with_economy(
+            PlanningState::default(),
+            compile("research(tech=nitroglycerin)").unwrap(),
+            SimConfig {
+                research_days: 365,
+                ..SimConfig::default()
+            },
+            economy,
+        );
+        // Serial costs 50+75+100 at rate 1.0.
+        assert_eq!(start.heuristic(), 225);
+        let (path, cost) =
+            shortest_path::<_, PairingHeap<_, _>>(&start).expect("tech tree reachable");
+        assert_eq!(cost, 225);
+        let mut research_order = Vec::new();
+        for window in path.windows(2) {
+            let before = &window[0].state().techs;
+            let after = &window[1].state().techs;
+            for tech in after.difference(before) {
+                research_order.push(tech.clone());
+            }
+        }
+        assert_eq!(
+            research_order,
+            ["manufacturies", "shaft_mining", "nitroglycerin"]
+        );
+    }
+
+    #[test]
+    fn research_and_construction_heuristic_is_max_across_tracks() {
+        use crate::sim::EconomyContext;
+        use crate::world::{ConstructionQueueKind, PlanningConstruction};
+        use vic3_prices::{SolveOpts, World};
+
+        let economy = EconomyContext::new(World::default(), tech_tree_defs(), SolveOpts::default());
+        let state = PlanningState::from_parts(PlanningParts {
+            constructions: vec![PlanningConstruction {
+                order_id: 1,
+                queue: ConstructionQueueKind::Government,
+                state_id: None,
+                building: "building_rye_farm".into(),
+                remaining: Some(30.0),
+            }],
+            construction_rate: 1.0,
+            good_prices: vec![("wood".into(), 40.0)],
+            ..PlanningParts::default()
+        });
+        let start = Vic3Node::new_with_economy(
+            state,
+            compile("has_tech(manufacturies) && good_price(wood) <= 20").unwrap(),
+            SimConfig {
+                research_days: 365,
+                construction_days: 180,
+                ..SimConfig::default()
+            },
+            economy,
+        );
+        // Research 50, construction remaining 30 → max = 50.
+        assert_eq!(start.heuristic(), 50);
     }
 
     #[test]

@@ -700,13 +700,20 @@ pub fn successors(state: &PlanningState, goal: &Goal, config: SimConfig) -> Vec<
 }
 
 /// Generate successors with price-solver context for building decisions.
+///
+/// When `economy.defs` carries technologies, open research gaps expand to
+/// missing ancestors and only prereq-satisfied techs are queued.
 pub fn successors_with_economy(
     state: &PlanningState,
     goal: &Goal,
     config: SimConfig,
     economy: &EconomyContext,
 ) -> Vec<Successor> {
-    let open_atoms = gaps(goal, state);
+    let open_atoms = if economy.defs.technologies.is_empty() {
+        gaps(goal, state)
+    } else {
+        crate::goals::gaps_with_defs(goal, state, &economy.defs)
+    };
     successors_for_atoms_with_economy(state, &open_atoms, config, Some(economy))
 }
 
@@ -811,7 +818,10 @@ fn successors_for_atoms_with_economy(
     for atom in open_atoms {
         match atom {
             Atom::HasTech(tech) => {
-                if state.research_busy() || state.has_tech(tech) || !seen_techs.insert(tech.clone())
+                if state.research_busy()
+                    || state.has_tech(tech)
+                    || !seen_techs.insert(tech.clone())
+                    || !crate::tech::tech_prereqs_satisfied(tech, state, economy.map(|e| &e.defs))
                 {
                     continue;
                 }
@@ -944,7 +954,9 @@ fn successors_for_atoms_with_economy(
             .iter()
             .any(|atom| atom.is_has_tech(queued.as_str()))
     }) {
-        let days = state.tech_days_left.unwrap_or(config.research_days);
+        let days = state
+            .tech_days_left
+            .unwrap_or_else(|| research_days_for_tech(tech, config, economy));
         wait_candidates.push((days, Event::TechCompleted { tech: tech.clone() }));
     }
     if let (Some(building), Some(_)) = (state.queued_building.as_ref(), economy) {
@@ -1029,6 +1041,18 @@ fn construction_wait_days(state: &PlanningState, config: SimConfig) -> Option<u1
         }
         None => Some(config.construction_days),
     }
+}
+
+/// Research duration for a queued tech: defs cost at [`crate::tracks::CONSTANT_RATE`]
+/// when present, otherwise [`SimConfig::research_days`].
+fn research_days_for_tech(tech: &str, config: SimConfig, economy: Option<&EconomyContext>) -> u16 {
+    let defs = economy.map(|e| &e.defs);
+    if let Some(cost) = crate::tech::tech_research_cost(tech, defs) {
+        if let Some(days) = crate::tracks::days_for_work(cost, crate::tracks::CONSTANT_RATE) {
+            return u16::try_from(days).unwrap_or(u16::MAX).max(1);
+        }
+    }
+    config.research_days.max(1)
 }
 
 fn tax_deltas_toward(state: &PlanningState, atom: &Atom, config: SimConfig) -> Vec<i8> {
@@ -1184,11 +1208,15 @@ pub fn apply_action_with_economy(
     let mut next = state.clone();
     match action {
         Action::QueueTech { tech } => {
-            if tech.is_empty() || next.research_busy() || next.has_tech(tech) {
+            if tech.is_empty()
+                || next.research_busy()
+                || next.has_tech(tech)
+                || !crate::tech::tech_prereqs_satisfied(tech, &next, economy.map(|e| &e.defs))
+            {
                 return None;
             }
             next.queued_tech = Some(tech.clone());
-            next.tech_days_left = Some(config.research_days);
+            next.tech_days_left = Some(research_days_for_tech(tech, config, economy));
         }
         Action::QueueBuildingLevel { building } => {
             let economy = economy?;
@@ -1630,6 +1658,51 @@ mod tests {
         assert_eq!(start.date.days_until(&waits[0].state.date), 100);
         assert!(waits[0].state.queued_tech.is_none());
         assert!(evaluate(&goal, &waits[0].state));
+    }
+
+    #[test]
+    fn with_tech_defs_only_eligible_prereq_leaf_is_queued() {
+        use vic3_defs::Technology;
+
+        let mut technologies = BTreeMap::new();
+        technologies.insert(
+            "manufacturies".into(),
+            Technology {
+                id: "manufacturies".into(),
+                cost: Some(50.0),
+                prerequisites: vec![],
+            },
+        );
+        technologies.insert(
+            "shaft_mining".into(),
+            Technology {
+                id: "shaft_mining".into(),
+                cost: Some(75.0),
+                prerequisites: vec!["manufacturies".into()],
+            },
+        );
+        technologies.insert(
+            "nitroglycerin".into(),
+            Technology {
+                id: "nitroglycerin".into(),
+                cost: Some(100.0),
+                prerequisites: vec!["shaft_mining".into()],
+            },
+        );
+        let defs = GameDefs {
+            technologies,
+            ..GameDefs::default()
+        };
+        let economy = EconomyContext::new(World::default(), defs, SolveOpts::default());
+        let goal = compile("research(tech=nitroglycerin)").unwrap();
+        let start = state_at(0);
+        let decisions = successors_with_economy(&start, &goal, SimConfig::default(), &economy);
+        assert_eq!(decisions.len(), 1);
+        assert!(matches!(
+            decisions[0].action,
+            Action::QueueTech { ref tech } if tech == "manufacturies"
+        ));
+        assert_eq!(decisions[0].state.tech_days_left, Some(50));
     }
 
     #[test]

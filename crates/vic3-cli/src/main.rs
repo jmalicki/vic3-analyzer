@@ -471,7 +471,7 @@ fn run_gaps(cmd: GapsCli) -> Result<()> {
     }
     let result = GapsResult {
         satisfied: vic3_planning::evaluate(&goal, &state),
-        gaps: vic3_planning::gaps(&goal, &state),
+        gaps: vic3_planning::gaps_with_defs(&goal, &state, &defs),
         limitations,
     };
     emit_gaps(&result, cmd.json)
