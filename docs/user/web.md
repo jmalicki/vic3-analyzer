@@ -1,6 +1,6 @@
 # Browser workbench
 
-Drop a save in the browser — **nothing uploads**. Explore prices like a workbench, stress-test a build with What-if, then ask Goal gaps or Timeline for war readiness and GDP paths under our model, not Paradox’s binary.
+Drop a save in the browser — **nothing uploads**. Load a save, inspect prices, run a What-if on a build, then use Goal gaps or Timeline for war readiness and GDP paths.
 
 **Live demo:** [https://jmalicki.github.io/vic3-analyzer/](https://jmalicki.github.io/vic3-analyzer/)
 
@@ -52,7 +52,7 @@ Read-only red flags from the same detectors as SQL `alerts()` — goods/[shortag
 
 ## Military
 
-Army, navy, and mobilization snapshots from the save — useful before a [diplomatic play](https://vic3.paradoxwikis.com/Diplomatic_play) when you need power projection and interest context, not only market heat.
+Army, navy, and mobilization snapshots from the save — useful before a [diplomatic play](https://vic3.paradoxwikis.com/Diplomatic_play) when you need power projection and interest context.
 
 ## Buildings
 
@@ -70,7 +70,7 @@ Employment, wages, and trade stay frozen unless the delta changes them; pop dema
 
 ## Plans and gaps
 
-Vic3 goals are hard for the same reasons as the campaign: [qualifications](https://vic3.paradoxwikis.com/Profession#Qualifications) and universities, construction-goods loops, MAPI-local prices, and war **conjunctions** (interest + staffed army + munitions + solvency). Use two verbs deliberately:
+Vic3 goals are hard for the same reasons as the campaign: [qualifications](https://vic3.paradoxwikis.com/Profession#Qualifications) and universities, construction-goods loops, MAPI-local prices, and war readiness (interest, staffed army, munitions, solvency). Use two verbs deliberately:
 
 | Verb | Meaning | Pane |
 | --- | --- | --- |
@@ -79,7 +79,7 @@ Vic3 goals are hard for the same reasons as the campaign: [qualifications](https
 
 ### Prepare for war → Goal gaps
 
-Preset **Prepare for war** evaluates `declare-war(state=…)` atoms. War readiness is often a **checklist first**; Timeline closes only when the planner can act on the failing conjuncts.
+Preset **Prepare for war** checks `declare-war(state=…)` readiness. War readiness is often a **checklist first**; Timeline runs only when the planner can act on what is still missing.
 
 ![Goal gaps — prepare for war readiness checklist](../assets/web-gaps-war.png)
 
@@ -89,7 +89,7 @@ Preset **Grow the economy** (`gdp >= 100000000`) searches modeled building expan
 
 ![Timeline — GDP growth path](../assets/web-timeline-gdp.png)
 
-Also available: research / army power (Timeline-closable when successors exist), avoid default (payday model when surplus can close), colonize and SoL / weekly income (**gaps-only** today). Preset honesty matches the UI `closesTimeline` flags.
+Also available: research / army power (Timeline when the planner has a path), avoid default (payday model when surplus can close), colonize and SoL / weekly income (**gaps-only** today). If a preset cannot close Timeline in the UI, treat it as gaps-only.
 
 ## Archive
 

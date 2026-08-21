@@ -1,6 +1,6 @@
 # Desktop companion
 
-Play Vic3, alt-tab to a shell that already sees your autosaves. The native companion finds Steam/Paradox paths, binds a save by stub name, and lets you ask hard questions in SQL — then follow a Timeline when you want a sequenced path under our model, not Paradox’s binary.
+Play Vic3, alt-tab to a shell that already sees your autosaves. The native companion finds Steam/Paradox paths, binds a save by stub name, runs SQL on the loaded stub, then opens Timeline for a sequenced plan.
 
 Building-level **what-if** UI lives on the [web](web.md) workbench and via MCP `preview_delta`. The companion answers the same *questions* through **Advanced Query** and **Timeline** today.
 
@@ -73,11 +73,11 @@ ORDER BY queue, position
 LIMIT 40;
 ```
 
-Useful when iron/wood/tools are screaming and you want to see what you already queued.
+Useful when iron, wood, or tools are short and you want to see what you already queued.
 
 ### Goal plans and gaps
 
-**Grow GDP** — Timeline-closable under the modeled building expansions:
+**Grow GDP** — produces a Timeline when the planner finds building-expansion steps:
 
 ```sql
 SELECT step, day, action, detail
@@ -85,7 +85,7 @@ FROM plan('gdp >= 100000000')
 ORDER BY step;
 ```
 
-**Prepare for war** — often start with gaps (interest, army power, munitions prices, solvency). A [diplomatic play](https://vic3.paradoxwikis.com/Diplomatic_play) is a conjunction; missing any atom blocks readiness:
+**Prepare for war** — often start with gaps. A [diplomatic play](https://vic3.paradoxwikis.com/Diplomatic_play) needs interest, staffed army power, munitions prices under control, and solvency — missing any of those blocks the play:
 
 ```sql
 SELECT predicate, status, detail
@@ -104,7 +104,7 @@ Goal language reference: [dsl.md](../dsl.md). Full dialect: [sql.md](../sql.md).
 
 ## Timeline
 
-After a successful `plan(...)`, open **Timeline** for the same step list with highlightable rows — an ordered path for GDP or research, not a vibes check.
+After a successful `plan(...)`, open **Timeline** for the same steps as the SQL result, in time order.
 
 ![Timeline — GDP or research plan steps](../assets/desktop-timeline-gdp.png)
 

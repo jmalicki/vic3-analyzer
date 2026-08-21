@@ -1,6 +1,6 @@
 # Play guides
 
-**vic3-analyzer** is a local Victoria 3 advisor: market triage, building what-ifs, and goal plans for war readiness, GDP paths, and research — under our model, not Paradox’s binary. Your saves and game definitions stay on your machine.
+**vic3-analyzer** is a local Victoria 3 advisor: market triage, building what-ifs, and goal plans for war readiness, GDP paths, and research. Your saves and game definitions stay on your machine. Method details and caveats live in [Model notes](_model-notes.md).
 
 These guides are for mid/late-campaign players who already feel construction-price opacity, empty factories, and “what should I queue next?” paralysis. They are not a replacement for learning the game.
 
@@ -12,7 +12,7 @@ These guides are for mid/late-campaign players who already feel construction-pri
 | **Desktop companion** | [desktop.md](desktop.md) | Local catalog, Advanced Query, States/Prices drill-down, Timeline |
 | **Browser workbench** | [web.md](web.md) | Zero-install demo; What-if + Timeline / Goal gaps |
 
-Same analysis stack underneath — pick the shell that matches how you play.
+Same solver and planner; pick the shell you want.
 
 ## Game data you provide
 
@@ -32,9 +32,9 @@ Vic3 decisions look like spreadsheets (“build more steel”) and are not.
 - **[Shortages](https://vic3.paradoxwikis.com/Market#Shortage) cascade** — When buy orders roughly double sell orders, throughput penalties escalate. One short input wrecks the chain for weeks.
 - **Local prices lie to your eyes** — Buildings and pops pay **local** prices, not the national ticker. Local prices blend the national [market](https://vic3.paradoxwikis.com/Market) price with what the state would pay in isolation; that blend weight is [Market Access Price Impact (MAPI)](https://vic3.paradoxwikis.com/Market#Local_prices), reduced further by low [market access](https://vic3.paradoxwikis.com/Infrastructure#Market_access).
 - **War readiness is a conjunction** — A [diplomatic play](https://vic3.paradoxwikis.com/Diplomatic_play) needs declared interest, staffed army power (not empty barracks levels), munitions prices under control, and solvency. Missing any one blocks the play.
-- **Order matters** — Construction queues, hiring, research, and interest compete over months and years. Gut feel cannot re-solve a multi-good market after a hypothetical delta or search a combinatorial build/research graph while holding staffing and fiscal constraints in your head.
+- **Order matters** — Construction queues, hiring, research, and interest compete over months and years. You cannot re-price a multi-good market by hand after a build delta, or search build/research order while tracking staffing and cash.
 
-That is why a save viewer and a static calculator fall short — and why this project pairs a market solver, a goal planner (`gaps` / `plan` / Timeline), and optional LLM or SQL workbenches.
+A save viewer shows the ledger; this stack re-prices markets after a change and searches build/research sequences under staffing and fiscal constraints — via the market solver, goal planner (`gaps` / `plan` / Timeline), and optional LLM or SQL workbenches.
 
 ## Guides
 
