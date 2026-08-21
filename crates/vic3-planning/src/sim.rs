@@ -46,45 +46,50 @@ enum MilitaryBranch {
     Navy,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn push_military_pp_decisions(
-    result: &mut Vec<Successor>,
-    state: &PlanningState,
-    economy: Option<&EconomyContext>,
+/// Grouped arguments for military power-projection successor helpers
+/// ([`push_military_pp_decisions`], [`push_mil_hire_decisions`]).
+struct MilitaryPpDecisionArgs<'a> {
+    result: &'a mut Vec<Successor>,
+    state: &'a PlanningState,
+    economy: Option<&'a EconomyContext>,
     config: SimConfig,
+    seen_builds: &'a mut BTreeSet<String>,
+    seen_hires: &'a mut BTreeSet<String>,
+}
+
+fn push_military_pp_decisions(
+    args: &mut MilitaryPpDecisionArgs<'_>,
     branch: MilitaryBranch,
     rel: Rel,
     value: f64,
-    seen_builds: &mut BTreeSet<String>,
-    seen_hires: &mut BTreeSet<String>,
 ) {
     let current = match branch {
-        MilitaryBranch::Army => state.army_power_projection,
-        MilitaryBranch::Navy => state.navy_power_projection,
+        MilitaryBranch::Army => args.state.army_power_projection,
+        MilitaryBranch::Navy => args.state.navy_power_projection,
     };
     let Some(needed) = power_raise_needed(rel, value, current) else {
         // Still may need to hire underemployed buildings so the atom can clear.
         let underemployed = match branch {
-            MilitaryBranch::Army => !state.army_buildings_fully_staffed(),
-            MilitaryBranch::Navy => !state.navy_buildings_fully_staffed(),
+            MilitaryBranch::Army => !args.state.army_buildings_fully_staffed(),
+            MilitaryBranch::Navy => !args.state.navy_buildings_fully_staffed(),
         };
         if underemployed {
-            push_mil_hire_decisions(result, state, economy, branch, seen_hires);
+            push_mil_hire_decisions(args, branch);
         }
         return;
     };
     let staffed = match branch {
-        MilitaryBranch::Army => state.army_buildings_fully_staffed(),
-        MilitaryBranch::Navy => state.navy_buildings_fully_staffed(),
+        MilitaryBranch::Army => args.state.army_buildings_fully_staffed(),
+        MilitaryBranch::Navy => args.state.navy_buildings_fully_staffed(),
     };
     if needed <= 0.0 && staffed {
         return;
     }
     // Prefer staffing existing underemployed capacity before building more.
-    if push_mil_hire_decisions(result, state, economy, branch, seen_hires) {
+    if push_mil_hire_decisions(args, branch) {
         return;
     }
-    let Some(economy) = economy else {
+    let Some(economy) = args.economy else {
         return;
     };
     let unit = match branch {
@@ -93,14 +98,14 @@ fn push_military_pp_decisions(
     };
     let per = unit.full_power_projection().max(1.0);
     let levels_needed = (needed / per).ceil().max(1.0) as u32;
-    let cap = u32::from(config.max_added_levels_per_type);
+    let cap = u32::from(args.config.max_added_levels_per_type);
     match branch {
         MilitaryBranch::Army => {
-            let have = mil_levels(state, is_barracks_building);
-            if have < levels_needed.min(cap) && seen_builds.insert(BUILDING_BARRACKS.into()) {
+            let have = mil_levels(args.state, is_barracks_building);
+            if have < levels_needed.min(cap) && args.seen_builds.insert(BUILDING_BARRACKS.into()) {
                 push_decision(
-                    result,
-                    state,
+                    args.result,
+                    args.state,
                     Action::QueueBuildingLevel {
                         building: BUILDING_BARRACKS.into(),
                     },
@@ -110,22 +115,22 @@ fn push_military_pp_decisions(
         }
         MilitaryBranch::Navy => {
             let ships_needed = levels_needed.min(cap);
-            let shipyard = mil_levels(state, is_shipyard_building);
-            let admin = mil_levels(state, is_naval_admin_building);
-            if shipyard < ships_needed && seen_builds.insert(BUILDING_SHIPYARD.into()) {
+            let shipyard = mil_levels(args.state, is_shipyard_building);
+            let admin = mil_levels(args.state, is_naval_admin_building);
+            if shipyard < ships_needed && args.seen_builds.insert(BUILDING_SHIPYARD.into()) {
                 push_decision(
-                    result,
-                    state,
+                    args.result,
+                    args.state,
                     Action::QueueBuildingLevel {
                         building: BUILDING_SHIPYARD.into(),
                     },
                     Some(economy),
                 );
             }
-            if admin < ships_needed && seen_builds.insert(BUILDING_NAVAL_ADMIN.into()) {
+            if admin < ships_needed && args.seen_builds.insert(BUILDING_NAVAL_ADMIN.into()) {
                 push_decision(
-                    result,
-                    state,
+                    args.result,
+                    args.state,
                     Action::QueueBuildingLevel {
                         building: BUILDING_NAVAL_ADMIN.into(),
                     },
@@ -146,13 +151,14 @@ fn mil_levels(state: &PlanningState, pred: fn(&str) -> bool) -> u32 {
 }
 
 /// Queue hire for underemployed buildings on this branch. Returns true if any hire was pushed.
-fn push_mil_hire_decisions(
-    result: &mut Vec<Successor>,
-    state: &PlanningState,
-    economy: Option<&EconomyContext>,
-    branch: MilitaryBranch,
-    seen_hires: &mut BTreeSet<String>,
-) -> bool {
+fn push_mil_hire_decisions(args: &mut MilitaryPpDecisionArgs<'_>, branch: MilitaryBranch) -> bool {
+    let MilitaryPpDecisionArgs {
+        result,
+        state,
+        economy,
+        seen_hires,
+        ..
+    } = args;
     let mut pushed = false;
     for row in &state.mil_buildings {
         if row.is_fully_staffed() {
@@ -173,7 +179,7 @@ fn push_mil_hire_decisions(
             Action::QueueHireMilitary {
                 building: row.building.clone(),
             },
-            economy,
+            *economy,
         );
         pushed = true;
     }
@@ -828,28 +834,32 @@ fn successors_for_atoms_with_economy(
                 }
                 Atom::ArmyPower { rel, value } => {
                     push_military_pp_decisions(
-                        &mut result,
-                        state,
-                        economy,
-                        config,
+                        &mut MilitaryPpDecisionArgs {
+                            result: &mut result,
+                            state,
+                            economy,
+                            config,
+                            seen_builds: &mut seen_mil_builds,
+                            seen_hires: &mut seen_mil_hires,
+                        },
                         MilitaryBranch::Army,
                         *rel,
                         *value,
-                        &mut seen_mil_builds,
-                        &mut seen_mil_hires,
                     );
                 }
                 Atom::NavyPower { rel, value } => {
                     push_military_pp_decisions(
-                        &mut result,
-                        state,
-                        economy,
-                        config,
+                        &mut MilitaryPpDecisionArgs {
+                            result: &mut result,
+                            state,
+                            economy,
+                            config,
+                            seen_builds: &mut seen_mil_builds,
+                            seen_hires: &mut seen_mil_hires,
+                        },
                         MilitaryBranch::Navy,
                         *rel,
                         *value,
-                        &mut seen_mil_builds,
-                        &mut seen_mil_hires,
                     );
                 }
                 Atom::WeeklyBalance { .. } => {
