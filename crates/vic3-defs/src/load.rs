@@ -387,6 +387,9 @@ fn parse_defs_text(
                         group: building.building_group,
                         city_type: building.city_type,
                         production_method_groups: building.production_method_groups,
+                        required_construction: building
+                            .required_construction
+                            .filter(|v| v.is_finite() && *v >= 0.0),
                     },
                 )
             }));
@@ -870,6 +873,9 @@ fn load_buildings(data_root: &Path) -> Result<BTreeMap<String, BuildingType>, De
                     group: raw.building_group,
                     city_type: raw.city_type,
                     production_method_groups: raw.production_method_groups,
+                    required_construction: raw
+                        .required_construction
+                        .filter(|v| v.is_finite() && *v >= 0.0),
                 },
             )
         }));
@@ -1387,6 +1393,9 @@ struct RawBuilding {
     city_type: Option<String>,
     #[serde(default)]
     production_method_groups: Vec<String>,
+    /// Paradox `required_construction` (construction points for one level).
+    #[serde(default)]
+    required_construction: Option<f64>,
 }
 
 #[derive(Debug, Default, Deserialize)]

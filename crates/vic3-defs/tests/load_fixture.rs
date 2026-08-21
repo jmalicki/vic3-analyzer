@@ -230,6 +230,10 @@ fn fixture_pop_types_record_qualification_sources() {
         ["pmg_base_building_rye_farm"]
     );
     assert_eq!(
+        defs.buildings["building_rye_farm"].required_construction,
+        Some(200.0)
+    );
+    assert_eq!(
         defs.production_method_groups["pmg_base_building_rye_farm"],
         ["pm_simple_farming"]
     );

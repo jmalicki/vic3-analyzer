@@ -152,6 +152,76 @@ Construction timing is a model constant, not a claim about Paradox's queue.
 queue head) stays **sim-only / undocumented as compile conjuncts** for now —
 `research(tech=…)` still compiles to `has_tech` alone.
 
+## Framework seams
+
+In-repo layering toward a reusable planning core. **Do not** publish a separate crate until a second host exists. DataFusion / MCP stay product code; document them as *optional peripherals* for a future extract.
+
+### Core vs host vs optional
+
+| Layer | Owns | Does not own |
+| --- | --- | --- |
+| **Core** | Boolean goal DSL algebra; `evaluate` / `gaps` / `plan`; resource **tracks** (backlog + rate → ETA); prereq expansion traits; layered defs merge | Vic3 atom meanings, sugar thresholds, price re-solve |
+| **Host** | Atoms, `declare-war` / `colonize` sugar, military PP, `EconomyContext`, Clausewitz save/defs parsers | Generic ETA math |
+| **Optional dataflow** | SQL `plan`/`gaps` TVFs, query catalog binding | Search engine |
+
+Stable solver surface for facades: `compile` / `evaluate` / `gaps` / `plan`. Keep Vic3-only logic out of those entrypoints (atom eval, sugar, sim).
+
+### Resource tracks and ETA
+
+A **track** is an ordered backlog of jobs plus a worker-pool rate `R` (work units per day).
+
+- **Construction:** one backlog; many construction sectors contribute to `R`. ETA for job *k* ≈ (prefix work through *k*) / `R`.
+- **Research / law / interest / hire:** usually single-head tracks (`max_inflight = 1`).
+- **No `can_start` API:** eligibility = prereqs; enqueue policy = track concurrency; timing = ETA.
+- Days are `ceil(work / rate)` when `rate > 0`. Zero rate → no finite ETA (treat as unreachable / no wait edge).
+
+Constant-rate adapters map legacy `SimConfig` day fields to `work = days`, `rate = 1` until defs/save supply real costs and throughput.
+
+### Prereq expansion
+
+Missing **world facts** (tech ancestors, unlocks) expand into the goal/job closure before enqueue. Transient queue occupancy is scheduling, not a goal conjunct.
+
+### Defs merge order
+
+Bottom → top (higher wins on conflict; new keys additive):
+
+1. Code defaults / hardcoded model constants
+2. Extracted game blob or install parse
+3. Optional file overlays (JSON)
+
+### Rustdoc / docs.rs
+
+Seam modules (`tracks`, overlay merge, public solvers) need real rustdoc: purpose, units (work vs days vs rate), invariants, edge cases. Prefer examples on `eta` and solver entrypoints.
+
+### Test contract (later PRs)
+
+| Slice | Must prove |
+| --- | --- |
+| Tracks core | ETA empty/one/many; `rate → 0`; `next_completion`; constant-rate adapter; proptest monotonicity |
+| Construction wire | `remaining/rate` wait; research ∥ construction; tech-only cost unchanged |
+| Def construction cost | Parse + blob round-trip; economy solve still passes |
+| Consume def cost | New build uses def cost when `remaining` absent; in-flight `remaining` wins |
+| File overlays | Overlay overrides blob; missing overlay unchanged |
+| Prereq expand | Gaps include tech ancestors; queue eligible leaves only |
+| Track heuristic | AND ≤ true cost; OR = min; 0-day enqueue consistency |
+
+Non-goals: bit-identical Paradox calendars; full multi-sector construction simulation in early slices.
+
+### PR map (named branches)
+
+Independent bases off default unless stacked:
+
+| PR | Branch | Depends on |
+| --- | --- | --- |
+| Docs | `plan/framework-docs` | — |
+| Tracks module | `plan/tracks-eta-core` | — |
+| Construction ETA wire | `plan/construction-eta-wire` | tracks |
+| Defs `required_construction` | `plan/defs-construction-cost` | — |
+| Consume def cost | `plan/construction-cost-consume` | wire + defs cost |
+| File overlays | `plan/defs-file-overlays` | defs cost |
+| Tech prereq expand | `plan/tech-prereq-expand` | after consume |
+| Track heuristic | `plan/track-heuristic` | prereq + tracks |
+
 ## P9a vs P9b
 
 - P9a: toy `SearchNode`s, no Vic3, I7 + known shortest path + I8.

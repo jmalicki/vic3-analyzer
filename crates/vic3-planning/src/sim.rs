@@ -1861,6 +1861,7 @@ mod tests {
                 group: None,
                 city_type: None,
                 production_method_groups: vec!["pmg_logging".into()],
+                required_construction: Some(250.0),
             },
         );
         defs.production_method_groups.insert(

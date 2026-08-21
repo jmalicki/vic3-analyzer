@@ -1,6 +1,7 @@
 building_rye_farm = {
     building_group = bg_agriculture
     city_type = farm
+    required_construction = 200
     production_method_groups = {
         pmg_base_building_rye_farm
     }
@@ -8,10 +9,12 @@ building_rye_farm = {
 building_government_administration = {
     building_group = bg_government
     city_type = city
+    required_construction = 500
 }
 building_coal_mine = {
     building_group = bg_mining
     city_type = mine
+    required_construction = 300
     production_method_groups = {
         pmg_base_building_coal_mine
     }
@@ -19,6 +22,7 @@ building_coal_mine = {
 building_university = {
     building_group = bg_university
     city_type = city
+    required_construction = 400
     production_method_groups = {
         pmg_base_building_university
     }

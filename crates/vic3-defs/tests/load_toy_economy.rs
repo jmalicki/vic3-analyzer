@@ -33,6 +33,14 @@ fn toy_economy_loads_goods_buildings_and_mill_pms() {
     let mill_group = &defs.buildings["building_flour_mill"].production_method_groups;
     assert_eq!(mill_group, &["pmg_base_building_flour_mill".to_string()]);
     assert_eq!(
+        defs.buildings["building_flour_mill"].required_construction,
+        Some(400.0)
+    );
+    assert_eq!(
+        defs.buildings["building_wheat_farm"].required_construction,
+        Some(200.0)
+    );
+    assert_eq!(
         defs.production_method_groups["pmg_base_building_flour_mill"],
         ["pm_toy_mill", "pm_toy_mill_efficient"]
     );
