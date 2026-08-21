@@ -153,6 +153,17 @@ fields read from the save.
 
 **I5:** residual is always reported. If `status = converged` then residual < ε.
 
+## Alerts mitigations
+
+Shortage detectors can attach ranked mitigations (trade-center advice, local
+producer expansion, best production-method upgrade, …). Building those levers
+used to rescan every world building per alert. When mitigations are enabled,
+`alerts_with` / `goods_shortage_alerts` now build a one-shot
+`MitigationIndex` (buildings by type / state / good IO, plus memoized PM
+candidate sets and best-PM picks) so each alerts pass pays O(buildings) index
+cost instead of O(alerts × buildings) rescans. The lean path
+(`with_mitigations: false`) skips the index entirely.
+
 ## What-if
 
 Apply a delta (e.g. extra building levels) to the frozen building side, then re-solve. Pop consumption re-equilibrates; employment does not.
