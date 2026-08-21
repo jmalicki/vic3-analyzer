@@ -203,6 +203,7 @@ describe('wasm wrapper (real wasm-pack build)', () => {
   })
 
   it('plan with research(tech=…) returns day cost and actions', async () => {
+    // Fixture tech tree sums to 225 days (50+75+100) across three queue/wait pairs.
     const result = JSON.parse(
       await api.plan(
         save,
@@ -216,8 +217,8 @@ describe('wasm wrapper (real wasm-pack build)', () => {
         }),
       ),
     )
-    expect(result.day_cost).toBe(365)
-    expect(result.actions.length).toBe(2)
+    expect(result.day_cost).toBe(225)
+    expect(result.actions.length).toBe(6)
   })
 
   it('gaps returns unsatisfied atoms on the barren fixture', async () => {

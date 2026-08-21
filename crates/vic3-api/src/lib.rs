@@ -1631,7 +1631,8 @@ mod tests {
     }
 
     #[test]
-    fn plan_json_contains_timeline_and_default_research_cost() {
+    fn plan_json_contains_timeline_and_fixture_tech_prereq_costs() {
+        // Fixture tech tree: manufacturies(50) → shaft_mining(75) → nitroglycerin(100).
         let json = plan_json(
             &load_fixture(),
             None,
@@ -1641,8 +1642,8 @@ mod tests {
         )
         .expect("plan");
         let result: vic3_planning::PlanResult = serde_json::from_str(&json).expect("PlanResult");
-        assert_eq!(result.day_cost, 365);
-        assert_eq!(result.actions.len(), 2);
+        assert_eq!(result.day_cost, 225);
+        assert_eq!(result.actions.len(), 6);
         assert!(result.residual.is_finite());
         assert!(!result.limitations.is_empty());
     }
