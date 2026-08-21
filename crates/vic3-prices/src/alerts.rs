@@ -11,7 +11,12 @@
 //!
 //! `vic3-api` / CLI / wasm serialize [`AlertsResult`]; SQL `alerts()` and MCP
 //! hosts consume the same JSON shape.
+//!
+//! When mitigations are enabled, one [`MitigationIndex`] is built per
+//! [`alerts_with`] / [`goods_shortage_alerts`] call so shortage lever selection
+//! does not rescan every building for each alert.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use schemars::JsonSchema;
@@ -299,6 +304,9 @@ fn collect_goods_alerts(
         }
     }
 
+    // Build once per alerts pass; lean (`with_mitigations: false`) skips entirely.
+    let index = with_mitigations.then(|| MitigationIndex::build(world, defs, prices));
+
     for (good_id, hint) in short_goods {
         let kind = goods_kind(&good_id);
         let key = (kind, good_id.clone());
@@ -338,12 +346,13 @@ fn collect_goods_alerts(
                 value: "non-tradeable (local-only)".into(),
             });
         }
-        let mitigations = if with_mitigations {
+        let mitigations = if let Some(index) = index.as_ref() {
             goods_mitigations(
                 &ShortageEffect {
                     world,
                     defs,
                     prices,
+                    index,
                     good_id: &good_id,
                     buy: hint.buy,
                     sell: hint.sell,
@@ -596,24 +605,9 @@ fn push_local_producer(
     state_id: Option<u32>,
     alert_id: &str,
 ) {
-    let producer = ctx.prices.buildings.iter().find(|building| {
-        state_id.is_none_or(|sid| building.state_id == Some(sid))
-            && building
-                .outputs
-                .iter()
-                .any(|flow| flow.good_id == ctx.good_id)
-    });
-    let from_world = ctx.world.buildings.iter().find_map(|row| {
-        if state_id.is_some_and(|sid| row.state != Some(sid)) {
-            return None;
-        }
-        let idx = ctx.defs.index_of(ctx.good_id)?;
-        let (inputs, outputs) = row.goods_io(ctx.defs);
-        (outputs[idx] > ORDER_EPS || inputs[idx] > ORDER_EPS).then(|| row.building.clone())
-    });
-    let building = producer
-        .map(|row| row.type_id.clone())
-        .or(from_world)
+    let building = ctx
+        .index
+        .local_producer_type(ctx.good_id, state_id)
         .unwrap_or_else(|| format!("building_{}_producer", ctx.good_id));
     items.push(with_effect(
         action_mit(
@@ -639,7 +633,7 @@ fn push_best_pm(
     state_id: Option<u32>,
     alert_id: &str,
 ) {
-    let Some(pick) = best_pm_upgrade(ctx.world, ctx.defs, ctx.good_id, state_id) else {
+    let Some(pick) = ctx.index.best_pm_upgrade(ctx.good_id, state_id) else {
         return;
     };
     let label = pm_label(ctx.defs, &pick.new_pm);
@@ -680,6 +674,7 @@ fn push_best_pm(
     ));
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct PmPick {
     building_id: u32,
     type_id: String,
@@ -688,62 +683,200 @@ struct PmPick {
     new_pm: String,
 }
 
-fn best_pm_upgrade(
-    world: &World,
-    defs: &GameDefs,
-    good_id: &str,
-    state_id: Option<u32>,
-) -> Option<PmPick> {
-    let idx = defs.index_of(good_id)?;
-    let mut best: Option<PmPick> = None;
-    let mut best_score = ORDER_EPS;
-    for building in &world.buildings {
-        if state_id.is_some_and(|sid| building.state != Some(sid)) {
-            continue;
-        }
-        let current = &building.production_methods;
-        if current.is_empty() {
-            continue;
-        }
-        let candidates = type_pm_candidates(world, &building.building);
-        if candidates.len() < 2 {
-            continue;
-        }
-        let (in0, out0) = building.goods_io(defs);
-        for slot in 0..current.len() {
-            for candidate in &candidates {
-                if current[slot] == *candidate {
-                    continue;
-                }
-                let mut methods = current.clone();
-                methods[slot] = candidate.clone();
-                let trial = building.with_methods(methods.clone());
-                let (in1, out1) = trial.goods_io(defs);
-                let score = (out1[idx] - in1[idx]) - (out0[idx] - in0[idx]);
-                if score > best_score {
-                    best_score = score;
-                    best = Some(PmPick {
-                        building_id: building.id,
-                        type_id: building.building.clone(),
-                        from: current.clone(),
-                        to: methods,
-                        new_pm: candidate.clone(),
-                    });
+type BestPmCache = BTreeMap<(String, Option<u32>), Option<PmPick>>;
+
+/// Structural indexes + memoization reused while expanding shortage mitigations
+/// for one [`alerts_with`] / [`goods_shortage_alerts`] call.
+///
+/// Built only when `with_mitigations` is true so the lean projection path stays
+/// cheap. Lookups preserve world / prices scan order so PM picks and local
+/// producer type ids match the previous full-scan semantics.
+struct MitigationIndex<'a> {
+    world: &'a World,
+    defs: &'a GameDefs,
+    prices: &'a PricesResult,
+    /// World building indices by type id (ascending = world order).
+    by_type: BTreeMap<&'a str, Vec<usize>>,
+    /// World building indices by `(type_id, state)`.
+    #[allow(dead_code)] // available for type×state lookups; exercised in unit tests
+    by_type_state: BTreeMap<(&'a str, Option<u32>), Vec<usize>>,
+    /// World building indices by state (`None` key = buildings with no state).
+    by_state: BTreeMap<Option<u32>, Vec<usize>>,
+    /// World building indices whose current IO involves each good (by goods_order slot).
+    by_good_io: Vec<Vec<usize>>,
+    /// Prices-result building indices that list each good in `outputs`.
+    price_output_by_good: BTreeMap<&'a str, Vec<usize>>,
+    /// Cached `type_pm_candidates` results for this pass.
+    pm_candidates: RefCell<BTreeMap<String, Vec<String>>>,
+    /// Cached best PM upgrade per `(good_id, state_id)`.
+    best_pm: RefCell<BestPmCache>,
+}
+
+impl<'a> MitigationIndex<'a> {
+    fn build(world: &'a World, defs: &'a GameDefs, prices: &'a PricesResult) -> Self {
+        let mut by_type: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+        let mut by_type_state: BTreeMap<(&str, Option<u32>), Vec<usize>> = BTreeMap::new();
+        let mut by_state: BTreeMap<Option<u32>, Vec<usize>> = BTreeMap::new();
+        let mut by_good_io = vec![Vec::new(); defs.goods_order.len()];
+
+        for (i, building) in world.buildings.iter().enumerate() {
+            by_type
+                .entry(building.building.as_str())
+                .or_default()
+                .push(i);
+            by_type_state
+                .entry((building.building.as_str(), building.state))
+                .or_default()
+                .push(i);
+            by_state.entry(building.state).or_default().push(i);
+
+            let (inputs, outputs) = building.goods_io(defs);
+            for (good, _qty) in inputs
+                .iter_indexed()
+                .chain(outputs.iter_indexed())
+                .filter(|(_, qty)| *qty > ORDER_EPS)
+            {
+                let slot = good.as_usize();
+                if slot < by_good_io.len() {
+                    let list = &mut by_good_io[slot];
+                    if list.last().copied() != Some(i) {
+                        list.push(i);
+                    }
                 }
             }
         }
-    }
-    best
-}
 
-fn type_pm_candidates(world: &World, type_id: &str) -> Vec<String> {
-    let mut ids = BTreeSet::new();
-    for building in &world.buildings {
-        if building.building == type_id {
-            ids.extend(building.production_methods.iter().cloned());
+        let mut price_output_by_good: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+        for (i, building) in prices.buildings.iter().enumerate() {
+            for flow in &building.outputs {
+                let list = price_output_by_good
+                    .entry(flow.good_id.as_str())
+                    .or_default();
+                if list.last().copied() != Some(i) {
+                    list.push(i);
+                }
+            }
+        }
+
+        Self {
+            world,
+            defs,
+            prices,
+            by_type,
+            by_type_state,
+            by_state,
+            by_good_io,
+            price_output_by_good,
+            pm_candidates: RefCell::new(BTreeMap::new()),
+            best_pm: RefCell::new(BTreeMap::new()),
         }
     }
-    ids.into_iter().collect()
+
+    fn buildings_in_state(&self, state_id: Option<u32>) -> Vec<usize> {
+        match state_id {
+            None => (0..self.world.buildings.len()).collect(),
+            Some(sid) => self.by_state.get(&Some(sid)).cloned().unwrap_or_default(),
+        }
+    }
+
+    /// World building indices of `type_id` in `state` (empty when none). Preserves world order.
+    #[cfg(test)]
+    fn buildings_of_type_in_state(&self, type_id: &str, state: Option<u32>) -> Vec<usize> {
+        self.by_type_state
+            .get(&(type_id, state))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn type_pm_candidates(&self, type_id: &str) -> Vec<String> {
+        if let Some(cached) = self.pm_candidates.borrow().get(type_id) {
+            return cached.clone();
+        }
+        let mut ids = BTreeSet::new();
+        if let Some(indices) = self.by_type.get(type_id) {
+            for &i in indices {
+                ids.extend(self.world.buildings[i].production_methods.iter().cloned());
+            }
+        }
+        let out: Vec<String> = ids.into_iter().collect();
+        self.pm_candidates
+            .borrow_mut()
+            .insert(type_id.to_string(), out.clone());
+        out
+    }
+
+    fn local_producer_type(&self, good_id: &str, state_id: Option<u32>) -> Option<String> {
+        if let Some(indices) = self.price_output_by_good.get(good_id) {
+            for &i in indices {
+                let building = &self.prices.buildings[i];
+                if state_id.is_none_or(|sid| building.state_id == Some(sid)) {
+                    return Some(building.type_id.clone());
+                }
+            }
+        }
+        let good_idx = self.defs.index_of(good_id)?;
+        let slot = good_idx.as_usize();
+        let indices = self.by_good_io.get(slot)?;
+        for &i in indices {
+            let row = &self.world.buildings[i];
+            if state_id.is_some_and(|sid| row.state != Some(sid)) {
+                continue;
+            }
+            return Some(row.building.clone());
+        }
+        None
+    }
+
+    fn best_pm_upgrade(&self, good_id: &str, state_id: Option<u32>) -> Option<PmPick> {
+        let key = (good_id.to_string(), state_id);
+        if let Some(cached) = self.best_pm.borrow().get(&key) {
+            return cached.clone();
+        }
+        let pick = self.best_pm_upgrade_uncached(good_id, state_id);
+        self.best_pm.borrow_mut().insert(key, pick.clone());
+        pick
+    }
+
+    fn best_pm_upgrade_uncached(&self, good_id: &str, state_id: Option<u32>) -> Option<PmPick> {
+        let idx = self.defs.index_of(good_id)?;
+        let mut best: Option<PmPick> = None;
+        let mut best_score = ORDER_EPS;
+        for i in self.buildings_in_state(state_id) {
+            let building = &self.world.buildings[i];
+            let current = &building.production_methods;
+            if current.is_empty() {
+                continue;
+            }
+            let candidates = self.type_pm_candidates(&building.building);
+            if candidates.len() < 2 {
+                continue;
+            }
+            let (in0, out0) = building.goods_io(self.defs);
+            for slot in 0..current.len() {
+                for candidate in &candidates {
+                    if current[slot] == *candidate {
+                        continue;
+                    }
+                    let mut methods = current.clone();
+                    methods[slot] = candidate.clone();
+                    let trial = building.with_methods(methods.clone());
+                    let (in1, out1) = trial.goods_io(self.defs);
+                    let score = (out1[idx] - in1[idx]) - (out0[idx] - in0[idx]);
+                    if score > best_score {
+                        best_score = score;
+                        best = Some(PmPick {
+                            building_id: building.id,
+                            type_id: building.building.clone(),
+                            from: current.clone(),
+                            to: methods,
+                            new_pm: candidate.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        best
+    }
 }
 
 fn pm_label(defs: &GameDefs, id: &str) -> String {
@@ -757,6 +890,7 @@ struct ShortageEffect<'a> {
     world: &'a World,
     defs: &'a GameDefs,
     prices: &'a PricesResult,
+    index: &'a MitigationIndex<'a>,
     good_id: &'a str,
     buy: f64,
     sell: f64,
@@ -2717,5 +2851,136 @@ mod tests {
         assert!(!kinds.contains(&AlertKind::Underemployed));
         assert!(!kinds.contains(&AlertKind::NeedsUnmet));
         assert!(!kinds.contains(&AlertKind::LowMarketAccess));
+    }
+
+    /// Naive full-world scan (pre-index semantics) for equivalence checks.
+    fn naive_type_pm_candidates(world: &World, type_id: &str) -> Vec<String> {
+        let mut ids = BTreeSet::new();
+        for building in &world.buildings {
+            if building.building == type_id {
+                ids.extend(building.production_methods.iter().cloned());
+            }
+        }
+        ids.into_iter().collect()
+    }
+
+    fn naive_best_pm_upgrade(
+        world: &World,
+        defs: &GameDefs,
+        good_id: &str,
+        state_id: Option<u32>,
+    ) -> Option<PmPick> {
+        let idx = defs.index_of(good_id)?;
+        let mut best: Option<PmPick> = None;
+        let mut best_score = ORDER_EPS;
+        for building in &world.buildings {
+            if state_id.is_some_and(|sid| building.state != Some(sid)) {
+                continue;
+            }
+            let current = &building.production_methods;
+            if current.is_empty() {
+                continue;
+            }
+            let candidates = naive_type_pm_candidates(world, &building.building);
+            if candidates.len() < 2 {
+                continue;
+            }
+            let (in0, out0) = building.goods_io(defs);
+            for slot in 0..current.len() {
+                for candidate in &candidates {
+                    if current[slot] == *candidate {
+                        continue;
+                    }
+                    let mut methods = current.clone();
+                    methods[slot] = candidate.clone();
+                    let trial = building.with_methods(methods.clone());
+                    let (in1, out1) = trial.goods_io(defs);
+                    let score = (out1[idx] - in1[idx]) - (out0[idx] - in0[idx]);
+                    if score > best_score {
+                        best_score = score;
+                        best = Some(PmPick {
+                            building_id: building.id,
+                            type_id: building.building.clone(),
+                            from: current.clone(),
+                            to: methods,
+                            new_pm: candidate.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        best
+    }
+
+    fn naive_local_producer_type(
+        world: &World,
+        defs: &GameDefs,
+        prices: &PricesResult,
+        good_id: &str,
+        state_id: Option<u32>,
+    ) -> Option<String> {
+        let producer = prices.buildings.iter().find(|building| {
+            state_id.is_none_or(|sid| building.state_id == Some(sid))
+                && building.outputs.iter().any(|flow| flow.good_id == good_id)
+        });
+        if let Some(row) = producer {
+            return Some(row.type_id.clone());
+        }
+        world.buildings.iter().find_map(|row| {
+            if state_id.is_some_and(|sid| row.state != Some(sid)) {
+                return None;
+            }
+            let idx = defs.index_of(good_id)?;
+            let (inputs, outputs) = row.goods_io(defs);
+            (outputs[idx] > ORDER_EPS || inputs[idx] > ORDER_EPS).then(|| row.building.clone())
+        })
+    }
+
+    #[test]
+    fn mitigation_index_matches_naive_pm_and_producer_picks() {
+        let (world, defs, prices) = fixture();
+        let index = MitigationIndex::build(&world, &defs, &prices);
+
+        assert_eq!(
+            index.buildings_of_type_in_state("building_rye_farm", Some(1)),
+            vec![2, 4],
+            "rye farms in state 1 are world indices 2 and 4"
+        );
+        assert_eq!(
+            index.type_pm_candidates("building_rye_farm"),
+            naive_type_pm_candidates(&world, "building_rye_farm")
+        );
+        assert_eq!(
+            index.type_pm_candidates("building_rye_farm"),
+            vec![
+                "pm_simple_farming".to_string(),
+                "pm_soil_enriching_farming".to_string(),
+            ]
+        );
+
+        for state_id in [None, Some(1), Some(99)] {
+            let indexed = index.best_pm_upgrade("grain", state_id);
+            let naive = naive_best_pm_upgrade(&world, &defs, "grain", state_id);
+            assert_eq!(indexed, naive, "best PM for grain state={state_id:?}");
+            assert_eq!(
+                index.local_producer_type("grain", state_id),
+                naive_local_producer_type(&world, &defs, &prices, "grain", state_id),
+                "local producer for grain state={state_id:?}"
+            );
+        }
+
+        let pick = index
+            .best_pm_upgrade("grain", Some(1))
+            .expect("grain PM upgrade");
+        assert_eq!(pick.building_id, 3);
+        assert_eq!(pick.new_pm, "pm_soil_enriching_farming");
+        assert_eq!(
+            index.local_producer_type("grain", Some(1)).as_deref(),
+            Some("building_rye_farm")
+        );
+        assert!(
+            index.best_pm_upgrade("electricity", Some(1)).is_none(),
+            "electricity has no PM upgrade on this fixture"
+        );
     }
 }
