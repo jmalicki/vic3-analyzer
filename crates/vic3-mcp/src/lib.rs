@@ -18,7 +18,7 @@
 //!
 //! | Kind | Names |
 //! | --- | --- |
-//! | Tools | `query`, `use_save`, `refresh_catalog`, `explain`, `preview_delta` |
+//! | Tools | `query`, `use_save`, `refresh_catalog`, `explain`, `campaign_brief`, `preview_delta` |
 //! | Resources | `vic3://schema`, `vic3://saves`, `vic3://session`, `vic3://docs/*` |
 //! | Prompts | `investigate_shortages`, `compare_latest_autosave`, `military_readiness`, `what_is_loaded`, `plan_research` |
 //!
@@ -30,6 +30,7 @@
 //! - [`Vic3McpServer`] — rmcp `ServerHandler`
 //! - `docs/mcp.md`, `docs/desktop.md`
 
+mod brief;
 mod error;
 mod format;
 mod runtime;

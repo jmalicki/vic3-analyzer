@@ -21,6 +21,8 @@ use vic3_sql::{
     UseSaveResult,
 };
 
+use crate::brief::campaign_brief_json;
+
 /// Why MCP failed to open (config / catalog / engine).
 #[derive(Debug, thiserror::Error)]
 pub enum McpBootstrapError {
@@ -206,6 +208,22 @@ impl McpRuntime {
     ) -> Result<Vec<datafusion::arrow::array::RecordBatch>, SqlError> {
         let eng = self.engine.lock().await;
         eng.query(sql).await
+    }
+
+    /// Compact campaign summary after [`Self::use_save`] (tool `campaign_brief`).
+    ///
+    /// Reads [`SqlEngine::active_binding`] directly: domestic top goods /
+    /// hotspots and a player-scoped alert-kind histogram (same filter as
+    /// zero-arg `alerts()`).
+    ///
+    /// # Errors
+    ///
+    /// [`SqlError::Unbound`] when no save is bound.
+    pub async fn campaign_brief(&self) -> Result<Value, SqlError> {
+        let eng = self.engine.lock().await;
+        let binding = eng.active_binding().ok_or(SqlError::Unbound)?;
+        let session = eng.active_session().ok_or(SqlError::Unbound)?;
+        Ok(campaign_brief_json(&session, binding.as_ref()))
     }
 }
 

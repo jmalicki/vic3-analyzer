@@ -25,7 +25,7 @@ License: AGPL-3.0. Saves and token maps are user-supplied and never uploaded.
 | `vic3-api` | Transport-free analysis (bytes or paths in, JSON out); shared shapes for wasm, Tauri, MCP (and CLI `--json`) |
 | `vic3-catalog` | Save-root scan (stubs, `local`/`steam_cloud`), shared TOML/JSON app config + path auto-detect |
 | `vic3-sql` | Read-only DataFusion SQL over catalog + active/latest fact tables |
-| `vic3-mcp` | Stdio MCP server (rmcp): tools `query` / `use_save` / `refresh_catalog` / `explain`, resources, prompts |
+| `vic3-mcp` | Stdio MCP server (rmcp): tools `query` / `use_save` / `refresh_catalog` / `explain` / `campaign_brief`, resources, prompts |
 | `vic3-cli` | clap only lives here; commands map to the same analysis as `vic3-api` |
 | `vic3-analyzer` | Fat Tauri 2 binary: default/`gui` → companion UI (Settings/catalog/Advanced Query); `mcp` → stdio MCP (no window; early argv). Shares catalog config + defs cache with `vic3-mcp` / `vic3-api` / `vic3-sql`. |
 | `vic3-wasm` | Thin `wasm-bindgen` over `vic3-api`; no filesystem |

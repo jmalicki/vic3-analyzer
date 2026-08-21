@@ -39,12 +39,12 @@ const FLOW_MARKDOWN: &str = r#"# Vic3 Analyzer MCP flow
 
 1. Discover saves: tool `query` on `saves`, or read resource `vic3://saves`.
 2. Bind session: tool `use_save` with `{ "name": "autosave" }` or `{ "selector": "latest_autosave" }`.
-3. Query fact tables / TVFs: `SELECT … FROM countries`, `SELECT * FROM alerts()` (player-scoped; use `alerts('all')` for the full save), `plan('research(tech=…)')`. Or `preview_delta` for a what-if on the bound save.
+3. Prefer tool `campaign_brief` for a compact session overview, then query / `preview_delta` as needed (`alerts()` is player-scoped; use `alerts('all')` for the full save).
 
 Rules:
 - Filename **stubs** only (no filesystem paths).
 - SQL is **read-only** (`SELECT` / `WITH` / `EXPLAIN`).
-- Call `use_save` before unqualified fact tables; do not use `SELECT set_active_save(...)`.
+- Call `use_save` before `campaign_brief` / unqualified fact tables; do not use `SELECT set_active_save(...)`.
 "#;
 
 /// rmcp [`ServerHandler`] over a process-local [`McpRuntime`].
@@ -132,6 +132,12 @@ pub struct UseSaveArgs {
 /// Args for tool `refresh_catalog`: empty object so clients can send `{}`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct RefreshCatalogArgs {
+    // No fields — schemars still emits an object schema.
+}
+
+/// Args for tool `campaign_brief`: empty object so clients can send `{}`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CampaignBriefArgs {
     // No fields — schemars still emits an object schema.
 }
 
@@ -246,6 +252,20 @@ impl Vic3McpServer {
         }
     }
 
+    /// Compact campaign summary for the bound save (shortages + alert kinds).
+    #[tool(
+        description = "After use_save: compact JSON brief (session, player_tag, top domestic goods shortages, region×good hotspots, player-scoped alert kind histogram). Requires a bound save."
+    )]
+    async fn campaign_brief(
+        &self,
+        Parameters(_args): Parameters<CampaignBriefArgs>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        match self.runtime.campaign_brief().await {
+            Ok(body) => Ok(tool_ok_json(&body)),
+            Err(e) => Ok(sql_to_tool_result(e)),
+        }
+    }
+
     /// Return a DataFusion EXPLAIN plan for debugging agent SQL.
     #[tool(description = "Return DataFusion EXPLAIN plan text for a SQL statement.")]
     async fn explain(
@@ -281,21 +301,21 @@ impl Vic3McpServer {
 impl Vic3McpServer {
     #[prompt(
         name = "investigate_shortages",
-        description = "Guide: use_save latest → alerts / shortage-oriented SQL"
+        description = "Guide: use_save → campaign_brief → optional shortage SQL"
     )]
     async fn investigate_shortages(&self) -> Vec<PromptMessage> {
         vec![PromptMessage::new_text(
             Role::User,
             "Investigate goods shortages in the current Vic3 campaign.\n\
              1. Call use_save with selector latest_autosave (or latest).\n\
-             2. Query saves if needed: SELECT name, kind, mtime, location FROM saves ORDER BY mtime DESC LIMIT 10.\n\
-             3. Rank domestic shortages (player-owned states), e.g.\n\
+             2. Call campaign_brief for session meta, top domestic shortages, hotspots, and alert kinds.\n\
+             3. If you need more detail, query e.g.\n\
              SELECT s.region_name, g.good, g.shortage, g.price\n\
              FROM states s JOIN goods_by_state g USING (state_id)\n\
              WHERE s.owner_tag = player_tag() AND g.shortage > 0\n\
              ORDER BY g.shortage DESC LIMIT 20.\n\
              Optionally also check market-wide SELECT * FROM goods WHERE shortage > 0.\n\
-             Rules: stubs not paths; read-only SQL; use_save before fact tables.",
+             Rules: stubs not paths; read-only SQL; use_save before campaign_brief / fact tables.",
         )]
     }
 
@@ -372,7 +392,7 @@ impl ServerHandler for Vic3McpServer {
                 .build(),
         )
         .with_instructions(
-            "Vic3 Analyzer MCP: discover saves → use_save → query / preview_delta. \
+            "Vic3 Analyzer MCP: discover saves → use_save → campaign_brief / query / preview_delta. \
              Stubs only (no paths). Resources: vic3://schema|saves|session|docs/*."
                 .to_string(),
         )
