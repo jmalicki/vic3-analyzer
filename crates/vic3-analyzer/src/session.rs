@@ -44,8 +44,8 @@ Registered on the active session after `use_save` (see `docs/sql.md` for columns
 - `is_underemployed(state_id BIGINT)` → BOOLEAN
 
 ## Diagnostics TVFs
-- `alerts([scope])` — default player-scoped; `'all'` = full save
-- `suggest_mitigations([scope])` — heuristic rows; `'player'` / `'all'`
+- `alerts()` / `alerts('all')` — default player-scoped; `'all'` = full save
+- `suggest_mitigations()` / `suggest_mitigations('player'|'all')` — heuristic rows (not sized-to-fix)
 - `shortage_analysis(good TEXT)` — `NULL` = all shortage kinds
 - `building_staffing(state_id BIGINT)`
 
