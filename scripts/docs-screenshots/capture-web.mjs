@@ -40,6 +40,7 @@ async function startPreview() {
       cwd: webRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env },
+      detached: true,
     },
   )
   let logs = ''
@@ -59,10 +60,16 @@ async function startPreview() {
   return {
     baseUrl,
     stop: async () => {
-      if (child.killed) return
-      child.kill('SIGTERM')
-      await sleep(300)
-      if (!child.killed) child.kill('SIGKILL')
+      if (!child.pid) return
+      try {
+        process.kill(-child.pid, 'SIGKILL')
+      } catch {
+        try {
+          child.kill('SIGKILL')
+        } catch {
+          // already gone
+        }
+      }
     },
   }
 }
@@ -178,11 +185,23 @@ async function main() {
     await sleep(300)
     await writeShot(page, dest, WEB_SHOTS[9])
 
+    console.log('web capture: done, closing…')
     await context.close()
   } finally {
-    await browser.close()
-    await preview.stop()
+    try {
+      await Promise.race([
+        (async () => {
+          await browser.close()
+          await preview.stop()
+        })(),
+        sleep(5_000),
+      ])
+    } catch (err) {
+      console.warn('web capture cleanup:', err)
+    }
   }
+  // Vite preview / Playwright can leave handles open; force exit after success.
+  process.exit(0)
 }
 
 main().catch((err) => {

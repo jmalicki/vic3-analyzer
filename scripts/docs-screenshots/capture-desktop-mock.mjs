@@ -97,12 +97,12 @@ async function startStaticServer(root) {
 async function main() {
   const dest = outDir()
   const server = await startStaticServer(desktopUiDir)
-  const browser = await chromium.launch()
+  const browser = await chromium.launch({ headless: true })
   try {
     const { context, page } = await newShotPage(browser)
     await installTauriMock(page)
-    await page.goto(server.url, { waitUntil: 'networkidle' })
-    await page.waitForSelector('#metrics .metric')
+    await page.goto(server.url, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+    await page.waitForSelector('#metrics .metric', { timeout: 30_000 })
 
     // D1 Dashboard
     await writeShot(page, dest, DESKTOP_SHOTS[0])
@@ -153,11 +153,22 @@ async function main() {
     await page.waitForFunction(() => document.getElementById('cfg-game').value.length > 0)
     await writeShot(page, dest, DESKTOP_SHOTS[6])
 
+    console.log('desktop mock: done')
     await context.close()
   } finally {
-    await browser.close()
-    await server.close()
+    try {
+      await Promise.race([
+        (async () => {
+          await browser.close()
+          await server.close()
+        })(),
+        new Promise((r) => setTimeout(r, 5_000)),
+      ])
+    } catch (err) {
+      console.warn('desktop mock cleanup:', err)
+    }
   }
+  process.exit(0)
 }
 
 main().catch((err) => {
