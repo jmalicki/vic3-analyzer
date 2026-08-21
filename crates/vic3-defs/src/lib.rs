@@ -11,9 +11,9 @@
 //! ```
 //!
 //! Defs merge layers (code defaults → blob/install → file overlays) are
-//! described in [`docs/planning.md`](../../../docs/planning.md#framework-seams).
-//! This crate does **not** parse saves; it turns Clausewitz game data (or a
-//! postcard blob) into [`GameDefs`]. Overlays land in a follow-on module.
+//! described in [`docs/planning.md`](../../../docs/planning.md#framework-seams)
+//! and implemented by [`overlay`]. This crate does **not** parse saves; it
+//! turns Clausewitz game data (or a postcard blob) into [`GameDefs`].
 //! Clausewitz text is parsed with **jomini**; there is no custom lexer.
 //!
 //! Architecture overview: [`docs/architecture.md`](../../../docs/architecture.md).
@@ -56,6 +56,7 @@ mod icons;
 mod load;
 mod loc;
 mod needs;
+mod overlay;
 mod path_rules;
 mod staging;
 mod substitution;
@@ -67,6 +68,7 @@ pub use error::DefsError;
 pub use goods::{GoodIdx, GoodsVec};
 pub use load::{load_from_files, load_from_path, DefsBuilder};
 pub use needs::{NeedIdx, NeedsVec};
+pub use overlay::{apply_overlay, load_overlay_json, BuildingOverlay, DefsOverlay};
 pub use path_rules::{classify_defs_path, DefsPathClass, COMMON_DIRS};
 pub use substitution::{clamp_supply_share, substitution_shares, substitution_weight};
 pub use types::{
