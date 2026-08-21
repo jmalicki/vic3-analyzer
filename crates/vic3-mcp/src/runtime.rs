@@ -12,11 +12,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use vic3_catalog::{is_valid_game_dir, scan_roots, AppConfig, DesktopConfig, SaveEntry, SaveRoot};
+use vic3_prices::{preview, ExtraLevelsDelta, GoodPrice, PricesResult, SolveOpts, WorldDelta};
 use vic3_sql::{
-    ActiveSessionInfo, EngineLoadOpts, SqlEngine, SqlError, UseSaveRequest, UseSaveResult,
+    ActiveSessionInfo, EngineLoadOpts, SessionBinding, SqlEngine, SqlError, UseSaveRequest,
+    UseSaveResult,
 };
 
 use crate::brief::campaign_brief_json;
@@ -174,6 +176,23 @@ impl McpRuntime {
         eng.use_save(req).await
     }
 
+    /// Active analysis binding after `use_save` / `bind`, if any.
+    pub async fn active_binding(&self) -> Option<std::sync::Arc<SessionBinding>> {
+        let eng = self.engine.lock().await;
+        eng.active_binding()
+    }
+
+    /// Preview a [`WorldDelta`] on the bound session (warm-started); compact JSON.
+    ///
+    /// Does not mutate the session world or prices. Unbound → error string.
+    pub async fn preview_delta(&self, delta: &WorldDelta) -> Result<Value, String> {
+        let binding = self
+            .active_binding()
+            .await
+            .ok_or_else(|| "no active save; call use_save first".to_string())?;
+        Ok(compact_preview(&binding, delta))
+    }
+
     /// Run one read-only SQL statement (`docs/sql.md`).
     ///
     /// # Arguments
@@ -206,6 +225,126 @@ impl McpRuntime {
         let session = eng.active_session().ok_or(SqlError::Unbound)?;
         Ok(campaign_brief_json(&session, binding.as_ref()))
     }
+}
+
+fn shortage(g: &GoodPrice) -> f64 {
+    (g.buy - g.sell).max(0.0)
+}
+
+/// Compact before/after goods preview (not a full [`PricesResult`]).
+fn compact_preview(binding: &SessionBinding, delta: &WorldDelta) -> Value {
+    let baseline: &PricesResult = binding.prices.as_ref();
+    let mut opts = SolveOpts::default();
+    if !baseline.relative.is_empty() {
+        opts.warm_rel = Some(baseline.relative.clone());
+    }
+    let after = preview(binding.world.as_ref(), binding.defs.as_ref(), delta, opts);
+
+    let before_by_id: std::collections::BTreeMap<&str, &GoodPrice> =
+        baseline.goods.iter().map(|g| (g.id.as_str(), g)).collect();
+
+    let mut goods = Vec::new();
+    for g_after in &after.goods {
+        let (price_before, shortage_before) = match before_by_id.get(g_after.id.as_str()) {
+            Some(g) => (g.price, shortage(g)),
+            None => (g_after.base, 0.0),
+        };
+        let price_after = g_after.price;
+        let shortage_after = shortage(g_after);
+        let d_price = price_after - price_before;
+        let d_shortage = shortage_after - shortage_before;
+        if d_price.abs() < 1e-9 && d_shortage.abs() < 1e-9 {
+            continue;
+        }
+        goods.push(json!({
+            "id": g_after.id,
+            "price_before": price_before,
+            "price_after": price_after,
+            "d_price": d_price,
+            "shortage_before": shortage_before,
+            "shortage_after": shortage_after,
+            "d_shortage": d_shortage,
+        }));
+    }
+
+    json!({
+        "status": after.status.to_string(),
+        "residual": after.residual,
+        "applied": delta,
+        "goods": goods,
+        "limitations": after.limitations,
+    })
+}
+
+/// Resolve sugar args into a [`WorldDelta`], or an error message.
+pub fn world_delta_from_sugar(
+    binding: &SessionBinding,
+    building: Option<&str>,
+    extra_levels: Option<u32>,
+    building_id: Option<u32>,
+    state_id: Option<u32>,
+) -> Result<WorldDelta, String> {
+    let extra_levels = extra_levels.ok_or_else(|| {
+        "sugar preview requires extra_levels (and building or building_id)".to_string()
+    })?;
+
+    if let Some(id) = building_id {
+        if let Some(want) = state_id {
+            let ok = binding
+                .world
+                .buildings
+                .iter()
+                .any(|b| b.id == id && b.state == Some(want));
+            if !ok {
+                return Err(format!("building_id {id} not found in state_id {want}"));
+            }
+        }
+        return Ok(WorldDelta {
+            extra_levels: vec![ExtraLevelsDelta {
+                building: None,
+                building_id: Some(id),
+                extra_levels,
+            }],
+            ..WorldDelta::default()
+        });
+    }
+
+    let building = building.ok_or_else(|| {
+        "sugar preview requires building or building_id (with extra_levels)".to_string()
+    })?;
+
+    if let Some(want_state) = state_id {
+        let ids: Vec<u32> = binding
+            .world
+            .buildings
+            .iter()
+            .filter(|b| b.building == building && b.state == Some(want_state))
+            .map(|b| b.id)
+            .collect();
+        if ids.is_empty() {
+            return Err(format!("no building {building:?} in state_id {want_state}"));
+        }
+        return Ok(WorldDelta {
+            extra_levels: ids
+                .into_iter()
+                .map(|id| ExtraLevelsDelta {
+                    building: None,
+                    building_id: Some(id),
+                    extra_levels,
+                })
+                .collect(),
+            ..WorldDelta::default()
+        });
+    }
+
+    Ok(WorldDelta {
+        extra_levels: vec![ExtraLevelsDelta {
+            building: Some(building.to_string()),
+            building_id: None,
+            extra_levels,
+        }],
+        ..WorldDelta::default()
+    })
 }
 
 fn resolve_load_opts(config: &AppConfig, app_data: &Path) -> (DefsStatus, EngineLoadOpts) {
