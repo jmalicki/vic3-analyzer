@@ -1,6 +1,11 @@
-//! `alerts()` → one row per `vic3-prices::alerts` finding (`docs/sql.md`).
+//! `alerts()` / `alerts('all')` → rows from `vic3-prices::alerts` (`docs/sql.md`).
+//!
+//! Zero-arg form is player-scoped: keep rows with `state_id` NULL or owned by
+//! [`World::player_tag`](vic3_prices::World::player_tag) (strict; no first-country
+//! fallback). `alerts('all')` is the unfiltered save-wide set.
 
 use std::any::Any;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -11,16 +16,17 @@ use datafusion::common::{plan_err, Result as DfResult};
 use datafusion::datasource::{TableProvider, TableType};
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
-use vic3_prices::AlertKind;
+use vic3_prices::{Alert, AlertKind, World};
 
 use crate::binding::{projection_needs_json, SessionBinding};
 use crate::exec::memory_exec;
 use crate::schema::alerts_schema;
+use crate::udfs::literal_str;
 
 /// Column indices for `evidence` / `mitigations` in [`alerts_schema`].
 const ALERTS_JSON_COLS: &[usize] = &[8, 9];
 
-/// Zero-arg TVF wrapping [`alerts`] for the bound session.
+/// TVF wrapping [`SessionBinding::alerts`] for the bound session.
 #[derive(Debug)]
 pub struct AlertsTvf {
     binding: Arc<SessionBinding>,
@@ -34,12 +40,24 @@ impl AlertsTvf {
 
 impl TableFunctionImpl for AlertsTvf {
     fn call(&self, args: &[Expr]) -> DfResult<Arc<dyn TableProvider>> {
-        if !args.is_empty() {
-            return plan_err!("alerts() takes no arguments");
-        }
+        let all = match args {
+            [] => false,
+            [arg] => {
+                let s = literal_str(arg, 1)?;
+                if s == "all" {
+                    true
+                } else {
+                    return plan_err!("alerts() accepts no arguments or alerts('all'); got {s:?}");
+                }
+            }
+            _ => {
+                return plan_err!("alerts() accepts no arguments or alerts('all')");
+            }
+        };
         Ok(Arc::new(AlertsProvider {
             binding: Arc::clone(&self.binding),
             schema: alerts_schema(),
+            all,
         }))
     }
 }
@@ -48,14 +66,29 @@ impl TableFunctionImpl for AlertsTvf {
 struct AlertsProvider {
     binding: Arc<SessionBinding>,
     schema: SchemaRef,
+    /// When true, emit every alert; when false, player-scope by `state_id`.
+    all: bool,
 }
 
 impl AlertsProvider {
     fn batch(&self, with_mitigations: bool, limit: Option<usize>) -> DfResult<RecordBatch> {
         let result = self.binding.alerts(with_mitigations);
+        let scoped: Vec<&Alert> = if self.all {
+            result.alerts.iter().collect()
+        } else {
+            let player_states = player_owned_state_ids(self.binding.world.as_ref());
+            result
+                .alerts
+                .iter()
+                .filter(|alert| match alert.state_id {
+                    None => true,
+                    Some(id) => player_states.as_ref().is_some_and(|ids| ids.contains(&id)),
+                })
+                .collect()
+        };
         let alerts = match limit {
-            Some(n) => &result.alerts[..n.min(result.alerts.len())],
-            None => result.alerts.as_slice(),
+            Some(n) => &scoped[..n.min(scoped.len())],
+            None => scoped.as_slice(),
         };
 
         let mut id = StringBuilder::new();
@@ -139,6 +172,22 @@ impl TableProvider for AlertsProvider {
         let with_mitigations = projection_needs_json(projection, ALERTS_JSON_COLS);
         memory_exec(self.batch(with_mitigations, limit)?, projection)
     }
+}
+
+/// State ids owned by [`World::player_tag`] (strict; no first-country fallback).
+///
+/// Mirrors `player_state_ids` in `vic3-prices` optimize, but only when
+/// `player_tag` is set.
+fn player_owned_state_ids(world: &World) -> Option<BTreeSet<u32>> {
+    let tag = world.player_tag.as_deref()?;
+    let country = world.country_by_tag(tag)?;
+    let mut ids: BTreeSet<u32> = country.states.iter().copied().collect();
+    for state in &world.states {
+        if state.country == Some(country.id) {
+            ids.insert(state.id);
+        }
+    }
+    Some(ids)
 }
 
 /// Snake_case `kind` strings for SQL (`docs/sql.md` / alerts JSON).

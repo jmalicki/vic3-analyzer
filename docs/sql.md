@@ -334,9 +334,13 @@ Other rules:
 
 All read the **active** session unless noted. Column contracts should stay stable (treat as schema).
 
-### `alerts()`
+### `alerts([scope])`
 
 One row per alert from `vic3-prices::alerts` ([`AlertsResult`](json-schema.md)).
+
+- **`alerts()`** (default) — player-scoped: keep rows whose `state_id` is **NULL** or owned by `World.player_tag` (strict tag; no first-country fallback). Foreign-state rows are dropped.
+- **`alerts('all')`** — unfiltered full-save set (previous default).
+- Any other argument is a plan error. Only the string literal `'all'` is accepted as the one-arg form.
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -438,6 +442,8 @@ ORDER BY g.shortage DESC
 LIMIT 20;
 
 SELECT * FROM alerts() WHERE severity = 1;
+-- Full-save alerts (not player-scoped):
+-- SELECT * FROM alerts('all') WHERE severity = 1;
 
 SELECT * FROM shortage_analysis('engines');
 
@@ -479,6 +485,6 @@ The Tauri **Advanced Query** tab uses this same dialect:
 
 - Crate: `vic3-sql` registers providers on a `SessionContext` over an in-memory `SessionBinding` (`GameDefs` + `World` + `PricesResult`). Hosts hold the engine next to `vic3-api` session state and call Rust `SqlEngine::use_save` (never a mutating `SELECT`); `saves` reads `vic3-catalog`; `latest.*` loads via `vic3-api` without installing the active session.
 - Result shaping: Advanced Query uses `vic3_sql::batches_to_json` (`columns` / `rows` / `row_count`). MCP `query` uses the same JSON shape (formatter currently lives in `vic3-mcp`; keep aligned). `vic3://schema` → `schema_catalog_json()` (facts + diagnostics/planning TVFs + scalars).
-- Diagnostics: `alerts()`, `shortage_analysis(good)`, `building_staffing(state_id)`, `good_price` / `army_power` / `player_tag` wrap `vic3-prices` alerts + market rows + session identity. TVF args must be plan-time literals (`NULL` allowed for `shortage_analysis`).
+- Diagnostics: `alerts()` (player-scoped) / `alerts('all')`, `shortage_analysis(good)`, `building_staffing(state_id)`, `good_price` / `army_power` / `player_tag` wrap `vic3-prices` alerts + market rows + session identity. TVF args must be plan-time literals (`NULL` allowed for `shortage_analysis`).
 - Planning TVFs: `plan(goal [, max_days [, label]])` and `gaps(goal)` call `vic3-plan` / `vic3-goals` against the bound snapshot. `label` is accepted for [`PlanOpts`](json-schema.md) parity and ignored in the result set. `limitations` is emitted on step 0 only.
 - Pages/wasm continues without this engine in v1.
