@@ -76,6 +76,7 @@
 //! | `good_price(good)` | scalar | Utf8 | arg or missing id → NULL |
 //! | `army_power()` | scalar | none | no player tag → NULL |
 //! | `player_tag()` | scalar | none | no player tag → NULL |
+//! | `is_underemployed(state_id)` | scalar | Int64 | NULL arg → NULL; else Underemployed alert |
 //! | `alerts([scope])` | TVF | optional `'all'` | zero-arg → player-scoped; `'all'` → full save |
 //! | `suggest_mitigations([scope])` | TVF | optional `'player'` / `'all'` | heuristic alert mitigations as rows (not sized-to-fix) |
 //! | `shortage_analysis(good)` | TVF | Utf8 or NULL | NULL = all scarce-good alerts |
@@ -218,6 +219,11 @@ pub fn schema_catalog_json() -> serde_json::Value {
                 "name": "player_tag",
                 "signature": "player_tag() → TEXT",
                 "null": "no player_tag on bound world → NULL",
+            },
+            {
+                "name": "is_underemployed",
+                "signature": "is_underemployed(state_id BIGINT) → BOOLEAN",
+                "null": "NULL arg → NULL; else true iff AlertKind::Underemployed for that state",
             },
         ],
         "tvfs": [
