@@ -202,6 +202,26 @@ pub fn alerts_schema() -> SchemaRef {
     ]))
 }
 
+/// `suggest_mitigations([scope])` columns (`docs/sql.md`).
+///
+/// Hybrid: flat identity/action fields plus `detail` JSON of the full
+/// [`vic3_prices::Mitigation`]. Does **not** size actions to clear shortages.
+pub fn suggest_mitigations_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("alert_id", DataType::Utf8, false),
+        Field::new("mitigation_id", DataType::Utf8, false),
+        Field::new("state_id", DataType::UInt32, true),
+        Field::new("kind", DataType::Utf8, false),
+        Field::new("rank", DataType::UInt32, false),
+        Field::new("action", DataType::Utf8, true),
+        Field::new("building", DataType::Utf8, true),
+        Field::new("good_id", DataType::Utf8, true),
+        Field::new("extra_levels", DataType::UInt32, true),
+        Field::new("title", DataType::Utf8, false),
+        Field::new("detail", DataType::Utf8, false),
+    ]))
+}
+
 /// `shortage_analysis(good)` columns (`docs/sql.md`).
 ///
 /// Market magnitudes (`buy`/`sell`/…) may be NULL when no matching goods row.

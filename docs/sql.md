@@ -382,6 +382,41 @@ Nested `staffing` on employment alerts is not inlined here — use `building_sta
 - Applies `LIMIT` before mitigations when every `WHERE` clause is Exact (or there is no `WHERE`). If a residual Unsupported filter remains, LIMIT is left to DataFusion after the batch so filtering stays correct.
 
 Prefer triage queries that omit `mitigations` (and avoid `SELECT *`) until a shortlist of alert ids is known.
+
+### `suggest_mitigations([scope])`
+
+One row per **existing** alert mitigation from `vic3-prices::alerts` (same builders as the `mitigations` JSON on [`alerts()`](#alertsscope)).
+
+**Limitation:** this does **not** compute levels or actions sized to clear the problem. It exposes the current heuristic mitigations (often `extra_levels = 1`). Sizing-to-fix is an explicit future gap — do not treat flat numeric columns as clearance quantities.
+
+- **`suggest_mitigations()`** / **`suggest_mitigations('player')`** — player-scoped (same ownership rule as `alerts()`).
+- **`suggest_mitigations('all')`** — full save.
+- Any other argument is a plan error. Args must be plan-time string literals (no subquery scope in v1).
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `alert_id` | text | Parent alert id |
+| `mitigation_id` | text | |
+| `state_id` | int nullable | From the parent alert |
+| `kind` | text | Parent alert kind (snake_case) |
+| `rank` | int | Lower is better |
+| `action` | text nullable | Mitigation action `type` (`build`, `pm`, `subsidize`, `trade_alloc`, `feeder_job`, `sol_goods`) |
+| `building` | text nullable | From `build` / `feeder_job` actions |
+| `good_id` | text nullable | From `trade_alloc` / `sol_goods` actions |
+| `extra_levels` | int nullable | From `build` — heuristic (often 1), **not** sized-to-fix |
+| `title` | text | |
+| `detail` | text | Full mitigation object as JSON (remaining fields + action payload) |
+
+```sql
+SELECT action, building, extra_levels, title
+FROM suggest_mitigations()
+WHERE kind = 'goods_shortage'
+ORDER BY rank
+LIMIT 20;
+
+SELECT * FROM suggest_mitigations('all') WHERE action = 'build';
+```
+
 ### `shortage_analysis(good TEXT)`
 
 Expands goods-shortage alerts for one good (`NULL` = all electricity / transportation / goods shortage alerts). Magnitudes come from the market `goods` row; evidence/mitigations are JSON from the alert expander (no invented economics).
@@ -525,6 +560,6 @@ The Tauri **Advanced Query** tab uses this same dialect:
 
 - Crate: `vic3-sql` registers providers on a `SessionContext` over an in-memory `SessionBinding` (`GameDefs` + `World` + `PricesResult`). Hosts hold the engine next to `vic3-api` session state and call Rust `SqlEngine::use_save` (never a mutating `SELECT`); `saves` reads `vic3-catalog`; `latest.*` loads via `vic3-api` without installing the active session.
 - Result shaping: Advanced Query uses `vic3_sql::batches_to_json` (`columns` / `rows` / `row_count`). MCP `query` uses the same JSON shape (formatter currently lives in `vic3-mcp`; keep aligned). `vic3://schema` → `schema_catalog_json()` (facts + diagnostics/planning TVFs + scalars).
-- Diagnostics: `alerts()` (player-scoped) / `alerts('all')`, `shortage_analysis(good)`, `building_staffing(state_id)`, `good_price` / `army_power` / `player_tag` wrap `vic3-prices` alerts + market rows + session identity. TVF args must be plan-time literals (`NULL` allowed for `shortage_analysis`).
+- Diagnostics: `alerts()` (player-scoped) / `alerts('all')`, `suggest_mitigations()` / `('player')` / `('all')` (heuristic mitigations as rows — **not** sized-to-fix), `shortage_analysis(good)`, `building_staffing(state_id)`, `good_price` / `army_power` / `player_tag` wrap `vic3-prices` alerts + market rows + session identity. TVF args must be plan-time literals (`NULL` allowed for `shortage_analysis`).
 - Planning TVFs: `plan(goal [, max_days [, label]])` and `gaps(goal)` call `vic3-planning` against the bound snapshot. `label` is accepted for [`PlanOpts`](json-schema.md) parity and ignored in the result set. `limitations` is emitted on step 0 only.
 - Pages/wasm continues without this engine in v1.
