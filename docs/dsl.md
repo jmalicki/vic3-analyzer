@@ -1,6 +1,6 @@
 # Goal DSL
 
-Parser: **chumsky** combinators in `vic3-goals`. Keep the module small; do not turn it into a compiler-front-end showcase. Richer error recovery is optional.
+Parser: **chumsky** combinators in `vic3-planning::goals`. Keep the module small; do not turn it into a compiler-front-end showcase. Richer error recovery is optional.
 
 GOAP crates inspired the *shape* (goal = desired facts, actions = preconditions/effects). They are not the engine.
 
@@ -85,7 +85,7 @@ SwitchPm alternatives when defs expose them.
 
 ## Evaluation
 
-`vic3-goals` evaluates a compiled predicate against `PlanningState`. It does not search. Gaps = unsatisfied atoms. Plans = A* until the predicate is true ([`planning.md`](planning.md)).
+`vic3-planning` evaluates a compiled predicate against `PlanningState`. It does not search. Gaps = unsatisfied atoms. Plans = A* until the predicate is true ([`planning.md`](planning.md)).
 
 UI presets and SQL `plan`/`gaps` TVFs consume the **same** compiled atoms — presets are DSL strings, not a parallel vocabulary.
 
@@ -131,7 +131,7 @@ projection is unknown (SQL `gaps` → `unknown`, not a silent zero). `interest_i
 separately (Clausewitz ids are normalized, e.g. `STATE_ALSACE` → `alsace`).
 `has_law(…)` matches projected active laws (`law_` prefix insensitive).
 Missing metrics remain unavailable and do not satisfy comparisons. A valid
-preset can still be unreachable when `vic3-sim` has no action capable of
+preset can still be unreachable when `vic3-planning` has no action capable of
 closing its open atoms.
 
 ## Golden examples (P7a tests)

@@ -1,4 +1,4 @@
-//! Planner glue: A* over [`vic3_sim`] successors + shared JSON types.
+//! Planner glue: A* over [`crate::sim`] successors + shared JSON types.
 //!
 //! # Stack
 //!
@@ -15,7 +15,7 @@
 //!
 //! `SearchNode: Clone + Eq + Hash` is stored in the pathfinder's HashMap.
 //! Fat worlds must not be key bodies: [`TimedNode`] hashes a `u32` id;
-//! [`Vic3Node`] hashes only [`vic3_world::PlanningState::fingerprint`]. State,
+//! [`Vic3Node`] hashes only [`crate::world::PlanningState::fingerprint`]. State,
 //! goal, and economy ride behind [`std::sync::Arc`].
 //!
 //! # Heuristic (I7)

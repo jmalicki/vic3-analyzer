@@ -8,7 +8,7 @@
 //!
 //! Production search uses [`crate::Vic3Node`] instead.
 
-use crate::pathfinding::SearchNode;
+use super::pathfinding::SearchNode;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -274,7 +274,7 @@ impl SearchNode for TimedNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pathfinding::{shortest_path, shortest_path_lazy};
+    use crate::plan::pathfinding::{shortest_path, shortest_path_lazy};
     use proptest::prelude::*;
     use rust_advanced_heaps::pairing::PairingHeap;
     use rust_advanced_heaps::simple_binary::SimpleBinaryHeap;

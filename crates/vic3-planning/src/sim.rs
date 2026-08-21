@@ -1,9 +1,9 @@
-//! Goal-relevant simulator successors over [`vic3_world::PlanningState`].
+//! Goal-relevant simulator successors over [`crate::world::PlanningState`].
 //!
 //! # Why goal-relevant only
 //!
 //! Enumerating the whole game is intractable. [`successors`] / [`successors_for_atoms`]
-//! open only edges that can close currently failing [`vic3_goals::Atom`]s (plus
+//! open only edges that can close currently failing [`crate::goals::Atom`]s (plus
 //! capped building / PM candidates when an [`EconomyContext`] is present). Idle
 //! atoms with no model action emit nothing.
 //!
@@ -11,7 +11,7 @@
 //!
 //! - **Decision** (0 days): queue tech/building/interest/army/law, `SwitchPm`,
 //!   `AdjustTax`. Emitted only when no compact queue is occupied
-//!   ([`vic3_world::PlanningState::has_inflight_queue`]).
+//!   ([`crate::world::PlanningState::has_inflight_queue`]).
 //! - **At most one event-wait** per expansion: complete the in-flight item that
 //!   still closes an open atom, or a payday tick when a solvency atom can move
 //!   closer. **I6:** wait never decreases date; no wait if nothing in flight and
@@ -25,15 +25,15 @@
 //! - **I6** — monotone dates; no spurious waits (property-tested).
 //! - **I8** — [`apply_action`] on identical state is deterministic / same fingerprint.
 //!
-//! This crate does **not** search; `vic3-plan` owns A*.
+//! This module does **not** search; `crate::plan` owns A*.
 //! See [`docs/planning.md`](../../../docs/planning.md).
 
+use crate::goals::{gaps, Atom, Goal, InterestKind, Rel};
+use crate::world::{PlanningState, QueuedInterest};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use vic3_defs::GameDefs;
-use vic3_goals::{gaps, Atom, Goal, InterestKind, Rel};
 use vic3_prices::{solve, PricesResult, SolveOpts, World, ORDER_EPS};
-use vic3_world::{PlanningState, QueuedInterest};
 
 /// Immutable price-solver inputs shared by all nodes in one search.
 #[derive(Debug, Clone)]
@@ -559,7 +559,7 @@ fn successors_for_atoms_with_economy(
                     );
                 }
                 Atom::HasLaw(law) => {
-                    if state.has_law(law) || !seen_laws.insert(vic3_world::law_key(law)) {
+                    if state.has_law(law) || !seen_laws.insert(crate::world::law_key(law)) {
                         continue;
                     }
                     push_decision(
@@ -1060,12 +1060,12 @@ pub fn version() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::goals::{compile, evaluate};
+    use crate::world::{PlanningParts, Vic3Date};
     use proptest::prelude::*;
     use std::collections::BTreeMap;
     use vic3_defs::{Good, GoodIdx, GoodsVec};
-    use vic3_goals::{compile, evaluate};
     use vic3_prices::{WorldBuilding, WorldCountry, WorldState};
-    use vic3_world::{PlanningParts, Vic3Date};
 
     #[test]
     fn version_is_semver() {

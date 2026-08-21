@@ -3,9 +3,9 @@
 //! # Role
 //!
 //! Downstream crates never search the full save IR. They read this projection:
-//! - `vic3-goals` evaluates DSL atoms against it
-//! - `vic3-sim` emits goal-relevant successors that mutate a clone
-//! - `vic3-plan` interns A* nodes by [`PlanningState::fingerprint`] (I8)
+//! - `crate::goals` evaluates DSL atoms against it
+//! - `crate::sim` emits goal-relevant successors that mutate a clone
+//! - `crate::plan` interns A* nodes by [`PlanningState::fingerprint`] (I8)
 //!
 //! This is **not** the full save. Identical state ⇒ identical hash (I8).
 //!
@@ -201,8 +201,8 @@ impl Default for PlanningParts {
 
 /// Compact world node for DSL eval, sim successors, and A* intern keys.
 ///
-/// Fields cover every atom `vic3-goals` can read, plus queue / delta slots
-/// `vic3-sim` needs for waits and re-solves. Hash/eq use `f64::to_bits` (I8).
+/// Fields cover every atom `crate::goals` can read, plus queue / delta slots
+/// `crate::sim` needs for waits and re-solves. Hash/eq use `f64::to_bits` (I8).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningState {
     pub date: Vic3Date,

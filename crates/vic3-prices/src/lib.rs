@@ -5,7 +5,7 @@
 //! `vic3-load` + `vic3-defs` → [`World`] + [`vic3_defs::GameDefs`] → [`solve`] /
 //! [`preview`] / [`alerts`] → [`PricesResult`]. Downstream:
 //!
-//! - `vic3-world::PlanningState::from_world_with_prices` copies good prices
+//! - `vic3-planning::PlanningState::from_world_with_prices` copies good prices
 //!   (and modeled GDP) into the compact planning IR.
 //! - `vic3-api` exposes the same JSON to CLI, wasm, Tauri, and MCP/SQL hosts
 //!   (`prices`, `what_if`, `preview`, `alerts`, planning/gaps paths).

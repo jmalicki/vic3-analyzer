@@ -3,13 +3,13 @@
 //! # Role
 //!
 //! **clap lives only in this crate.** Inner option structs
-//! ([`vic3_prices::SolveOpts`], [`vic3_prices::WhatIfOpts`], [`vic3_plan::PlanOpts`], …)
+//! ([`vic3_prices::SolveOpts`], [`vic3_prices::WhatIfOpts`], [`vic3_planning::PlanOpts`], …)
 //! have no `PathBuf`; filesystem fields sit on clap wrappers (`IoArgs`, `*Cli`).
 //! wasm never links clap.
 //!
 //! JSON shapes match `vic3-api` so CLI `--json`, wasm, Tauri, and MCP stay aligned.
 //! This binary currently loads a [`vic3_load::WorldSave`] and calls
-//! `vic3-prices` / `vic3-plan` directly for speed; path helpers and session APIs
+//! `vic3-prices` / `vic3-planning` directly for speed; path helpers and session APIs
 //! in `vic3-api` are what Tauri / MCP / wasm use for the same results.
 //!
 //! # Command → analysis mapping
@@ -25,7 +25,7 @@
 //! | `gaps` | `gaps_json` | `{ satisfied, gaps, limitations }` |
 //! | `plan` | `plan_json` | also archives under XDG |
 //! | `defs export` | `defs_blob_from_game` | local postcard; do not publish |
-//! | `archive …` | `vic3-plan` records | list / show / diff / import / export |
+//! | `archive …` | `vic3-planning` records | list / show / diff / import / export |
 //!
 //! Shared IO: `--save` / `VIC3_SAVE`, optional `--tokens` / `VIC3_TOKENS`,
 //! `--game` / `VIC3_GAME` or `--defs` / `VIC3_DEFS`.
@@ -46,15 +46,15 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use vic3_defs::GameDefs;
-use vic3_goals::Atom;
 use vic3_load::{empty_tokens, export_save, load_path_world, load_tokens_path, SavePatch};
-use vic3_plan::{compare, AnalysisRecord, PlanOpts, PlanResult};
+use vic3_planning::Atom;
+use vic3_planning::PlanningState;
+use vic3_planning::{compare, AnalysisRecord, PlanOpts, PlanResult};
+use vic3_planning::{EconomyContext, SimConfig};
 use vic3_prices::{
     alerts, optimize_pms, preview, solve, what_if, AlertsResult, OptimizeAxis as PriceOptimizeAxis,
     OptimizeResult, PricesResult, SolveOpts, WhatIfOpts, World, WorldDelta,
 };
-use vic3_sim::{EconomyContext, SimConfig};
-use vic3_world::PlanningState;
 use vic3save::PdsDate;
 
 fn main() -> Result<()> {
@@ -464,14 +464,14 @@ fn run_gaps(cmd: GapsCli) -> Result<()> {
         .player_country_tag()
         .context("save has no playable country")?;
     let state = PlanningState::from_world_with_prices(&world, country_tag, &prices)?;
-    let goal = vic3_goals::parse(&cmd.goal)?;
+    let goal = vic3_planning::parse(&cmd.goal)?;
     let mut limitations = prices.limitations;
     if goal.has_army_atom() {
         state.push_army_power_limitation(&mut limitations);
     }
     let result = GapsResult {
-        satisfied: vic3_goals::evaluate(&goal, &state),
-        gaps: vic3_goals::gaps(&goal, &state),
+        satisfied: vic3_planning::evaluate(&goal, &state),
+        gaps: vic3_planning::gaps(&goal, &state),
         limitations,
     };
     emit_gaps(&result, cmd.json)
@@ -489,9 +489,9 @@ fn run_plan(cmd: PlanCli) -> Result<()> {
         .to_string();
     let date = world.game_date.map(|date| date.game_fmt().to_string());
     let state = PlanningState::from_world_with_prices(&world, &country, &prices)?;
-    let goal = vic3_goals::parse(&cmd.goal)?;
+    let goal = vic3_planning::parse(&cmd.goal)?;
     let economy = EconomyContext::new(world, defs, solve_opts);
-    let result = vic3_plan::plan_with_economy(
+    let result = vic3_planning::plan_with_economy(
         state,
         goal,
         SimConfig::default(),

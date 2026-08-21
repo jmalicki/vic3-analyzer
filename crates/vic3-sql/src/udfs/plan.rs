@@ -16,10 +16,10 @@ use datafusion::datasource::{TableProvider, TableType};
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
 use serde_json::Value;
-use vic3_plan::plan_with_economy;
+use vic3_planning::plan_with_economy;
+use vic3_planning::PlanningState;
+use vic3_planning::{Action, EconomyContext, SimConfig};
 use vic3_prices::SolveOpts;
-use vic3_sim::{Action, EconomyContext, SimConfig};
-use vic3_world::PlanningState;
 
 use crate::binding::SessionBinding;
 use crate::exec::memory_exec;
@@ -54,7 +54,7 @@ impl TableFunctionImpl for PlanTvf {
             let _label = literal_str(&args[2], 3)?;
         }
 
-        let goal = vic3_goals::compile(&goal_src)
+        let goal = vic3_planning::compile(&goal_src)
             .map_err(|e| datafusion::common::DataFusionError::Plan(format!("plan goal: {e}")))?;
         let country = self.binding.world.player_country_tag().ok_or_else(|| {
             datafusion::common::DataFusionError::Execution(
@@ -91,7 +91,10 @@ impl TableFunctionImpl for PlanTvf {
     }
 }
 
-fn plan_batch(actions: &[vic3_plan::PlanStep], limitations: &[String]) -> DfResult<RecordBatch> {
+fn plan_batch(
+    actions: &[vic3_planning::PlanStep],
+    limitations: &[String],
+) -> DfResult<RecordBatch> {
     let schema = plan_schema();
     let mut step = Int32Builder::with_capacity(actions.len());
     let mut day = UInt32Builder::with_capacity(actions.len());

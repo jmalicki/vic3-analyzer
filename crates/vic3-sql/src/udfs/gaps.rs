@@ -15,8 +15,8 @@ use datafusion::common::{plan_err, Result as DfResult};
 use datafusion::datasource::{TableProvider, TableType};
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
-use vic3_goals::{Atom, InterestKind, Rel};
-use vic3_world::PlanningState;
+use vic3_planning::PlanningState;
+use vic3_planning::{Atom, InterestKind, Rel};
 
 use crate::binding::SessionBinding;
 use crate::exec::memory_exec;
@@ -40,7 +40,7 @@ impl TableFunctionImpl for GapsTvf {
             return plan_err!("gaps(goal) expects exactly 1 argument");
         }
         let goal_src = literal_str(&args[0], 1)?;
-        let goal = vic3_goals::compile(&goal_src)
+        let goal = vic3_planning::compile(&goal_src)
             .map_err(|e| datafusion::common::DataFusionError::Plan(format!("gaps goal: {e}")))?;
         let country = self.binding.world.player_country_tag().ok_or_else(|| {
             datafusion::common::DataFusionError::Execution(
@@ -62,7 +62,7 @@ impl TableFunctionImpl for GapsTvf {
     }
 }
 
-fn gaps_batch(goal: &vic3_goals::Goal, state: &PlanningState) -> DfResult<RecordBatch> {
+fn gaps_batch(goal: &vic3_planning::Goal, state: &PlanningState) -> DfResult<RecordBatch> {
     let atoms = goal.atoms();
     let schema = gaps_schema();
     let mut predicate = StringBuilder::with_capacity(atoms.len(), atoms.len() * 24);

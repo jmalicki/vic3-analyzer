@@ -35,13 +35,13 @@ pub enum ApiError {
     DefsManifest(String),
     /// Goal DSL could not be compiled.
     #[error(transparent)]
-    Goal(#[from] vic3_goals::GoalError),
+    Goal(#[from] vic3_planning::GoalError),
     /// Save projection could not be built.
     #[error(transparent)]
-    World(#[from] vic3_world::WorldError),
+    World(#[from] vic3_planning::WorldError),
     /// No plan fits the current model and limits.
     #[error(transparent)]
-    Plan(#[from] vic3_plan::PlanError),
+    Plan(#[from] vic3_planning::PlanError),
     /// The save contains no playable country (gaps / plan need a player tag).
     #[error("save has no playable country")]
     NoCountry,

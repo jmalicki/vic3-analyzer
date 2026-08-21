@@ -298,7 +298,7 @@ pub fn prices_schema() -> String {
     schema::prices_schema_json()
 }
 
-/// Find a shortest goal-relevant plan and return `vic3_plan::PlanResult` JSON.
+/// Find a shortest goal-relevant plan and return `vic3_planning::PlanResult` JSON.
 #[wasm_bindgen]
 pub fn plan(
     save_bytes: &[u8],

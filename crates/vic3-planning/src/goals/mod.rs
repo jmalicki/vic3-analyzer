@@ -4,10 +4,10 @@
 //!
 //! 1. [`compile`] / [`parse`] — chumsky grammar ([`docs/dsl.md`](../../../docs/dsl.md))
 //! 2. Sugar expands to [`Atom`] trees (`declare-war`, `research`, `gdp`)
-//! 3. [`evaluate`] / [`gaps`] — read [`vic3_world::PlanningState`] only
+//! 3. [`evaluate`] / [`gaps`] — read [`crate::world::PlanningState`] only
 //!
-//! This crate does **not** search. Timelines live in `vic3-plan`; successors in
-//! `vic3-sim`.
+//! This module does **not** search. Timelines live in `crate::plan`; successors in
+//! `crate::sim`.
 //!
 //! # Sugar
 //!
@@ -33,8 +33,8 @@
 
 mod parse;
 
+use crate::world::PlanningState;
 use serde::{Deserialize, Serialize};
-use vic3_world::PlanningState;
 
 pub use parse::parse;
 
@@ -167,7 +167,7 @@ impl Atom {
     }
 
     pub fn is_has_law(&self, law: &str) -> bool {
-        matches!(self, Atom::HasLaw(id) if vic3_world::law_key(id) == vic3_world::law_key(law))
+        matches!(self, Atom::HasLaw(id) if crate::world::law_key(id) == crate::world::law_key(law))
     }
 
     /// Whether the atom holds. Unknown metrics (including missing army PP) are false.
@@ -387,8 +387,8 @@ pub fn version() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::{PlanningParts, PlanningState};
     use proptest::prelude::*;
-    use vic3_world::{PlanningParts, PlanningState};
 
     #[test]
     fn version_is_semver() {

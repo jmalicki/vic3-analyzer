@@ -36,7 +36,7 @@
 //! # Contracts
 //!
 //! - Inner option structs ([`vic3_prices::SolveOpts`], [`vic3_prices::WhatIfOpts`],
-//!   [`vic3_plan::PlanOpts`], …) have **no** `PathBuf`; paths appear only on
+//!   [`vic3_planning::PlanOpts`], …) have **no** `PathBuf`; paths appear only on
 //!   path helpers and clap wrappers.
 //! - Empty / `{}` / whitespace `solve_opts_json` → [`SolveOpts::default`].
 //! - Most analysis exports return `Result<String, ApiError>` (JSON text).
@@ -54,16 +54,16 @@ use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::path::Path;
-use vic3_goals::Atom;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save, SavePatch};
-use vic3_plan::PlanOpts;
+use vic3_planning::Atom;
+use vic3_planning::PlanOpts;
+use vic3_planning::PlanningState;
+use vic3_planning::{EconomyContext, SimConfig};
 use vic3_prices::{
     alerts as diagnose_alerts, optimize_pms, preview as solve_preview, solve,
     what_if as solve_what_if, OptimizePmsOpts, PricesResult, SolveOpts, WhatIfOpts, World,
     WorldDelta,
 };
-use vic3_sim::{EconomyContext, SimConfig};
-use vic3_world::PlanningState;
 use vic3save::PdsDate;
 
 pub use error::ApiError;
@@ -586,7 +586,7 @@ pub fn loaded_optimize_pms_json(axis_json: &str) -> Result<String, ApiError> {
 ///
 /// [`ApiError::NoLoadedAnalysis`], goal parse, [`ApiError::NoCountry`], world projection.
 pub fn loaded_gaps_json(goal: &str) -> Result<String, ApiError> {
-    let goal = vic3_goals::parse(goal)?;
+    let goal = vic3_planning::parse(goal)?;
     with_loaded_analysis(|loaded| {
         let country = country_tag(&loaded.world)?;
         let state = PlanningState::from_world_with_prices(&loaded.world, country, &loaded.prices)?;
@@ -595,15 +595,15 @@ pub fn loaded_gaps_json(goal: &str) -> Result<String, ApiError> {
             state.push_army_power_limitation(&mut limitations);
         }
         let result = GapsResult {
-            satisfied: vic3_goals::evaluate(&goal, &state),
-            gaps: vic3_goals::gaps(&goal, &state),
+            satisfied: vic3_planning::evaluate(&goal, &state),
+            gaps: vic3_planning::gaps(&goal, &state),
             limitations,
         };
         Ok(serde_json::to_string(&result)?)
     })
 }
 
-/// Plan from the loaded session ([`PlanOpts`] JSON → [`vic3_plan::PlanResult`]).
+/// Plan from the loaded session ([`PlanOpts`] JSON → [`vic3_planning::PlanResult`]).
 ///
 /// # Errors
 ///
@@ -611,7 +611,7 @@ pub fn loaded_gaps_json(goal: &str) -> Result<String, ApiError> {
 /// world projection, or [`ApiError::Plan`].
 pub fn loaded_plan_json(plan_opts_json: &str) -> Result<String, ApiError> {
     let plan_opts: PlanOpts = serde_json::from_str(plan_opts_json)?;
-    let goal = vic3_goals::parse(&plan_opts.goal)?;
+    let goal = vic3_planning::parse(&plan_opts.goal)?;
     with_loaded_analysis(|loaded| {
         let country = country_tag(&loaded.world)?;
         let state = PlanningState::from_world_with_prices(&loaded.world, country, &loaded.prices)?;
@@ -620,7 +620,7 @@ pub fn loaded_plan_json(plan_opts_json: &str) -> Result<String, ApiError> {
             loaded.defs.clone(),
             loaded.solve_opts.clone(),
         );
-        let result = vic3_plan::plan_with_economy(
+        let result = vic3_planning::plan_with_economy(
             state,
             goal,
             SimConfig::default(),
@@ -748,7 +748,7 @@ pub fn what_if_json(
     Ok(serde_json::to_string(&result)?)
 }
 
-/// Find a shortest goal-relevant plan ([`vic3_plan::PlanResult`] JSON). One-shot.
+/// Find a shortest goal-relevant plan ([`vic3_planning::PlanResult`] JSON). One-shot.
 ///
 /// `plan_opts_json` is [`PlanOpts`] (`goal`, `max_days`, optional `label`).
 ///
@@ -771,9 +771,9 @@ pub fn plan_json(
     let country = country_tag(&world)?;
     drop(save);
     let state = PlanningState::from_world_with_prices(&world, country, &prices)?;
-    let goal = vic3_goals::parse(&plan_opts.goal)?;
+    let goal = vic3_planning::parse(&plan_opts.goal)?;
     let economy = EconomyContext::new(world, defs, solve_opts.clone());
-    let result = vic3_plan::plan_with_economy(
+    let result = vic3_planning::plan_with_economy(
         state,
         goal,
         SimConfig::default(),
@@ -805,14 +805,14 @@ pub fn gaps_json(
     let country = country_tag(&world)?;
     drop(save);
     let state = PlanningState::from_world_with_prices(&world, country, &prices)?;
-    let goal = vic3_goals::parse(goal)?;
+    let goal = vic3_planning::parse(goal)?;
     let mut limitations = prices.limitations;
     if goal.has_army_atom() {
         state.push_army_power_limitation(&mut limitations);
     }
     let result = GapsResult {
-        satisfied: vic3_goals::evaluate(&goal, &state),
-        gaps: vic3_goals::gaps(&goal, &state),
+        satisfied: vic3_planning::evaluate(&goal, &state),
+        gaps: vic3_planning::gaps(&goal, &state),
         limitations,
     };
     Ok(serde_json::to_string(&result)?)
@@ -1640,7 +1640,7 @@ mod tests {
             r#"{"goal":"research(tech=nitroglycerin)","max_days":1000,"label":"rush"}"#,
         )
         .expect("plan");
-        let result: vic3_plan::PlanResult = serde_json::from_str(&json).expect("PlanResult");
+        let result: vic3_planning::PlanResult = serde_json::from_str(&json).expect("PlanResult");
         assert_eq!(result.day_cost, 365);
         assert_eq!(result.actions.len(), 2);
         assert!(result.residual.is_finite());
@@ -1687,7 +1687,7 @@ mod tests {
                 .is_some_and(|limitations| {
                     !limitations.is_empty()
                         && limitations.iter().any(|line| {
-                            line.as_str() == Some(vic3_world::ARMY_POWER_PROJECTION_UNKNOWN)
+                            line.as_str() == Some(vic3_planning::ARMY_POWER_PROJECTION_UNKNOWN)
                         })
                 }),
             "army PP unknown limitation: {value}"

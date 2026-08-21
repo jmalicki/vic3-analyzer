@@ -1,4 +1,4 @@
-//! A* node backed by goal-relevant [`vic3_sim`] transitions.
+//! A* node backed by goal-relevant [`crate::sim`] transitions.
 //!
 //! # Cheap intern key
 //!
@@ -19,12 +19,12 @@
 //! Admissible relaxation of the real graph (**I7** on research formulas), not
 //! a substitute for search.
 
-use crate::pathfinding::SearchNode;
+use super::pathfinding::SearchNode;
+use crate::goals::{evaluate, Atom, Goal};
+use crate::sim::{EconomyContext, SimConfig, Successor};
+use crate::world::PlanningState;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use vic3_goals::{evaluate, Atom, Goal};
-use vic3_sim::{EconomyContext, SimConfig, Successor};
-use vic3_world::PlanningState;
 
 /// Immutable inputs shared by every node in one planning search.
 #[derive(Debug)]
@@ -106,13 +106,13 @@ impl Vic3Node {
 
     pub(crate) fn sim_successors(&self) -> Vec<Successor> {
         match self.context.economy.as_deref() {
-            Some(economy) => vic3_sim::successors_with_economy(
+            Some(economy) => crate::sim::successors_with_economy(
                 &self.state,
                 &self.context.goal,
                 self.context.config,
                 economy,
             ),
-            None => vic3_sim::successors(&self.state, &self.context.goal, self.context.config),
+            None => crate::sim::successors(&self.state, &self.context.goal, self.context.config),
         }
     }
 }
@@ -185,8 +185,8 @@ fn goal_timing_lower_bound(
         }
         Goal::Atom(Atom::InterestIn { kind, id }) => {
             let held = match kind {
-                vic3_goals::InterestKind::State => state.has_interest_state(id),
-                vic3_goals::InterestKind::Region => state.has_interest_region(id),
+                crate::goals::InterestKind::State => state.has_interest_state(id),
+                crate::goals::InterestKind::Region => state.has_interest_region(id),
             };
             if held {
                 0
@@ -195,7 +195,7 @@ fn goal_timing_lower_bound(
             }
         }
         Goal::Atom(Atom::ArmyPower { rel, value }) => {
-            if vic3_sim::army_power_raise_target(*rel, *value, state.army_power_projection)
+            if crate::sim::army_power_raise_target(*rel, *value, state.army_power_projection)
                 .is_some()
             {
                 army_days
@@ -253,13 +253,13 @@ impl SearchNode for Vic3Node {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pathfinding::{shortest_path, shortest_path_lazy};
+    use crate::goals::compile;
+    use crate::plan::pathfinding::{shortest_path, shortest_path_lazy};
+    use crate::sim::Action;
+    use crate::world::{PlanningParts, PlanningState};
     use proptest::prelude::*;
     use rust_advanced_heaps::pairing::PairingHeap;
     use rust_advanced_heaps::simple_binary::SimpleBinaryHeap;
-    use vic3_goals::compile;
-    use vic3_sim::Action;
-    use vic3_world::{PlanningParts, PlanningState};
 
     fn tech_fixture(research_days: u16) -> Vic3Node {
         Vic3Node::new(
@@ -307,7 +307,7 @@ mod tests {
         assert!(path.iter().any(|node| {
             matches!(
                 node.state().queued_interest,
-                Some(vic3_world::QueuedInterest::State(ref id)) if id == "alsace"
+                Some(crate::world::QueuedInterest::State(ref id)) if id == "alsace"
             ) || node.state().has_interest_state("alsace")
         }));
         assert!(path.iter().any(|node| {
@@ -376,10 +376,10 @@ mod tests {
         assert!(path[2].state().has_tech("nitroglycerin"));
         assert!(path[2].is_goal());
 
-        let first_edges = vic3_sim::successors(start.state(), start.goal(), start.config());
+        let first_edges = crate::sim::successors(start.state(), start.goal(), start.config());
         assert!(matches!(
             first_edges.as_slice(),
-            [vic3_sim::Successor {
+            [crate::sim::Successor {
                 action: Action::QueueTech { tech },
                 days: 0,
                 ..

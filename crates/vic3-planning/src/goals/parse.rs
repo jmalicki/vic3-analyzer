@@ -5,7 +5,7 @@
 
 use chumsky::prelude::*;
 
-use crate::{
+use super::{
     Atom, Goal, GoalError, InterestKind, Rel, DECLARE_WAR_ARMY_THRESHOLD,
     DECLARE_WAR_MUNITIONS_PRICE_CEILING, MUNITIONS_GOOD,
 };

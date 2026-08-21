@@ -18,10 +18,7 @@ License: AGPL-3.0. Saves and token maps are user-supplied and never uploaded.
 | `vic3-load` | Envelope via pdx-tools `vic3save` + our serde IR (`DeserializeVic3`); surgical plaintext `.v3` patch-export (`SavePatch`). Contracts in crate rustdoc. |
 | `vic3-defs` | Goods, defines, PMs, pop needs from a game install or fixture tree; wasm defs blob. Contracts in crate rustdoc. |
 | `vic3-prices` | Closed-form market price + pop consumption + Basin NLS equilibrium; `alerts`, `preview(WorldDelta)`, `warm_rel` |
-| `vic3-world` | Compact `PlanningState` projection from IR + prices |
-| `vic3-goals` | Chumsky DSL + `declare-war` / `research` / `gdp` compilation |
-| `vic3-sim` | Goal-relevant successors; event-wait edges |
-| `vic3-plan` | `SearchNode` glue + `shortest_path`; shared option/result/archive types |
+| `vic3-planning` | Compact `PlanningState`, goal DSL, goal-relevant successors, A* glue + shared option/archive types |
 | `vic3-api` | Transport-free analysis (bytes or paths in, JSON out); shared shapes for wasm, Tauri, MCP (and CLI `--json`) |
 | `vic3-catalog` | Save-root scan (stubs, `local`/`steam_cloud`), shared TOML/JSON app config + path auto-detect |
 | `vic3-sql` | Read-only DataFusion SQL over catalog + active/latest fact tables |
@@ -31,7 +28,7 @@ License: AGPL-3.0. Saves and token maps are user-supplied and never uploaded.
 | `vic3-wasm` | Thin `wasm-bindgen` over `vic3-api`; no filesystem |
 | `web/` | Vite + React; IndexedDB archive; forms from JSON Schema |
 
-Shared option structs (no `PathBuf`) live with results in `vic3-plan` (or a tiny sibling if that crate’s deps get too heavy). clap flatten wrappers in `vic3-cli` only. wasm never links clap. Facades share `vic3-api` so JSON shapes stay identical.
+Shared option structs (no `PathBuf`) live with results in `vic3-planning` (or a tiny sibling if that crate’s deps get too heavy). clap flatten wrappers in `vic3-cli` only. wasm never links clap. Facades share `vic3-api` so JSON shapes stay identical.
 
 ## Data flow
 
@@ -43,10 +40,10 @@ flowchart LR
   defs --> prices
   prices --> alerts[alerts]
   prices --> preview[WorldDelta preview]
-  prices --> world[vic3-world]
-  world --> goals[vic3-goals]
-  goals --> sim[vic3-sim]
-  sim --> plan[vic3-plan SearchNode]
+  prices --> world[vic3-planning PlanningState]
+  world --> goals[goal DSL]
+  goals --> sim[successors]
+  sim --> plan[A-star SearchNode]
   plan --> api[vic3-api]
   preview --> api
   alerts --> api

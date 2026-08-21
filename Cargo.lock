@@ -6332,12 +6332,9 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "vic3-defs",
- "vic3-goals",
  "vic3-load",
- "vic3-plan",
+ "vic3-planning",
  "vic3-prices",
- "vic3-sim",
- "vic3-world",
  "vic3save",
 ]
 
@@ -6368,12 +6365,9 @@ dependencies = [
  "sha2 0.11.0",
  "uuid",
  "vic3-defs",
- "vic3-goals",
  "vic3-load",
- "vic3-plan",
+ "vic3-planning",
  "vic3-prices",
- "vic3-sim",
- "vic3-world",
  "vic3save",
 ]
 
@@ -6388,17 +6382,6 @@ dependencies = [
  "proptest",
  "serde",
  "thiserror 2.0.20",
-]
-
-[[package]]
-name = "vic3-goals"
-version = "0.3.0"
-dependencies = [
- "chumsky",
- "proptest",
- "serde",
- "thiserror 2.0.20",
- "vic3-world",
 ]
 
 [[package]]
@@ -6435,17 +6418,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "vic3-plan"
+name = "vic3-planning"
 version = "0.3.0"
 dependencies = [
+ "chumsky",
  "proptest",
  "rust-advanced-heaps",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
- "vic3-goals",
- "vic3-sim",
- "vic3-world",
+ "vic3-defs",
+ "vic3-load",
+ "vic3-prices",
 ]
 
 [[package]]
@@ -6464,19 +6448,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vic3-sim"
-version = "0.3.0"
-dependencies = [
- "proptest",
- "serde",
- "thiserror 2.0.20",
- "vic3-defs",
- "vic3-goals",
- "vic3-prices",
- "vic3-world",
-]
-
-[[package]]
 name = "vic3-sql"
 version = "0.3.0"
 dependencies = [
@@ -6490,12 +6461,9 @@ dependencies = [
  "vic3-api",
  "vic3-catalog",
  "vic3-defs",
- "vic3-goals",
  "vic3-load",
- "vic3-plan",
+ "vic3-planning",
  "vic3-prices",
- "vic3-sim",
- "vic3-world",
 ]
 
 [[package]]
@@ -6508,18 +6476,6 @@ dependencies = [
  "vic3-defs",
  "vic3-prices",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "vic3-world"
-version = "0.3.0"
-dependencies = [
- "proptest",
- "serde",
- "thiserror 2.0.20",
- "vic3-defs",
- "vic3-load",
- "vic3-prices",
 ]
 
 [[package]]

@@ -38,7 +38,7 @@ Compiled atoms are the contract across surfaces:
 | --- | --- | --- |
 | Web presets | `web/src/planTemplates.ts` | Ordinary DSL strings (`declare-war(state=alsace)`, `gdp >= …`, …); no bypass of compile/eval |
 | Gaps / Timeline UI | wasm `loaded_gaps` / `loaded_plan` | Same `PlanOpts` / gaps JSON as CLI |
-| SQL | `plan(goal [, max_days [, label]])`, `gaps(goal)` | TVFs compile the goal, project `PlanningState::from_world_with_prices`, then call `vic3-plan` / `vic3-goals` ([`sql.md`](sql.md)) |
+| SQL | `plan(goal [, max_days [, label]])`, `gaps(goal)` | TVFs compile the goal, project `PlanningState::from_world_with_prices`, then call `vic3-planning` ([`sql.md`](sql.md)) |
 | CLI | `vic3-cli gaps` / `plan` | Identical JSON field names ([`json-schema.md`](json-schema.md)) |
 
 ## Graph
@@ -86,7 +86,7 @@ reachable research formulas.
 ## Non-tech action readiness
 
 Saved-wealth (`population_weighted_wealth`) stays diagnostic until a wage model
-exists. Fiscal atoms use a **compact payday model** in `vic3-sim`, not a full
+exists. Fiscal atoms use a **compact payday model** in `vic3-planning`, not a full
 Paradox treasury simulation:
 
 - When `solvent`, `credit_headroom`, or `debt_principal` is an open atom and one
@@ -146,4 +146,4 @@ queue head) stays **sim-only / undocumented as compile conjuncts** for now —
 ## P9a vs P9b
 
 - P9a: toy `SearchNode`s, no Vic3, I7 + known shortest path + I8.
-- P9b: `SearchNode` for `vic3-sim` successors.
+- P9b: `SearchNode` for `vic3-planning` successors.

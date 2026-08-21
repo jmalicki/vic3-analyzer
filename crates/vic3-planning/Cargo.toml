@@ -1,21 +1,24 @@
 [package]
-name = "vic3-sim"
+name = "vic3-planning"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Goal-relevant successors and event-wait edges"
+description = "Planning stack: PlanningState, goal DSL, successors, and A*"
 
 [lints]
 workspace = true
 
 [dependencies]
+chumsky.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
-vic3-goals = { path = "../vic3-goals" }
+rust-advanced-heaps.workspace = true
 vic3-defs = { path = "../vic3-defs" }
+vic3-load = { path = "../vic3-load" }
 vic3-prices = { path = "../vic3-prices" }
-vic3-world = { path = "../vic3-world" }
 
 [dev-dependencies]
 proptest.workspace = true
+vic3-defs = { path = "../vic3-defs" }

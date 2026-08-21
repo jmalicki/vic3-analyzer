@@ -4,18 +4,18 @@
 //! and SQL `plan(goal [, max_days [, label]])` (label accepted, not emitted).
 //! [`plan`] runs A* via [`Vic3Node`]; failures are [`PlanError`].
 
-use crate::{pathfinding::shortest_path, Vic3Node};
+use super::{pathfinding::shortest_path, Vic3Node};
+use crate::goals::Goal;
+use crate::sim::{Action, EconomyContext, SimConfig};
+use crate::world::PlanningState;
 use rust_advanced_heaps::pairing::PairingHeap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use vic3_goals::Goal;
-use vic3_sim::{Action, EconomyContext, SimConfig};
-use vic3_world::PlanningState;
 
 /// Shared planner options (CLI / wasm JSON; SQL mirrors `goal` + `max_days`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanOpts {
-    /// DSL source compiled by [`vic3_goals::compile`].
+    /// DSL source compiled by [`crate::goals::compile`].
     pub goal: String,
     /// Reject plans whose day cost exceeds this (default 3650).
     #[serde(default = "default_max_days")]
@@ -254,7 +254,7 @@ pub enum PlanError {
     /// Shortest path exists but exceeds [`PlanOpts::max_days`].
     #[error("shortest plan costs {cost} days, exceeding --max-days {max_days}")]
     MaxDays { cost: u32, max_days: u32 },
-    /// Path nodes were not adjacent under [`vic3_sim::successors`] (bug).
+    /// Path nodes were not adjacent under [`crate::sim::successors`] (bug).
     #[error("planner path contains an unknown state transition")]
     UnknownTransition,
 }
@@ -331,9 +331,9 @@ fn plan_from_root(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::goals::compile;
+    use crate::world::{PlanningParts, PlanningState};
     use serde_json::json;
-    use vic3_goals::compile;
-    use vic3_world::{PlanningParts, PlanningState};
 
     #[test]
     fn plan_result_contains_queue_and_wait_actions() {

@@ -24,12 +24,9 @@ serde_json.workspace = true
 sha2 = "0.11.0"
 uuid = { version = "1.24.1", features = ["v4"] }
 vic3-defs = { path = "../vic3-defs" }
-vic3-goals = { path = "../vic3-goals" }
 vic3-load = { path = "../vic3-load" }
-vic3-plan = { version = "0.3.0", path = "../vic3-plan" }
+vic3-planning = { path = "../vic3-planning" }
 vic3-prices = { path = "../vic3-prices" }
-vic3-sim = { version = "0.3.0", path = "../vic3-sim" }
-vic3-world = { path = "../vic3-world" }
 vic3save.workspace = true
 
 [dev-dependencies]
