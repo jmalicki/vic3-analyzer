@@ -26,4 +26,6 @@ pub enum DefsError {
     BlobEncode(postcard::Error),
     #[error("failed to decode defs blob: {0}")]
     BlobDecode(postcard::Error),
+    #[error("failed to parse defs overlay JSON: {0}")]
+    OverlayJson(#[source] serde_json::Error),
 }
