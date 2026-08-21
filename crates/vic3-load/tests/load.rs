@@ -280,6 +280,82 @@ technology={
         save.queued_building_for(16777216).as_deref(),
         Some("building_construction_sector")
     );
+    let rows = vic3_load::constructions_for(&save, 16777216);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].building, "building_construction_sector");
+    assert_eq!(rows[0].queue, vic3_load::ConstructionQueueKind::Private);
+    assert_eq!(rows[0].remaining, Some(20.0));
+}
+
+#[test]
+fn constructions_private_before_government_and_ownership_filter() {
+    let save = load_slice(
+        br#"SAV01000000000000000000
+country_manager={
+	database={
+		16777216={ definition="GER" states={ 1 } }
+		16777217={ definition="FRA" states={ 2 } }
+	}
+}
+states={
+	database={
+		1={ country=16777216 }
+		2={ country=16777217 }
+	}
+}
+building_constructions={
+	database={
+		10={
+			building="building_logging_camp"
+			state=1
+			remaining=5
+		}
+		11={
+			building="building_rye_farm"
+			state=2
+			remaining=9
+		}
+	}
+}
+government_constructions={
+	database={
+		1={
+			building="building_construction_sector"
+			state=1
+			remaining=40
+		}
+	}
+}
+"#,
+        empty_tokens(),
+    )
+    .expect("dual queue fixture");
+    let ger = vic3_load::constructions_for(&save, 16777216);
+    assert_eq!(
+        ger.iter()
+            .map(|row| (row.queue, row.building.as_str(), row.order_id))
+            .collect::<Vec<_>>(),
+        [
+            (
+                vic3_load::ConstructionQueueKind::Private,
+                "building_logging_camp",
+                10
+            ),
+            (
+                vic3_load::ConstructionQueueKind::Government,
+                "building_construction_sector",
+                1
+            ),
+        ]
+    );
+    assert_eq!(
+        save.queued_building_for(16777216).as_deref(),
+        Some("building_logging_camp"),
+        "head prefers private over government"
+    );
+    let all = vic3_load::all_constructions(&save);
+    assert_eq!(all.len(), 3);
+    assert!(all.iter().any(|row| row.country_id == Some(16777217)));
 }
 
 #[test]

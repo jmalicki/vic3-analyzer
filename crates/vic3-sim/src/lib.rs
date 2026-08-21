@@ -885,7 +885,8 @@ pub fn apply_action_with_economy(
             if building.is_empty() || next.has_inflight_queue() || economy.is_none() {
                 return None;
             }
-            next.queued_building = Some(building.clone());
+            // Push onto the exposed queue and set the in-flight head together.
+            next.push_construction(building.clone());
         }
         Action::QueueInterest { kind, id } => {
             if id.is_empty() || next.has_inflight_queue() {
@@ -969,7 +970,8 @@ pub fn apply_action_with_economy(
                 return None;
             }
             next.date = next.date.add_days(i32::from(*days));
-            next.queued_building = None;
+            // Pop the finished order; advance head if the save queue had more.
+            next.complete_construction(building);
             *next
                 .building_level_deltas
                 .entry(building.clone())

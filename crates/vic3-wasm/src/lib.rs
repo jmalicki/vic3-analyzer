@@ -96,6 +96,12 @@ pub fn loaded_military() -> Result<String, JsError> {
     vic3_api::loaded_military_json().map_err(to_js)
 }
 
+/// Return private + government construction queues for the played country.
+#[wasm_bindgen]
+pub fn loaded_constructions() -> Result<String, JsError> {
+    vic3_api::loaded_constructions_json().map_err(to_js)
+}
+
 /// Patch plaintext `.v3` bytes with building production methods and extra levels.
 ///
 /// `original_bytes` are the origin save from JS (IndexedDB). They are not
@@ -350,10 +356,10 @@ pub fn alerts(
 // Thin re-exports for native callers that historically linked `vic3-wasm`.
 pub use vic3_api::{
     alerts_json, build_defs_blob_bytes, defs_icons_json, defs_summary_json, export_save_bytes,
-    gaps_json, load_analysis_json, loaded_alerts_json, loaded_apply_delta_json, loaded_gaps_json,
-    loaded_military_json, loaded_optimize_pms_json, loaded_plan_json, loaded_prices_json,
-    loaded_production_methods_json, loaded_what_if_json, parse_save_json, plan_json, prices_json,
-    what_if_json,
+    gaps_json, load_analysis_json, loaded_alerts_json, loaded_apply_delta_json,
+    loaded_constructions_json, loaded_gaps_json, loaded_military_json, loaded_optimize_pms_json,
+    loaded_plan_json, loaded_prices_json, loaded_production_methods_json, loaded_what_if_json,
+    parse_save_json, plan_json, prices_json, what_if_json,
 };
 
 fn to_js(err: WasmError) -> JsError {

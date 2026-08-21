@@ -23,6 +23,7 @@ import {
 } from './saveStore'
 import { AlertsPane } from './AlertsPane'
 import { BuildingsPane } from './BuildingsPane'
+import { BuildQueuesPane } from './BuildQueuesPane'
 import {
   ConfirmApply,
   deltasFromSteps,
@@ -51,6 +52,7 @@ import type {
   AlertsResult,
   DefsIcons,
   MilitarySnapshot,
+  ConstructionsSnapshot,
   DefsSummary,
   GapAtom,
   GapsResult,
@@ -68,6 +70,7 @@ import {
   hashForView,
   parseHash,
   WORKSPACE_NAV,
+  type BuildingsTab,
   type MilitaryTab,
   type WorkspaceView,
 } from './workspaceNav'
@@ -247,6 +250,7 @@ function App({ wasmApi }: Props) {
   const [planResult, setPlanResult] = useState<PlanResult>()
   const [alertsResult, setAlertsResult] = useState<AlertsResult>()
   const [militaryResult, setMilitaryResult] = useState<MilitarySnapshot>()
+  const [constructionsResult, setConstructionsResult] = useState<ConstructionsSnapshot>()
   const [timelineStep, setTimelineStep] = useState<Step>()
   const [sessionBytes, setSessionBytes] = useState<Uint8Array>()
   const [pendingApply, setPendingApply] = useState<{
@@ -263,6 +267,9 @@ function App({ wasmApi }: Props) {
   })
   const [activeView, setActiveView] = useState<WorkspaceView>(() => parseHash().view ?? 'prices')
   const [militaryTab, setMilitaryTab] = useState<MilitaryTab>(() => parseHash().militaryTab)
+  const [buildingsTab, setBuildingsTab] = useState<BuildingsTab>(
+    () => parseHash().buildingsTab,
+  )
   const [locationHash, setLocationHash] = useState(() => window.location.hash)
   const [records, setRecords] = useState<AnalysisRecord[]>([])
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
@@ -501,6 +508,7 @@ function App({ wasmApi }: Props) {
       const parsed = parseHash()
       if (parsed.view) setActiveView(parsed.view)
       setMilitaryTab(parsed.militaryTab)
+      setBuildingsTab(parsed.buildingsTab)
       setLocationHash(window.location.hash)
     }
     window.addEventListener('hashchange', sync)
@@ -536,6 +544,23 @@ function App({ wasmApi }: Props) {
       cancelled = true
     }
   }, [activeView, api, result, analysisReady])
+
+  useEffect(() => {
+    if (activeView !== 'buildings' || buildingsTab !== 'queues' || !api || !result || !analysisReady) {
+      return
+    }
+    let cancelled = false
+    void Promise.resolve(api.loaded_constructions())
+      .then((json) => {
+        if (!cancelled) setConstructionsResult(JSON.parse(json) as ConstructionsSnapshot)
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeView, buildingsTab, api, result, analysisReady])
 
   const archiveResult = async (
     kind: AnalysisKind,
@@ -1187,19 +1212,50 @@ function App({ wasmApi }: Props) {
       )}
 
       {activeView === 'buildings' && (
-        <BuildingsPane
-          result={result}
-          icons={goodIcons}
-          playerCountryId={summary?.country_id}
-          playerMarketId={summary?.market_id}
-          gated={gated}
-          api={api}
-          alerts={alertsResult?.alerts}
-          onWhatIf={(building, extraLevels) => {
-            void applyWhatIf({ building, extra_levels: extraLevels })
-          }}
-          onApply={(delta) => void requestApply(delta)}
-        />
+        <section
+          className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
+          aria-labelledby="buildings-heading"
+        >
+          <h2 id="buildings-heading">Buildings</h2>
+          <div className="state-tabs" role="tablist" aria-label="Buildings views">
+            {(['overview', 'queues'] as const).map((tab) => (
+              <button
+                type="button"
+                key={tab}
+                role="tab"
+                aria-selected={buildingsTab === tab}
+                onClick={() => {
+                  setBuildingsTab(tab)
+                  window.location.hash = hashForView('buildings', undefined, tab)
+                }}
+              >
+                {tab === 'overview' ? 'Overview' : 'Queues'}
+              </button>
+            ))}
+          </div>
+          {buildingsTab === 'queues' ? (
+            constructionsResult ? (
+              <BuildQueuesPane snapshot={constructionsResult} icons={goodIcons} />
+            ) : (
+              <p>Construction queues appear after a save is priced.</p>
+            )
+          ) : (
+            <BuildingsPane
+              result={result}
+              icons={goodIcons}
+              playerCountryId={summary?.country_id}
+              playerMarketId={summary?.market_id}
+              gated={gated}
+              api={api}
+              alerts={alertsResult?.alerts}
+              onWhatIf={(building, extraLevels) => {
+                void applyWhatIf({ building, extra_levels: extraLevels })
+              }}
+              onApply={(delta) => void requestApply(delta)}
+              embedded
+            />
+          )}
+        </section>
       )}
 
       {activeView === 'what-if' && (

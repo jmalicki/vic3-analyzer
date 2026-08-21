@@ -14,7 +14,7 @@
 //! | Field | At load (`from_save` / `from_world`) | Default / sim-only |
 //! | --- | --- | --- |
 //! | `date`, `country` | save meta / tag | `1836.1.1` / empty |
-//! | `techs`, `queued_tech`, `queued_building` | tech manager + construction heads | empty |
+//! | `techs`, `queued_tech`, `queued_building`, `constructions` | tech manager + construction queues | empty |
 //! | `laws`, `infamy` | law manager / country | empty / `None` |
 //! | `good_prices` | last price solve | empty map |
 //! | `gdp` | `0` unless `*_with_prices` (owned building revenue) | `0` |
@@ -34,7 +34,7 @@ use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 use vic3_prices::{PricesResult, World, WorldCountry};
 
-pub use vic3_load::{Save, Vic3Date};
+pub use vic3_load::{ConstructionQueueKind, Save, Vic3Date};
 
 /// Failure while projecting a [`PlanningState`] from save IR or [`World`].
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -56,6 +56,69 @@ pub enum QueuedInterest {
     State(String),
     /// DSL `interest_in(region=…)`.
     Region(String),
+}
+
+/// One construction-queue row on a planning branch (player country only).
+///
+/// Full ordered queue for exposure / SQL consumers. Distinct from
+/// [`PlanningState::queued_building`], which remains the single in-flight head
+/// used by sim waits (`QueueBuildingLevel` / `BuildingCompleted`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanningConstruction {
+    pub order_id: u32,
+    pub queue: ConstructionQueueKind,
+    pub state_id: Option<u32>,
+    pub building: String,
+    pub remaining: Option<f64>,
+}
+
+impl PartialEq for PlanningConstruction {
+    fn eq(&self, other: &Self) -> bool {
+        self.order_id == other.order_id
+            && self.queue == other.queue
+            && self.state_id == other.state_id
+            && self.building == other.building
+            && f64_option_bits_eq(self.remaining, other.remaining)
+    }
+}
+
+impl Eq for PlanningConstruction {}
+
+impl Hash for PlanningConstruction {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.order_id.hash(state);
+        self.queue.hash(state);
+        self.state_id.hash(state);
+        self.building.hash(state);
+        hash_f64_option(self.remaining, state);
+    }
+}
+
+impl From<&vic3_load::ConstructionQueueEntry> for PlanningConstruction {
+    fn from(entry: &vic3_load::ConstructionQueueEntry) -> Self {
+        Self {
+            order_id: entry.order_id,
+            queue: entry.queue,
+            state_id: entry.state_id,
+            building: entry.building.clone(),
+            remaining: entry.remaining,
+        }
+    }
+}
+
+impl From<&vic3_prices::WorldConstruction> for PlanningConstruction {
+    fn from(entry: &vic3_prices::WorldConstruction) -> Self {
+        Self {
+            order_id: entry.id,
+            queue: match entry.queue {
+                vic3_prices::ConstructionQueueKind::Private => ConstructionQueueKind::Private,
+                vic3_prices::ConstructionQueueKind::Government => ConstructionQueueKind::Government,
+            },
+            state_id: entry.state_id,
+            building: entry.building.clone(),
+            remaining: entry.remaining,
+        }
+    }
 }
 
 /// Inputs for [`PlanningState::from_parts`] (tests; no `.v3` required).
@@ -81,6 +144,8 @@ pub struct PlanningParts {
     pub credit_headroom: Option<f64>,
     pub building_level_deltas: BTreeMap<String, u32>,
     pub queued_building: Option<String>,
+    /// Full private then government queue for this country (exposure / sim sync).
+    pub constructions: Vec<PlanningConstruction>,
     pub queued_interest: Option<QueuedInterest>,
     /// Target army power projection after the in-flight expansion completes.
     pub queued_army_target: Option<f64>,
@@ -117,6 +182,7 @@ impl Default for PlanningParts {
             credit_headroom: None,
             building_level_deltas: BTreeMap::new(),
             queued_building: None,
+            constructions: Vec::new(),
             queued_interest: None,
             queued_army_target: None,
             laws: Vec::new(),
@@ -167,7 +233,15 @@ pub struct PlanningState {
     /// Added levels by building type on this simulated branch (empty at load).
     pub building_level_deltas: BTreeMap<String, u32>,
     /// Construction queue head from save, or sim `QueueBuildingLevel`.
+    ///
+    /// Prefer private over government at load. Kept in sync with
+    /// [`Self::constructions`] when sim queues or completes a building.
     pub queued_building: Option<String>,
+    /// Full ordered construction queue for this country (private then government).
+    ///
+    /// Exposed for SQL / UI / future goals. Sim push/pops entries alongside
+    /// [`Self::queued_building`] so the list does not diverge from the head.
+    pub constructions: Vec<PlanningConstruction>,
     /// Interest in flight — sim-only (`None` at load).
     pub queued_interest: Option<QueuedInterest>,
     /// Army expansion target in flight — sim-only (`None` at load).
@@ -213,6 +287,7 @@ impl PartialEq for PlanningState {
             && f64_option_bits_eq(self.credit_headroom, other.credit_headroom)
             && self.building_level_deltas == other.building_level_deltas
             && self.queued_building == other.queued_building
+            && self.constructions == other.constructions
             && self.queued_interest == other.queued_interest
             && f64_option_bits_eq(self.queued_army_target, other.queued_army_target)
             && self.laws == other.laws
@@ -249,6 +324,7 @@ impl Hash for PlanningState {
         hash_f64_option(self.credit_headroom, state);
         self.building_level_deltas.hash(state);
         self.queued_building.hash(state);
+        self.constructions.hash(state);
         self.queued_interest.hash(state);
         hash_f64_option(self.queued_army_target, state);
         self.laws.hash(state);
@@ -347,6 +423,7 @@ impl PlanningState {
             credit_headroom: parts.credit_headroom,
             building_level_deltas: parts.building_level_deltas,
             queued_building: parts.queued_building,
+            constructions: parts.constructions,
             queued_interest: parts.queued_interest,
             queued_army_target: parts.queued_army_target,
             laws: parts.laws.into_iter().collect(),
@@ -364,6 +441,45 @@ impl PlanningState {
             || self.queued_interest.is_some()
             || self.queued_army_target.is_some()
             || self.queued_law.is_some()
+    }
+
+    /// Rebuild [`Self::queued_building`] from the first [`Self::constructions`] entry.
+    pub fn sync_queued_building_from_constructions(&mut self) {
+        self.queued_building = self
+            .constructions
+            .first()
+            .map(|entry| entry.building.clone());
+    }
+
+    /// Append a government construction (sim `QueueBuildingLevel`) and set the head.
+    pub fn push_construction(&mut self, building: String) {
+        let order_id = self
+            .constructions
+            .iter()
+            .map(|entry| entry.order_id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        self.constructions.push(PlanningConstruction {
+            order_id,
+            queue: ConstructionQueueKind::Government,
+            state_id: None,
+            building: building.clone(),
+            remaining: None,
+        });
+        self.queued_building = Some(building);
+    }
+
+    /// Remove the completed head entry matching `building`, then advance the head.
+    pub fn complete_construction(&mut self, building: &str) {
+        if let Some(idx) = self
+            .constructions
+            .iter()
+            .position(|entry| entry.building == building)
+        {
+            self.constructions.remove(idx);
+        }
+        self.sync_queued_building_from_constructions();
     }
 
     /// Project the player country and last price solve into a planning node.
@@ -448,6 +564,10 @@ impl PlanningState {
             credit_headroom,
             building_level_deltas: BTreeMap::new(),
             queued_building: save.queued_building_for(country_id),
+            constructions: vic3_load::constructions_for(save, country_id)
+                .iter()
+                .map(PlanningConstruction::from)
+                .collect(),
             // Interest/army/law queues and PM/tax deltas are sim-only.
             queued_interest: None,
             queued_army_target: None,
@@ -533,6 +653,12 @@ impl PlanningState {
             credit_headroom: country.credit_headroom,
             building_level_deltas: BTreeMap::new(),
             queued_building: country.queued_building.clone(),
+            constructions: world
+                .constructions
+                .iter()
+                .filter(|row| row.country_id == Some(country.id))
+                .map(PlanningConstruction::from)
+                .collect(),
             queued_interest: None,
             queued_army_target: None,
             laws: country.laws.iter().cloned().collect(),
@@ -820,12 +946,18 @@ mod tests {
             state.queued_building.as_deref(),
             Some("building_construction_sector")
         );
+        assert_eq!(state.constructions.len(), 1);
+        assert_eq!(
+            state.constructions[0].building,
+            "building_construction_sector"
+        );
 
         let world = World::from_save(&save, &vic3_defs::GameDefs::default());
         let from_world = PlanningState::from_world(&world, "GER", BTreeMap::new()).unwrap();
         assert_eq!(from_world.techs, state.techs);
         assert_eq!(from_world.queued_tech, state.queued_tech);
         assert_eq!(from_world.queued_building, state.queued_building);
+        assert_eq!(from_world.constructions, state.constructions);
     }
 
     #[test]

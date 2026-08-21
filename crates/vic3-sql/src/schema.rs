@@ -130,6 +130,22 @@ pub fn countries_schema() -> SchemaRef {
     ]))
 }
 
+/// Full private + government construction queues (`docs/sql.md`).
+///
+/// Distinct from planning's single `queued_building` head — one row per order.
+pub fn constructions_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("order_id", DataType::UInt32, false),
+        Field::new("queue", DataType::Utf8, false),
+        Field::new("position", DataType::UInt32, false),
+        Field::new("country_id", DataType::UInt32, true),
+        Field::new("state_id", DataType::UInt32, true),
+        Field::new("building", DataType::Utf8, false),
+        Field::new("building_name", DataType::Utf8, true),
+        Field::new("remaining", DataType::Float64, true),
+    ]))
+}
+
 /// `plan(goal [, …])` columns (`docs/sql.md`).
 pub fn plan_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![

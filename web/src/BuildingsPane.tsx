@@ -202,6 +202,8 @@ export function BuildingsPane({
   onApply,
   productionMethods,
   alerts = [],
+  /** When true, App owns the page chrome (heading / tabs); skip nested section + h2. */
+  embedded = false,
 }: {
   result?: PricesResult
   icons?: DefsIcons
@@ -213,6 +215,7 @@ export function BuildingsPane({
   onApply?: (delta: WorldDelta) => void
   productionMethods?: ProductionMethodDef[]
   alerts?: Alert[]
+  embedded?: boolean
 }) {
   const [hash, setHash] = useState(() => window.location.hash)
   const [filterMode, setFilterMode] = useState<FilterMode>('domestic')
@@ -279,17 +282,19 @@ export function BuildingsPane({
   )
 
   if (buildingId != null && result) {
+    const detail = (
+      <BuildingPage
+        result={result}
+        icons={icons}
+        buildingId={buildingId}
+        source="buildings"
+        alerts={alerts}
+        onApply={onApply}
+      />
+    )
+    if (embedded) return detail
     return (
-      <section className={gated ? 'workspace-page needs-defs' : 'workspace-page'}>
-        <BuildingPage
-          result={result}
-          icons={icons}
-          buildingId={buildingId}
-          source="buildings"
-          alerts={alerts}
-          onApply={onApply}
-        />
-      </section>
+      <section className={gated ? 'workspace-page needs-defs' : 'workspace-page'}>{detail}</section>
     )
   }
 
@@ -335,13 +340,10 @@ export function BuildingsPane({
   const typeName = (typeId: string): string =>
     result?.building_types?.find((type) => type.id === typeId)?.name || displayId(typeId)
 
-  return (
-    <section
-      className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
-      aria-labelledby="buildings-heading"
-    >
+  const content = (
+    <>
       <div className="result-heading">
-        <h2 id="buildings-heading">Buildings</h2>
+        {!embedded && <h2 id="buildings-heading">Buildings</h2>}
         <div className="building-what-if">
           <label>
             Optimize for
@@ -429,6 +431,16 @@ export function BuildingsPane({
       ) : (
         <p>{result ? 'No buildings in this save.' : 'Load a save to see buildings.'}</p>
       )}
+    </>
+  )
+
+  if (embedded) return content
+  return (
+    <section
+      className={gated ? 'workspace-page needs-defs' : 'workspace-page'}
+      aria-labelledby="buildings-heading"
+    >
+      {content}
     </section>
   )
 }

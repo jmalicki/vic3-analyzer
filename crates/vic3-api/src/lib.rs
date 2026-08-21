@@ -26,7 +26,8 @@
 //!    [`loaded_what_if_json`], [`loaded_gaps_json`], [`loaded_plan_json`],
 //!    [`loaded_alerts_json`], [`loaded_apply_delta_json`],
 //!    [`loaded_optimize_pms_json`], [`loaded_military_json`],
-//!    [`loaded_production_methods_json`]. [`clear_analysis`] drops the session.
+//!    [`loaded_constructions_json`], [`loaded_production_methods_json`].
+//!    [`clear_analysis`] drops the session.
 //!
 //! Wasm hosts the session in the analysis worker (one at a time). Native hosts
 //! share the same model. [`load_analysis_snapshot`] with `install = false` builds
@@ -481,6 +482,25 @@ pub fn loaded_military_json() -> Result<String, ApiError> {
         let player = played_country(&loaded.save).map(|(id, _)| id);
         Ok(serde_json::to_string(&military_snapshot(
             &loaded.save,
+            player,
+        ))?)
+    })
+}
+
+/// Private + government construction queues for the played country.
+///
+/// Rows come from [`vic3_prices::World::constructions`] (same projection as SQL).
+/// Empty queues are valid (no limitations string).
+///
+/// # Errors
+///
+/// [`ApiError::NoLoadedAnalysis`] if nothing is loaded.
+pub fn loaded_constructions_json() -> Result<String, ApiError> {
+    with_loaded_analysis(|loaded| {
+        let player = played_country(&loaded.save).map(|(id, _)| id);
+        Ok(serde_json::to_string(&constructions_snapshot(
+            &loaded.world,
+            &loaded.defs,
             player,
         ))?)
     })
@@ -950,6 +970,87 @@ fn matches_player(country: Option<u32>, player: Option<u32>) -> bool {
     }
 }
 
+/// Build-queue JSON for the Buildings → Queues UI (government / private lists).
+#[derive(Debug, Serialize)]
+struct ConstructionsSnapshot {
+    private: Vec<ConstructionSnap>,
+    government: Vec<ConstructionSnap>,
+}
+
+#[derive(Debug, Serialize)]
+struct ConstructionSnap {
+    id: u32,
+    queue: &'static str,
+    country_id: Option<u32>,
+    state_id: Option<u32>,
+    /// Localized state region label when known.
+    state_name: Option<String>,
+    building: String,
+    building_name: Option<String>,
+    remaining: Option<f64>,
+}
+
+fn constructions_snapshot(
+    world: &vic3_prices::World,
+    defs: &vic3_defs::GameDefs,
+    player: Option<u32>,
+) -> ConstructionsSnapshot {
+    let state_name = |state_id: Option<u32>| -> Option<String> {
+        let id = state_id?;
+        let state = world.states.iter().find(|s| s.id == id)?;
+        state.region.clone().map(|region| {
+            defs.labels
+                .get(&region)
+                .cloned()
+                .unwrap_or_else(|| humanize_region(&region))
+        })
+    };
+    let mut private = Vec::new();
+    let mut government = Vec::new();
+    for row in &world.constructions {
+        if !matches_player(row.country_id, player) {
+            continue;
+        }
+        let snap = ConstructionSnap {
+            id: row.id,
+            queue: row.queue.as_str(),
+            country_id: row.country_id,
+            state_id: row.state_id,
+            state_name: state_name(row.state_id),
+            building: row.building.clone(),
+            building_name: defs.labels.get(&row.building).cloned(),
+            remaining: row.remaining,
+        };
+        match row.queue {
+            vic3_prices::ConstructionQueueKind::Private => private.push(snap),
+            vic3_prices::ConstructionQueueKind::Government => government.push(snap),
+        }
+    }
+    ConstructionsSnapshot {
+        private,
+        government,
+    }
+}
+
+fn humanize_region(region_id: &str) -> String {
+    let trimmed = region_id
+        .strip_prefix("STATE_")
+        .or_else(|| region_id.strip_prefix("state_"))
+        .unwrap_or(region_id);
+    trimmed
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn is_navy(kind: Option<&str>) -> bool {
     kind.is_some_and(|kind| {
         matches!(
@@ -1377,6 +1478,21 @@ mod tests {
         clear_analysis();
         assert!(matches!(
             loaded_military_json(),
+            Err(ApiError::NoLoadedAnalysis)
+        ));
+    }
+
+    #[test]
+    fn loaded_constructions_json_after_load_has_private_and_government_arrays() {
+        clear_analysis();
+        load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
+        let json = loaded_constructions_json().expect("constructions snapshot");
+        let v: Value = serde_json::from_str(&json).expect("constructions json");
+        assert!(v["private"].is_array(), "{v}");
+        assert!(v["government"].is_array(), "{v}");
+        clear_analysis();
+        assert!(matches!(
+            loaded_constructions_json(),
             Err(ApiError::NoLoadedAnalysis)
         ));
     }

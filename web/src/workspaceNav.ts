@@ -12,6 +12,9 @@ export type WorkspaceView =
 
 export type MilitaryTab = 'army' | 'navy' | 'mobilization'
 
+/** Buildings workspace sub-view. `building/{id}` is detail, not a tab. */
+export type BuildingsTab = 'overview' | 'queues'
+
 export const WORKSPACE_NAV: readonly { view: WorkspaceView; label: string }[] = [
   { view: 'prices', label: 'Prices' },
   { view: 'states', label: 'States' },
@@ -27,20 +30,34 @@ export const WORKSPACE_NAV: readonly { view: WorkspaceView; label: string }[] = 
 
 const VIEW_IDS = new Set<string>(WORKSPACE_NAV.map((item) => item.view))
 const MILITARY_TABS = new Set<string>(['army', 'navy', 'mobilization'])
+const BUILDINGS_TABS = new Set<string>(['overview', 'queues'])
 
 export function parseHash(hash = window.location.hash): {
   view?: WorkspaceView
   militaryTab: MilitaryTab
+  buildingsTab: BuildingsTab
 } {
   const path = hash.replace(/^#\/?/, '').split('/')
   const view = VIEW_IDS.has(path[0]) ? (path[0] as WorkspaceView) : undefined
   const militaryTab =
     view === 'military' && MILITARY_TABS.has(path[1]) ? (path[1] as MilitaryTab) : 'army'
-  return { view, militaryTab }
+  // `#/buildings/building/{id}` is a detail route — do not treat `building` as a tab.
+  let buildingsTab: BuildingsTab = 'overview'
+  if (view === 'buildings' && path[1] && BUILDINGS_TABS.has(path[1])) {
+    buildingsTab = path[1] as BuildingsTab
+  }
+  return { view, militaryTab, buildingsTab }
 }
 
-export function hashForView(view: WorkspaceView, militaryTab?: MilitaryTab): string {
+export function hashForView(
+  view: WorkspaceView,
+  militaryTab?: MilitaryTab,
+  buildingsTab?: BuildingsTab,
+): string {
   if (view === 'military' && militaryTab) return `#/military/${militaryTab}`
+  if (view === 'buildings' && buildingsTab && buildingsTab !== 'overview') {
+    return `#/buildings/${buildingsTab}`
+  }
   return `#/${view}`
 }
 

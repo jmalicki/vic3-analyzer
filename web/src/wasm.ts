@@ -35,6 +35,7 @@ export interface WasmApi {
   clear_analysis(): void | Promise<void>
   loaded_prices(): string | Promise<string>
   loaded_military(): string | Promise<string>
+  loaded_constructions(): string | Promise<string>
   /** Patch origin `.v3` bytes with a SavePatch JSON; returns new bytes. */
   export_save(
     originalBytes: Uint8Array,

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -150,6 +150,28 @@ function mockApi(): WasmApi {
         ],
         mobilization: [{ id: 3, name: 'General Mobilization', type: 'general' }],
         limitations: [],
+      }),
+    ),
+    loaded_constructions: vi.fn(() =>
+      JSON.stringify({
+        private: [
+          {
+            id: 10,
+            queue: 'private',
+            building: 'building_logging_camp',
+            building_name: 'Logging Camp',
+            remaining: 5,
+          },
+        ],
+        government: [
+          {
+            id: 1,
+            queue: 'government',
+            building: 'building_construction_sector',
+            building_name: 'Construction Sector',
+            remaining: 40,
+          },
+        ],
       }),
     ),
     export_save: vi.fn(() => new Uint8Array([1, 2, 3])),
@@ -829,6 +851,7 @@ describe('prices UI', () => {
 
     await user.click(screen.getByRole('button', { name: 'Buildings' }))
     expect(screen.getByRole('heading', { name: 'Buildings' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('Rye Farms')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Optimize production methods' })).toBeEnabled()
     expect(window.location.hash).toBe('#/buildings')
@@ -839,6 +862,25 @@ describe('prices UI', () => {
       '#/buildings/building/9',
     )
     expect(screen.getAllByText('Simple Farming').length).toBeGreaterThan(0)
+  })
+
+  it('loads construction queues under Buildings → Queues', async () => {
+    const user = userEvent.setup()
+    const api = mockApi()
+    render(<App wasmApi={api} />)
+    await selectSave(user)
+
+    await user.click(screen.getByRole('button', { name: 'Buildings' }))
+    await user.click(screen.getByRole('tab', { name: 'Queues' }))
+    expect(window.location.hash).toBe('#/buildings/queues')
+    await waitFor(() => expect(api.loaded_constructions).toHaveBeenCalled())
+    expect(await screen.findByText('Construction Sector')).toBeInTheDocument()
+    await user.click(
+      within(screen.getByRole('tablist', { name: 'Construction queue' })).getByRole('tab', {
+        name: /^Private$/,
+      }),
+    )
+    expect(screen.getByText('Logging Camp')).toBeInTheDocument()
   })
 
   it('opens a building page from a buildings hash', async () => {

@@ -26,7 +26,7 @@
 
 use crate::maybe::maybe_map;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use vic3save::Vic3Date;
@@ -1291,6 +1291,48 @@ pub struct ConstructionOrder {
     pub remaining: Option<f64>,
 }
 
+/// Which save manager an order came from.
+///
+/// Vic3 keeps two independent queues. Planning's single `queued_building` head
+/// prefers **private** over government (see [`queued_building_for`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum ConstructionQueueKind {
+    Private,
+    Government,
+}
+
+impl ConstructionQueueKind {
+    /// Stable SQL / JSON token (`private` / `government`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Private => "private",
+            Self::Government => "government",
+        }
+    }
+}
+
+impl std::fmt::Display for ConstructionQueueKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// One present construction order with ownership resolved for SQL / UI / planning.
+///
+/// Distinct from the planning **head** (`queued_building`): that is only the
+/// first private-then-government building type id. This row carries the full
+/// queue entry (remaining construction, state, queue kind).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConstructionQueueEntry {
+    pub order_id: u32,
+    pub queue: ConstructionQueueKind,
+    /// Owner of [`Self::state_id`], when the state (or country states list) resolves.
+    pub country_id: Option<u32>,
+    pub state_id: Option<u32>,
+    pub building: String,
+    pub remaining: Option<f64>,
+}
+
 /// Last-played tag pointer (`previous_played`).
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub struct Player {
@@ -1456,10 +1498,78 @@ pub fn queued_tech_for(save: &impl WorldSnapshot, country_id: u32) -> Option<Str
 }
 
 /// First private, then government, construction order in states owned by the country.
+///
+/// Private is preferred because the private queue is the economy's organic build
+/// pipeline; government is the player's directed queue. Ownership is filtered via
+/// state `country` (falling back to the country's `states` list).
 pub fn queued_building_for(save: &impl WorldSnapshot, country_id: u32) -> Option<String> {
+    constructions_for(save, country_id)
+        .into_iter()
+        .next()
+        .map(|entry| entry.building)
+}
+
+/// All present construction orders for `country_id`, private then government, by `order_id`.
+///
+/// Skips empty building ids and orders whose state is not owned by the country.
+pub fn constructions_for(
+    save: &impl WorldSnapshot,
+    country_id: u32,
+) -> Vec<ConstructionQueueEntry> {
     let owned = owned_state_ids(save, country_id);
-    first_queued_building(save.building_constructions(), &owned)
-        .or_else(|| first_queued_building(save.government_constructions(), &owned))
+    let mut rows = Vec::new();
+    collect_queue_orders(
+        save.building_constructions(),
+        ConstructionQueueKind::Private,
+        Some((country_id, &owned)),
+        &mut rows,
+    );
+    collect_queue_orders(
+        save.government_constructions(),
+        ConstructionQueueKind::Government,
+        Some((country_id, &owned)),
+        &mut rows,
+    );
+    rows
+}
+
+/// Every present construction order in the save (both queues), ordered private then government by id.
+///
+/// `country_id` is resolved from the order's state owner when possible.
+pub fn all_constructions(save: &impl WorldSnapshot) -> Vec<ConstructionQueueEntry> {
+    let state_owner: std::collections::HashMap<u32, u32> = save
+        .states()
+        .iter_present()
+        .filter_map(|(id, state)| state.country.map(|country| (id, country)))
+        .collect();
+    // Country.states is a fallback when state rows omit `country`.
+    let mut state_owner = state_owner;
+    for (country_id, country) in save.country_manager().iter_present() {
+        for &state_id in &country.states {
+            state_owner.entry(state_id).or_insert(country_id);
+        }
+    }
+    let mut rows = Vec::new();
+    collect_queue_orders(
+        save.building_constructions(),
+        ConstructionQueueKind::Private,
+        None,
+        &mut rows,
+    );
+    collect_queue_orders(
+        save.government_constructions(),
+        ConstructionQueueKind::Government,
+        None,
+        &mut rows,
+    );
+    for row in &mut rows {
+        if row.country_id.is_none() {
+            if let Some(state_id) = row.state_id {
+                row.country_id = state_owner.get(&state_id).copied();
+            }
+        }
+    }
+    rows
 }
 
 /// Declared interest ids split so DSL `interest_in(state=…)` / `region=` can differ.
@@ -1622,27 +1732,45 @@ fn owned_state_ids(save: &impl WorldSnapshot, country_id: u32) -> std::collectio
     owned
 }
 
-fn first_queued_building(
+/// Collect present orders from one manager.
+///
+/// When `filter` is `Some((country_id, owned_states))`, only orders in those
+/// states are kept and `country_id` is stamped on each row. When `None`, every
+/// present order is kept (caller fills `country_id` from state ownership).
+fn collect_queue_orders(
     orders: &Manager<ConstructionOrder>,
-    owned_states: &std::collections::BTreeSet<u32>,
-) -> Option<String> {
-    let mut best: Option<(u32, String)> = None;
-    for (id, order) in orders.iter_present() {
-        let Some(state) = order.state else {
-            continue;
-        };
-        if !owned_states.contains(&state) {
-            continue;
-        }
+    queue: ConstructionQueueKind,
+    filter: Option<(u32, &std::collections::BTreeSet<u32>)>,
+    out: &mut Vec<ConstructionQueueEntry>,
+) {
+    let mut batch = Vec::new();
+    for (order_id, order) in orders.iter_present() {
         let Some(building) = order.building.as_ref().filter(|id| !id.is_empty()).cloned() else {
             continue;
         };
-        match &best {
-            Some((best_id, _)) if *best_id <= id => {}
-            _ => best = Some((id, building)),
-        }
+        let state_id = order.state;
+        let country_id = if let Some((country_id, owned)) = filter {
+            let Some(state) = state_id else {
+                continue;
+            };
+            if !owned.contains(&state) {
+                continue;
+            }
+            Some(country_id)
+        } else {
+            None
+        };
+        batch.push(ConstructionQueueEntry {
+            order_id,
+            queue,
+            country_id,
+            state_id,
+            building,
+            remaining: order.remaining.filter(|value| value.is_finite()),
+        });
     }
-    best.map(|(_, building)| building)
+    batch.sort_by_key(|entry| entry.order_id);
+    out.extend(batch);
 }
 
 #[cfg(test)]

@@ -109,6 +109,7 @@ export function workerWasmApi(local: WasmApi, port: WasmWorkerPort): WasmApi {
     clear_analysis: () => call('clear_analysis', []),
     loaded_prices: () => call('loaded_prices', []),
     loaded_military: () => call('loaded_military', []),
+    loaded_constructions: () => call('loaded_constructions', []),
     export_save: (originalBytes, deltaJson) =>
       call('export_save', [originalBytes, deltaJson]),
     loaded_what_if: (whatIfOptsJson) => call('loaded_what_if', [whatIfOptsJson]),

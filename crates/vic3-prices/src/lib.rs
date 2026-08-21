@@ -80,8 +80,9 @@ pub use result::{
 };
 pub use solve::{solve, what_if};
 pub use world::{
-    reconstruct_non_pop_orders, Intern, World, WorldBuilding, WorldCountry, WorldPop, WorldState,
-    WorldStatePop, WorldStateTrade, POP_SCALE,
+    reconstruct_non_pop_orders, ConstructionQueueKind, Intern, World, WorldBuilding,
+    WorldConstruction, WorldCountry, WorldPop, WorldState, WorldStatePop, WorldStateTrade,
+    POP_SCALE,
 };
 
 /// Solver caveats copied into every [`PricesResult::limitations`] (CLI / UI / SQL).

@@ -508,3 +508,65 @@ async fn gaps_declare_war_exposes_interest_army_munitions_solvent() {
     assert!(seen.iter().any(|p| p.starts_with("good_price(ammunition)")));
     assert!(seen.contains("solvent"));
 }
+
+#[tokio::test]
+async fn constructions_table_lists_private_and_government() {
+    use vic3_prices::{ConstructionQueueKind, WorldConstruction};
+
+    let defs = decode_blob(&defs_blob()).expect("decode defs");
+    let save = load_slice(&save_bytes(), empty_tokens()).expect("load save");
+    let mut world = World::from_save(&save, &defs);
+    let country_id = world
+        .countries
+        .iter()
+        .find(|c| c.tag == "GER")
+        .map(|c| c.id);
+    world.constructions = vec![
+        WorldConstruction {
+            id: 10,
+            queue: ConstructionQueueKind::Private,
+            country_id,
+            state_id: Some(1),
+            building: "building_logging_camp".into(),
+            remaining: Some(5.0),
+        },
+        WorldConstruction {
+            id: 1,
+            queue: ConstructionQueueKind::Government,
+            country_id,
+            state_id: Some(1),
+            building: "building_construction_sector".into(),
+            remaining: Some(40.0),
+        },
+    ];
+    let prices = solve(&world, &defs, SolveOpts::default());
+    let eng = SqlEngine::bind(defs, world, prices).await.expect("bind");
+
+    let batches = eng
+        .query(
+            "SELECT queue, position, building, remaining FROM constructions ORDER BY queue, position",
+        )
+        .await
+        .expect("constructions");
+    assert_eq!(batches[0].num_rows(), 2);
+    let queues = batches[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("queue");
+    // Utf8 sort: government before private.
+    assert_eq!(queues.value(0), "government");
+    assert_eq!(queues.value(1), "private");
+
+    let gov = eng
+        .query("SELECT building FROM constructions WHERE queue = 'government'")
+        .await
+        .expect("gov filter");
+    let buildings = gov[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("building");
+    assert_eq!(gov[0].num_rows(), 1);
+    assert_eq!(buildings.value(0), "building_construction_sector");
+}
