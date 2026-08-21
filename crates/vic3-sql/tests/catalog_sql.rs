@@ -109,6 +109,16 @@ async fn stub_use_save_then_active_queries() {
         .expect("unqualified countries");
     assert_eq!(unqualified[0].num_rows(), 1);
 
+    let constructions = eng
+        .query("SELECT queue, building FROM constructions")
+        .await
+        .expect("constructions fact table");
+    assert_eq!(
+        constructions[0].schema().field(0).name(),
+        "queue",
+        "constructions registered after use_save"
+    );
+
     let saves_after = eng
         .query("SELECT loaded, in_game_date, country FROM saves WHERE name = 'autosave'")
         .await

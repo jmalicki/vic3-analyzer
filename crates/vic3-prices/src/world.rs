@@ -88,6 +88,12 @@ pub struct World {
     /// Culture / profession strings indexed by the `u16` ids on pops and states.
     pub names: Intern,
     pub buildings: Vec<WorldBuilding>,
+    /// Full private + government construction queues from the save.
+    ///
+    /// Ordered private then government by Paradox `order_id`. Distinct from
+    /// [`WorldCountry::queued_building`], which is only the planning head
+    /// (first private, else first government) for each country.
+    pub constructions: Vec<WorldConstruction>,
     /// Government / trade / construction buy orders, held fixed during the solve.
     pub frozen_buy: GoodsVec,
     /// Trade (and any other non-building) sell orders, held fixed during the solve.
@@ -106,6 +112,42 @@ pub struct World {
     pub game_date: Option<Vic3Date>,
     /// Played country tag from `previous_played`, when it resolves.
     pub player_tag: Option<String>,
+}
+
+/// Which construction queue an order belongs to (mirrors save managers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ConstructionQueueKind {
+    Private,
+    Government,
+}
+
+impl ConstructionQueueKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Private => "private",
+            Self::Government => "government",
+        }
+    }
+}
+
+impl From<vic3_load::ConstructionQueueKind> for ConstructionQueueKind {
+    fn from(value: vic3_load::ConstructionQueueKind) -> Self {
+        match value {
+            vic3_load::ConstructionQueueKind::Private => Self::Private,
+            vic3_load::ConstructionQueueKind::Government => Self::Government,
+        }
+    }
+}
+
+/// One construction queue row projected from save IR for SQL / UI / planning.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldConstruction {
+    pub id: u32,
+    pub queue: ConstructionQueueKind,
+    pub country_id: Option<u32>,
+    pub state_id: Option<u32>,
+    pub building: String,
+    pub remaining: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -430,6 +472,17 @@ impl World {
             state_pops,
             names,
             buildings,
+            constructions: vic3_load::all_constructions(save)
+                .into_iter()
+                .map(|entry| WorldConstruction {
+                    id: entry.order_id,
+                    queue: entry.queue.into(),
+                    country_id: entry.country_id,
+                    state_id: entry.state_id,
+                    building: entry.building,
+                    remaining: entry.remaining,
+                })
+                .collect(),
             frozen_buy: GoodsVec::zeros(defs.goods_order.len()),
             frozen_sell: GoodsVec::zeros(defs.goods_order.len()),
             state_trade,
@@ -720,7 +773,7 @@ fn resolve_saved_goods(
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
-    use vic3_load::{Building, BuildingGoods, Pop, Save, State};
+    use vic3_load::{Building, BuildingGoods, ConstructionOrder, Country, Pop, Save, State};
 
     fn defs_with_goods(ids: &[&str]) -> GameDefs {
         GameDefs {
@@ -741,6 +794,56 @@ mod tests {
                 .collect(),
             ..GameDefs::default()
         }
+    }
+
+    #[test]
+    fn from_save_projects_construction_queues_and_country_head() {
+        let mut save = Save::default();
+        save.country_manager.database.insert(
+            1,
+            Some(Country {
+                definition: "GER".into(),
+                states: vec![7],
+                ..Country::default()
+            }),
+        );
+        save.states.database.insert(
+            7,
+            Some(State {
+                country: Some(1),
+                ..State::default()
+            }),
+        );
+        save.building_constructions.database.insert(
+            3,
+            Some(ConstructionOrder {
+                building: Some("building_logging_camp".into()),
+                state: Some(7),
+                remaining: Some(12.0),
+            }),
+        );
+        save.government_constructions.database.insert(
+            1,
+            Some(ConstructionOrder {
+                building: Some("building_construction_sector".into()),
+                state: Some(7),
+                remaining: Some(30.0),
+            }),
+        );
+
+        let world = World::from_save(&save, &defs_with_goods(&[]));
+        assert_eq!(world.constructions.len(), 2);
+        assert_eq!(world.constructions[0].queue, ConstructionQueueKind::Private);
+        assert_eq!(world.constructions[0].building, "building_logging_camp");
+        assert_eq!(
+            world.constructions[1].queue,
+            ConstructionQueueKind::Government
+        );
+        assert_eq!(
+            world.countries[0].queued_building.as_deref(),
+            Some("building_logging_camp"),
+            "country head must match private-then-government helper"
+        );
     }
 
     #[test]

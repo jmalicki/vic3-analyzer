@@ -467,3 +467,52 @@ Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent;
   }
 }
 ```
+
+## ConstructionsSnapshot
+
+Player-scoped build queues from `loaded_constructions` / Buildings → Queues. Same projection as SQL `constructions` (`World.constructions`), not the single planning head `queued_building`.
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["private", "government"],
+  "properties": {
+    "private": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/ConstructionOrderSnapshot" },
+          { "properties": { "queue": { "const": "private" } } }
+        ]
+      }
+    },
+    "government": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/ConstructionOrderSnapshot" },
+          { "properties": { "queue": { "const": "government" } } }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "ConstructionOrderSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "queue", "building", "country_id", "state_id", "state_name", "building_name", "remaining"],
+      "properties": {
+        "id": { "type": "integer" },
+        "queue": { "type": "string", "enum": ["private", "government"] },
+        "country_id": { "type": ["integer", "null"] },
+        "state_id": { "type": ["integer", "null"] },
+        "state_name": { "type": ["string", "null"] },
+        "building": { "type": "string" },
+        "building_name": { "type": ["string", "null"] },
+        "remaining": { "type": ["number", "null"] }
+      }
+    }
+  }
+}
+```

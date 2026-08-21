@@ -16,8 +16,21 @@ describe('workspaceNav', () => {
     expect(parseHash('#/prices/good/iron').view).toBe('prices')
     expect(parseHash('#/prices/state/1').view).toBe('prices')
     expect(parseHash('#/prices/building/4').view).toBe('prices')
-    expect(parseHash('#/buildings/building/9').view).toBe('buildings')
-    expect(parseHash('#/military/navy')).toEqual({ view: 'military', militaryTab: 'navy' })
+    expect(parseHash('#/buildings/building/9')).toEqual({
+      view: 'buildings',
+      militaryTab: 'army',
+      buildingsTab: 'overview',
+    })
+    expect(parseHash('#/buildings/queues')).toEqual({
+      view: 'buildings',
+      militaryTab: 'army',
+      buildingsTab: 'queues',
+    })
+    expect(parseHash('#/military/navy')).toEqual({
+      view: 'military',
+      militaryTab: 'navy',
+      buildingsTab: 'overview',
+    })
     expect(parseHash('#/military/mobilization').militaryTab).toBe('mobilization')
     expect(parseHash('#/unknown').view).toBeUndefined()
     expect(parseHash('').view).toBeUndefined()
@@ -28,6 +41,9 @@ describe('workspaceNav', () => {
     expect(hashForView('what-if')).toBe('#/what-if')
     expect(hashForView('military')).toBe('#/military')
     expect(hashForView('military', 'army')).toBe('#/military/army')
+    expect(hashForView('buildings')).toBe('#/buildings')
+    expect(hashForView('buildings', undefined, 'queues')).toBe('#/buildings/queues')
+    expect(hashForView('buildings', undefined, 'overview')).toBe('#/buildings')
     expect(hashForState(12)).toBe('#/states/12')
     expect(parseStateId('#/states/12')).toBe(12)
     expect(parseStateId('#/states')).toBeUndefined()

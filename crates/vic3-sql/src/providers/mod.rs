@@ -25,6 +25,7 @@
 //! | `pops` | `state_id`, `profession` | — |
 //! | `state_qualifications` | `state_id`, `profession` | — |
 //! | `countries` | `country_id`, `tag` | — |
+//! | `constructions` | `order_id`, `country_id`, `state_id`, `queue`, `building` | — |
 //!
 //! Exact means the provider filters rows itself; Unsupported predicates are
 //! left for DataFusion. `latest.*` advertises Inexact and delegates after load.
@@ -37,6 +38,7 @@
 mod arrays;
 mod building_types;
 mod buildings;
+mod constructions;
 mod countries;
 mod goods;
 mod goods_by_state;
@@ -57,13 +59,15 @@ use datafusion::prelude::SessionContext;
 use crate::binding::SessionBinding;
 use crate::host::HostState;
 use crate::schema::{
-    building_types_schema, buildings_schema, countries_schema, goods_by_state_schema, goods_schema,
-    pops_schema, production_methods_schema, state_qualifications_schema, states_schema,
+    building_types_schema, buildings_schema, constructions_schema, countries_schema,
+    goods_by_state_schema, goods_schema, pops_schema, production_methods_schema,
+    state_qualifications_schema, states_schema,
 };
 use crate::SqlError;
 
 pub use building_types::BuildingTypesProvider;
 pub use buildings::BuildingsProvider;
+pub use constructions::ConstructionsProvider;
 pub use countries::CountriesProvider;
 pub use goods::GoodsProvider;
 pub use goods_by_state::GoodsByStateProvider;
@@ -86,6 +90,7 @@ pub enum FactTable {
     Pops,
     StateQualifications,
     Countries,
+    Constructions,
 }
 
 /// All campaign fact tables registered for a binding.
@@ -99,6 +104,7 @@ pub const FACT_TABLES: &[FactTable] = &[
     FactTable::Pops,
     FactTable::StateQualifications,
     FactTable::Countries,
+    FactTable::Constructions,
 ];
 
 impl FactTable {
@@ -114,6 +120,7 @@ impl FactTable {
             Self::Pops => "pops",
             Self::StateQualifications => "state_qualifications",
             Self::Countries => "countries",
+            Self::Constructions => "constructions",
         }
     }
 
@@ -129,6 +136,7 @@ impl FactTable {
             Self::Pops => pops_schema(),
             Self::StateQualifications => state_qualifications_schema(),
             Self::Countries => countries_schema(),
+            Self::Constructions => constructions_schema(),
         }
     }
 }
@@ -145,6 +153,7 @@ pub fn provider_for(table: FactTable, binding: Arc<SessionBinding>) -> Arc<dyn T
         FactTable::Pops => Arc::new(PopsProvider::new(binding)),
         FactTable::StateQualifications => Arc::new(StateQualificationsProvider::new(binding)),
         FactTable::Countries => Arc::new(CountriesProvider::new(binding)),
+        FactTable::Constructions => Arc::new(ConstructionsProvider::new(binding)),
     }
 }
 

@@ -379,6 +379,28 @@ export interface MilitarySnapshot {
   limitations: string[]
 }
 
+/** One construction order from `loaded_constructions` (Buildings → Queues). */
+export interface ConstructionOrderSnapshot {
+  id: number
+  queue: 'private' | 'government' | string
+  /** Present as JSON `null` when missing on the order. */
+  country_id: number | null
+  state_id: number | null
+  state_name: string | null
+  building: string
+  building_name: string | null
+  remaining: number | null
+}
+
+/**
+ * Player-scoped private + government queues.
+ * Distinct from planning's single `queued_building` head.
+ */
+export interface ConstructionsSnapshot {
+  private: ConstructionOrderSnapshot[]
+  government: ConstructionOrderSnapshot[]
+}
+
 export interface DefsIcons {
   goods?: Record<string, string>
   extra?: Record<string, string>

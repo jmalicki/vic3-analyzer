@@ -17,13 +17,16 @@ It is **not** the full save. Hash it. **I8:** identical state ⇒ identical hash
 | `laws` | Active law script ids from the law manager for the country |
 | `infamy` | Country `infamy` when present and finite |
 | `queued_tech` | Country `currently_researching`, else `technology.research_technology` |
-| `queued_building` | First private, then government, construction order in owned states |
+| `queued_building` | First private, then government, construction order in owned states (in-flight head) |
+| `constructions` | Full private then government queue for the country (`PlanningConstruction` rows) |
 | `good_prices`, `gdp` | Last price solve (`gdp` only via `*_with_prices`) |
 | `treasury`, `weekly_balance`, `debt_*`, `credit_*`, `solvent` | Country budget |
 | `population_weighted_wealth` | Pops in states owned by the country |
 | `army_power_projection`, `interest_states` / `interest_regions` | Country `cached_total_army_power_projection` (else army formation `power_projection`); `interest_marker_manager` + country `declared_interests` (normalized for DSL `state=` / `region=`) |
 | `building_level_deltas`, `pm_overrides`, `tax_level` | Empty / zero at load; sim branches fill them |
 | `queued_interest`, `queued_army_target`, `queued_law` | Empty at load; sim-only in-flight interest / army / law |
+
+`queued_building` remains the single sim wait slot. `constructions` is the full ordered list for exposure (SQL / UI / future goals). Sim `QueueBuildingLevel` pushes a government row and sets the head; `BuildingCompleted` pops the finished row and advances the head to the next entry when the save queue had more.
 
 `from_world` reads the same projected fields off [`WorldCountry`](../crates/vic3-prices/src/world.rs) after `World::from_save`.
 
