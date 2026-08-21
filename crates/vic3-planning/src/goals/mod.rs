@@ -379,10 +379,20 @@ pub fn evaluate(goal: &Goal, state: &PlanningState) -> bool {
 ///
 /// Under `And`/`Or`, only failing subtrees contribute; under `Not`, all atoms
 /// of the negated subtree are listed when the `not` itself fails.
+///
+/// Tech gaps are leaf-only here. Prefer [`gaps_with_defs`] when
+/// [`vic3_defs::GameDefs`] technologies are loaded so missing ancestors appear.
 pub fn gaps(goal: &Goal, state: &PlanningState) -> Vec<Atom> {
     let mut out = Vec::new();
     collect_gaps(goal, state, &mut out);
     out
+}
+
+/// Like [`gaps`], then expand each open [`Atom::HasTech`] through prerequisite
+/// closure using `defs` (DSL string / compiled goal stay leaf-shaped).
+pub fn gaps_with_defs(goal: &Goal, state: &PlanningState, defs: &vic3_defs::GameDefs) -> Vec<Atom> {
+    let open = gaps(goal, state);
+    crate::tech::expand_tech_gap_atoms(&open, state, defs)
 }
 
 fn collect_gaps(goal: &Goal, state: &PlanningState, out: &mut Vec<Atom>) {
@@ -639,6 +649,49 @@ mod tests {
             &state
         ));
         assert!(!evaluate(&parse("credit_headroom > 0").unwrap(), &state));
+    }
+
+    #[test]
+    fn gaps_with_defs_include_missing_tech_ancestors() {
+        use std::collections::BTreeMap;
+        use vic3_defs::{GameDefs, Technology};
+
+        let mut technologies = BTreeMap::new();
+        technologies.insert(
+            "manufacturies".into(),
+            Technology {
+                id: "manufacturies".into(),
+                cost: Some(50.0),
+                prerequisites: vec![],
+            },
+        );
+        technologies.insert(
+            "shaft_mining".into(),
+            Technology {
+                id: "shaft_mining".into(),
+                cost: Some(75.0),
+                prerequisites: vec!["manufacturies".into()],
+            },
+        );
+        technologies.insert(
+            "nitroglycerin".into(),
+            Technology {
+                id: "nitroglycerin".into(),
+                cost: Some(100.0),
+                prerequisites: vec!["shaft_mining".into()],
+            },
+        );
+        let defs = GameDefs {
+            technologies,
+            ..GameDefs::default()
+        };
+        let state = PlanningState::default();
+        let research = parse("research(tech=nitroglycerin)").unwrap();
+        let tech_gaps = gaps_with_defs(&research, &state, &defs);
+        assert_eq!(tech_gaps.len(), 3);
+        assert!(tech_gaps[0].is_has_tech("manufacturies"));
+        assert!(tech_gaps[1].is_has_tech("shaft_mining"));
+        assert!(tech_gaps[2].is_has_tech("nitroglycerin"));
     }
 
     #[test]

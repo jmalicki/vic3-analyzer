@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 use crate::types::build_package_ladder;
 use crate::{
     BuildingGroup, BuildingType, BuyPackage, DefsError, FlagDefinition, GameDefs, Good, GoodIdx,
-    NeedEntry, NeedIdx, NeedsVec, PopNeed, PopType, ProductionMethod,
+    NeedEntry, NeedIdx, NeedsVec, PopNeed, PopType, ProductionMethod, Technology,
 };
 
 #[derive(Debug, Clone)]
@@ -31,6 +31,7 @@ pub(crate) struct StagingDefs {
     pub obsessions: BTreeMap<String, Vec<String>>,
     pub pop_types: BTreeMap<String, PopType>,
     pub production_method_groups: BTreeMap<String, Vec<String>>,
+    pub technologies: BTreeMap<String, Technology>,
 }
 
 impl Default for StagingDefs {
@@ -53,6 +54,7 @@ impl Default for StagingDefs {
             obsessions: BTreeMap::new(),
             pop_types: BTreeMap::new(),
             production_method_groups: BTreeMap::new(),
+            technologies: BTreeMap::new(),
         }
     }
 }
@@ -121,6 +123,7 @@ impl StagingDefs {
             obsessions: BTreeMap::new(),
             pop_types: self.pop_types,
             production_method_groups: self.production_method_groups,
+            technologies: self.technologies,
         };
         crate::loc::polish_labels(&mut defs.labels);
         let good_index: HashMap<String, GoodIdx> = defs
