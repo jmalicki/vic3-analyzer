@@ -22,6 +22,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 vic3-api = { path = "../vic3-api" }
 vic3-catalog = { path = "../vic3-catalog" }
+vic3-prices = { path = "../vic3-prices" }
 vic3-sql = { path = "../vic3-sql" }
 
 [dev-dependencies]

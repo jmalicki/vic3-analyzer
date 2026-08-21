@@ -26,13 +26,14 @@ On start: load config, refresh save catalog, register DataFusion + tools. No pri
 
 1. Discover saves (`query` on `saves`, or resource `vic3://saves`).
 2. Bind with `use_save` (stub or selector).
-3. `query` against `active` tables / TVFs.
+3. Prefer `campaign_brief` for a compact overview, then `query` against `active` tables / TVFs as needed.
 
 Do **not** use `SELECT set_active_save(...)`.
 
 ```text
 query:  SELECT name, kind, in_game_date, mtime, location FROM saves ORDER BY mtime DESC LIMIT 10
 use_save: { "name": "autosave" }
+campaign_brief: {}
 query:  SELECT * FROM alerts() WHERE severity = 1
         -- player-scoped by default; alerts('all') for the full save
 ```
@@ -68,6 +69,22 @@ JSON Schema from Rust (rmcp + schemars).
 
 Rescan allowlisted save dirs → `{ "count": number }`.
 
+### `campaign_brief`
+
+Empty args (`{}`). Requires a bound save (`use_save` first); otherwise a tool error (`no active session binding`).
+
+**Result (compact JSON):**
+
+| Field | Notes |
+| --- | --- |
+| `session` | `{ name, kind, in_game_date, country }` from the active session |
+| `player_tag` | Bound world's played country tag (may be null) |
+| `top_goods` | Up to ~10 domestic goods by summed shortage (`owner_tag` = player) |
+| `hotspots` | Up to ~15 `{ region_name, good, shortage }` rows |
+| `alert_kinds` | Kind → count histogram from **player-default** alerts (same filter as zero-arg `alerts()`, not `alerts('all')`) |
+
+Built from `SqlEngine::active_binding()` (no SQL round-trip).
+
 ### `explain`
 
 | Arg | Type | Notes |
@@ -81,7 +98,7 @@ Rescan allowlisted save dirs → `{ "count": number }`.
 | `vic3://schema` | Tables / columns / TVFs (same registry as SQL) |
 | `vic3://saves` | Catalog snapshot (no absolute paths) |
 | `vic3://session` | Active stub, defs status |
-| `vic3://docs/flow` | Short list → use_save → query |
+| `vic3://docs/flow` | Short list → use_save → campaign_brief → query |
 | `vic3://docs/sql` | Body of [`sql.md`](sql.md) |
 | `vic3://docs/mcp` | Body of this file |
 
@@ -89,7 +106,7 @@ Rescan allowlisted save dirs → `{ "count": number }`.
 
 | Prompt | Purpose |
 | --- | --- |
-| `investigate_shortages` | use_save → domestic `owner_tag = player_tag()` shortage join (market-wide goods optional) |
+| `investigate_shortages` | use_save → `campaign_brief` → optional domestic shortage SQL |
 | `compare_latest_autosave` | Catalog + bind + summary |
 | `military_readiness` | Military queries when available |
 | `what_is_loaded` | `vic3://session` + counts |

@@ -61,7 +61,13 @@ async fn tool_schemas_match_mcp_contract() {
     let names: BTreeSet<_> = tools.iter().map(|t| t.name.as_ref()).collect();
     assert_eq!(
         names,
-        BTreeSet::from(["query", "use_save", "refresh_catalog", "explain"])
+        BTreeSet::from([
+            "query",
+            "use_save",
+            "refresh_catalog",
+            "explain",
+            "campaign_brief"
+        ])
     );
 
     let by_name = |n: &str| tools.iter().find(|t| t.name == n).expect(n);
@@ -94,6 +100,14 @@ async fn tool_schemas_match_mcp_contract() {
             || refresh.input_schema.as_ref().is_empty()
             || refresh.input_schema.as_ref().contains_key("properties"),
         "refresh_catalog should expose an object schema"
+    );
+
+    let brief = by_name("campaign_brief");
+    assert!(
+        brief.input_schema.as_ref().get("type").is_some()
+            || brief.input_schema.as_ref().is_empty()
+            || brief.input_schema.as_ref().contains_key("properties"),
+        "campaign_brief should expose an object schema"
     );
 
     let explain = by_name("explain");
@@ -163,6 +177,25 @@ async fn query_and_use_save_tools_end_to_end() {
     assert!(result.loaded);
     assert_eq!(result.country.as_deref(), Some("GER"));
 
+    let brief = runtime.campaign_brief().await.expect("campaign_brief");
+    for key in [
+        "session",
+        "player_tag",
+        "top_goods",
+        "hotspots",
+        "alert_kinds",
+    ] {
+        assert!(brief.get(key).is_some(), "missing {key} in {brief}");
+    }
+    let session = brief.get("session").expect("session");
+    for key in ["name", "kind", "in_game_date", "country"] {
+        assert!(session.get(key).is_some(), "missing session.{key}");
+    }
+    assert_eq!(brief["player_tag"], "GER");
+    assert!(brief["top_goods"].is_array());
+    assert!(brief["hotspots"].is_array());
+    assert!(brief["alert_kinds"].is_object());
+
     let countries = runtime
         .query("SELECT tag FROM countries WHERE tag = 'GER'")
         .await
@@ -182,4 +215,34 @@ async fn query_and_use_save_tools_end_to_end() {
         .await
         .unwrap();
     let _ = eng;
+}
+
+#[tokio::test]
+async fn campaign_brief_requires_bound_save() {
+    let tmp = TempDir::new().unwrap();
+    let saves = tmp.path().join("saves");
+    fs::create_dir_all(&saves).unwrap();
+    fs::write(saves.join("autosave.v3"), save_fixture()).unwrap();
+    let blob = defs_blob(&tmp);
+
+    let config = AppConfig {
+        auto_detect: false,
+        save_dirs: vec![saves],
+        defs_blob: Some(blob),
+        ..Default::default()
+    };
+
+    let runtime = McpRuntime::from_config(
+        tmp.path().to_path_buf(),
+        tmp.path().join("config.toml"),
+        config,
+    )
+    .await
+    .expect("runtime");
+
+    let err = runtime.campaign_brief().await.expect_err("unbound");
+    assert!(
+        err.to_string().contains("no active session binding"),
+        "{err}"
+    );
 }

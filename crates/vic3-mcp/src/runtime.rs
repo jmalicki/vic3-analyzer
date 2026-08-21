@@ -12,11 +12,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use serde_json::Value;
 use tokio::sync::Mutex;
 use vic3_catalog::{is_valid_game_dir, scan_roots, AppConfig, DesktopConfig, SaveEntry, SaveRoot};
 use vic3_sql::{
     ActiveSessionInfo, EngineLoadOpts, SqlEngine, SqlError, UseSaveRequest, UseSaveResult,
 };
+
+use crate::brief::campaign_brief_json;
 
 /// Why MCP failed to open (config / catalog / engine).
 #[derive(Debug, thiserror::Error)]
@@ -186,6 +189,22 @@ impl McpRuntime {
     ) -> Result<Vec<datafusion::arrow::array::RecordBatch>, SqlError> {
         let eng = self.engine.lock().await;
         eng.query(sql).await
+    }
+
+    /// Compact campaign summary after [`Self::use_save`] (tool `campaign_brief`).
+    ///
+    /// Reads [`SqlEngine::active_binding`] directly: domestic top goods /
+    /// hotspots and a player-scoped alert-kind histogram (same filter as
+    /// zero-arg `alerts()`).
+    ///
+    /// # Errors
+    ///
+    /// [`SqlError::Unbound`] when no save is bound.
+    pub async fn campaign_brief(&self) -> Result<Value, SqlError> {
+        let eng = self.engine.lock().await;
+        let binding = eng.active_binding().ok_or(SqlError::Unbound)?;
+        let session = eng.active_session().ok_or(SqlError::Unbound)?;
+        Ok(campaign_brief_json(&session, binding.as_ref()))
     }
 }
 
