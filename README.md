@@ -78,10 +78,10 @@ Recommendation: Expand the Arms Industry in Silesia by 2 levels (or set an impor
 
 ---
 
-### 3. Native Desktop Companion (Tauri 2 GUI)
-* Standalone desktop application with auto-discovery of local Steam installs and save directories across macOS, Windows, and Linux.
-* Includes an interactive campaign dashboard, save catalog browser, shortage & qualification **Alerts** with ranked mitigations, advanced DataFusion SQL workbench, and goal timeline planning.
-* See the full **[Desktop Companion Guide](docs/desktop.md)**.
+### 3. Desktop App (Auto-Syncing Campaign Dashboard)
+* Run it on a second monitor while you play: automatically detects your Steam and Paradox save files whenever the game autosaves.
+* Surfaces critical economic **Alerts** with actionable next steps (like expanding local coal or building universities), lets you browse market prices across your states, and plots step-by-step goal timelines.
+* See the full **[Desktop App Guide](docs/desktop.md)**.
 
 ```bash
 cargo run -p vic3-analyzer

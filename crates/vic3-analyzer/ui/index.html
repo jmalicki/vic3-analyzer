@@ -423,8 +423,8 @@
     <header>
       <h1>Vic3 Analyzer</h1>
       <p class="lede">
-        Native companion: catalog, Settings, analysis JSON, and Advanced Query
-        over the same <code>vic3-sql</code> engine MCP will use.
+        Live campaign assistant: track domestic shortages, browse state economies,
+        and plan strategic goals directly from your Victoria 3 saves.
       </p>
       <nav aria-label="Views">
         <button type="button" id="tab-dashboard" aria-pressed="true">Dashboard</button>
@@ -452,13 +452,13 @@
       <section id="view-saves" class="hidden">
         <h2>Save catalog</h2>
         <p class="lede" style="margin-bottom: 0.75rem">
-          Filename stubs only — paths stay in Rust. Click a row to bind the SQL
-          session and analysis JSON.
+          Discovered save games from your local and Steam Cloud directories.
+          Click any save to inspect its economy and market prices.
         </p>
         <div class="actions" style="margin-bottom: 0.75rem">
           <button type="button" id="refresh-saves">Refresh list</button>
           <button type="button" class="ghost" id="load-prices" disabled>Loaded prices</button>
-          <button type="button" class="ghost" id="open-alerts" disabled>Open Alerts</button>
+          <button type="button" class="ghost" id="load-alerts" disabled>Loaded alerts</button>
         </div>
         <div style="overflow-x: auto">
           <table>
@@ -493,9 +493,9 @@
       <section id="view-query" class="hidden">
         <h2>Advanced Query</h2>
         <p class="lede" style="margin-bottom: 0.65rem">
-          Read-only SQL via <code>vic3-sql</code>. Click
-          <code>state_id</code>, <code>good</code>, <code>building_id</code>, or plan
-          <code>step</code> cells to open companion panes.
+          Run custom analytical queries against your campaign data. Click any
+          highlighted <code>state_id</code>, <code>good</code>, <code>building_id</code>, or
+          <code>step</code> to drill down into detailed breakdowns.
         </p>
         <div class="examples" id="sql-examples"></div>
         <div class="query-grid" id="query-layout">
@@ -576,8 +576,8 @@
       <section id="view-settings" class="hidden">
         <h2>Settings</h2>
         <p class="lede" style="margin-bottom: 0.85rem">
-          Shared with <code>vic3-analyzer mcp</code> via app-data
-          <code>config.toml</code>.
+          Game install and save directory paths. Configuration is saved locally
+          and shared with the AI assistant MCP server.
         </p>
         <label>
           Game folder (<code>…/Victoria 3/game</code>)

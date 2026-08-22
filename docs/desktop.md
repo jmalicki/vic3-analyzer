@@ -1,18 +1,18 @@
-# Desktop Companion App
+# Desktop App
 
-The native desktop companion (`crates/vic3-analyzer`) is a [Tauri 2](https://v2.tauri.app/) application providing automatic game and save discovery, an interactive campaign dashboard, and save timeline tracking.
+The Vic3 Analyzer desktop app is a lightweight local application designed to run alongside Victoria 3. It automatically detects your active game saves, provides a real-time campaign dashboard, monitors economic shortages, and maps out goal progression timelines.
 
-The compiled binary serves as both the **Desktop GUI** (default) and the background **AI Assistant MCP Server** (`vic3-analyzer mcp`).
+The compiled binary can run as either the **Desktop GUI** (default) or the background **AI Assistant MCP Server** (`vic3-analyzer mcp`).
 
 ---
 
-## Running the Desktop Companion
+## Launching the App
 
 ```bash
-# Launch the Tauri GUI companion
+# Launch the desktop application
 cargo run -p vic3-analyzer
 
-# Run the background MCP server for AI assistants (no GUI window opened)
+# Launch as a background AI assistant (MCP server)
 cargo run -p vic3-analyzer -- mcp
 
 # Headless CI ready check

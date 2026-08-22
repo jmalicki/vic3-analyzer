@@ -10,7 +10,10 @@ import { dirname, join } from 'node:path'
 const SWIFT = `
 import Cocoa
 
-let needles = ["vic3-analyzer", "Vic3 Analyzer"]
+let disallowedOwners = ["cursor", "electron", "code", "terminal", "iterm", "antigravity", "safari", "chrome"]
+let allowedOwners = ["vic3-analyzer", "vic3_analyzer", "victoria 3 analyzer"]
+let allowedTitles = ["victoria 3 analyzer & planner", "victoria 3 analyzer", "vic3 analyzer", "vic3-analyzer"]
+
 let opts = CGWindowListOption(arrayLiteral: .optionOnScreenOnly, .excludeDesktopElements)
 guard let info = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]] else {
   fputs("no window list\\n", stderr)
@@ -23,8 +26,15 @@ for w in info {
   if layer != 0 { continue }
   let owner = (w[kCGWindowOwnerName as String] as? String) ?? ""
   let title = (w[kCGWindowName as String] as? String) ?? ""
-  let blob = "\\(owner) \\(title)".lowercased()
-  guard needles.contains(where: { blob.contains($0.lowercased()) }) else { continue }
+  let ownerLower = owner.lowercased()
+  let titleLower = title.lowercased()
+
+  if disallowedOwners.contains(where: { ownerLower.contains($0) }) { continue }
+
+  let ownerMatch = allowedOwners.contains(where: { ownerLower.contains($0) })
+  let titleMatch = allowedTitles.contains(where: { titleLower.contains($0) })
+  guard ownerMatch || titleMatch else { continue }
+
   let bounds = w[kCGWindowBounds as String] as? [String: Any] ?? [:]
   let width = bounds["Width"] as? CGFloat ?? 0
   let height = bounds["Height"] as? CGFloat ?? 0
