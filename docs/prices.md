@@ -8,6 +8,17 @@ Solved prices feed the [`PlanningState`](planning.md) (`good_prices`, modeled GD
 
 ---
 
+## Why Simple Order Tallying Fails
+
+Victoria 3's economy cannot be accurately projected by simply adding or subtracting fixed order quantities. When production changes or buildings expand:
+- **Pop demand is dynamic:** Pops shop across wealth-stratified need packages. As relative prices move, pop substitution and purchasing power shift requested quantities.
+- **Local prices depend on market access:** State-level prices blend local supply and demand with national market prices based on infrastructure access and [Market Access Price Impact (MAPI)](https://vic3.paradoxwikis.com/Market#Market_access_price_impact).
+- **Cascading profitability:** Factory revenue and input costs change simultaneously across upstream and downstream supply chains.
+
+Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the full non-linear system (NLS) to find consistent pop demand and market prices.
+
+---
+
 ## Market Price Formula
 
 With `PRICE_RANGE` from game defines (typically `0.75`):
