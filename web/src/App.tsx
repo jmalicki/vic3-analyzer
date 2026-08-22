@@ -899,8 +899,8 @@ function App({ wasmApi }: Props) {
     <main>
       <header>
         <p className="eyebrow">LOCAL ECONOMY WORKBENCH</p>
-        <h1>vic3-analyzer</h1>
-        <p>Inspect market prices without uploading your campaign.</p>
+        <h1>Victoria 3 Analyzer</h1>
+        <p>Offline market equilibrium solver, what-if simulator, and strategic planner.</p>
       </header>
 
       <section className="inputs" aria-label="Analysis files">
@@ -1606,7 +1606,7 @@ function App({ wasmApi }: Props) {
       )}
       <footer className="site-footer">
         <span>
-          vic3-analyzer v{__APP_VERSION__} ({__GIT_REVISION__})
+          Victoria 3 Analyzer v{__APP_VERSION__} ({__GIT_REVISION__})
         </span>
         <span>
           Built <time dateTime={__BUILD_TIME__}>{new Date(__BUILD_TIME__).toLocaleString()}</time>

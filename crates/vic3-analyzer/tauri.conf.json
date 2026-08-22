@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Vic3 Analyzer",
+  "productName": "Victoria 3 Analyzer",
   "version": "0.3.0",
   "identifier": "com.jmalicki.vic3-analyzer",
   "mainBinaryName": "vic3-analyzer",
@@ -12,7 +12,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Vic3 Analyzer",
+        "title": "Victoria 3 Analyzer",
         "width": 1200,
         "height": 820,
         "resizable": true

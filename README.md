@@ -1,11 +1,11 @@
-# vic3-analyzer
+# Victoria 3 Analyzer & Planner
 
-> Privacy-first, offline Victoria 3 save analyzer, economic solver, and strategic planner.
+> Privacy-first, offline economic solver, what-if simulator, and AI strategic co-pilot for Victoria 3.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![CI](https://github.com/jmalicki/vic3-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/jmalicki/vic3-analyzer/actions)
 
-**vic3-analyzer** is an offline second-screen companion for *Victoria 3* (`.v3` save files). It solves true market price equilibria, diagnoses regional economic bottlenecks, checks strategic readiness, and finds optimal action timelines to achieve national goals.
+**Victoria 3 Analyzer** is an offline second-screen companion for *Victoria 3* (`.v3` save files). It solves true market price equilibria, diagnoses regional economic bottlenecks, checks strategic readiness, and finds optimal action timelines to achieve national goals.
 
 ---
 

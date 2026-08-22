@@ -905,7 +905,7 @@ describe('prices UI', () => {
   it('shows version, revision, and build time in the footer', () => {
     render(<App wasmApi={mockApi()} />)
     const footer = document.querySelector('.site-footer')
-    expect(footer).toHaveTextContent(`vic3-analyzer v${__APP_VERSION__}`)
+    expect(footer).toHaveTextContent(`Victoria 3 Analyzer v${__APP_VERSION__}`)
     expect(footer).toHaveTextContent('Built')
     expect(footer?.querySelector('time')).toHaveAttribute('dateTime')
   })
