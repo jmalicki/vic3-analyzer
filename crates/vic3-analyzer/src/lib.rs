@@ -42,7 +42,8 @@ pub use mode::Mode;
 /// `main` routes MCP to `vic3_mcp::run` so this function does not run.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default()
         .setup(commands::setup_app)
         .invoke_handler(tauri::generate_handler![
             commands::api_ping,
@@ -58,7 +59,15 @@ pub fn run() {
             commands::loaded_gaps,
             commands::sql_query,
             commands::sql_docs,
-        ])
+        ]);
+
+    // Docs / WDIO only — never enable the `webdriver` feature in player release builds.
+    #[cfg(feature = "webdriver")]
+    {
+        builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+    }
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running vic3-analyzer");
 }

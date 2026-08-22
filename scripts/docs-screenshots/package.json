@@ -9,7 +9,7 @@
     "docs:screenshots:web": "node capture-web.mjs",
     "docs:screenshots:desktop:mock": "node capture-desktop-mock.mjs",
     "docs:screenshots:compare": "node compare.mjs",
-    "docs:screenshots:desktop:tauri": "node -e \"console.error('Real macOS Tauri (WDIO) path is not wired yet — see desktop-tauri/README.md'); process.exit(1)\""
+    "docs:screenshots:desktop:tauri": "node desktop-tauri/run.mjs"
   },
   "devDependencies": {
     "pixelmatch": "^7.1.0",

@@ -40,6 +40,7 @@ export const WEB_SHOTS = [
 export const DESKTOP_SHOTS = [
   'desktop-dashboard.png',
   'desktop-saves.png',
+  'desktop-alert-mitigations.png',
   'desktop-query-shortages.png',
   'desktop-states.png',
   'desktop-prices.png',

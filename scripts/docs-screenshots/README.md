@@ -53,19 +53,18 @@ DOCS_SCREENSHOTS_OUT=/tmp/docs-shots npm run docs:screenshots:compare
 | Script | How |
 | --- | --- |
 | **web** | `vite preview` of `web/dist`, seeds fixture defs into IndexedDB, uploads the plaintext save fixture, walks hash/nav routes, writes `web-*.png` |
-| **desktop:mock** | Serves `crates/vic3-analyzer/ui/index.html` with `window.__TAURI__.core.invoke` mocked from `fixtures/desktop-mock-data.json`, writes `desktop-*.png` |
-| **desktop:tauri** | Stub — real macOS Tauri via WDIO (see below) |
+| **desktop:mock** | Serves `crates/vic3-analyzer/ui/index.html` with `window.__TAURI__.core.invoke` mocked from `fixtures/desktop-mock-data.json` — **CI layout drift** only |
+| **desktop:tauri** | Real companion on **macOS** via `@wdio/tauri-service` + `screencapture -l` (native window chrome). Prefer this when committing `desktop-*.png` |
 
-Viewport: **1280×800 @ 2×** `deviceScaleFactor`.
+Viewport (web + mock): **1280×800 @ 2×** `deviceScaleFactor`. Tauri shots use the live window size from `tauri.conf.json` (1200×820).
 
-## Real macOS Tauri (optional / future)
+## Real macOS Tauri (committed desktop goldens)
 
-Vanilla Playwright cannot drive WKWebView. Prefer Tauri’s WebDriver stack on macOS when you need the native chrome:
+```bash
+npm run docs:screenshots:desktop:tauri
+```
 
-- [WebDriver / `@wdio/tauri-service`](https://v2.tauri.app/develop/tests/webdriver/) + debug-only `tauri-plugin-wdio-webdriver`
-- Or a Playwright bridge such as [`@srsholmes/tauri-playwright`](https://github.com/srsholmes/tauri-playwright)
-
-See [`desktop-tauri/README.md`](desktop-tauri/README.md). Not required for Ubuntu CI; CI uses the mock path only.
+Requires Screen Recording permission for your terminal. Details: [`desktop-tauri/README.md`](desktop-tauri/README.md). Ubuntu CI keeps the mock path only.
 
 ## CI
 

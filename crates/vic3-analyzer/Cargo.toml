@@ -27,6 +27,7 @@ notify-debouncer-mini = "0.4"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tauri = { workspace = true, features = [] }
+tauri-plugin-wdio-webdriver = { version = "1.3", optional = true }
 tokio = { workspace = true, features = ["rt"] }
 vic3-api = { path = "../vic3-api" }
 vic3-catalog = { path = "../vic3-catalog" }
@@ -37,3 +38,7 @@ vic3-sql = { path = "../vic3-sql" }
 serde_json.workspace = true
 tempfile = "3"
 vic3-defs = { path = "../vic3-defs" }
+
+[features]
+# Docs / WDIO only — embeds WebDriver + starts the HTTP server. Never ship to players.
+webdriver = ["dep:tauri-plugin-wdio-webdriver"]
