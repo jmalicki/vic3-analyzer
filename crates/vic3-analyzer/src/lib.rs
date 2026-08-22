@@ -59,6 +59,8 @@ pub fn run() {
             commands::loaded_gaps,
             commands::sql_query,
             commands::sql_docs,
+            commands::get_mcp_status,
+            commands::toggle_mcp_client,
         ]);
 
     // Docs / WDIO only — never enable the `webdriver` feature in player release builds.

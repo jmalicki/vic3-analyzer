@@ -114,8 +114,40 @@ cargo run -p vic3-cli -- archive show <record-id>
 cargo run -p vic3-cli -- archive diff <record-id-1> <record-id-2>
 ```
 
+### 10. AI Companion & MCP Integration: `mcp`
+Inspects, installs, configures, or serves the Model Context Protocol (MCP) server for desktop AI assistants (Claude Desktop, LM Studio, Windows Copilot, Codex, Cursor, Claude Code).
+
+```bash
+# Interactive installation (presents checkboxes for detected apps in your terminal):
+cargo run -p vic3-cli -- mcp install
+
+# Automated non-interactive installation to all detected apps:
+cargo run -p vic3-cli -- mcp install -y
+
+# Configure a specific application:
+cargo run -p vic3-cli -- mcp install --client claude-desktop
+cargo run -p vic3-cli -- mcp install --client lm-studio
+
+# Preview changes without modifying disk:
+cargo run -p vic3-cli -- mcp install --dry-run
+
+# Inspect integration status across all supported desktop AI applications:
+cargo run -p vic3-cli -- mcp status
+
+# Remove vic3-analyzer from client configs (leaves other tools untouched):
+cargo run -p vic3-cli -- mcp uninstall --client lm-studio
+cargo run -p vic3-cli -- mcp uninstall --all
+
+# Print configuration snippet for manual pasting:
+cargo run -p vic3-cli -- mcp show-config --client claude-desktop
+cargo run -p vic3-cli -- mcp show-config --client codex
+
+# Run stdio MCP server directly from the CLI:
+cargo run -p vic3-cli -- mcp serve
+```
+
 ---
 
 ## Machine-Readable Output (`--json`)
 
-Passing `--json` to any command outputs clean, unformatted NDJSON/JSON stdout suitable for piping to `jq` or integrating into custom scripts. Errors and diagnostic progress are emitted to `stderr`.
+Passing `--json` to any command (e.g. `prices`, `plan`, `mcp status`) outputs clean, unformatted NDJSON/JSON stdout suitable for piping to `jq` or integrating into custom scripts. Errors and diagnostic progress are emitted to `stderr`.

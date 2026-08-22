@@ -193,6 +193,32 @@ pub fn sql_docs(state: State<'_, AppState>) -> Result<SqlDocsDto, String> {
     Ok(session.sql_docs())
 }
 
+/// Query the current detection and configuration status of supported MCP clients on this OS.
+#[tauri::command]
+pub fn get_mcp_status() -> Vec<vic3_catalog::McpClientStatus> {
+    vic3_catalog::McpClientKind::supported_on_current_os()
+        .into_iter()
+        .map(|c| c.status())
+        .collect()
+}
+
+/// Enable or disable MCP configuration for a specific AI client.
+#[tauri::command]
+pub fn toggle_mcp_client(
+    client_id: String,
+    enabled: bool,
+) -> Result<vic3_catalog::McpClientStatus, String> {
+    let client = vic3_catalog::McpClientKind::from_id_or_alias(&client_id)
+        .ok_or_else(|| format!("unknown client '{client_id}'"))?;
+    if enabled {
+        let binary = vic3_catalog::resolve_mcp_binary(None);
+        vic3_catalog::install_client_config(client, &binary, false)?;
+    } else {
+        vic3_catalog::uninstall_client_config(client, false)?;
+    }
+    Ok(client.status())
+}
+
 fn restart_watch(app: &AppHandle, state: &State<'_, AppState>) -> Result<(), String> {
     let roots = {
         let session = state.inner.lock().map_err(|_| "state lock poisoned")?;

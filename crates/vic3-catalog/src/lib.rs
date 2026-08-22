@@ -45,6 +45,7 @@ mod catalog;
 mod config;
 mod error;
 mod location;
+pub mod mcp;
 mod paths;
 mod stub;
 
@@ -52,6 +53,12 @@ pub use catalog::{scan_roots, SaveCatalog, SaveEntry};
 pub use config::{resolve_config_path, AppConfig, DesktopConfig};
 pub use error::CatalogError;
 pub use location::SaveLocation;
+pub use mcp::{
+    format_client_snippet, generate_mcp_json_entry, install_client_config,
+    remove_codex_toml_content, remove_mcp_json_content, resolve_mcp_binary,
+    uninstall_client_config, update_codex_toml_content, update_mcp_json_content, which_binary,
+    McpClientKind, McpClientStatus, ResolvedMcpBinary, MCP_SERVER_NAME,
+};
 pub use paths::{
     app_data_dir, default_config_path, default_game_dir_candidates, default_local_save_dir,
     detect_game_dir, detect_save_roots, detect_steam_cloud_save_dirs, infer_location,

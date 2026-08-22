@@ -393,3 +393,64 @@ fn export_save_writes_a_different_path() {
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn mcp_status_table_and_json() {
+    let assert = bin().args(["mcp", "status"]).assert().success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("Claude Desktop"), "{stdout}");
+    assert!(stdout.contains("LM Studio"), "{stdout}");
+
+    let assert_json = bin().args(["mcp", "status", "--json"]).assert().success();
+    let json_stdout = String::from_utf8_lossy(&assert_json.get_output().stdout);
+    let value: Value = serde_json::from_str(&json_stdout).expect("valid JSON array");
+    let arr = value.as_array().expect("array of status objects");
+    assert!(!arr.is_empty());
+    assert!(arr.iter().any(|item| item["id"] == "claude-desktop"));
+    assert!(arr.iter().any(|item| item["id"] == "lm-studio"));
+}
+
+#[test]
+fn mcp_show_config_snippets() {
+    let assert_claude = bin()
+        .args(["mcp", "show-config", "--client", "claude-desktop"])
+        .assert()
+        .success();
+    let stdout_claude = String::from_utf8_lossy(&assert_claude.get_output().stdout);
+    assert!(stdout_claude.contains("mcpServers"), "{stdout_claude}");
+    assert!(stdout_claude.contains("vic3-analyzer"), "{stdout_claude}");
+
+    let assert_codex = bin()
+        .args(["mcp", "show-config", "--client", "codex"])
+        .assert()
+        .success();
+    let stdout_codex = String::from_utf8_lossy(&assert_codex.get_output().stdout);
+    assert!(
+        stdout_codex.contains("[mcp_servers.vic3-analyzer]"),
+        "{stdout_codex}"
+    );
+}
+
+#[test]
+fn mcp_install_and_uninstall_dry_run() {
+    let assert_install = bin()
+        .args(["mcp", "install", "--client", "claude-desktop", "--dry-run"])
+        .assert()
+        .success();
+    let stdout_install = String::from_utf8_lossy(&assert_install.get_output().stdout);
+    assert!(stdout_install.contains("[DRY-RUN]"), "{stdout_install}");
+    assert!(stdout_install.contains("vic3-analyzer"), "{stdout_install}");
+
+    let assert_uninstall = bin()
+        .args([
+            "mcp",
+            "uninstall",
+            "--client",
+            "claude-desktop",
+            "--dry-run",
+        ])
+        .assert()
+        .success();
+    let stdout_uninstall = String::from_utf8_lossy(&assert_uninstall.get_output().stdout);
+    assert!(stdout_uninstall.contains("[DRY-RUN]"), "{stdout_uninstall}");
+}
