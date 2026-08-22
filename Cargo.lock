@@ -6596,7 +6596,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vic3-analyzer"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "notify",
  "notify-debouncer-mini",
@@ -6616,7 +6616,7 @@ dependencies = [
 
 [[package]]
 name = "vic3-api"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -6630,7 +6630,7 @@ dependencies = [
 
 [[package]]
 name = "vic3-catalog"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "dirs",
  "serde",
@@ -6642,7 +6642,7 @@ dependencies = [
 
 [[package]]
 name = "vic3-cli"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -6666,7 +6666,7 @@ dependencies = [
 
 [[package]]
 name = "vic3-defs"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bcdec_rs",
  "jomini",
@@ -6680,7 +6680,7 @@ dependencies = [
 
 [[package]]
 name = "vic3-load"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "jomini",
  "serde",
@@ -6691,7 +6691,7 @@ dependencies = [
 
 [[package]]
 name = "vic3-mcp"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "datafusion",
@@ -6713,7 +6713,7 @@ dependencies = [
 
 [[package]]
 name = "vic3-planning"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "chumsky",
  "proptest",
@@ -6728,7 +6728,7 @@ dependencies = [
 
 [[package]]
 name = "vic3-prices"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "basin",
  "proptest",
@@ -6743,7 +6743,7 @@ dependencies = [
 
 [[package]]
 name = "vic3-sql"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "datafusion",
@@ -6762,7 +6762,7 @@ dependencies = [
 
 [[package]]
 name = "vic3-wasm"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "schemars 1.2.2",
  "serde_json",

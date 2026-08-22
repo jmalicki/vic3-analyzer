@@ -9,12 +9,12 @@ export const config = {
     capabilities: [{
         browserName: 'chrome',
         'goog:chromeOptions': {
-            args: ['headless', 'disable-gpu']
+            args: ['--headless=new', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage']
         }
     }],
     logLevel: 'info',
     bail: 0,
-    baseUrl: 'http://localhost:5173',
+    baseUrl: 'http://localhost:5173/vic3-analyzer/',
     waitforTimeout: 10000,
     connectionRetryTimeout: 120000,
     connectionRetryCount: 3,

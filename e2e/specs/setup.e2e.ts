@@ -4,7 +4,7 @@ import { join } from 'node:path'
 describe('Setup & Configuration', () => {
     it('should load the web app', async () => {
         if (browser.capabilities.browserName !== 'tauri') {
-            await browser.url('http://localhost:5173')
+            await browser.url('')
         }
         await expect($('body')).toBeExisting()
     })
@@ -32,6 +32,6 @@ describe('Setup & Configuration', () => {
         await saveBtn.click()
         
         const status = await $('#settings-status')
-        await expect(status).toHaveTextContaining('Saved')
+        await expect(status).toHaveText(expect.stringContaining('Saved'))
     })
 })
