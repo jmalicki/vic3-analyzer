@@ -1,84 +1,137 @@
 # vic3-analyzer
 
-AGPL-3.0 Victoria 3 save loader and planner. Given a `.v3` and a high-level goal, it evaluates readiness gaps and — when the simulator has actions for that goal — emits a time-optimal move sequence **under our model**, not Paradox’s binary. Today A* closes `research`, modeled `gdp`, supported goods-price goals, `interest_in`, staffed `army_power_projection` / `navy_power_projection` (barracks, shipyards, naval administrations), and solvency / credit-headroom via a compact payday model; `declare-war` and `colonize` sugar expand to readiness conjuncts (see [`docs/dsl.md`](docs/dsl.md)).
+Local advisor for [Victoria 3](https://www.paradoxinteractive.com/games/victoria-3/about) ([wiki](https://vic3.paradoxwikis.com/)): triage market shortages, run building what-ifs, search **goal plans** (war readiness, GDP paths, research), and drive the same engine from SQL or an LLM over MCP. Your saves and game definitions **never leave your machine**.
 
-**CLI first**, then an in-browser UI (`wasm-bindgen` + React). Saves are never uploaded. Past runs and alternative plans live in a **local archive** (CLI: XDG; UI: IndexedDB).
+![Prices workspace — market overview with goods icons](docs/assets/web-prices.png)
 
-**Live demo:** [https://jmalicki.github.io/vic3-analyzer/](https://jmalicki.github.io/vic3-analyzer/) — drop a plaintext `.v3` (or fixture bytes) and supply definitions from your own install. The site ships none, so nothing can quietly price a campaign from test fixtures. Binary token maps are not redistributed either.
+![Advanced Query — shortage SQL for player-owned states](docs/assets/desktop-query-shortages.png)
 
-The browser builds and stores definitions locally when you choose or drag your
-installed `Victoria 3/game` folder. It prunes heavy trees and reads only
-allowlisted definitions, English goods localization, and the goods icons under
-`gfx/interface/icons/goods_icons`. Selecting a local folder does not upload it
-or use network bandwidth.
+## Why it’s hard
 
-Icons ship as DDS, which browsers cannot draw, so the loader decodes the top mip
-(BC1/BC2/BC3/BC7 or uncompressed 32-bit) and stores PNG bytes in the blob.
-Anything it cannot decode is skipped: goods then render by name alone.
+Vic3 decisions look like spreadsheets (“build more steel”) and are not.
 
-For CLI use, build a blob directly from your installed game:
+Construction sectors eat iron, wood, and tools — a feedback loop, not a static cost line. [Shortages](https://vic3.paradoxwikis.com/Market#Shortage) cascade into throughput penalties. Buildings and pops pay **local** prices (a blend of the national [market](https://vic3.paradoxwikis.com/Market) price and the state’s isolated price — [Market Access Price Impact (MAPI)](https://vic3.paradoxwikis.com/Market#Local_prices), reduced further by low [market access](https://vic3.paradoxwikis.com/Infrastructure#Market_access)). Advanced industry needs [qualifications](https://vic3.paradoxwikis.com/Profession#Qualifications); peasants do not become engineers overnight. War readiness is a checklist (declared interest, staffed army power, munitions, solvency), not a single button. Order matters across months of construction, hiring, and research.
+
+A save viewer shows the ledger. This stack re-prices *your* market after a change and searches build/research sequences under staffing and fiscal constraints — under our model. Fuller pitch: [docs/user/README.md](docs/user/README.md).
+
+## Who it’s for
+
+Mid/late-campaign players who already feel construction-price opacity, empty factories, and “what should I queue next?” paralysis. Not a replacement for learning the game — start from the [Victoria 3 Wiki](https://vic3.paradoxwikis.com/) for the rules.
+
+## Three ways to use it
+
+### Ask your AI (MCP)
+
+Point Cursor or Claude Desktop at `vic3-analyzer mcp`. The model binds your autosave, reads `campaign_brief`, then runs `query` / `preview_delta` — same dialect as Advanced Query.
 
 ```text
-cargo run -p vic3-cli -- defs export \
-  --game "/path/to/Victoria 3/game" \
-  --out defs.postcard
+You: What’s short in my market, and where?
+
+→ use_save { "selector": "latest_autosave" }
+→ campaign_brief {}
+→ query  SELECT s.region_name, g.good, g.shortage, g.price
+         FROM states s JOIN goods_by_state g USING (state_id)
+         WHERE g.shortage > 0
+         ORDER BY g.shortage DESC LIMIT 20
 ```
 
-Do not commit or publish `defs.postcard`: it is derived from Paradox game data.
+Full trajectories (shortage triage, what-if, war gaps, GDP path, research, credit): [docs/user/mcp.md](docs/user/mcp.md).
 
-Dragging the game folder is the reliable browser route, since Chrome refuses to open Steam's install
-location (`~/Library`, `Program Files`) through its folder pickers. The
-Clausewitz files are parsed in wasm and never leave the browser, and the built
-blob is kept in IndexedDB so a reload does not lose it.
+### Desktop companion
 
-Goods results are sortable, show the game's icon and localized name, and link to
-state-attributed orders, then to
-individual building model revenue, costs, profit, IO, and shortages. Prices are
-per-state MAPI blends of the solved market price and attributed local orders,
-using infrastructure-only access and base MAPI 75%; the global table shows an
-order-weighted average for the selected geography. Full modifiers, overseas
-access, and separate market solves are not yet modeled. State-attributed orders
-are access-scaled into the current single market, including post-1.9 trade
-recorded directly on each trade-center state.
+Native shell that finds Steam/Paradox paths, binds stubs by name, runs Advanced Query, drills into States/Prices, and opens Timeline for a sequenced plan. Building-level what-if lives on the web and via MCP `preview_delta` today.
+
+![Dashboard — save catalog and defs status](docs/assets/desktop-dashboard.png)
+
+![Timeline — time-ordered GDP / research plan steps](docs/assets/desktop-timeline-gdp.png)
+
+Guide: [docs/user/desktop.md](docs/user/desktop.md).
+
+### Browser workbench
+
+Zero-install [live demo](https://jmalicki.github.io/vic3-analyzer/). Drop a save (nothing uploads), explore prices, stress-test a build with What-if, then Goal gaps / Timeline for war and GDP paths.
+
+Paradox game data is **copyrighted** — the site ships no defs. Drag your local `Victoria 3/game` folder once; files stay in the browser (IndexedDB).
+
+![What-if — re-solve prices after a building delta](docs/assets/web-what-if.png)
+
+![Goal gaps — prepare-for-war checklist under the model](docs/assets/web-gaps-war.png)
+
+Guide: [docs/user/web.md](docs/user/web.md).
+
+## Try it in 5 minutes
+
+1. Prefer plaintext saves: `"save_file_format": "zip_text_all"` in `pdx_settings.json`, then re-save ([Save-game editing](https://vic3.paradoxwikis.com/Save-game_editing)).
+2. **Browser:** open the [live demo](https://jmalicki.github.io/vic3-analyzer/), drag your `Victoria 3/game` folder, drop a `.v3`.
+3. **Desktop / MCP:** build and run the companion; MCP uses the same binary with args `["mcp"]`:
+
+```json
+{
+  "mcpServers": {
+    "vic3-analyzer": {
+      "command": "/absolute/path/to/vic3-analyzer",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+## What you can answer
+
+- What’s short in my market, and where?
+- If I add five steel mills / rye farms, what moves?
+- Prepare for war over this state — what’s missing?
+- Optimal path toward a GDP target / research plan under the model?
+- Am I about to default — credit headroom?
+- Where are qualifications bottlenecks before I spam factories?
 
 ## Docs
 
+### Play
+
 | Doc | Contents |
 | --- | --- |
-| [architecture](docs/architecture.md) | Crates, data flow, what is not the game |
-| [usage](docs/usage.md) | CLI/UI, shared option structs |
-| [dsl](docs/dsl.md) | Goal language (chumsky) |
-| [prices](docs/prices.md) | Equilibrium, Basin, limitations |
-| [planning](docs/planning.md) | `PlanningState`, A* |
-| [archive](docs/archive.md) | Past saves and alternative plans |
-| [sql](docs/sql.md) | DataFusion SQL tables / UDFs / `plan()` TVF |
-| [mcp](docs/mcp.md) | Stdio MCP tools / resources / agent flow (`vic3-mcp` / rmcp) |
-| [desktop](docs/desktop.md) | Tauri shell build/run + auto-detect, config, Settings |
-| [libraries](docs/libraries.md) | Locked deps and selection bar |
-| [invariants](docs/invariants.md) | I1–I9 property tests |
-| [json-schema](docs/json-schema.md) | Result/option contract (draft) |
+| [Play guides](docs/user/README.md) | Overview, why it’s hard, choose a surface |
+| [MCP](docs/user/mcp.md) | LLM trajectories and tool flow |
+| [Desktop](docs/user/desktop.md) | Companion UI and SQL recipes |
+| [Web](docs/user/web.md) | Browser workbench and defs setup |
 
-## Develop
+### Reference
+
+| Doc | Contents |
+| --- | --- |
+| [sql](docs/sql.md) | DataFusion tables / UDFs / `plan()` |
+| [dsl](docs/dsl.md) | Goal language |
+| [prices](docs/prices.md) | Equilibrium method and limitations |
+| [json-schema](docs/json-schema.md) | Result/option contract |
+| [archive](docs/archive.md) | Past saves and alternative plans |
+
+### Develop
+
+| Doc | Contents |
+| --- | --- |
+| [architecture](docs/architecture.md) | Crates, data flow |
+| [usage](docs/usage.md) | CLI / shared option structs |
+| [planning](docs/planning.md) | `PlanningState`, A* |
+| [mcp](docs/mcp.md) | MCP protocol reference |
+| [desktop](docs/desktop.md) | Tauri config / auto-detect |
+| [libraries](docs/libraries.md) | Locked deps |
+| [invariants](docs/invariants.md) | Property tests |
 
 ```text
-git config core.hooksPath .githooks   # fmt, clippy, web tsc on commit (same as CI lint)
+git config core.hooksPath .githooks
 cargo test --workspace
-cargo run -p vic3-cli
+cargo run -p vic3-analyzer            # companion UI
+cargo run -p vic3-analyzer -- mcp     # stdio MCP
 cd web && npm install && npm run build:wasm && npm run build:defs && npm run dev
 ```
 
-### Desktop (GUI + MCP)
-
-One fat binary (`vic3-analyzer`): companion UI by default, stdio MCP with `mcp`. Same app config and defs cache; separate process / RAM session. WebView libraries may still load in `mcp` mode (no window). Details: [`docs/desktop.md`](docs/desktop.md), [`docs/mcp.md`](docs/mcp.md).
-
-```text
-cargo run -p vic3-analyzer            # Tauri companion UI
-cargo run -p vic3-analyzer -- mcp     # stdio MCP (JSON-RPC on stdout, logs on stderr)
-./scripts/mcp-smoke.sh                # headless ready check (no display)
-```
-
-CI runs Rust (`fmt`, `clippy`, `test`, MCP smoke) and the web job (`npm test`, `npm run test:wasm`, `npm run build`). Pushes to `main` deploy `web/dist` to GitHub Pages. Pre-commit is `./scripts/lint.sh` (fmt, clippy, `tsc -b`); it does not run tests or wasm-pack.
+Also: CLI via `vic3-cli` ([usage](docs/usage.md)). Screenshot regen: `scripts/docs-screenshots`.
 
 ## License
 
-[AGPL-3.0](LICENSE).
+[AGPL-3.0](LICENSE) covers **our** code. Game definitions remain Paradox’s / yours — we never redistribute them.
+
+## Model notes
+
+See [docs/user/_model-notes.md](docs/user/_model-notes.md): frozen labor/trade in solves, not a full pop/migration planner, simplified MAPI/access, uneven planner coverage.

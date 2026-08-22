@@ -112,7 +112,8 @@ async function main() {
     })
     await waitReady(page)
 
-    // W1 Prices
+    // W1 Prices — frame the goods table, not just the drop zone
+    await page.getByRole('heading', { name: 'Goods prices' }).scrollIntoViewIfNeeded()
     await writeShot(page, dest, WEB_SHOTS[0])
 
     // W2 Good drill-down

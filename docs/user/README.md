@@ -1,8 +1,8 @@
 # Play guides
 
-**vic3-analyzer** is a local Victoria 3 advisor: market triage, building what-ifs, and goal plans for war readiness, GDP paths, and research. Your saves and game definitions stay on your machine. Method details and caveats live in [Model notes](_model-notes.md).
+**vic3-analyzer** is a local advisor for [Victoria 3](https://www.paradoxinteractive.com/games/victoria-3/about) ([wiki](https://vic3.paradoxwikis.com/)): market triage, building what-ifs, and goal plans for war readiness, GDP paths, and research. Your saves and game definitions stay on your machine. Method details and caveats live in [Model notes](_model-notes.md).
 
-These guides are for mid/late-campaign players who already feel construction-price opacity, empty factories, and “what should I queue next?” paralysis. They are not a replacement for learning the game.
+These guides are for mid/late-campaign players who already feel construction-price opacity, empty factories, and “what should I queue next?” paralysis. They are not a replacement for learning the game — start from the [Victoria 3 Wiki](https://vic3.paradoxwikis.com/) if you need the rules.
 
 ## Choose your surface
 

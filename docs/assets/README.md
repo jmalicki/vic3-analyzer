@@ -1,6 +1,6 @@
 # Doc screenshots
 
-Locked filenames for player-facing guides. Generate via `scripts/docs-screenshots` (see that package). PNGs are committed in a later stack PR; until then guides may link these paths as placeholders.
+Locked filenames for player-facing guides. Generate via `scripts/docs-screenshots` (see that package). Committed PNGs are the source of truth for README / `docs/user/*` embeds.
 
 ## Desktop companion (`desktop-*.png`)
 
