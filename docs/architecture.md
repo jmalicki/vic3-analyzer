@@ -23,6 +23,8 @@ The core analysis engine is transport-independent: analytical results and option
 | **`vic3-wasm`** | Thin `wasm-bindgen` wrapper exposing `vic3-api` functionality to browser JavaScript. | WebAssembly |
 | **`web/`** | Browser client built with React and Vite. Uses IndexedDB for offline persistence and generates forms dynamically from JSON Schema. | Browser / Web |
 
+*(For detailed crate selection criteria, WASM compatibility requirements, and dependency rationales, see the **[Dependency Registry](libraries.md)**).*
+
 ---
 
 ## Data Flow Diagram

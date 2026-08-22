@@ -100,9 +100,8 @@ Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the ful
 ### Developer & Architecture Specifications
 | Document | Description |
 | --- | --- |
-| [Architecture](docs/architecture.md) | Crate boundaries, dataflow diagram, asset/texture pipelines, and WASM bridge |
-| [Invariants](docs/invariants.md) | Property-tested formal invariants (I1–I9) |
-| [Libraries](docs/libraries.md) | Dependency selection bar and locked crate choices |
+| [Architecture Overview](docs/architecture.md) | Crate boundaries, dataflow pipeline, asset decoding, and dependency registry |
+| [Mathematical Invariants](docs/invariants.md) | Property-tested formal invariants and solver guarantees |
 | [JSON Schema](docs/json-schema.md) | Shared result and option schema contracts |
 
 ---
