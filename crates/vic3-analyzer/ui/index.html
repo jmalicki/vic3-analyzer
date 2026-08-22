@@ -1101,13 +1101,18 @@
           hasLoaded = true;
           setAlertsLoadedUi(true);
           const summary = JSON.parse(json).summary || {};
+          await refreshDashboard();
+          await refreshSaves();
+          
+          // Set status AFTER refreshSaves so it doesn't get overwritten by the stub count
           setStatus(
             status,
             `Loaded ${selected.name} — ${summary.tag || "?"} @ ${summary.date || "?"}`,
             "ok"
           );
-          await refreshDashboard();
-          await refreshSaves();
+          
+          // Navigate to dashboard so the user sees the new state
+          showView("dashboard");
         } catch (err) {
           setStatus(status, String(err), "err");
         }
