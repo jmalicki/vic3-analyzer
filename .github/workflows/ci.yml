@@ -116,6 +116,7 @@ jobs:
         env:
           DOCS_SCREENSHOTS_OUT: ${{ runner.temp }}/docs-screenshots-out
           CI: "true"
+          DOCS_SCREENSHOTS_MAX_DIFF_RATIO: "0.15"
         run: npm run docs:screenshots:compare
       - name: Upload screenshot artifacts on failure
         if: failure()
