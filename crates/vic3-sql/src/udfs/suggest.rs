@@ -18,7 +18,6 @@
 //!
 //! Args are plan-time string literals only (no subquery args in v1).
 
-use std::any::Any;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -223,10 +222,6 @@ fn action_type_str(action: &MitigationAction) -> &'static str {
 
 #[async_trait]
 impl TableProvider for SuggestMitigationsProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

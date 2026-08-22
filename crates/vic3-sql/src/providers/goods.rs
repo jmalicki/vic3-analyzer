@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -123,10 +122,6 @@ impl GoodsProvider {
 
 #[async_trait]
 impl TableProvider for GoodsProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

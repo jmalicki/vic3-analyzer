@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -103,10 +102,6 @@ impl BuildingTypesProvider {
 
 #[async_trait]
 impl TableProvider for BuildingTypesProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

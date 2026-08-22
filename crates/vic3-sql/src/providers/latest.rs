@@ -3,7 +3,6 @@
 //! Distinct from `active.*`: a `SELECT` here must not call `use_save` or install
 //! the process analysis session (`docs/sql.md`).
 
-use std::any::Any;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -44,10 +43,6 @@ impl LatestFactProvider {
 
 #[async_trait]
 impl TableProvider for LatestFactProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }
@@ -100,10 +95,6 @@ impl UnboundFactProvider {
 
 #[async_trait]
 impl TableProvider for UnboundFactProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -99,10 +98,6 @@ fn flows_from_idx(binding: &SessionBinding, rows: &[(vic3_defs::GoodIdx, f64)]) 
 
 #[async_trait]
 impl TableProvider for ProductionMethodsProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

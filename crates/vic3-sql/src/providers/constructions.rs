@@ -4,7 +4,6 @@
 //! `queued_building`. Use `queue = 'private'|'government'` and `position` for
 //! display order within a country (matching the in-game build queue UI).
 
-use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -157,10 +156,6 @@ impl ConstructionsProvider {
 
 #[async_trait]
 impl TableProvider for ConstructionsProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

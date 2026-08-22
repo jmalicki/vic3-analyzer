@@ -7,7 +7,6 @@
 //! Same projection / Exact filter / LIMIT-before-mitigations policy as `alerts()`
 //! (speedup D, issue #37).
 
-use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -274,10 +273,6 @@ fn is_goods_shortage_kind(kind: AlertKind) -> bool {
 
 #[async_trait]
 impl TableProvider for ShortageAnalysisProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

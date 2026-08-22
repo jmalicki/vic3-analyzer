@@ -4,7 +4,6 @@
 //! `label` mirrors `PlanOpts` and is not emitted. `limitations` is joined onto
 //! **step 0 only**.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -159,10 +158,6 @@ struct PlanProvider {
 
 #[async_trait]
 impl TableProvider for PlanProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }
