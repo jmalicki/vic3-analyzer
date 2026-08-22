@@ -88,6 +88,20 @@
       ],
       "row_count": 3
     },
+    "basic": {
+      "columns": ["player_tag", "army_power"],
+      "rows": [["GER", 480.5]],
+      "row_count": 1
+    },
+    "top_alerts": {
+      "columns": ["kind", "severity", "count"],
+      "rows": [
+        ["goods_shortage", 1, 3],
+        ["needs_unmet", 1, 2],
+        ["underemployed", 2, 4]
+      ],
+      "row_count": 3
+    },
     "shortage": {
       "columns": ["good", "shortage", "price", "state_id"],
       "rows": [

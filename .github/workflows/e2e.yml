@@ -39,7 +39,7 @@ jobs:
         run: |
           cd web
           npm run dev &
-          npx wait-on http://localhost:5173
+          npx wait-on http://localhost:5173/vic3-analyzer/
           cd ../e2e
           npm test
   tauri:
