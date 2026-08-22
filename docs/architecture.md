@@ -1,91 +1,106 @@
-# Architecture
+# Architecture & Crate Design
 
-This tool is a **model** of Victoria 3, not the game binary. Plans are time-optimal under the formulas and invariants in these docs. They are not guaranteed to match Paradox’s executable.
+**vic3-analyzer** is structured as a modular workspace of Rust crates, a WebAssembly bridge, a Vite/React frontend, and a native Tauri companion.
 
-License: AGPL-3.0. Saves and token maps are user-supplied and never uploaded.
+The core analysis engine is transport-independent: analytical results and option structs are shared identically across the CLI, Web UI, Desktop GUI, and MCP server.
 
-## Delivery
+---
 
-1. **CLI** (`vic3-cli`) — first product. Load a `.v3`, print prices, what-if, alerts, WorldDelta preview, PM search, gaps, and plans as JSON or text. Patch-export writes a **new** plaintext `.v3`.
-2. **In-browser UI** (`web/` + `vic3-wasm`) — same Rust core via `vic3-api`, thin `wasm-bindgen`. Drop a save in the tab. No server, no upload. Load solves prices immediately.
-3. **Desktop** (`vic3-analyzer`) — one fat Tauri 2 binary: default argv opens a WebView; `vic3-analyzer mcp` runs stdio MCP via `vic3-mcp` / rmcp with an early argv branch (no window; WebView libs may still load). See [`desktop.md`](desktop.md), [`mcp.md`](mcp.md).
-4. **Local archive** — past runs and named alternative plans stay on the machine ([`archive.md`](archive.md)). UI save timelines live in IndexedDB (`origins` / `timelines` / `steps` / `current`).
+## Crate Responsibilities
 
-## Crates
+| Crate | Responsibility | Dependencies / Target |
+| --- | --- | --- |
+| **`vic3-load`** | Parsing `.v3` save files (using `jomini` and `pdx-tools` `vic3save`) into intermediate representation (`WorldSave`); surgical plaintext patch export (`SavePatch`). | Pure Rust, WASM-safe |
+| **`vic3-defs`** | Extracting and indexing game definitions (goods, PMs, pop needs, buy packages) from installs or precompiled blobs; decoding game UI icons. | Pure Rust, WASM-safe |
+| **`vic3-prices`** | Market price equilibrium solver (Basin non-linear least squares + successive substitution warm start), pop consumption, [MAPI](https://vic3.paradoxwikis.com/Market#Market_access_price_impact) blending, and qualification bottleneck alerts. | Pure Rust, WASM-safe |
+| **`vic3-planning`** | Compact `PlanningState` projection, Goal DSL parsing (`chumsky`), goal-relevant successor generation, and A* search engine (`rust-advanced-heaps`). | Pure Rust, WASM-safe |
+| **`vic3-api`** | Transport-free API facade. Accepts raw bytes or filesystem paths and produces uniform analytical JSON. | Pure Rust |
+| **`vic3-catalog`** | File system discovery and watcher for local/Steam save directories and shared application configuration (`config.toml`). | Native OS |
+| **`vic3-sql`** | Embedded read-only [Apache DataFusion](https://datafusion.apache.org/) SQL query engine over the save catalog and active save fact tables. | Native OS |
+| **`vic3-mcp`** | Model Context Protocol server (`rmcp`) exposing query tools, campaign briefs, and prompts to desktop AI assistants. | Native OS |
+| **`vic3-cli`** | Command-line interface (`clap`). Clap wrappers exist only in this crate; core structs remain filesystem-free. | Native CLI binary |
+| **`vic3-analyzer`** | Fat desktop binary (Tauri 2). Default launch runs the GUI companion; `vic3-analyzer mcp` launches the headless MCP server. | Native Desktop binary |
+| **`vic3-wasm`** | Thin `wasm-bindgen` wrapper exposing `vic3-api` functionality to browser JavaScript. | WebAssembly |
+| **`web/`** | Browser client built with React and Vite. Uses IndexedDB for offline persistence and generates forms dynamically from JSON Schema. | Browser / Web |
 
-| Crate | Role |
-| --- | --- |
-| `vic3-load` | Envelope via pdx-tools `vic3save` + our serde IR (`DeserializeVic3`); surgical plaintext `.v3` patch-export (`SavePatch`). Contracts in crate rustdoc. |
-| `vic3-defs` | Goods, defines, PMs, pop needs from a game install or fixture tree; wasm defs blob. Contracts in crate rustdoc. |
-| `vic3-prices` | Closed-form market price + pop consumption + Basin NLS equilibrium; `alerts`, `preview(WorldDelta)`, `warm_rel` |
-| `vic3-planning` | Compact `PlanningState`, goal DSL, goal-relevant successors, A* glue + shared option/archive types |
-| `vic3-api` | Transport-free analysis (bytes or paths in, JSON out); shared shapes for wasm, Tauri, MCP (and CLI `--json`) |
-| `vic3-catalog` | Save-root scan (stubs, `local`/`steam_cloud`), shared TOML/JSON app config + path auto-detect |
-| `vic3-sql` | Read-only DataFusion SQL over catalog + active/latest fact tables |
-| `vic3-mcp` | Stdio MCP server (rmcp): tools `query` / `use_save` / `refresh_catalog` / `explain` / `campaign_brief`, resources, prompts |
-| `vic3-cli` | clap only lives here; commands map to the same analysis as `vic3-api` |
-| `vic3-analyzer` | Fat Tauri 2 binary: default/`gui` → companion UI (Settings/catalog/Advanced Query); `mcp` → stdio MCP (no window; early argv). Shares catalog config + defs cache with `vic3-mcp` / `vic3-api` / `vic3-sql`. |
-| `vic3-wasm` | Thin `wasm-bindgen` over `vic3-api`; no filesystem |
-| `web/` | Vite + React; IndexedDB archive; forms from JSON Schema |
+*(For detailed crate selection criteria, WASM compatibility requirements, and dependency rationales, see the **[Dependency Registry](libraries.md)**).*
 
-Shared option structs (no `PathBuf`) live with results in `vic3-planning` (or a tiny sibling if that crate’s deps get too heavy). clap flatten wrappers in `vic3-cli` only. wasm never links clap. Facades share `vic3-api` so JSON shapes stay identical.
+---
 
-## Data flow
+## Data Flow Diagram
 
 ```mermaid
 flowchart LR
-  save[".v3 plus tokens"] --> load[vic3-load]
-  game[Vic3 install or fixtures] --> defs[vic3-defs]
+  save[".v3 Save + Tokens"] --> load[vic3-load]
+  game["Vic3 Install / Game Folder"] --> defs[vic3-defs]
   load --> prices[vic3-prices]
   defs --> prices
   prices --> alerts[alerts]
-  prices --> preview[WorldDelta preview]
-  prices --> world[vic3-planning PlanningState]
-  world --> goals[goal DSL]
-  goals --> sim[successors]
-  sim --> plan[A-star SearchNode]
+  prices --> preview[WorldDelta Preview]
+  prices --> world[PlanningState]
+  world --> goals[Goal DSL]
+  goals --> sim[Successor Sim]
+  sim --> plan[A* Search]
   plan --> api[vic3-api]
   preview --> api
   alerts --> api
-  load --> export[plaintext .v3 patch]
+  load --> export[Plaintext .v3 Patch]
   export --> api
   api --> cli[vic3-cli]
   api --> wasm[vic3-wasm]
   api --> desktop[vic3-analyzer Tauri]
-  cli --> xdg[XDG archive]
-  wasm --> ui[React]
-  desktop --> uiShell[companion ui or web]
-  ui --> idb[IndexedDB origins timelines steps]
+  cli --> xdg[XDG Local Archive]
+  wasm --> ui[React UI]
+  desktop --> uiShell[Companion UI]
+  ui --> idb[IndexedDB Local Archive]
 ```
 
-Binary saves need a **user-supplied token map**. We do not redistribute Paradox tokens. Text saves do not need tokens.
+---
 
-## What we freeze
+## Asset & Definition Pipeline
 
-Employment, wages, hire/fire, and trade-center volumes are **frozen** except explicit what-if deltas (building levels, PMs, etc.). Pop consumption is **not** frozen: it sits in the price loop. See [`prices.md`](prices.md).
+Game definitions and visual assets are processed completely offline without distributing proprietary Paradox assets:
 
-## Search
+1. **Path Allowlisting:** When reading a local game directory, [`vic3-defs`](../crates/vic3-defs) scans only essential paths: allowlisted `common/` directories (goods, production methods, pop types, technologies, laws), English localization (`*_l_english.yml`), and goods icons.
+2. **Texture Decoding (DDS to PNG):** In-game icons are stored as DirectDraw Surface (`.dds`) textures with block compression. Browsers cannot render DDS natively. The [`vic3-defs::icons`](../crates/vic3-defs/src/icons.rs) pipeline decodes the top mip (supporting BC1, BC2, BC3, BC7, and uncompressed 32-bit RGBA) into raw pixel buffers and re-encodes them as compact PNG data URLs. Unrecognized or damaged textures degrade gracefully without interrupting the solve.
+3. **Serialization Blob:** The extracted definitions and PNG icons are packed into a versioned `defs.postcard` blob. In the browser, this blob is saved to IndexedDB so subsequent visits load instantly.
 
-Do not write a third A*. Use `rust_advanced_heaps::pathfinding::{SearchNode, shortest_path}`. Node type `N` must be cheap (`Arc` or a compact hash), not a fat `PlanningState` as a HashMap key. See [`planning.md`](planning.md).
+---
 
-## Patch-export
+## Shared Options & Schema Isolation
 
-`export_save` rewrites `building_manager.database` entries in the **original uncompressed plaintext** (zip `gamestate` or raw text). It does not round-trip the serde IR. Production methods and extra levels are applied in place; the origin bytes are never written. Ironman / binary envelopes are rejected. The CLI `export-save` command always writes `--out` and refuses to overwrite `--save`.
+To ensure absolute consistency across CLI, WASM, Desktop, and MCP surfaces:
+- **No Filesystem References in Core Option Types:** Inner structs (`SolveOpts`, `WhatIfOpts`, `PlanOpts`, `WorldDelta`) never contain `PathBuf` or OS-specific paths.
+- **Unified Schemas:** Schemas are derived via `schemars` from shared serde types, guaranteeing that CLI flags, JSON outputs, and React UI form components adhere to the exact same data contracts.
 
-`mutate` applies a [`WorldDelta`](json-schema.md) to a cloned world and re-solves (`preview`). That preview does not write a file. `SolveOpts.warm_rel` feeds the previous relative-price vector into Basin so a second solve can skip successive substitution.
+---
 
-## Planning framework seams
+## Search Engine Specifications
 
-The planning stack is growing **framework-shaped seams** inside the repo (not a published crate yet). See [`planning.md`](planning.md#framework-seams).
+The A* planner uses priority queue pathfinding from `rust-advanced-heaps`:
+- **Node Compaction:** The search node `N` implements `Clone + Eq + Hash` using lightweight `Arc<PlanningState>` references or compact state hashes to ensure minimal memory overhead during large graph expansions.
+- **Consistent Admissible Heuristics:** The remaining time heuristic $h$ is computed from a relaxed dependency DAG of remaining goal conjuncts, ensuring admissibility and strict optimality under our model assumptions.
 
-| Layer | Role |
+---
+
+## Patch Export Safety
+
+`export-save` modifies building production methods and levels directly in the **original uncompressed plaintext** stream:
+- It surgically rewrites `building_manager.database` entries in-place.
+- It rejects binary/ironman envelopes.
+- It strictly enforces that the original save file is never overwritten, writing exclusively to the specified `--out` path.
+
+---
+
+## 📖 Technical Specifications Directory
+
+For developer onboarding, setup prerequisites, and testing workflows, see the **[Contributor Guide](../CONTRIBUTING.md)**.
+
+| Document | Purpose |
 | --- | --- |
-| **Core** | Goal DSL + solvers (`evaluate` / `gaps` / `plan`), resource tracks + ETA, prereq expansion, layered defs merge |
-| **Host (Vic3)** | Atoms, sugar, military, economy edges, Clausewitz parsers |
-| **Optional peripheral** | DataFusion `plan()` / `gaps()` TVFs, MCP/CLI/wasm adapters — first-class in this product; optional if a framework splits out |
-
-## Out of scope (this architecture)
-
-- Fighting/winning the war (only starting the play)
-- AI countries; labor market equilibrium; endogenous trade volumes
-- Server-side upload or cloud sync
+| **[CLI Reference & Batch Debugging](cli.md)** | Subcommand reference, headless scripting, and plaintext save export. |
+| **[Model Context Protocol (MCP) Server](mcp.md)** | AI assistant tool schemas, resources, and JSON-RPC protocol contracts. |
+| **[DataFusion SQL Interface](sql.md)** | Read-only SQL dialect, virtual fact tables (`active.*`), and analytical TVFs. |
+| **[Mathematical & Test Invariants](invariants.md)** | Formal property-tested invariants (I1–I9) and goal compilation guarantees. |
+| **[Dependency Registry](libraries.md)** | Crate choices, WASM compatibility constraints, and locked library rationale. |
+| **[JSON Schema Contracts](json-schema.md)** | Shared options and analytical result JSON Schema definitions (draft 2020-12). |

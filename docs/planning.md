@@ -1,228 +1,97 @@
-# Planning
+# Strategic Planning & A* Search Specification
 
-Search finds a **time-optimal** sequence of goal-relevant moves under our model ([`dsl.md`](dsl.md), [`prices.md`](prices.md)). Optimality is not Paradox’s binary.
+This document details the state representation, graph transition operators, admissible heuristic bounds, and A* search engine in [`vic3-planning`](../crates/vic3-planning).
 
-## PlanningState
+The planner evaluates goal predicates and discovers time-optimal action sequences (e.g. tech sequencing, law checkpoints, military barracks expansion, production method upgrades, and debt amortization).
 
-A compact projection of the save + last price solve: date, country tag, techs, laws checkpoints, building levels we can change, construction queue heads, treasury/debt flags needed for `solvent`, interest/infamy, good prices, and whatever atoms the compiled goal reads.
+---
 
-It is **not** the full save. Hash it. **I8:** identical state ⇒ identical hash; applying an action is deterministic.
+## PlanningState Projection
 
-### Fill rules (`from_save` / `from_world`)
+A `PlanningState` is a compact, deterministic projection of the save file and the latest economic solve:
 
-| Field | Source |
+| Field | Source / Projection Logic |
 | --- | --- |
-| `date`, `country` | `meta_data.game_date`; country `definition` / tag |
-| `techs` | Country tech fields + top-level `technology` manager (`acquired_technologies`) |
-| `laws` | Active law script ids from the law manager for the country |
-| `infamy` | Country `infamy` when present and finite |
-| `queued_tech` | Country `currently_researching`, else `technology.research_technology` |
-| `queued_building` | First private, then government, construction order in owned states (in-flight head) |
-| `constructions` | Full private then government queue for the country (`PlanningConstruction` rows) |
-| `good_prices`, `gdp` | Last price solve (`gdp` only via `*_with_prices`) |
-| `treasury`, `weekly_balance`, `debt_*`, `credit_*`, `solvent` | Country budget |
-| `population_weighted_wealth` | Pops in states owned by the country |
-| `army_power_projection`, `navy_power_projection`, `interest_states` / `interest_regions` | Country army/navy PP caches (else formation sums; navy includes `navy_manager`) as `Option` — `None` when IR omits PP; interest markers + `declared_interests` |
-| `building_level_deltas`, `pm_overrides`, `tax_level`, `mil_buildings` | Empty / zero at load; sim branches fill them |
-| `queued_interest`, `queued_hire`, `queued_law` | Empty at load; sim-only in-flight interest / hire / law |
+| `date`, `country` | Game date and country tag from save metadata |
+| `techs` | Acquired technology script IDs |
+| `laws` | Active law script IDs |
+| `infamy` | Current infamy level |
+| `queued_tech` | In-flight active research project |
+| `queued_building` | In-flight construction head (private or government) |
+| `constructions` | Full ordered construction backlog |
+| `good_prices`, `gdp` | Solved goods prices and gross output value from the economic model |
+| `treasury`, `weekly_balance`, `debt_*`, `credit_*`, `solvent` | Country fiscal balance and credit headroom |
+| `population_weighted_wealth` | Pop-weighted average wealth across owned states |
+| `army_power_projection`, `navy_power_projection` | Projected military and naval strength from combat formations and staffing |
+| `building_level_deltas`, `pm_overrides`, `tax_level` | Sim-only mutations applied along the planning search branch |
 
-`queued_building` remains the single sim wait slot. `constructions` is the full ordered list for exposure (SQL / UI / future goals). Sim `QueueBuildingLevel` pushes a government row and sets the head; `BuildingCompleted` pops the finished row and advances the head to the next entry when the save queue had more.
+**Invariants:**
+- **Deterministic State Hashing (I8):** Identical planning states produce identical hashes; applying an action is strictly deterministic.
+- **Node Compaction:** The search node wraps `Arc<PlanningState>` or a compact hash to minimize memory footprint during priority queue expansions.
 
-`from_world` reads the same projected fields off [`WorldCountry`](../crates/vic3-prices/src/world.rs) after `World::from_save`.
+---
 
-## Consumers (same atoms)
+## Search Graph Operators
 
-Compiled atoms are the contract across surfaces:
+Transitions between states consist of **zero-day decisions** and **event-wait edges**:
 
-| Surface | Entry | Notes |
-| --- | --- | --- |
-| Web presets | `web/src/planTemplates.ts` | Ordinary DSL strings (`declare-war(state=alsace)`, `gdp >= …`, …); no bypass of compile/eval |
-| Gaps / Timeline UI | wasm `loaded_gaps` / `loaded_plan` | Same `PlanOpts` / gaps JSON as CLI |
-| SQL | `plan(goal [, max_days [, label]])`, `gaps(goal)` | TVFs compile the goal, project `PlanningState::from_world_with_prices`, then call `vic3-planning` ([`sql.md`](sql.md)) |
-| CLI | `vic3-cli gaps` / `plan` | Identical JSON field names ([`json-schema.md`](json-schema.md)) |
+### 1. Decision Edges (0 Days)
+- `QueueTech`: Selects a tech that unlocks prerequisites for open goal atoms.
+- `QueueBuildingLevel`: Adds a level of barracks, shipyards, or economic buildings.
+- `SwitchPm`: Swaps production methods to boost GDP or relieve a specific goods shortage.
+- `QueueLaw`: Begins a law passage checkpoint.
+- `QueueInterest`: Declares a strategic interest in a target region.
+- `AdjustTax`: Increments or decrements the tax level to meet weekly budget balance goals.
 
-## Graph
+### 2. Event-Wait Edges (Advances Date)
+- Advances the game clock to the earliest completion event: tech research finished, building construction complete, military training staffed, law enacted, interest established, or weekly payday debt reduction.
+- **Invariant I6:** Event-wait edges strictly advance the game date ($\Delta t > 0$). No wait edge is generated if no action is in flight and solvency is not an open goal atom.
 
-Nodes: `PlanningState`.  
-Edges:
+---
 
-- **Decision** (0 days): queue a tech, start a building, declare interest, expand army power, **switch PM**, **queue a law checkpoint**, **adjust tax** when `weekly_balance` is open, …
-- **At most one event-wait** per expansion: wait until tech finishes, a construction slot frees, interest establishes, army expansion completes, a **law** enacts, or payday **only if solvency is an open atom**.
+## A* Heuristics & Consistency
 
-**I6:** event-wait never decreases date. No wait edge if nothing is in flight and solvency is not open.
+Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rust-advanced-heaps`:
 
-Successors are **goal-relevant** only (the compiled predicate’s atoms). Do not enumerate the whole game. PM switches and building-level adds are capped (`max_pm_candidates` / `max_pm_overrides` / `max_added_levels_per_type`); tax steps are capped (`max_tax_steps`).
+- **Admissible Heuristic $h$:** Estimates remaining calendar days by relaxing the remaining goal conjuncts into a dependency DAG:
+  - Open tech, interest, military training, and law atoms contribute their minimum model durations.
+  - Conjunctions (`AND`) take the maximum bound of parallelizable tracks.
+  - Disjunctions (`OR`) take the minimum bound across alternatives.
+  - Solvency, tax adjustments, and zero-day PM switches contribute zero days where immediate transitions exist.
+- **Invariant I7:** On any valid dependency graph, $h$ never overestimates the true remaining days to goal satisfaction.
 
-After build/PM edges, re-solve prices (frozen labor/trade still apply).
+---
 
-## A* — locked
+## Non-Tech Action Models
 
-Use `rust_advanced_heaps::pathfinding`:
+### 1. Compact Payday Model (Fiscal Goals)
+- When `solvent`, `credit_headroom`, or `debt_principal` is an open goal atom, successors emit weekly payday waits (7 days).
+- Surplus weekly balance pays down principal before accumulating cash; deficits draw down treasury before borrowing.
+- Tax adjustments shift the weekly balance sample by discrete increments (`tax_balance_per_step`).
 
-- `SearchNode`: `successors`, `is_goal`, `heuristic` (0 = Dijkstra)
-- `shortest_path` with a `DecreaseKeyHeap` (default `PairingHeap`; radix if costs stay integer days)
-- `shortest_path_lazy` **only** as a correctness baseline in tests
+### 2. Military Power Projection
+- Power projection is increased by constructing and staffing military infrastructure:
+  - **Army:** `building_barracks` construction followed by training time (`army_training_days`).
+  - **Navy:** `building_shipyards` and `building_naval_administration` followed by crew hiring (`navy_crew_days`).
 
-Do **not** use crates.io `pathfinding`. Do **not** write a third A* loop.
+### 3. Production Method Switching
+- When an economy context is present, the planner evaluates candidate PM switches on relevant industries, applies the override, and triggers an immediate price re-solve.
 
-`N: Clone + Eq + Hash` is interned as a HashMap key. **`N` must be cheap** — `Arc<PlanningState>` or a compact hash plus `Arc` to defs/goal. Never put a fat state struct in the intern map key.
+---
 
-Heuristic `h`: admissible estimate of remaining **days**. **I7:** on tiny constructed timed DAGs, `h` never exceeds true remaining cost.
+## Planning Framework Seams
 
-Event-wait and decision edges are just `successors()`. Goal/defs ride on the node (or an `Arc` it holds).
+The planning architecture cleanly separates generic search mechanisms from Victoria 3 specific mechanics:
 
-Production `Vic3Node` uses the compiled goal as a dependency DAG relaxation.
-Research, interest, raisable army-power, and law atoms contribute their fixed model
-durations whenever still open, independent of which item (if any) is queued; AND
-takes the maximum child bound (actions may overlap), OR takes the minimum, and
-NOT / atoms without a proven timing model (fiscal payday, SoL, tax, …) contribute
-zero. Open `good_price` / `gdp` atoms contribute `construction_days` when no
-zero-day SwitchPm candidate exists for those atoms; otherwise they contribute
-zero so a free PM close stays admissible. Keeping the bound stable across
-zero-day queue edges preserves A* consistency when closed nodes are not
-reopened. Property tests compare this bound with true remaining costs for
-reachable research formulas.
+```mermaid
+flowchart TD
+    Core["Core Planning Layer<br/>(Goal DSL Algebra, Solvers, Resource Tracks, Backlog ETA)"]
+    Host["Victoria 3 Domain Layer<br/>(Atoms, Sugar Compilations, Military Formations, PM Edges)"]
+    Peripherals["Optional Peripherals<br/>(Embedded Query TVFs, MCP Adapters, Web Facades)"]
 
-## Non-tech action readiness
+    Core --> Host
+    Host --> Peripherals
+```
 
-Saved-wealth (`population_weighted_wealth`) stays diagnostic until a wage model
-exists. Fiscal atoms use a **compact payday model** in `vic3-planning`, not a full
-Paradox treasury simulation:
-
-- When `solvent`, `credit_headroom`, or `debt_principal` is an open atom and one
-  weekly tick would move that atom closer, successors emit a single payday
-  event-wait (`SimConfig::payday_days`, default 7).
-- Each payday applies the **frozen** saved `weekly_balance` sample to treasury
-  and debt principal (surplus pays principal first, then raises cash; deficit
-  spends cash then borrows), then refreshes `credit_headroom` / `solvent`.
-- Open `weekly_balance` goals use **AdjustTax**: a zero-day step shifts the
-  frozen balance sample by `tax_balance_per_step` (default 50) and records a
-  `tax_level` offset capped by `max_tax_steps`. This is not Paradox’s tax UI.
-- SoL wealth is unchanged. No interest rate schedule, gold reserve floor,
-  credit-limit growth, or investment pool — only the frozen balance vs known
-  principal/credit book, plus the compact tax offset.
-
-Declared interest projects from save IR with a compact sim action: queue a
-goal-relevant interest (`state=` / `region=`), then event-wait `interest_days`
-(default 90).
-
-Army and navy power projection also project from save IR (caches or formation
-sums; navy includes `navy_manager`). They are **not** scalar bumps. Open
-`army_power_projection` / `navy_power_projection` close by constructing and
-fully staffing military buildings:
-
-- Army: `building_barracks` levels → hire-to-full (`army_training_days`)
-- Navy (1.13): `building_shipyards` + `building_naval_administration` → crew
-  hire (`navy_crew_days`); PP uses `min(shipyard, admin)` staffed capacity
-
-Unit formula: `((offense + defense) / 2) * manpower_ratio` with model default
-stats when combat-unit defs are absent. Underemployed buildings do not fully
-count. When save IR has no projection fields, planning keeps `None`: SQL
-`gaps` reports status `unknown`, and the sim will not invent a zero army/navy.
-These queues share the single in-flight slot with tech, building, hire, and
-law.
-
-**Law checkpoints:** `has_law(…)` reads projected active laws (`law_` prefix
-insensitive). Successors queue the missing law then event-wait `law_days`
-(default 180). Infamy is projected onto `PlanningState` for later declare-war
-extras but is not yet an atom or action.
-
-**Switch PM:** when economy context is present and an open `good_price` / `gdp`
-atom can be helped by an alternate production method from defs groups (or
-observed peer PMs), emit a capped set of zero-day `SwitchPm` decisions. Applying
-one stores a per-building override, clears that building’s saved IO via the
-world clone, and re-solves prices. Branching is bounded by
-`max_pm_candidates` / `max_pm_overrides`.
-
-The first economy construction action is a building-level decision followed by a
-fixed-time construction event and price re-solve. `vic3-prices` preserves the
-building's staffing ratio and scales absolute saved IO per level, while leaving
-unrelated employment, wages, and trade frozen. Planning may still raise
-**military** staffing on the planning branch only via `QueueHireMilitary`.
-`PlanningState` hashes compact per-type level deltas, PM overrides, tax level,
-mil buildings, and its single queued building/hire/law; immutable world/defs/solver
-inputs ride outside the A* key.
-Successors select only producers/consumers relevant to an open `good_price`
-atom (and expensive mil/shipyard inputs when PP atoms are open); increasing GDP
-goals consider the three highest current output-value building types. Added
-levels are capped per type, keeping the search finite.
-Construction timing is a model constant, not a claim about Paradox's queue.
-
-**Research innovation capacity** (queued-tech throughput gates beyond a single
-queue head) stays **sim-only / undocumented as compile conjuncts** for now —
-`research(tech=…)` still compiles to `has_tech` alone.
-
-## Framework seams
-
-In-repo layering toward a reusable planning core. **Do not** publish a separate crate until a second host exists. DataFusion / MCP stay product code; document them as *optional peripherals* for a future extract.
-
-### Core vs host vs optional
-
-| Layer | Owns | Does not own |
-| --- | --- | --- |
-| **Core** | Boolean goal DSL algebra; `evaluate` / `gaps` / `plan`; resource **tracks** (backlog + rate → ETA); prereq expansion traits; layered defs merge | Vic3 atom meanings, sugar thresholds, price re-solve |
-| **Host** | Atoms, `declare-war` / `colonize` sugar, military PP, `EconomyContext`, Clausewitz save/defs parsers | Generic ETA math |
-| **Optional dataflow** | SQL `plan`/`gaps` TVFs, query catalog binding | Search engine |
-
-Stable solver surface for facades: `compile` / `evaluate` / `gaps` / `plan`. Keep Vic3-only logic out of those entrypoints (atom eval, sugar, sim).
-
-### Resource tracks and ETA
-
-A **track** is an ordered backlog of jobs plus a worker-pool rate `R` (work units per day).
-
-- **Construction:** one backlog; many construction sectors contribute to `R`. ETA for job *k* ≈ (prefix work through *k*) / `R`.
-- **Research / law / interest / hire:** usually single-head tracks (`max_inflight = 1`).
-- **No `can_start` API:** eligibility = prereqs; enqueue policy = track concurrency; timing = ETA.
-- Days are `ceil(work / rate)` when `rate > 0`. Zero rate → no finite ETA (treat as unreachable / no wait edge).
-
-Constant-rate adapters map legacy `SimConfig` day fields to `work = days`, `rate = 1` until defs/save supply real costs and throughput.
-
-### Prereq expansion
-
-Missing **world facts** (tech ancestors, unlocks) expand into the goal/job closure before enqueue. Transient queue occupancy is scheduling, not a goal conjunct.
-
-### Defs merge order
-
-Bottom → top (higher wins on conflict; new keys additive):
-
-1. Code defaults / hardcoded model constants
-2. Extracted game blob or install parse
-3. Optional file overlays (JSON)
-
-### Rustdoc / docs.rs
-
-Seam modules (`tracks`, overlay merge, public solvers) need real rustdoc: purpose, units (work vs days vs rate), invariants, edge cases. Prefer examples on `eta` and solver entrypoints.
-
-### Test contract (later PRs)
-
-| Slice | Must prove |
-| --- | --- |
-| Tracks core | ETA empty/one/many; `rate → 0`; `next_completion`; constant-rate adapter; proptest monotonicity |
-| Construction wire | `remaining/rate` wait; research ∥ construction; tech-only cost unchanged |
-| Def construction cost | Parse + blob round-trip; economy solve still passes |
-| Consume def cost | New build uses def cost when `remaining` absent; in-flight `remaining` wins |
-| File overlays | Overlay overrides blob; missing overlay unchanged |
-| Prereq expand | Gaps include tech ancestors; queue eligible leaves only |
-| Track heuristic | AND ≤ true cost; OR = min; 0-day enqueue consistency |
-
-Non-goals: bit-identical Paradox calendars; full multi-sector construction simulation in early slices.
-
-### PR map (named branches)
-
-Independent bases off default unless stacked:
-
-| PR | Branch | Depends on |
-| --- | --- | --- |
-| Docs | `plan/framework-docs` | — |
-| Tracks module | `plan/tracks-eta-core` | — |
-| Construction ETA wire | `plan/construction-eta-wire` | tracks |
-| Defs `required_construction` | `plan/defs-construction-cost` | — |
-| Consume def cost | `plan/construction-cost-consume` | wire + defs cost |
-| File overlays | `plan/defs-file-overlays` | defs cost |
-| Tech prereq expand | `plan/tech-prereq-expand` | after consume |
-| Track heuristic | `plan/track-heuristic` | prereq + tracks |
-
-## P9a vs P9b
-
-- P9a: toy `SearchNode`s, no Vic3, I7 + known shortest path + I8.
-- P9b: `SearchNode` for `vic3-planning` successors.
+- **Resource Tracks & ETA:** Models queues (e.g. construction sectors with aggregate construction points $R$) where job completion time is derived from prefix work divided by throughput rate: $\text{ETA} \approx \lceil \text{work} / R \rceil$.
+- **Layered Definitions Merge:** Base constants $\rightarrow$ Extracted game definition blob $\rightarrow$ Optional JSON overlay files.

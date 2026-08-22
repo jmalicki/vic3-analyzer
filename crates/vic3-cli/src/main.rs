@@ -34,7 +34,7 @@
 //! (not the full file-shaped `Save`) and still `solve` a complete `PricesResult`.
 //! The default table only prints goods; compact pop rows exist for the webapp.
 //!
-//! See `docs/usage.md`.
+//! See `docs/cli.md`.
 
 use std::fs;
 use std::io::{self, Write};

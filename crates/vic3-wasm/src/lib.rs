@@ -34,7 +34,7 @@
 //! (or `npm run build:wasm` from `web/`). Compiles for `wasm32-unknown-unknown`
 //! without extra `getrandom` feature flags on the current dependency set.
 //!
-//! See [`docs/usage.md`](../../../docs/usage.md) and [`docs/architecture.md`](../../../docs/architecture.md).
+//! See [`docs/cli.md`](../../../docs/cli.md) and [`docs/architecture.md`](../../../docs/architecture.md).
 
 mod schema;
 

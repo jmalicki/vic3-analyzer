@@ -45,7 +45,7 @@
 //!   **not** replace the loaded world or baseline prices.
 //! - Errors: [`ApiError`] (load, defs, JSON, goals, plan, [`ApiError::NoLoadedAnalysis`], …).
 //!
-//! Usage overview: [`docs/usage.md`](../../../docs/usage.md). Result schemas:
+//! Usage overview: [`docs/cli.md`](../../../docs/cli.md). Result schemas:
 //! [`docs/json-schema.md`](../../../docs/json-schema.md).
 
 mod error;
