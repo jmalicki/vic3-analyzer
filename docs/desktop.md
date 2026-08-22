@@ -2,7 +2,7 @@
 
 The native desktop companion (`crates/vic3-analyzer`) is a [Tauri 2](https://v2.tauri.app/) application providing automatic game and save discovery, a campaign dashboard, and an embedded [DataFusion SQL](sql.md) engine.
 
-The compiled binary serves as both the **Desktop GUI** (default) and the headless **Stdio MCP Server** (`vic3-analyzer mcp`).
+The compiled binary serves as both the **Desktop GUI** (default) and the background **AI Assistant MCP Server** (`vic3-analyzer mcp`).
 
 ---
 
@@ -12,7 +12,7 @@ The compiled binary serves as both the **Desktop GUI** (default) and the headles
 # Launch the Tauri GUI companion
 cargo run -p vic3-analyzer
 
-# Run the Stdio MCP server (no GUI window opened)
+# Run the background MCP server for AI assistants (no GUI window opened)
 cargo run -p vic3-analyzer -- mcp
 
 # Headless CI ready check
@@ -63,15 +63,11 @@ Settings are saved in your platform's local application data directory (`$XDG_DA
 
 ---
 
-## Desktop Architecture
+## Architecture & Integration
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        vic3-catalog                         │
-│           (AppConfig + File Discovery & Watchers)           │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               ▼
+The Desktop app integrates the database, save watcher, and MCP server directly on your local machine:
+
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                          vic3-sql                           │
 │        (DataFusion SQL Engine + Active Save Session)        │
@@ -80,7 +76,7 @@ Settings are saved in your platform's local application data directory (`$XDG_DA
                ▼                              ▼
 ┌──────────────────────────────┐┌─────────────────────────────┐
 │        vic3-analyzer         ││          vic3-mcp           │
-│    (Tauri 2 Companion UI)    ││ (Stdio MCP Agent Server)    │
+│    (Tauri 2 Companion UI)    ││  (Local MCP Agent Server)   │
 └──────────────────────────────┘└─────────────────────────────┘
 ```
 

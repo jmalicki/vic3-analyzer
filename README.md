@@ -40,8 +40,9 @@ Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the ful
 * Drag and drop your `.v3` save and your local `Victoria 3/game` folder.
 * **100% Client-Side:** Everything parses and solves locally inside your browser via WebAssembly (`wasm-bindgen`) and IndexedDB. Saves, definitions, and tokens are **never uploaded** to any server.
 
-### 2. AI Assistant Co-Pilot (Stdio MCP Server)
+### 2. AI Strategic Co-Pilot (Claude Desktop / Cursor via MCP)
 * Turn Claude Desktop, Cursor, or your favorite AI assistant into your personal Grand Strategy advisor using the [Model Context Protocol (MCP)](docs/mcp.md).
+* Connects seamlessly to your desktop AI tools via standard local process communication (no web servers or open network ports required).
 * The AI can automatically discover your autosaves, explain domestic shortages, run SQL queries, and preview what-if economic adjustments in real time:
   ```json
   {
@@ -99,7 +100,7 @@ Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the ful
 ### Integrations & Power Users
 | Document | Description |
 | --- | --- |
-| [MCP Server](docs/mcp.md) | Stdio Model Context Protocol tools, resources, and agent workflows |
+| [MCP Server](docs/mcp.md) | Connect AI assistants (Claude Desktop, Cursor) to your campaign via MCP |
 | [DataFusion SQL](docs/sql.md) | Read-only SQL interface, virtual fact tables (`active.*`), and UDFs/TVFs |
 
 ### Developer & Architecture Specifications

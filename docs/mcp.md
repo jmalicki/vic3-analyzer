@@ -1,25 +1,25 @@
 # Model Context Protocol (MCP) Server
 
-**`vic3-analyzer`** includes a built-in stdio [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server implemented via [`rmcp`](https://crates.io/crates/rmcp) in `crates/vic3-mcp`.
+**`vic3-analyzer`** includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server implemented via [`rmcp`](https://crates.io/crates/rmcp) in `crates/vic3-mcp`.
 
-This enables AI assistants (such as Claude Desktop, Cursor, and custom agent workflows) to autonomously query campaign saves, diagnose shortages, evaluate what-if building adjustments, and plan national objectives.
+This enables desktop AI assistants (such as Claude Desktop, Cursor, and custom agent workflows) to connect directly to your Victoria 3 campaign saves, diagnose shortages, evaluate what-if building adjustments, and plan national objectives.
 
 ---
 
-## Invocation & Process Model
+## How It Works (Direct Local Integration)
 
-The MCP server is built into the unified `vic3-analyzer` binary:
+The MCP server runs as a lightweight local helper directly on your machine without requiring network setup, web servers, or open ports:
 
 ```bash
-# Launch stdio MCP server (no GUI window opened)
+# Launch MCP assistant server directly (headless, no window opened)
 cargo run -p vic3-analyzer -- mcp
 ```
 
 | Property | Specification |
 | --- | --- |
-| **Transport** | Standard I/O (JSON-RPC over `stdin` / `stdout`) |
-| **Logging** | Operational and error logs are emitted strictly to `stderr` (never polluting `stdout`) |
-| **GUI Window** | Headless execution; branches before window creation |
+| **Communication** | Direct local process standard I/O (JSON-RPC) |
+| **Logging** | Diagnostic and error logs are emitted to `stderr` without polluting protocol communication |
+| **GUI Window** | Runs headlessly in the background when invoked by your AI app |
 | **Query Engine** | Embedded [Apache DataFusion](sql.md) instance (`vic3-sql`) |
 | **Configuration** | Shares `config.toml` with the Tauri desktop companion |
 

@@ -17,7 +17,7 @@ The core analysis engine is transport-independent: analytical results and option
 | **`vic3-api`** | Transport-free API facade. Accepts raw bytes or filesystem paths and produces uniform analytical JSON. | Pure Rust |
 | **`vic3-catalog`** | File system discovery and watcher for local/Steam save directories and shared application configuration (`config.toml`). | Native OS |
 | **`vic3-sql`** | Embedded read-only [Apache DataFusion](https://datafusion.apache.org/) SQL query engine over the save catalog and active save fact tables. | Native OS |
-| **`vic3-mcp`** | Stdio Model Context Protocol server (`rmcp`) exposing query tools, campaign briefs, and prompts to AI assistants. | Native OS |
+| **`vic3-mcp`** | Model Context Protocol server (`rmcp`) exposing query tools, campaign briefs, and prompts to desktop AI assistants. | Native OS |
 | **`vic3-cli`** | Command-line interface (`clap`). Clap wrappers exist only in this crate; core structs remain filesystem-free. | Native CLI binary |
 | **`vic3-analyzer`** | Fat desktop binary (Tauri 2). Default launch runs the GUI companion; `vic3-analyzer mcp` launches the headless MCP server. | Native Desktop binary |
 | **`vic3-wasm`** | Thin `wasm-bindgen` wrapper exposing `vic3-api` functionality to browser JavaScript. | WebAssembly |
