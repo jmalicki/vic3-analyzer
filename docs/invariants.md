@@ -1,23 +1,29 @@
-# Invariants
+# Property-Tested Formal Invariants
 
-If rustdoc or these docs say “therefore X”, a property test must fail when X is false. Names below are the test names to implement in the listed phase.
+The `vic3-analyzer` codebase enforces mathematical and behavioral invariants via property-based testing (`proptest`).
 
-| ID | Claim | Phase | Test |
-| --- | --- | --- | --- |
-| I1 | `buy == sell` ⇒ market price = base (within ε) | P4 | `proptest` on `price(base, buy, sell, defines)` |
-| I2 | prices stay in `[1-PRICE_RANGE, 1+PRICE_RANGE] * base` | P4 | `proptest` including clamp extremes |
-| I3 | weakly more buy (sell fixed) ⇒ weakly higher price (away from clamp) | P4 | `proptest` |
-| I4 | substitution respects `min_supply_share` / `max_supply_share` | P3a / P4 | `proptest` on synthetic need tables |
-| I5 | residual always reported; `status=converged` ⇒ residual < ε | P4 / P5 | `proptest` + CLI JSON field |
-| I6 | event-wait never decreases date; no wait if nothing in flight and solvency not open | P8 | `proptest` on successor lists |
-| I7 | `h` never exceeds true remaining days on tiny constructed graphs | P9a | `proptest` timed DAGs |
-| I8 | identical `PlanningState` ⇒ identical hash; actions deterministic | P8 / P9a | hash + apply round-trip |
-| I9 | `AnalysisRecord` JSON round-trip; compare(self, self) is empty diff | P11 | serde round-trip + diff fixture |
+If any underlying assumption is violated, the corresponding property test suite fails.
 
-## Declare-war compilation (P7a)
+---
 
-`declare-war(...)` always includes interest, army, munitions-price, and solvent atoms.
+## Invariants Registry
 
-## Determinism
+| ID | Formal Claim | Test Suite / Coverage |
+| :--- | :--- | :--- |
+| **I1** | $\text{buy} = \text{sell} \implies \text{price} = \text{base}$ (within $\varepsilon$) | `proptest` on `vic3_prices::solve` with symmetric order vectors |
+| **I2** | Prices are bounded in $[1 - \text{PRICE\_RANGE}, 1 + \text{PRICE\_RANGE}] \cdot \text{base}$ | `proptest` covering extreme order imbalances and clamp edges |
+| **I3** | Monotonicity: Weakly more buy orders (sell fixed) $\implies$ weakly higher price | `proptest` on price response curves away from clamps |
+| **I4** | Pop need substitution strictly respects `min_supply_share` and `max_supply_share` | `proptest` on synthetic pop need packages in `vic3-defs` |
+| **I5** | Solver residual is always reported; `status = converged} \implies \text{residual} < \varepsilon$ | `proptest` across diverse world economic states |
+| **I6** | Search transitions strictly advance game time ($\Delta t > 0$); no empty wait edges | `proptest` on `vic3_planning` successor generators |
+| **I7** | Remaining-time heuristic $h$ is admissible ($h \le \text{true remaining days}$) | `proptest` on timed dependency DAG relaxations |
+| **I8** | State hashing and transition operators are strictly deterministic | Hash and action application round-trip tests on `PlanningState` |
+| **I9** | `AnalysisRecord` serde round-trips losslessly; diffing identical records yields an empty diff | Serde property round-trip tests and diff fixtures |
 
-Same IR + defs + opts ⇒ same prices JSON and same plan (I8). Archive fingerprint is a hash of save bytes, not of mtime.
+---
+
+## Goal Compilation Guarantees
+
+- **`declare-war` Expansion:** `declare-war(...)` compilation is guaranteed to produce `interest_in`, `army_power_projection`, munitions price stability, and `solvent` atoms.
+- **`colonize` Expansion:** `colonize(...)` compilation is guaranteed to produce tech prerequisites, colonial laws, naval and army thresholds, and `solvent` atoms.
+- **Determinism:** Identical save IR, game definitions, and solve options produce identical price vectors and action plans. Archive fingerprints are cryptographic SHA-256 hashes of save bytes (independent of filesystem modification times).

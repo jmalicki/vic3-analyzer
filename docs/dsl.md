@@ -1,12 +1,14 @@
-# Goal DSL
+# Goal Domain-Specific Language (DSL)
 
-Parser: **chumsky** combinators in `vic3-planning::goals`. Keep the module small; do not turn it into a compiler-front-end showcase. Richer error recovery is optional.
+The Goal DSL allows players, developers, and AI agents to define strategic targets as boolean formulas over a [`PlanningState`](planning.md).
 
-GOAP crates inspired the *shape* (goal = desired facts, actions = preconditions/effects). They are not the engine.
+These expressions power the **Goal Gaps** evaluator (which checks unsatisfied readiness conditions) and the **Timeline Planner** (which finds an optimal sequence of actions to achieve the goal).
 
-## Predicates
+---
 
-A goal is a boolean formula over a `PlanningState`.
+## Grammar
+
+Goals are parsed into boolean abstract syntax trees (AND, OR, NOT) over atomic predicates:
 
 ```text
 goal        := or
@@ -23,145 +25,81 @@ arg         := ident "=" value
 value       := ident | number | string
 ```
 
-Examples:
+### Atomic Predicates
 
-```text
-has_tech(nitroglycerin)
-has_law(law_homesteading)
-good_price(ammunition) <= 40
-army_power_projection >= 100
-navy_power_projection >= 100
-weekly_balance >= 100
-population_weighted_wealth >= 20
-credit_headroom > 0
-debt_principal <= 200
-solvent
-interest_in(state=alsace)
-```
+| Predicate | Example | Description |
+| --- | --- | --- |
+| `has_tech(id)` | `has_tech(nitroglycerin)` | True when the country has researched the technology |
+| `has_law(id)` | `has_law(law_homesteading)` | True when the specified law is active |
+| `good_price(id) [rel] [num]` | `good_price(ammunition) <= 40` | Market price ceiling or floor |
+| `army_power_projection [rel] [num]` | `army_power_projection >= 100` | Army power projection threshold |
+| `navy_power_projection [rel] [num]` | `navy_power_projection >= 100` | Navy power projection threshold |
+| `weekly_balance [rel] [num]` | `weekly_balance >= 100` | Net weekly budget balance |
+| `credit_headroom [rel] [num]` | `credit_headroom > 0` | Remaining credit before default (`credit - principal`) |
+| `debt_principal [rel] [num]` | `debt_principal <= 200` | Total outstanding debt |
+| `solvent` | `solvent` | True when `credit_headroom > 0` |
+| `interest_in(state=... / region=...)` | `interest_in(state=alsace)` | Declared interest in state or strategic region |
+| `population_weighted_wealth [rel] [num]`| `population_weighted_wealth >= 20` | Pop wealth average (Standard of Living proxy) |
 
-Sugar that compiles to predicates (not evaluated as opaque strings):
+---
 
-```text
-declare-war(state=alsace)
-colonize(region=region_congo)
-research(tech=nitroglycerin)
-gdp >= 50e6
-```
+## Compound Goal Sugar
 
-Optional `tag=` / `wargoal=` on `declare-war` parse for forward compatibility but are
-**ignored by compile** today — they do not become atoms. Prefer `state=` (or
-`region=`) alone in the UI and new examples.
+Higher-level strategic goals expand into concrete conjuncts (atomic prerequisites):
 
-## Compilation: `declare-war`
+### 1. `declare-war(state=...)`
+Expands to all prerequisites needed to safely launch a diplomatic play:
+- **Strategic Interest:** `interest_in(state=...)` in the target state or region.
+- **Army Strength:** `army_power_projection >= [threshold]` sufficient to contest the play.
+- **Munitions Supply:** `good_price(ammunition) <= [ceiling]` to prevent combat goods shortages.
+- **Fiscal Solvency:** `solvent` (`credit_headroom > 0`) to prevent immediate bankruptcy during war mobilization.
 
-Requires `state=` or `region=`. Always expands to (at least):
-
-- **interest** in the target strategic region / state
-- **army** power projection sufficient to start the play (model threshold, documented in rustdoc)
-- **munitions-price** (and related mil goods) under a ceiling derived from defs / opts
-- **solvent** — known remaining credit before exhaustion (`principal < credit`)
-  under frozen wages/employment; missing principal/credit leaves this false
-  rather than guessing from treasury sign
-
-Property (I-declare-war): compilation always includes those four conjuncts. Extra conjuncts (infamy headroom, relations, claims) may be added later without removing these. Infamy is projected on `PlanningState` already; it is not yet a declare-war conjunct.
-
-`declare-war` is closable end-to-end when interest still needs work **and**
-munitions-price plus solvent already hold (or munitions can move under existing
-building-level / PM actions), and army PP is known. Army PP closes via staffed
-barracks (build + hire), not a scalar bump. Solvent uses the compact payday model
-when credit is exhausted.
-
-## Compilation: `colonize`
-
-Requires `state=` or `region=`. Always expands to (I-colonize):
-
-- `has_tech(colonization)`
+### 2. `colonize(region=...)`
+Expands to institutional, technological, and military prerequisites for colonial expansion:
+- `has_tech(colonization)` and `has_tech(quinine)`
 - `has_law(law_colonial_resettlement) || has_law(law_colonial_exploitation)`
-- `has_tech(quinine)`
-- **interest** in the target
-- **army** power projection ≥ model threshold
-- **navy** power projection ≥ model threshold
-- **solvent**
+- `interest_in(region=...)`
+- `army_power_projection >= [threshold]` and `navy_power_projection >= [threshold]`
+- `solvent`
 
-Navy PP closes via **shipyards** and **naval administrations** that are fully
-staffed (1.13 crew model). Underemployed mil buildings do not fully count.
-Hiring uses fixed training waits (not qualifications/literacy). Colonial law
-passage ignores IG/influence. Treaties, invasions, and colonial growth are not
-modeled.
+### 3. `research(tech=...)`
+Expands to `has_tech(...)`, allowing the planner to queue the technology and wait for research completion.
 
-## Compilation: `research`
+### 4. `gdp >= [amount]`
+Evaluates gross solved building output value across owned states. When planning, the simulator prioritizes expanding high-output buildings and upgrading productive production methods.
 
-`has_tech(x)` so the sim can `QueueTech` then event-wait. Innovation-capacity /
-throughput conjuncts are **not** compiled yet — they remain sim-only if added
-later.
+---
 
-## Compilation: `gdp`
+## Planner Capabilities
 
-Predicate on modeled current GDP in `PlanningState`: gross solved building
-output value (the sum of non-negative building revenue) in states owned by the
-selected country. It is recomputed after modeled construction or PM switches.
-For an increasing GDP target, the simulator considers at most the three building
-types with the highest current solved output value per added level, plus capped
-SwitchPm alternatives when defs expose them.
+| Goal Family | Readiness Gaps Check | Timeline Planner | Primary Planner Actions |
+| --- | :---: | :---: | --- |
+| `research` / `has_tech` | ✅ | ✅ | `QueueTech` + research time waits |
+| `has_law` | ✅ | ✅ | `QueueLaw` + checkpoint waits |
+| `gdp` / `good_price` | ✅ | ✅ | Bounded building expansions + `SwitchPm` + price re-solves |
+| `interest_in` | ✅ | ✅ | `QueueInterest` + establishment wait |
+| `army_power_projection` | ✅ | ✅ | Staffed barracks construction + recruitment |
+| `navy_power_projection` | ✅ | ✅ | Shipyards + naval administrations construction |
+| `declare-war` | ✅ | ✅ | Closes interest, military size, munitions, and debt |
+| `colonize` | ✅ | ✅ | Closes techs, laws, interest, and military thresholds |
+| `solvent` / `credit_headroom` | ✅ | ✅ | Payday debt reduction under frozen weekly surplus |
+| `weekly_balance` | ✅ | ✅ | `AdjustTax` steps |
+| `population_weighted_wealth` | ✅ | Diagnostic only | Awaits wage/labor dynamic model |
 
-## Evaluation
+---
 
-`vic3-planning` evaluates a compiled predicate against `PlanningState`. It does not search. Gaps = unsatisfied atoms. Plans = A* until the predicate is true ([`planning.md`](planning.md)).
+## Canonical Goal Examples
 
-UI presets and SQL `plan`/`gaps` TVFs consume the **same** compiled atoms — presets are DSL strings, not a parallel vocabulary.
+```text
+# Military preparation for conflict over Alsace
+declare-war(state=alsace)
 
-## What search can close today
+# Rushing explosives technology
+research(tech=nitroglycerin)
 
-| Goal family | Gaps | Timeline (A*) |
-| --- | --- | --- |
-| `research` / `has_tech` | yes | yes (`QueueTech` + wait) |
-| `has_law` | yes | yes (`QueueLaw` + wait) |
-| `gdp` / supported `good_price` | yes | yes (bounded building levels and/or SwitchPm + re-solve) |
-| `interest_in` | yes | yes (`QueueInterest` + wait) |
-| `army_power_projection` / `navy_power_projection` | yes | yes (barracks / shipyards / naval administrations + hire-to-full; needs economy to build) |
-| `declare-war` | yes | yes when munitions + solvent hold (interest/army); solvent via payday |
-| `colonize` | yes | yes when tech/law/interest/PP/solvent closable (navy needs economy for shipyards) |
-| `solvent` / `credit_headroom` / `debt_principal` | yes | yes (payday waits on frozen weekly balance) |
-| `weekly_balance` | yes | yes (`AdjustTax` on the frozen balance sample) |
-| SoL proxy (`population_weighted_wealth`) | yes | **not yet** (need wage model) |
+# Securing munitions price stability while maintaining positive credit
+good_price(ammunition) <= 40 && solvent
 
-## Default plan presets
-
-The web UI maps default plans to ordinary DSL; presets do not bypass parsing or
-evaluation:
-
-| Preset | Goal | Timeline |
-| --- | --- | --- |
-| Prepare for war | `declare-war(state=alsace)` | closable when munitions + solvent hold (or payday) |
-| Colonize equatorial Africa | `colonize(region=region_congo)` | gaps always; timeline when PP known + economy |
-| Good-sized military | `army_power_projection >= 100` | closable when PP known (staffed barracks) |
-| Economic growth | `gdp >= 100000000` | closable |
-| Increase weekly income | `weekly_balance >= 100` | closable (tax steps) |
-| Avoid default | `credit_headroom > 0` | closable (payday model) |
-| Raise standard of living | `population_weighted_wealth >= 20` | gaps only |
-
-The state and numeric targets are starting values, not fixed policy.
-`weekly_balance` reads the most recent finite saved net-budget sample; tax
-adjust steps shift that sample by a model constant and do not recompute wages.
-`population_weighted_wealth` averages saved pop wealth by household
-population in states owned by the country; it is a compact SoL proxy, not a
-recomputed living-standard equilibrium. `credit_headroom` is `credit - principal`
-when both are present; `solvent` is true only when that headroom is strictly
-positive. Under the payday model, surplus balance pays down principal before
-increasing treasury, then headroom/solvent refresh. `army_power_projection` reads
-country cache or army-formation power from the save when present; missing
-projection is unknown (SQL `gaps` → `unknown`, not a silent zero). `interest_in(state=…)` /
-`interest_in(region=…)` match projected state vs strategic-region interest ids
-separately (Clausewitz ids are normalized, e.g. `STATE_ALSACE` → `alsace`).
-`has_law(…)` matches projected active laws (`law_` prefix insensitive).
-Missing metrics remain unavailable and do not satisfy comparisons. A valid
-preset can still be unreachable when `vic3-planning` has no action capable of
-closing its open atoms.
-
-## Golden examples (P7a tests)
-
-| Input | Must include |
-| --- | --- |
-| `declare-war(tag=FRA, wargoal=conquer_state, state=alsace)` | interest, army, munitions-price, solvent (`tag`/`wargoal` ignored) |
-| `research(tech=nitroglycerin)` | `has_tech(nitroglycerin)` |
-| `good_price(ammunition) <= 40 && solvent` | those two atoms |
+# Raising GDP above 50 million with balanced budget
+gdp >= 50000000 && weekly_balance >= 0
+```

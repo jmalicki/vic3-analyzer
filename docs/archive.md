@@ -1,75 +1,71 @@
-# Local archive
+# Local Campaign Archive & Timeline Comparison
 
-Past saves and **alternative plans** are first-class. Nothing is uploaded.
+`vic3-analyzer` treats past saves, timeline branches, and **alternative strategic plans** as first-class citizens.
 
-## AnalysisRecord
+All campaign data, analysis records, and timeline steps are stored completely locally (via XDG directory on CLI/Desktop and IndexedDB in the browser). Nothing is ever uploaded.
 
-Shared serde / schemars type (same crate as option structs). No `PathBuf`.
+---
 
-| Field | Meaning |
+## Save Timelines & Branching
+
+Rather than treating saves as a flat list of disconnected files, `vic3-analyzer` organizes your campaign into an interactive branching tree:
+
+```
+Origin Save (1836.v3)
+  └── Main Timeline
+        ├── Step 1: Initial Baseline (Solved Prices)
+        ├── Step 2: What-If (Build 5 Arms Industries)
+        └── Step 3: PM Switch (Bessemer Process)
+              └── Alternative Branch ("Rush Military")
+```
+
+| Store | Role |
 | --- | --- |
-| `id` | uuid |
-| `created_at` | RFC 3339 |
-| `label` | optional (“rush munitions”, “law first”) |
-| `kind` | `prices` \| `what_if` \| `gaps` \| `plan` |
-| `fingerprint` | hash of save bytes |
-| `date` | in-game date |
-| `country` | tag |
-| `filename` | original name, informational |
-| `opts` | the shared option struct used |
-| `result` | same JSON the command emits |
-| `limitations` | solver limitation strings |
-| `parent_id` | optional; this record is an alternative to another |
-| `blob` | optional save bytes (and token map if binary) |
+| **`origins`** | Immutable record of the original `.v3` save bytes, name, and cryptographic fingerprint. |
+| **`timelines`** | Labeled branches on an origin save (e.g. `Main`, `Alternative Heavy Industry`). |
+| **`steps`** | Sequential nodes on a timeline containing what-if mutations, cached price solves, and optional patched save bytes. |
+| **`current`** | Active cursor pointer pointing to `{ origin_id, timeline_id, step_id }` so browser reloads restore your exact workspace. |
 
-**I9:** JSON round-trip preserves id, fingerprint, kind, opts, result. Compare of two identical records is an empty diff.
+---
 
-## Storage
+## Analysis Records (`AnalysisRecord`)
 
-| Client | Store |
+Analytical results (prices, what-if evaluations, readiness gaps, and action plans) are saved as structured records:
+
+| Field | Description |
 | --- | --- |
-| CLI | `$XDG_DATA_HOME/vic3-analyzer/` (else `~/.local/share/vic3-analyzer/`): one JSON file per record; blobs beside them |
-| UI analyses | IndexedDB `vic3-analyzer` (`localStorage` is too small for `.v3`) |
-| UI saves | IndexedDB `vic3-analyzer-save`: origins, timelines, steps, and a `current` pointer |
-| wasm | serialize/parse only; does not own the store |
+| `id` | Unique UUID |
+| `created_at` | RFC 3339 timestamp |
+| `label` | Optional custom label (e.g. `"Rush Munitions"`, `"Industrialize Silesia"`) |
+| `kind` | `prices`, `what_if`, `gaps`, or `plan` |
+| `fingerprint` | Cryptographic SHA-256 hash of the origin save bytes |
+| `date` | In-game campaign date (e.g. `1836.1.1`) |
+| `country` | Played country tag (e.g. `PRU`) |
+| `opts` | Shared option struct used during the analysis |
+| `result` | The exact JSON analysis result |
+| `limitations` | Model caveats and convergence residual |
 
-CLI default: fingerprint + path, no blob. `--archive-blob` copies bytes. UI default: store the blob on drop so “open this past save” works without the file.
+---
 
-Export/import JSON so a CLI record can be dropped into the UI and vice versa.
+## Plan Comparison & Historical Diffing
 
-## Origins, timelines, steps, current
+You can compare any two analysis records to evaluate tradeoffs:
+- **Same Fingerprint:** Compares alternative strategic plans for the same campaign moment.
+- **Different Fingerprints:** Compares campaign progression over time.
 
-The browser save database is a campaign tree, not a flat list of last-dropped files.
+### Diff Outputs
+- **Plans:** Action sequence alignment, day cost differences, and queued techs/laws/buildings.
+- **Prices:** Per-good price and shortage deltas ($\Delta \text{price}$, $\Delta \text{shortage}$).
+- **Gaps:** Conditions cleared versus conditions still unsatisfied.
 
-| Store | Meaning |
-| --- | --- |
-| `origins` | One dropped `.v3` (bytes/blob, optional tokens, fingerprint, name). Never mutated. |
-| `timelines` | Labeled branches on an origin (`Main` after drop). Indexed by `origin_id`. |
-| `steps` | Nodes on a timeline: `parent_step_id`, `mutations`, cached prices, optional patched bytes. Indexed by `timeline_id`. |
-| `current` | Singleton pointer `{ origin_id, timeline_id, step_id }` for the open campaign. |
+### CLI Comparison Commands
+```bash
+# List all archived analyses
+vic3-cli archive list
 
-Dropping a file creates an origin, a Main timeline, a root step, and sets `current`. Preview mutations stay in wasm; committing a step records the delta and can keep patched plaintext bytes. Checking out another origin/timeline/step restores that save without re-reading the original file. Reloading the tab follows `current`.
+# Inspect a specific analysis record
+vic3-cli archive show <record-id>
 
-Analysis records (`AnalysisRecord`) remain a separate store: named prices / what-if / gaps / plan runs keyed by fingerprint.
-
-## Browse
-
-List by fingerprint / in-game date / country. Several labeled plans may share a fingerprint (alternatives on one snapshot). Different fingerprints are the campaign over time.
-
-Reopen from a stored blob, or re-drop a file whose fingerprint matches.
-
-## Compare (P11)
-
-Pick two records. Same fingerprint = alternative plans; different = progression.
-
-Diff stored results (do not re-run A* unless the user asks to replan):
-
-- **plan:** day cost, aligned action sequence, techs/laws/buildings queued
-- **prices:** per-good Δ
-- **gaps:** predicates still failing vs cleared
-
-CLI: `archive list` / `show` / `diff <id> <id>` emitting the same compare JSON as the UI.
-
-## Non-goals
-
-Cloud sync, uploading saves, treating the archive as a git repo of `.v3` files.
+# Diff two plans or price solves
+vic3-cli archive diff <record-id-1> <record-id-2>
+```

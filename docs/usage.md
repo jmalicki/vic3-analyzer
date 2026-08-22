@@ -1,97 +1,105 @@
-# Usage
+# Usage Guide
 
-CLI and UI share the **same nested option structs** and result JSON. Hosts reach analysis through **`vic3-api`** (bytes or path loaders → JSON); the CLI clap wrappers may call core crates directly while printing the same shapes. Filesystem fields (`save`, `--game`, `--tokens`) exist on CLI wrappers and on `vic3-api` path helpers; wasm takes `Vec<u8>` only. Inner option structs must not mention `PathBuf`.
+This guide covers running **`vic3-analyzer`** via the Command Line Interface (CLI) and the Web UI.
 
-P5 generates JSON Schema from these structs (schemars) and checks it against [`json-schema.md`](json-schema.md). The React form is built from schema, not a hardcoded field list.
+Both interfaces share the same underlying analysis engine ([`vic3-api`](../crates/vic3-api)) and emit identical JSON result schemas ([`json-schema.md`](json-schema.md)).
 
-## Environment
+---
 
-| Variable | Meaning |
-| --- | --- |
-| `VIC3_SAVE` | Path to a real `.v3` (live tests, ignored by default) |
-| `VIC3_TOKENS` | Token map for binary saves |
-| `VIC3_GAME` | Victoria 3 install (defs). Fixtures used in CI |
+## Environment Variables
 
-CI runs against the small `plaintext` Brandenburg fixture and the self-contained `toy_economy` pack (defs under `crates/vic3-defs/tests/fixtures/toy_economy`, save `crates/vic3-load/tests/fixtures/toy_economy.txt`). Real installs and ironman saves are exercised only by ignored live tests when `VIC3_SAVE` / `VIC3_GAME` are set.
+| Variable | Meaning | Notes |
+| --- | --- | --- |
+| `VIC3_SAVE` | Default path to a `.v3` save file | Used by CLI commands when `--save` is omitted |
+| `VIC3_GAME` | Path to your installed `Victoria 3/game` directory | Used to read game definitions |
+| `VIC3_DEFS` | Path to a prebuilt `defs.postcard` blob | Alternative to reading live game directory |
+| `VIC3_TOKENS` | Token mapping file for binary Ironman saves | Optional; text saves do not require tokens |
 
-## CLI (target)
+---
 
-```text
-vic3-cli prices --save game.v3 --tokens tokens.txt --game /path/to/Victoria3 --json
-vic3-cli what-if --save game.v3 --building arms_industry --extra-levels 5 --json
-vic3-cli alerts --save game.v3 --game /path/to/Victoria3 --json
-vic3-cli mutate --save game.v3 --game /path/to/Victoria3 --delta-json '{...WorldDelta...}' --json
-vic3-cli optimize-pms --save game.v3 --game /path/to/Victoria3 --axis income --json
-vic3-cli export-save --save game.v3 --delta-json '{...SavePatch...}' --out new.v3
-vic3-cli gaps --save game.v3 --goal 'declare-war(state=alsace)' --json
-vic3-cli plan --save game.v3 --goal research(tech=nitroglycerin) --label 'rush explosives' --json
+## Command Line Interface (CLI)
+
+The CLI binary (`vic3-cli`) provides fast batch analysis, what-if evaluations, qualification bottleneck alerts, and goal planning.
+
+### Common Commands
+
+```bash
+# Calculate market and state-level equilibrium prices
+vic3-cli prices --save campaign.v3 --game "/path/to/Victoria 3/game"
+
+# Run a what-if analysis: simulate adding 5 levels of arms industries
+vic3-cli what-if --save campaign.v3 --building arms_industry --extra-levels 5
+
+# Check state-by-state pop employment shortages and qualification alerts
+vic3-cli alerts --save campaign.v3 --game "/path/to/Victoria 3/game"
+
+# Evaluate readiness gaps for a strategic goal
+vic3-cli gaps --save campaign.v3 --goal "declare-war(state=alsace)"
+
+# Plan a time-optimal action sequence to reach a goal
+vic3-cli plan --save campaign.v3 --goal "research(tech=nitroglycerin)" --label "rush explosives"
+
+# Optimize production methods for a target axis (income, productivity, or sol)
+vic3-cli optimize-pms --save campaign.v3 --axis income
+
+# Export a modified plaintext save with applied what-if changes
+vic3-cli export-save --save campaign.v3 --delta-json '{"production_methods": [...]}' --out modified.v3
+
+# Manage local plan archives
 vic3-cli archive list
-vic3-cli archive show <id>
-vic3-cli archive diff <id> <id>
+vic3-cli archive show <record-id>
+vic3-cli archive diff <record-id-1> <record-id-2>
 ```
 
-`--json` prints the result object (plus `limitations`). Without it, a short text table and a one-line limitations warning.
+Adding `--json` to any command emits full structured JSON matching the schemas in [`json-schema.md`](json-schema.md).
 
-`mutate` prints a preview [`PricesResult`](json-schema.md) and does not write a file. `export-save` writes `--out` only; it never overwrites `--save`. `optimize-pms` `--axis` is `income`, `productivity`, or `sol`.
+---
 
-Flatten groups (clap in `vic3-cli` only):
+## Web Application Workflow
 
-- `SolveOpts` — `residual_eps`, `max_iters`, `warm_rel`, …
-- `WhatIfOpts` — `building`, `extra_levels`, …
-- `WorldDelta` — `--delta-json` on `mutate` (no `PathBuf` on the inner type)
-- `AlertsResult` — `vic3-cli alerts` / wasm `loaded_alerts`
-- `OptimizeResult` — `vic3-cli optimize-pms` / wasm `loaded_optimize_pms`
-- `SavePatch` — `--delta-json` on `export-save`
-- `PlanOpts` — `goal`, `max_days`, `label`, …
-- Paths stay on the outer `*Cli` struct
+1. **Load Save:** Drag and drop a `.v3` save file into the browser. Text saves are parsed immediately; binary saves prompt for a token map if not previously provided.
+2. **Instant Price Solve:** On load, the browser immediately calculates market equilibrium prices and state-level MAPI blends.
+3. **Tab Navigation:**
+   - **Prices:** Explore global goods prices, volume-weighted averages, and drill down into state-level buy/sell orders and building economics.
+   - **States & Pops:** Inspect regional infrastructure, arable land, pop wealth, and literacy.
+   - **Alerts:** View actionable employment shortages and qualification feeder advice.
+   - **What-If:** Test building level expansions or PM switches with live price re-solves.
+   - **Goal Gaps & Timeline:** Evaluate readiness or compute step-by-step action sequences using the guided goal builder.
+   - **Archive:** View past runs, branch alternative timelines, and compare plans.
 
-## UI
+---
 
-1. Drop a `.v3` (and tokens if binary). Parse in-browser. Load **solves prices immediately**; there is no separate Analyze prices action.
-2. Use the task navigation for **Prices**, **States**, **Pops**, **Alerts**, **Military**, **Buildings**, What-if, Timeline, Goal gaps, or Archive.
-3. What-if uses building types read from the save; timeline and gaps use a guided goal builder, with the DSL retained as an advanced option.
-4. Every run is saved to IndexedDB. Browse past saves, name alternative plans, and compare them (see [`archive.md`](archive.md)). Dropped saves also keep origin / timeline / step history so a reload restores the campaign.
+## Default Plan Presets
 
-### Default plans
+The Web UI and CLI share standard presets for common strategic goals (defined using the [Goal DSL](dsl.md)):
 
-Timeline and Goal gaps share presets for war readiness, military size, economic
-growth, avoiding default, maximizing revenue, and standard of living. Choosing
-an available preset fills both its goal and archive label; its fields remain
-editable in the goal builder.
+| Preset | Goal Expression | How It Is Evaluated |
+| --- | --- | --- |
+| **Prepare for War** | `declare-war(state=...)` | Checks strategic interest, army power projection, munitions price ceiling, and credit solvency. |
+| **Colonize Region** | `colonize(region=...)` | Checks colonization/quinine tech, colonial laws, naval/army power, and local interest. |
+| **Economic Growth** | `gdp >= ...` | Solves GDP impact from expanding highest-output buildings or upgrading production methods. |
+| **Military Expansion** | `army_power_projection >= ...` | Plans staffed barracks expansions and troop recruitment. |
+| **Avoid Default** | `credit_headroom > 0` | Evaluates fiscal runway and plans debt reduction via the compact payday model. |
+| **Raise Standard of Living** | `population_weighted_wealth >= ...` | Evaluates population-weighted wealth across domestic states (readiness gaps diagnostic). |
 
-**Gaps** can evaluate war readiness (`declare-war` → interest, army,
-munitions-price, solvent), army power, GDP, credit headroom / solvency from
-saved principal and credit, the latest saved net weekly-budget sample, and a
-population-weighted saved-pop-wealth SoL proxy. Missing fiscal or population
-metrics remain unavailable rather than being treated as zero.
+---
 
-**Timelines** today close research, modeled GDP growth, supported goods-price
-goals (bounded building-level expansions, fixed modeled construction time, and a
-price re-solve), army power projection, declared interest, and solvency /
-credit-headroom goals via the compact payday debt model. A full `declare-war`
-timeline is reachable when munitions-price and solvent hold or solvent can close
-via payday; the Timeline preset picker may still mark declare-war as gaps-only
-depending on preset policy. Weekly income and SoL presets remain gaps-only.
-Optional `tag=` / `wargoal=` on `declare-war`
-still parse but are ignored by compile; the UI emits `declare-war(state=…)`
-only.
+## Game Definitions Workflow
 
-## Defs
+To analyze saves accurately, `vic3-analyzer` needs access to game definitions (goods base prices, building recipes, and pop need packages).
 
-The CLI reads a game install. The hosted wasm demo ships a tiny fixture blob,
-which intentionally includes only a few goods. Build a complete, local blob
-from your own install:
+- **In the Desktop Companion & CLI:** Provide `--game "/path/to/Victoria 3/game"`. The tool reads definitions directly from your local installation.
+- **In the Web App:** Drag and drop your local `Victoria 3/game` folder into the definitions modal. The browser extracts only the necessary definitions and goods icons, packaging them into a local `defs.postcard` blob stored in your browser's IndexedDB.
+- **CLI Export:** You can pre-compile a definitions blob for fast CLI or web reuse:
+  ```bash
+  cargo run -p vic3-cli -- defs export --game "/path/to/Victoria 3/game" --out defs.postcard
+  ```
+  *(Note: Do not commit or redistribute `defs.postcard`, as it is derived from Paradox game data).*
 
-```text
-vic3-cli defs export --game "/path/to/Victoria 3/game" --out defs.postcard
-```
+---
 
-Upload that blob in the web UI. It is derived from Paradox game data and must
-not be committed or published.
+## Understanding Result Caveats
 
-## Limitations in the answer
-
-The residual and frozen-world caveats remain part of CLI/wasm result JSON and
-archived records. The web UI keeps normal results focused on goods and actions,
-shows a warning only when the solve did not converge, and links to
-[`prices.md`](prices.md) for method details.
+Every price solve and planning run includes diagnostic solver information:
+- **Residual:** Measures how closely the pop-consumption and market-price fixed point converged. A small residual ($\approx 10^{-6}$) indicates a consistent equilibrium.
+- **Frozen Dimensions:** As documented in [Price Methodology](prices.md), base employment, wages, and trade-center volumes are held fixed from the save during pop re-equilibration unless explicitly modified by what-if actions.

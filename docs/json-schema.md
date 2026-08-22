@@ -1,8 +1,10 @@
-# JSON Schema (draft)
+# JSON Schema Contracts
 
-P1 hand-written contract. P5 generates schemars from shared structs and **fails the test** if this file (or a checked-in `schema/*.json`) drifts.
+This document specifies the shared JSON Schema (draft 2020-12) contracts for options, mutations, and analytical result structures.
 
-Types below are JSON Schema 2020-12 sketches. `PathBuf` never appears. Bytes are base64 only if we ever embed a blob in JSON; IndexedDB stores blobs out of band.
+Shared structs derive `schemars` and serde serialization, ensuring identical data contracts across the CLI (`--json`), Web UI, Desktop companion, and MCP server.
+
+Core option structs never contain `PathBuf` or OS-specific filesystem fields.
 
 ## SolveOpts
 

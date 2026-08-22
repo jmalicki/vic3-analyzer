@@ -1,11 +1,10 @@
-# SQL interface (design spec)
+# DataFusion SQL Interface
 
-**Status:** Wave 4a — Advanced Query tab in the Tauri companion uses this dialect via `vic3-sql`. Wave 3 diagnostics/planning UDFs, `saves` catalog, host `use_save`, and `active.*` / `latest.*` views remain in `vic3-sql`.  
-**Engine:** Apache DataFusion (`datafusion` 51).  
-**Consumers:** MCP `query` tool (Wave 4b), Tauri Advanced Query tab, optional `vic3-analyzer sql` debug.  
-**Related:** [`mcp.md`](mcp.md) (agent transport), [`json-schema.md`](json-schema.md) (JSON field names), [`dsl.md`](dsl.md) / [`planning.md`](planning.md) (goals / A\*), [`desktop.md`](desktop.md) (companion invokes).
+**Engine:** [Apache DataFusion](https://datafusion.apache.org/) (`datafusion` 51 in `crates/vic3-sql`).  
+**Consumers:** Desktop Advanced Query tab, MCP `query` tool, and internal test suites.  
+**Related Specs:** [`mcp.md`](mcp.md) (agent transport), [`json-schema.md`](json-schema.md) (JSON field names), [`dsl.md`](dsl.md) / [`planning.md`](planning.md) (goals / A*), [`desktop.md`](desktop.md) (desktop companion).
 
-This document is the contract implementers must follow. Prefer amending this file over silently changing behavior.
+This document specifies the read-only SQL dialect, virtual tables, diagnostics functions, and Table-Valued Functions (TVFs) exposed over Victoria 3 save files.
 
 ## Goals
 
