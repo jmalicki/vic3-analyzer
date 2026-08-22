@@ -54,3 +54,60 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+  format-release:
+    needs: release
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Format GitHub Release notes by operating system
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets' | python3 -c '
+          import json, sys, subprocess, os
+
+          tag = os.environ["TAG"]
+          repo = os.environ["REPO"]
+          assets = json.load(sys.stdin)
+
+          def get_row(a):
+              name = a["name"]
+              url = a["url"]
+              if name.endswith(".dmg"):
+                  return (1, f"| 🍏 **macOS** | Universal (Apple Silicon & Intel) | [`.dmg`]({url}) |")
+              elif name.endswith("-setup.exe") or (name.endswith(".exe") and not name.endswith(".msi")):
+                  return (2, f"| 🪟 **Windows** | 64-bit Setup Installer | [`.exe`]({url}) |")
+              elif name.endswith(".AppImage"):
+                  return (3, f"| 🐧 **Linux** | Universal Standalone Executable | [`.AppImage`]({url}) |")
+              elif name.endswith(".deb"):
+                  return (4, f"| 🐧 **Linux** | Ubuntu / Debian (.deb) | [`.deb`]({url}) |")
+              elif name.endswith(".rpm"):
+                  return (5, f"| 🐧 **Linux** | Fedora / RHEL (.rpm) | [`.rpm`]({url}) |")
+              return (99, None)
+
+          rows = []
+          for a in assets:
+              rank, row = get_row(a)
+              if row:
+                  rows.append((rank, row))
+
+          rows.sort(key=lambda x: x[0])
+
+          table_lines = [
+              "### 🖥️ Desktop Downloads\n",
+              "| Operating System | Platform Details | Direct Download |",
+              "| :--- | :--- | :--- |",
+          ]
+          for _, row in rows:
+              table_lines.append(row)
+
+          table_lines.append("\n---\n*Offline economic solver, what-if simulator, and strategic co-pilot for Victoria 3.*")
+          notes = "\n".join(table_lines)
+
+          subprocess.run(["gh", "release", "edit", tag, "--repo", repo, "--notes", notes], check=True)
+          '
+
