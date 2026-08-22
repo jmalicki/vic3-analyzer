@@ -18,7 +18,16 @@ describe('Tauri Desktop Companion', () => {
         await refreshBtn.click()
         
         // We expect mock_save.v3 to appear
-        await expect(saveList).toHaveTextContaining('mock_save.v3')
+        const saveRow = await $('td*=mock_save.v3')
+        await expect(saveRow).toBeExisting()
+        
+        // Try to load the save file
+        // The user says "i can't click on a save file to load it!!"
+        await saveRow.click()
+        
+        // Check the status text
+        const status = await $('#saves-status')
+        await expect(status).toHaveTextContaining('Loaded mock_save.v3')
     })
 
     it('should run an Advanced Query', async () => {
