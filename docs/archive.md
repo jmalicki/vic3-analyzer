@@ -8,15 +8,20 @@ All campaign data, analysis records, and timeline steps are stored completely lo
 
 ## Save Timelines & Branching
 
-Rather than treating saves as a flat list of disconnected files, `vic3-analyzer` organizes your campaign into an interactive branching tree:
+Rather than treating saves as a flat list of disconnected files, `vic3-analyzer` organizes your campaign into an interactive branching timeline tree:
 
-```
-Origin Save (1836.v3)
-  └── Main Timeline
-        ├── Step 1: Initial Baseline (Solved Prices)
-        ├── Step 2: What-If (Build 5 Arms Industries)
-        └── Step 3: PM Switch (Bessemer Process)
-              └── Alternative Branch ("Rush Military")
+```mermaid
+graph TD
+    Origin["Origin Save (1836.v3)"]
+    Step1["Step 1: Baseline<br/>(Solved Prices)"]
+    Step2["Step 2: What-If<br/>(Build 5 Arms Industries)"]
+    Step3["Step 3: PM Switch<br/>(Bessemer Process)"]
+    AltBranch["Alternative Branch<br/>('Rush Military')"]
+
+    Origin --> Step1
+    Step1 --> Step2
+    Step2 --> Step3
+    Step2 --> AltBranch
 ```
 
 | Store | Role |

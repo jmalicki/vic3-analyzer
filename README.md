@@ -57,7 +57,7 @@ Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the ful
 
 ### 3. Native Desktop Companion (Tauri 2 GUI)
 * Standalone desktop application with auto-discovery of local Steam installs and save directories across macOS, Windows, and Linux.
-* Includes an interactive campaign dashboard, save timeline browser, and an Advanced SQL query tab.
+* Includes an interactive campaign dashboard, save timeline browser, and what-if simulation tools.
 * Run locally:
   ```bash
   cargo run -p vic3-analyzer
@@ -97,11 +97,11 @@ Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the ful
 | [Price Equilibrium](docs/prices.md) | Non-linear solver, MAPI formulas, pop need packages, and solver limitations |
 | [Strategic Planning](docs/planning.md) | `PlanningState` projection, A* graph search, heuristic bounds, and payday debt model |
 
-### Integrations & Power Users
+### Integrations & Developer Tools
 | Document | Description |
 | --- | --- |
 | [MCP Server](docs/mcp.md) | Connect AI assistants (Claude Desktop, Cursor) to your campaign via MCP |
-| [DataFusion SQL](docs/sql.md) | Read-only SQL interface, virtual fact tables (`active.*`), and UDFs/TVFs |
+| [SQL Query Engine](docs/sql.md) | In-engine SQL fact tables and analytical TVFs (for developer tools and integrations) |
 
 ### Developer & Architecture Specifications
 | Document | Description |

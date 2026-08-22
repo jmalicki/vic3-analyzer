@@ -1,6 +1,6 @@
 # Desktop Companion App
 
-The native desktop companion (`crates/vic3-analyzer`) is a [Tauri 2](https://v2.tauri.app/) application providing automatic game and save discovery, a campaign dashboard, and an embedded [DataFusion SQL](sql.md) engine.
+The native desktop companion (`crates/vic3-analyzer`) is a [Tauri 2](https://v2.tauri.app/) application providing automatic game and save discovery, an interactive campaign dashboard, and save timeline tracking.
 
 The compiled binary serves as both the **Desktop GUI** (default) and the background **AI Assistant MCP Server** (`vic3-analyzer mcp`).
 
@@ -65,19 +65,16 @@ Settings are saved in your platform's local application data directory (`$XDG_DA
 
 ## Architecture & Integration
 
-The Desktop app integrates the database, save watcher, and MCP server directly on your local machine:
+The Desktop app integrates the query engine, save watcher, and MCP server directly on your local machine:
 
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                          vic3-sql                           │
-│        (DataFusion SQL Engine + Active Save Session)        │
-└──────────────┬──────────────────────────────┬───────────────┘
-               │                              │
-               ▼                              ▼
-┌──────────────────────────────┐┌─────────────────────────────┐
-│        vic3-analyzer         ││          vic3-mcp           │
-│    (Tauri 2 Companion UI)    ││  (Local MCP Agent Server)   │
-└──────────────────────────────┘└─────────────────────────────┘
+```mermaid
+flowchart TD
+    Engine["Query Engine & Active Save Session<br/>(vic3-sql)"]
+    GUI["Tauri 2 Companion UI<br/>(vic3-analyzer)"]
+    MCP["Local AI Assistant MCP Server<br/>(vic3-mcp)"]
+
+    Engine --> GUI
+    Engine --> MCP
 ```
 
 - **Shared Configuration:** The GUI and MCP server share the same configuration file and definition caches.
@@ -91,6 +88,6 @@ The Desktop app integrates the database, save watcher, and MCP server directly o
 The Desktop UI provides settings management and exposes the following internal Tauri commands:
 - `get_config` / `save_config` / `reset_config`: Manage application settings.
 - `list_saves` / `get_dashboard`: Fetch cataloged saves and summary campaign metrics.
-- `use_save`: Bind an active save session for SQL and diagnostics.
-- `sql_query`: Execute read-only DataFusion queries against the loaded save.
+- `use_save`: Bind an active save session for diagnostics and what-if simulation.
+- `sql_query`: Execute read-only queries against the loaded save.
 - `loaded_prices` / `loaded_alerts` / `loaded_gaps`: Retrieve cached analytical projections.

@@ -83,23 +83,14 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
 
 The planning architecture cleanly separates generic search mechanisms from Victoria 3 specific mechanics:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         Core Layer                          │
-│   (Goal DSL Algebra, Solvers, Resource Tracks, Backlog ETA) │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      Host Layer (Vic3)                      │
-│ (Atoms, Sugar Compilations, Military Formations, PM Edges)  │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Optional Peripherals                     │
-│       (DataFusion SQL TVFs, MCP Adapters, Web Facades)      │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Core["Core Planning Layer<br/>(Goal DSL Algebra, Solvers, Resource Tracks, Backlog ETA)"]
+    Host["Victoria 3 Domain Layer<br/>(Atoms, Sugar Compilations, Military Formations, PM Edges)"]
+    Peripherals["Optional Peripherals<br/>(Embedded Query TVFs, MCP Adapters, Web Facades)"]
+
+    Core --> Host
+    Host --> Peripherals
 ```
 
 - **Resource Tracks & ETA:** Models queues (e.g. construction sectors with aggregate construction points $R$) where job completion time is derived from prefix work divided by throughput rate: $\text{ETA} \approx \lceil \text{work} / R \rceil$.
