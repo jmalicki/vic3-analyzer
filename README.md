@@ -33,7 +33,7 @@ Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the ful
 
 ---
 
-## 🌐 Four Ways to Run
+## 🌐 Three Ways to Run
 
 ### 1. In-Browser Web App (Zero Install)
 * **Live Demo:** [https://jmalicki.github.io/vic3-analyzer/](https://jmalicki.github.io/vic3-analyzer/)
@@ -43,7 +43,7 @@ Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the ful
 ### 2. AI Strategic Co-Pilot (Claude Desktop / Cursor via MCP)
 * Turn Claude Desktop, Cursor, or your favorite AI assistant into your personal Grand Strategy advisor using the [Model Context Protocol (MCP)](docs/mcp.md).
 * Connects seamlessly to your desktop AI tools via standard local process communication (no web servers or open network ports required).
-* The AI can automatically discover your autosaves, explain domestic shortages, run SQL queries, and preview what-if economic adjustments in real time:
+* The AI can automatically discover your autosaves, explain domestic shortages, run analytical queries, and preview what-if economic adjustments in real time:
   ```json
   {
     "mcpServers": {
@@ -63,12 +63,6 @@ Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the ful
   cargo run -p vic3-analyzer
   ```
 
-### 4. Command Line Interface (CLI)
-* Fast batch price solves, qualification alerts, what-if deltas, and save patching.
-  ```bash
-  cargo run -p vic3-cli -- prices --save campaign.v3 --game "/path/to/Victoria 3/game"
-  ```
-
 ---
 
 ## ✨ Core Capabilities
@@ -86,7 +80,6 @@ Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the ful
 ### User & Player Guides
 | Document | Description |
 | --- | --- |
-| [Usage Guide](docs/usage.md) | CLI commands, web UI navigation, shared options, and definitions workflow |
 | [Desktop Companion](docs/desktop.md) | Tauri app setup, automatic Steam/save discovery, and settings |
 | [Goal DSL](docs/dsl.md) | Goal language grammar, predicates, and expansion rules (`declare-war`, `colonize`) |
 | [Archive & History](docs/archive.md) | Local save archive, timeline branching, and historical plan comparison |
@@ -101,6 +94,7 @@ Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the ful
 | Document | Description |
 | --- | --- |
 | [MCP Server](docs/mcp.md) | Connect AI assistants (Claude Desktop, Cursor) to your campaign via MCP |
+| [CLI Reference](docs/cli.md) | Headless batch price solves, what-if automation, and save patching |
 | [SQL Query Engine](docs/sql.md) | In-engine SQL fact tables and analytical TVFs (for developer tools and integrations) |
 
 ### Developer & Architecture Specifications
