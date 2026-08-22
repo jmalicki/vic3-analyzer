@@ -19,7 +19,7 @@ price = base * (1 + PRICE_RANGE * clamp(ratio, -1, +1))
 
 ### Formal Invariants
 - **I1 (Equilibrium at Parity):** $\text{buy} = \text{sell} \implies \text{price} = \text{base}$ (within solver tolerance $\varepsilon$).
-- **I2 (Box Bounds):** All prices remain bounded in $[(1 - \text{PRICE\_RANGE}) \cdot \text{base}, (1 + \text{PRICE\_RANGE}) \cdot \text{base}]$.
+- **I2 (Box Bounds):** All prices remain bounded in $[(1 - r) \cdot \text{base}, (1 + r) \cdot \text{base}]$ (where $r = \text{PRICE-RANGE}$, typically $0.75$).
 - **I3 (Monotonicity):** Weakly higher buy orders (with fixed sell orders) result in weakly higher prices away from clamp boundaries.
 
 When orders are zero for a good, price defaults to base price without division by zero.
@@ -88,7 +88,7 @@ subject to box bounds on relative prices.
 
 Every analytical result carries structured limitation strings:
 1. Wealth is relaxed to a continuous variable during the solve, then rounded.
-2. Prices are strictly clamped to $\pm \text{PRICE\_RANGE}$ as defined by the game.
+2. Prices are strictly clamped to $\pm \text{PRICE-RANGE}$ (typically $\pm 75\%$) as defined by the game.
 3. Employment, wages, and trade route volumes are frozen unless explicitly modified.
 4. State orders are infrastructure-access scaled into a single whole-save market; overseas convoy limits and separate custom unions are not yet modeled.
 5. The solve residual is part of the answer: a large residual indicates the model did not converge to a fixed point.
