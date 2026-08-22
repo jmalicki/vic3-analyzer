@@ -87,7 +87,6 @@ Recommendation: Expand the Arms Industry in Silesia by 2 levels (or set an impor
 cargo run -p vic3-analyzer
 ```
 
-![Desktop Alerts — Coal, unmet needs, and empty jobs with ranked mitigations](docs/assets/desktop-alert-mitigations.png)
 ![Desktop Dashboard — Save catalog and active session overview](docs/assets/desktop-dashboard.png)
 ![Advanced Query — SQL shortage analysis in Desktop companion](docs/assets/desktop-query-shortages.png)
 ![Timeline Planner — Sequenced GDP and tech progression](docs/assets/desktop-timeline-gdp.png)
