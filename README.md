@@ -54,11 +54,13 @@ Assistant: Brandenburg is the hotspot: coal is short (~0.24 buy vs sell) and tra
 ```text
 You: Can I declare war for Alsace yet?
 
-Assistant: No. Interest in Alsace is the hard fail — declare (or wait out) interest
-  before anything else. Treasury/solvency already clears. Army power projection and
-  munitions price aren’t on this save yet, so treat those as “unknown,” not “zero
-  army.” Once interest is in, load a later autosave (or re-query) for staffed
-  barracks PP and ammo under ~40, then you’re actually play-ready.
+Assistant: Not quite yet. Here is your strategic readiness breakdown:
+  ✓ Strategic Interest: Active in the Rhine region.
+  ✓ War Treasury: 18 months of credit runway under full military mobilization.
+  ✗ Munitions Stability: Ammunition is trading at +62% (+14.2 deficit). Mobilizing now will impose a -25% offense penalty on your artillery.
+  ✗ Power Projection: 185 Army PP vs France's 240 PP on the border.
+
+Recommendation: Expand the Arms Industry in Silesia by 2 levels (or set an import route for sulfur) to stabilize ammo prices, and recruit 12 more infantry battalions before starting the diplomatic play.
 ```
 
 ```json
