@@ -19,7 +19,7 @@ version = "0.5.0"
 edition = "2021"
 license = "AGPL-3.0-only"
 repository = "https://github.com/jmalicki/vic3-analyzer"
-rust-version = "1.88"
+rust-version = "1.98"
 
 [workspace.dependencies]
 anyhow = "1"
@@ -27,7 +27,7 @@ basin = "1.5"
 bcdec_rs = "0.2"
 chumsky = "0.13"
 clap = { version = "4", features = ["derive", "env"] }
-datafusion = "51"
+datafusion = "55"
 jomini = { version = "0.35", features = ["envelope"] }
 png = "0.18"
 postcard = { version = "1.1", default-features = false, features = ["use-std"] }

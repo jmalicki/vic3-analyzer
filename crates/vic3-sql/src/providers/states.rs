@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -201,10 +200,6 @@ fn append_opt_f64(b: &mut Float64Builder, v: Option<f64>) {
 
 #[async_trait]
 impl TableProvider for StatesProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

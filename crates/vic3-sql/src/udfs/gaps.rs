@@ -4,7 +4,6 @@
 //! `unknown` (metric missing from save IR — not a measured shortfall).
 //! `detail` is the atom JSON.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -136,10 +135,6 @@ struct GapsProvider {
 
 #[async_trait]
 impl TableProvider for GapsProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

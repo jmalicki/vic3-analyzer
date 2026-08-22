@@ -3,7 +3,6 @@
 //! Arithmetic mirrors `vic3-prices` employment-alert staffing
 //! (`level / staffing` scales employed counts to jobs-at-full-level).
 
-use std::any::Any;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -183,10 +182,6 @@ fn building_label(binding: &SessionBinding, building: &BuildingEconomics) -> Str
 
 #[async_trait]
 impl TableProvider for BuildingStaffingProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

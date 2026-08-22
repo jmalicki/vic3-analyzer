@@ -12,7 +12,6 @@
 //! - `LIMIT` truncates before mitigations when every filter is Exact (or there
 //!   are no filters). Residual Unsupported filters disable early LIMIT.
 
-use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -259,10 +258,6 @@ fn alert_matches(alert: &Alert, preds: &[Pred]) -> bool {
 
 #[async_trait]
 impl TableProvider for AlertsProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

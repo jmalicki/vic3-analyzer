@@ -3,7 +3,6 @@
 //! Rows come from [`crate::host::HostState`]'s in-memory catalog; `loaded` is
 //! true only for the entry identity currently bound by `use_save`.
 
-use std::any::Any;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -94,10 +93,6 @@ fn system_time_millis(t: SystemTime) -> i64 {
 
 #[async_trait]
 impl TableProvider for SavesProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }
