@@ -2,7 +2,7 @@
 
 This document specifies the economic modeling formulation and non-linear equilibrium solver in [`vic3-prices`](../crates/vic3-prices).
 
-The core objective is to find a relative price vector $\mathbf{p}$ such that **pop consumption, substitution shares, and state-level MAPI access** are mutually consistent with game formulas.
+The core objective is to find a relative price vector $\mathbf{p}$ such that **pop consumption, substitution shares, and state-level [Market Access Price Impact (MAPI)](https://vic3.paradoxwikis.com/Market#Market_access_price_impact) access** are mutually consistent with game formulas.
 
 Solved prices feed the [`PlanningState`](planning.md) (`good_prices`, modeled GDP), the CLI, Web UI, Desktop GUI, and SQL diagnostics.
 
@@ -26,7 +26,7 @@ When orders are zero for a good, price defaults to base price without division b
 
 ---
 
-## Market Access Price Index (MAPI)
+## [Market Access Price Impact (MAPI)](https://vic3.paradoxwikis.com/Market#Market_access_price_impact)
 
 The solver calculates per-state local prices by blending the global market price with state-attributed local orders inside the residual:
 

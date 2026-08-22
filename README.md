@@ -26,7 +26,7 @@ Victoria 3 gives you immense freedom, but managing a 19th-century industrial emp
 
 Victoria 3's economy cannot be accurately analyzed by simply tallying current buy and sell orders. When production changes or buildings expand:
 - **Pop demand is dynamic:** Pops shop across tiered need packages; as prices move, pop substitution and purchasing power shift requested quantities.
-- **Local prices depend on market access (MAPI):** State-level prices blend local orders with national market prices based on infrastructure access.
+- **Local prices depend on market access:** State-level prices blend local supply and demand with national market prices based on infrastructure and [Market Access Price Impact (MAPI)](https://vic3.paradoxwikis.com/Market#Market_access_price_impact).
 - **Cascading profitability:** Factory revenue and input costs change simultaneously across the entire supply chain.
 
 Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the full non-linear system (NLS) to find consistent pop demand and market prices. This gives accurate revenue, profit, and shortage projections for what-if scenarios and goal planning. *(See [Price Methodology](docs/prices.md) for mathematical formulas and solver mechanics).*

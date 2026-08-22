@@ -12,7 +12,7 @@ The core analysis engine is transport-independent: analytical results and option
 | --- | --- | --- |
 | **`vic3-load`** | Parsing `.v3` save files (using `jomini` and `pdx-tools` `vic3save`) into intermediate representation (`WorldSave`); surgical plaintext patch export (`SavePatch`). | Pure Rust, WASM-safe |
 | **`vic3-defs`** | Extracting and indexing game definitions (goods, PMs, pop needs, buy packages) from installs or precompiled blobs; decoding game UI icons. | Pure Rust, WASM-safe |
-| **`vic3-prices`** | Market price equilibrium solver (Basin non-linear least squares + successive substitution warm start), pop consumption, MAPI blending, and qualification bottleneck alerts. | Pure Rust, WASM-safe |
+| **`vic3-prices`** | Market price equilibrium solver (Basin non-linear least squares + successive substitution warm start), pop consumption, [MAPI](https://vic3.paradoxwikis.com/Market#Market_access_price_impact) blending, and qualification bottleneck alerts. | Pure Rust, WASM-safe |
 | **`vic3-planning`** | Compact `PlanningState` projection, Goal DSL parsing (`chumsky`), goal-relevant successor generation, and A* search engine (`rust-advanced-heaps`). | Pure Rust, WASM-safe |
 | **`vic3-api`** | Transport-free API facade. Accepts raw bytes or filesystem paths and produces uniform analytical JSON. | Pure Rust |
 | **`vic3-catalog`** | File system discovery and watcher for local/Steam save directories and shared application configuration (`config.toml`). | Native OS |

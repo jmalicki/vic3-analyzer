@@ -20,7 +20,7 @@ It operates directly over the core analysis engine ([`vic3-api`](../crates/vic3-
 ## Command Reference
 
 ### 1. Market Equilibrium: `prices`
-Calculates national market prices and state-level blended MAPI prices for all active goods.
+Calculates national market prices and state-level blended [MAPI](https://vic3.paradoxwikis.com/Market#Market_access_price_impact) prices for all active goods.
 
 ```bash
 cargo run -p vic3-cli -- prices \
