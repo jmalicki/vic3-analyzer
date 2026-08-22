@@ -441,11 +441,44 @@
     <div class="layout">
       <section id="view-dashboard">
         <h2>Dashboard</h2>
-        <div class="metrics" id="metrics"></div>
-        <div class="status" id="dash-status" aria-live="polite">Loading…</div>
-        <div class="actions" style="margin-top: 0.75rem">
-          <button type="button" id="refresh-dash">Refresh</button>
-          <button type="button" class="ghost" id="show-hints">Path hints</button>
+        <div id="dash-no-save" style="display: none">
+          <p>Welcome to Vic3 Analyzer!</p>
+          <p>Switch to the <strong>Saves</strong> tab to load a save file and get started.</p>
+          <div class="actions" style="margin-top: 0.75rem">
+            <button type="button" class="ghost" id="show-hints">Troubleshooting path hints</button>
+          </div>
+          <div id="dash-hints" class="hint-list"></div>
+        </div>
+        <div id="dash-active" style="display: none">
+          <h3 id="dash-title" style="margin-bottom: 0.5rem; font-weight: normal;"></h3>
+          <div class="metrics" id="metrics"></div>
+
+          <div class="query-grid split" style="margin-top: 1rem;">
+            <div>
+              <h3 style="margin-bottom: 0.5rem;">Top Alerts</h3>
+              <div class="results-wrap">
+                <table id="dash-alerts-table">
+                  <thead id="dash-alerts-head"></thead>
+                  <tbody id="dash-alerts-body"></tbody>
+                </table>
+              </div>
+              <div id="dash-alerts-status" class="status" style="margin-top: 0.25rem; font-size: 0.8rem; min-height: unset; padding: 0.4rem;"></div>
+            </div>
+            <div>
+              <h3 style="margin-bottom: 0.5rem;">Top Shortages</h3>
+              <div class="results-wrap">
+                <table id="dash-shortages-table">
+                  <thead id="dash-shortages-head"></thead>
+                  <tbody id="dash-shortages-body"></tbody>
+                </table>
+              </div>
+              <div id="dash-shortages-status" class="status" style="margin-top: 0.25rem; font-size: 0.8rem; min-height: unset; padding: 0.4rem;"></div>
+            </div>
+          </div>
+          
+          <div class="actions" style="margin-top: 1rem">
+            <button type="button" id="refresh-dash">Refresh</button>
+          </div>
         </div>
       </section>
 
@@ -880,19 +913,68 @@
         };
       }
 
-      function renderMetrics(dash) {
-        const items = [
-          ["Game", dash.game_detected ? "found" : "missing"],
-          ["Save roots", String(dash.save_root_count)],
-          ["Saves", String(dash.save_count)],
-          ["Loaded", dash.loaded_stub || "—"],
-        ];
-        document.getElementById("metrics").innerHTML = items
-          .map(
-            ([label, value]) =>
-              `<div class="metric"><strong>${value}</strong><span>${label}</span></div>`
-          )
-          .join("");
+      async function renderMetrics(dash) {
+        if (!dash.loaded_stub) {
+          document.getElementById("dash-active").style.display = "none";
+          document.getElementById("dash-no-save").style.display = "block";
+          
+          if (!dash.game_detected || dash.save_root_count === 0) {
+            document.getElementById("dash-hints").innerHTML = (dash.detection_hints || [])
+              .map((h) => `<div>${escapeHtml(h)}</div>`)
+              .join("");
+          } else {
+            document.getElementById("dash-hints").innerHTML = "";
+          }
+          return;
+        }
+
+        document.getElementById("dash-no-save").style.display = "none";
+        document.getElementById("dash-active").style.display = "block";
+        document.getElementById("dash-title").innerHTML = `Active Session: <strong>${escapeHtml(dash.loaded_stub)}</strong>`;
+
+        try {
+          // Fetch basic country stats
+          const basicRaw = await invoke("sql_query", { sql: "SELECT player_tag(), army_power()" });
+          const basicResult = typeof basicRaw === "string" ? JSON.parse(basicRaw) : basicRaw;
+          const basicRow = (basicResult.rows && basicResult.rows[0]) || [];
+
+          const tag = basicRow[0] || "?";
+          const armyRaw = basicRow[1];
+          const army = (armyRaw !== null && armyRaw !== undefined) ? Number(armyRaw).toFixed(1) : "?";
+
+          const items = [
+            ["Playing As", tag],
+            ["Army Power", army],
+            ["Saves Found", String(dash.save_count)],
+          ];
+          
+          document.getElementById("metrics").innerHTML = items
+            .map(
+              ([label, value]) =>
+                `<div class="metric"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`
+            )
+            .join("");
+
+          // Fetch top alerts
+          await runSqlInto(
+            `SELECT kind, severity, count(*) AS count FROM alerts() GROUP BY kind, severity ORDER BY severity, count DESC LIMIT 5`,
+            document.getElementById("dash-alerts-head"),
+            document.getElementById("dash-alerts-body"),
+            document.getElementById("dash-alerts-status"),
+            { nav: false } // No specific click navigation for grouped alerts yet
+          );
+
+          // Fetch top shortages
+          await runSqlInto(
+            `SELECT good, good_name, shortage, price FROM goods WHERE shortage > 0 ORDER BY shortage DESC LIMIT 5`,
+            document.getElementById("dash-shortages-head"),
+            document.getElementById("dash-shortages-body"),
+            document.getElementById("dash-shortages-status")
+          );
+
+        } catch (e) {
+          console.error("Dashboard SQL error:", e);
+        }
       }
 
       function escapeHtml(s) {

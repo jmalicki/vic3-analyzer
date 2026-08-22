@@ -8,6 +8,10 @@ describe('Tauri Desktop Companion', () => {
     })
 
     it('should navigate to Dashboard and show auto-sync saves', async () => {
+        // First check the dashboard default state
+        const dashNoSave = await $('#dash-no-save')
+        await expect(dashNoSave).toBeDisplayed()
+        
         const savesTab = await $('#tab-saves')
         await savesTab.click()
         
@@ -28,6 +32,13 @@ describe('Tauri Desktop Companion', () => {
         // Check the status text
         const status = await $('#saves-status')
         await expect(status).toHaveTextContaining('Loaded mock_save.v3')
+        
+        // Wait for dashboard to automatically show up since UI auto-navigates
+        const dashActive = await $('#dash-active')
+        await expect(dashActive).toBeDisplayed()
+        
+        const dashTitle = await $('#dash-title')
+        await expect(dashTitle).toHaveTextContaining('Active Session:')
     })
 
     it('should run an Advanced Query', async () => {
