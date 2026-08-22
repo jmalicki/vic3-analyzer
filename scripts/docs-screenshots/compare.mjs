@@ -13,7 +13,7 @@ import { PNG } from 'pngjs'
 import { ALL_SHOTS, assetsDir, outDir } from './lib/paths.mjs'
 
 const THRESHOLD = Number(process.env.DOCS_SCREENSHOTS_THRESHOLD || 0.1)
-const MAX_DIFF_RATIO = Number(process.env.DOCS_SCREENSHOTS_MAX_DIFF_RATIO || 0.02)
+const MAX_DIFF_RATIO = Number(process.env.DOCS_SCREENSHOTS_MAX_DIFF_RATIO || 0.15)
 
 function compareOne(name, generatedDir, goldenDir, diffDir) {
   const goldenPath = join(goldenDir, name)

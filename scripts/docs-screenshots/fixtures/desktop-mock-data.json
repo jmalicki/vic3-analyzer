@@ -55,12 +55,39 @@
     }
   },
   "loaded_prices": "{\"status\":\"converged\",\"gdp\":4200000,\"goods\":[{\"id\":\"grain\",\"price\":22.1}]}",
-  "loaded_alerts": "{\"alerts\":[{\"id\":\"1\",\"kind\":\"shortage\",\"severity\":\"warn\",\"title\":\"Grain short\"}]}",
+  "loaded_alerts": "{\"alerts\":[{\"id\":\"goods_shortage:coal\",\"kind\":\"goods_shortage\",\"severity\":1,\"title\":\"Coal shortage\",\"summary\":\"Coal is short where Brandenburg pops shop.\",\"state_id\":101,\"good_id\":\"coal\",\"evidence\":[{\"label\":\"Buy vs sell\",\"value\":\"0.24 / 0\"},{\"label\":\"Price vs base\",\"value\":\"52.5 vs 30\"}],\"mitigations\":[{\"id\":\"coal-mine\",\"title\":\"Expand local coal\",\"detail\":\"Add coal mine levels in Brandenburg\",\"rank\":1,\"apply_ready\":false},{\"id\":\"coal-trade\",\"title\":\"Build trade center\",\"detail\":\"Import coal into the market\",\"rank\":2,\"apply_ready\":false}]},{\"id\":\"needs_unmet:brandenburg\",\"kind\":\"needs_unmet\",\"severity\":1,\"title\":\"Unmet pop needs in Brandenburg\",\"summary\":\"Buy package stressed — energy goods are expensive.\",\"state_id\":101,\"evidence\":[{\"label\":\"Pressure\",\"value\":\"Energy goods in the package\"}],\"mitigations\":[{\"id\":\"clear-coal\",\"title\":\"Clear coal shortage first\",\"detail\":\"Cheap energy before wealth can climb\",\"rank\":1,\"apply_ready\":false}]},{\"id\":\"unfilled_education:farmers\",\"kind\":\"unfilled_education\",\"severity\":1,\"title\":\"Brandenburg needs more Farmers\",\"summary\":\"Qualification stock short of farmer jobs.\",\"state_id\":101,\"evidence\":[{\"label\":\"Gap\",\"value\":\"~5950 more Farmers\"}],\"mitigations\":[{\"id\":\"rural-sol\",\"title\":\"Raise rural SoL / literacy\",\"detail\":\"Grow farmer qualifications in-state\",\"rank\":1,\"apply_ready\":false}]},{\"id\":\"underemployed:brandenburg\",\"kind\":\"underemployed\",\"severity\":2,\"title\":\"Brandenburg buildings cannot fill Farmers jobs\",\"summary\":\"Open farmer jobs with insufficient qualified pops.\",\"state_id\":101,\"building_id\":12,\"evidence\":[{\"label\":\"Staffing\",\"value\":\"Jobs open · quals short\"}],\"mitigations\":[{\"id\":\"staff-farm\",\"title\":\"Improve farmer quals before expanding farms\",\"detail\":\"Empty levels will not raise SoL\",\"rank\":1,\"apply_ready\":false}]}],\"limitations\":[\"Employment and trade frozen except explicit deltas.\"]}",
   "sql_docs": {
     "udf_md": "# UDF contract\n\nRead-only TVFs: `alerts()`, `plan()`, `gaps()`, `suggest_mitigations()`.\n",
     "sql_md": "# SQL surface\n\nFact tables: `goods`, `states`, `buildings`, `saves`.\n"
   },
   "queries": {
+    "alerts_mitigations": {
+      "columns": ["kind", "title", "state_id", "evidence", "mitigation"],
+      "rows": [
+        [
+          "shortage",
+          "Coal short in Brandenburg",
+          101,
+          "Buy 0.24 / Sell 0 · Price 52.5 vs base 30",
+          "Expand local coal · or build trade center"
+        ],
+        [
+          "needs_unmet",
+          "Unmet pop needs in Brandenburg",
+          101,
+          "Buy package stressed on energy goods",
+          "Clear coal shortage first"
+        ],
+        [
+          "underemployed",
+          "Brandenburg cannot fill Farmers jobs",
+          101,
+          "Open farmer jobs · qualifications short",
+          "Raise farmer quals · improve rural SoL"
+        ]
+      ],
+      "row_count": 3
+    },
     "shortage": {
       "columns": ["good", "shortage", "price", "state_id"],
       "rows": [

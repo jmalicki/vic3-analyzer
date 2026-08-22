@@ -2,17 +2,20 @@
 
 Locked filenames for player-facing guides. Generate via `scripts/docs-screenshots` (see that package). Committed PNGs are the source of truth for README / `docs/user/*` embeds.
 
+**Fixture disclaimer:** these PNGs are the CI toy economy (few goods, early date), not a mid-campaign save. Captions and README call that out so players don’t confuse demo chrome with their install.
+
 ## Desktop companion (`desktop-*.png`)
 
 | File | Shot |
 | --- | --- |
 | `desktop-dashboard.png` | D1 Dashboard |
 | `desktop-saves.png` | D2 Saves |
-| `desktop-query-shortages.png` | D3 Advanced Query + shortage SQL |
-| `desktop-states.png` | D4 Query → States |
-| `desktop-prices.png` | D5 Query → Prices |
-| `desktop-timeline-gdp.png` | D6 Timeline GDP/research |
-| `desktop-settings.png` | D7 Settings |
+| `desktop-alert-mitigations.png` | D3 Alerts tab (evidence + mitigations) |
+| `desktop-query-shortages.png` | D4 Advanced Query + shortage SQL |
+| `desktop-states.png` | D5 Query → States |
+| `desktop-prices.png` | D6 Query → Prices |
+| `desktop-timeline-gdp.png` | D7 Timeline GDP/research |
+| `desktop-settings.png` | D8 Settings |
 
 ## Web app (`web-*.png`)
 

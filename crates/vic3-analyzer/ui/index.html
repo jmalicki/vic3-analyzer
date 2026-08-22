@@ -297,10 +297,109 @@
       }
       .focus-card .eyebrow {
         color: var(--muted);
-        font-size: 0.78rem;
+        font-size: 0.75rem;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
-        margin: 0 0 0.35rem;
+        letter-spacing: 0.06em;
+        margin: 0 0 0.25rem;
+      }
+      .alert-groups {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 0.75rem;
+      }
+      .alert-group {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 0.35rem;
+        padding: 0.35rem 0.75rem 0.65rem;
+      }
+      .alert-group > summary {
+        cursor: pointer;
+        font-weight: 600;
+        color: var(--accent);
+        padding: 0.4rem 0;
+        list-style: none;
+      }
+      .alert-group > summary::-webkit-details-marker {
+        display: none;
+      }
+      .alert-group > summary .count {
+        color: var(--muted);
+        font-weight: 500;
+        font-size: 0.85rem;
+        margin-left: 0.35rem;
+      }
+      .alerts-list {
+        list-style: none;
+        margin: 0.25rem 0 0;
+        padding: 0;
+        display: grid;
+        gap: 0.45rem;
+      }
+      .alert-expander {
+        border: 1px solid var(--line);
+        border-radius: 0.3rem;
+        padding: 0.35rem 0.65rem 0.55rem;
+        background: color-mix(in srgb, var(--panel) 40%, white);
+      }
+      .alert-expander > summary {
+        cursor: pointer;
+        padding: 0.35rem 0;
+        list-style: none;
+      }
+      .alert-expander > summary::-webkit-details-marker {
+        display: none;
+      }
+      .alert-expander .sev {
+        color: var(--warn);
+        font-size: 0.8rem;
+        margin-left: 0.4rem;
+      }
+      .alert-summary {
+        margin: 0.15rem 0 0.45rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+        line-height: 1.4;
+      }
+      .alert-evidence {
+        display: grid;
+        gap: 0.25rem;
+        margin: 0.35rem 0 0.55rem;
+        font-size: 0.88rem;
+      }
+      .alert-evidence div {
+        display: grid;
+        grid-template-columns: 9rem 1fr;
+        gap: 0.5rem;
+      }
+      .alert-evidence dt {
+        margin: 0;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      .alert-evidence dd {
+        margin: 0;
+      }
+      .alert-mitigations {
+        margin: 0.25rem 0 0.35rem;
+        padding-left: 1.15rem;
+        font-size: 0.9rem;
+        line-height: 1.4;
+      }
+      .alert-mitigations li {
+        margin-bottom: 0.35rem;
+      }
+      .alert-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        margin-top: 0.35rem;
+      }
+      .alert-links button {
+        font-size: 0.85rem;
+        padding: 0.3rem 0.65rem;
       }
       .examples {
         display: flex;
@@ -324,12 +423,13 @@
     <header>
       <h1>Vic3 Analyzer</h1>
       <p class="lede">
-        Native companion: catalog, Settings, analysis JSON, and Advanced Query
-        over the same <code>vic3-sql</code> engine MCP will use.
+        Live campaign assistant: track domestic shortages, browse state economies,
+        and plan strategic goals directly from your Victoria 3 saves.
       </p>
       <nav aria-label="Views">
         <button type="button" id="tab-dashboard" aria-pressed="true">Dashboard</button>
         <button type="button" id="tab-saves" class="ghost" aria-pressed="false">Saves</button>
+        <button type="button" id="tab-alerts" class="ghost" aria-pressed="false">Alerts</button>
         <button type="button" id="tab-query" class="ghost" aria-pressed="false">Query</button>
         <button type="button" id="tab-states" class="ghost" aria-pressed="false">States</button>
         <button type="button" id="tab-prices" class="ghost" aria-pressed="false">Prices</button>
@@ -352,13 +452,13 @@
       <section id="view-saves" class="hidden">
         <h2>Save catalog</h2>
         <p class="lede" style="margin-bottom: 0.75rem">
-          Filename stubs only — paths stay in Rust. Click a row to bind the SQL
-          session and analysis JSON.
+          Discovered save games from your local and Steam Cloud directories.
+          Click any save to inspect its economy and market prices.
         </p>
         <div class="actions" style="margin-bottom: 0.75rem">
           <button type="button" id="refresh-saves">Refresh list</button>
           <button type="button" class="ghost" id="load-prices" disabled>Loaded prices</button>
-          <button type="button" class="ghost" id="load-alerts" disabled>Loaded alerts</button>
+          <button type="button" class="ghost" id="open-alerts" disabled>Open Alerts</button>
         </div>
         <div style="overflow-x: auto">
           <table>
@@ -376,12 +476,26 @@
         <div class="status" id="saves-status" style="margin-top: 0.75rem" aria-live="polite"></div>
       </section>
 
+      <section id="view-alerts" class="hidden">
+        <h2>Alerts</h2>
+        <p class="lede" style="margin-bottom: 0.75rem">
+          Shortage, unmet needs, qualifications, and employment flags for the loaded
+          save — with evidence and suggested mitigations. Click through to States or
+          Prices when a state or good is attached.
+        </p>
+        <div class="actions" style="margin-bottom: 0.75rem">
+          <button type="button" id="refresh-alerts" disabled>Refresh alerts</button>
+        </div>
+        <div id="alerts-root"></div>
+        <div class="status" id="alerts-status" style="margin-top: 0.75rem" aria-live="polite"></div>
+      </section>
+
       <section id="view-query" class="hidden">
         <h2>Advanced Query</h2>
         <p class="lede" style="margin-bottom: 0.65rem">
-          Read-only SQL via <code>vic3-sql</code>. Click
-          <code>state_id</code>, <code>good</code>, <code>building_id</code>, or plan
-          <code>step</code> cells to open companion panes.
+          Run custom analytical queries against your campaign data. Click any
+          highlighted <code>state_id</code>, <code>good</code>, <code>building_id</code>, or
+          <code>step</code> to drill down into detailed breakdowns.
         </p>
         <div class="examples" id="sql-examples"></div>
         <div class="query-grid" id="query-layout">
@@ -462,8 +576,8 @@
       <section id="view-settings" class="hidden">
         <h2>Settings</h2>
         <p class="lede" style="margin-bottom: 0.85rem">
-          Shared with <code>vic3-analyzer mcp</code> via app-data
-          <code>config.toml</code>.
+          Game install and save directory paths. Configuration is saved locally
+          and shared with the AI assistant MCP server.
         </p>
         <label>
           Game folder (<code>…/Victoria 3/game</code>)
@@ -530,6 +644,7 @@
       const views = {
         dashboard: document.getElementById("view-dashboard"),
         saves: document.getElementById("view-saves"),
+        alerts: document.getElementById("view-alerts"),
         query: document.getElementById("view-query"),
         states: document.getElementById("view-states"),
         prices: document.getElementById("view-prices"),
@@ -539,6 +654,7 @@
       const tabs = {
         dashboard: document.getElementById("tab-dashboard"),
         saves: document.getElementById("tab-saves"),
+        alerts: document.getElementById("tab-alerts"),
         query: document.getElementById("tab-query"),
         states: document.getElementById("tab-states"),
         prices: document.getElementById("tab-prices"),
@@ -553,12 +669,183 @@
       let lastPlanRows = null;
       let lastPlanColumns = null;
       let timelineStep = null;
+      let alertsCache = null;
+
+      const ALERT_GROUP_ORDER = [
+        "shortages",
+        "needs",
+        "market_access",
+        "qualifications",
+        "employment",
+      ];
+
+      function alertGroupMeta(kind) {
+        switch (kind) {
+          case "electricity_shortage":
+          case "transportation_shortage":
+          case "goods_shortage":
+            return { id: "shortages", label: "Shortages" };
+          case "needs_unmet":
+            return { id: "needs", label: "Unmet needs" };
+          case "low_market_access":
+            return { id: "market_access", label: "Market access" };
+          case "unfilled_education":
+            return { id: "qualifications", label: "Qualifications" };
+          case "unfilled_pops":
+          case "underemployed":
+            return { id: "employment", label: "Employment" };
+          default:
+            return { id: "shortages", label: "Other" };
+        }
+      }
 
       function showView(name) {
         for (const [key, el] of Object.entries(views)) {
           el.classList.toggle("hidden", key !== name);
           tabs[key].setAttribute("aria-pressed", key === name ? "true" : "false");
           tabs[key].classList.toggle("ghost", key !== name);
+        }
+        if (name === "alerts") {
+          refreshAlerts().catch(() => {});
+        }
+      }
+
+      function setAlertsLoadedUi(loaded) {
+        hasLoaded = loaded;
+        document.getElementById("load-prices").disabled = !loaded;
+        document.getElementById("open-alerts").disabled = !loaded;
+        document.getElementById("refresh-alerts").disabled = !loaded;
+      }
+
+      function renderAlerts(payload) {
+        const root = document.getElementById("alerts-root");
+        const alerts = (payload && payload.alerts) || [];
+        if (!alerts.length) {
+          root.innerHTML =
+            '<p class="lede">No alerts for this save (or load a save first).</p>';
+          return;
+        }
+        const buckets = new Map();
+        for (const id of ALERT_GROUP_ORDER) {
+          buckets.set(id, { id, label: null, items: [] });
+        }
+        for (const alert of alerts) {
+          const meta = alertGroupMeta(alert.kind);
+          let bucket = buckets.get(meta.id);
+          if (!bucket) {
+            bucket = { id: meta.id, label: meta.label, items: [] };
+            buckets.set(meta.id, bucket);
+          }
+          bucket.label = bucket.label || meta.label;
+          bucket.items.push(alert);
+        }
+        const groups = ALERT_GROUP_ORDER.map((id) => buckets.get(id)).filter(
+          (g) => g && g.items.length
+        );
+        root.innerHTML = `<ul class="alert-groups">${groups
+          .map((group) => {
+            const items = group.items
+              .map((alert) => {
+                const evidence = (alert.evidence || [])
+                  .map(
+                    (row) =>
+                      `<div><dt>${escapeHtml(row.label)}</dt><dd>${escapeHtml(
+                        row.value
+                      )}</dd></div>`
+                  )
+                  .join("");
+                const mitigations = [...(alert.mitigations || [])]
+                  .sort((a, b) => (a.rank || 0) - (b.rank || 0))
+                  .map((m) => {
+                    const detail = m.detail
+                      ? ` — ${escapeHtml(m.detail)}`
+                      : "";
+                    return `<li><strong>${escapeHtml(m.title || m.id)}</strong>${detail}</li>`;
+                  })
+                  .join("");
+                const links = [];
+                if (alert.state_id != null) {
+                  links.push(
+                    `<button type="button" class="ghost alert-nav" data-nav="state_id" data-val="${escapeHtml(
+                      alert.state_id
+                    )}">Open state ${escapeHtml(alert.state_id)}</button>`
+                  );
+                }
+                if (alert.good_id) {
+                  links.push(
+                    `<button type="button" class="ghost alert-nav" data-nav="good" data-val="${escapeHtml(
+                      alert.good_id
+                    )}">Open ${escapeHtml(alert.good_id)}</button>`
+                  );
+                }
+                if (alert.building_id != null) {
+                  links.push(
+                    `<button type="button" class="ghost alert-nav" data-nav="building_id" data-val="${escapeHtml(
+                      alert.building_id
+                    )}">Open building ${escapeHtml(alert.building_id)}</button>`
+                  );
+                }
+                return `<li>
+                  <details class="alert-expander" open>
+                    <summary>${escapeHtml(alert.title || alert.id)}<span class="sev">severity ${escapeHtml(
+                      alert.severity
+                    )}</span></summary>
+                    <p class="alert-summary">${escapeHtml(alert.summary || "")}</p>
+                    ${
+                      evidence
+                        ? `<dl class="alert-evidence">${evidence}</dl>`
+                        : ""
+                    }
+                    ${
+                      mitigations
+                        ? `<ol class="alert-mitigations">${mitigations}</ol>`
+                        : "<p class=\"lede\">No mitigations projected.</p>"
+                    }
+                    ${
+                      links.length
+                        ? `<div class="alert-links">${links.join("")}</div>`
+                        : ""
+                    }
+                  </details>
+                </li>`;
+              })
+              .join("");
+            return `<li>
+              <details class="alert-group" open>
+                <summary>${escapeHtml(group.label)}<span class="count">${
+              group.items.length
+            } alert(s)</span></summary>
+                <ul class="alerts-list">${items}</ul>
+              </details>
+            </li>`;
+          })
+          .join("")}</ul>`;
+        root.querySelectorAll("button.alert-nav").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            navigateKey(btn.dataset.nav, btn.dataset.val, [], []);
+          });
+        });
+      }
+
+      async function refreshAlerts() {
+        const status = document.getElementById("alerts-status");
+        if (!hasLoaded) {
+          document.getElementById("alerts-root").innerHTML =
+            '<p class="lede">Load a save from the Saves tab first.</p>';
+          setStatus(status, "No save loaded", "err");
+          return;
+        }
+        setStatus(status, "Loading alerts…");
+        try {
+          const raw = await invoke("loaded_alerts");
+          const payload = typeof raw === "string" ? JSON.parse(raw) : raw;
+          alertsCache = payload;
+          renderAlerts(payload);
+          const n = (payload.alerts || []).length;
+          setStatus(status, `${n} alert(s)`, "ok");
+        } catch (err) {
+          document.getElementById("alerts-root").innerHTML = "";
+          setStatus(status, String(err), "err");
         }
       }
 
@@ -787,9 +1074,7 @@
           bits.join(" "),
           dash.game_detected ? "ok" : "err"
         );
-        hasLoaded = !!dash.loaded_stub;
-        document.getElementById("load-prices").disabled = !hasLoaded;
-        document.getElementById("load-alerts").disabled = !hasLoaded;
+        setAlertsLoadedUi(!!dash.loaded_stub);
       }
 
       async function refreshSaves() {
@@ -814,8 +1099,7 @@
             solveOptsJson: "{}",
           });
           hasLoaded = true;
-          document.getElementById("load-prices").disabled = false;
-          document.getElementById("load-alerts").disabled = false;
+          setAlertsLoadedUi(true);
           const summary = JSON.parse(json).summary || {};
           setStatus(
             status,
@@ -974,6 +1258,7 @@
 
       tabs.dashboard.addEventListener("click", () => showView("dashboard"));
       tabs.saves.addEventListener("click", () => showView("saves"));
+      tabs.alerts.addEventListener("click", () => showView("alerts"));
       tabs.query.addEventListener("click", () => showView("query"));
       tabs.states.addEventListener("click", () => showView("states"));
       tabs.prices.addEventListener("click", () => showView("prices"));
@@ -1034,17 +1319,11 @@
           setStatus(document.getElementById("saves-status"), String(err), "err");
         }
       });
-      document.getElementById("load-alerts").addEventListener("click", async () => {
-        try {
-          const json = await invoke("loaded_alerts");
-          setStatus(
-            document.getElementById("saves-status"),
-            json.slice(0, 400) + (json.length > 400 ? "…" : ""),
-            "ok"
-          );
-        } catch (err) {
-          setStatus(document.getElementById("saves-status"), String(err), "err");
-        }
+      document.getElementById("open-alerts").addEventListener("click", () => {
+        showView("alerts");
+      });
+      document.getElementById("refresh-alerts").addEventListener("click", () => {
+        refreshAlerts().catch(() => {});
       });
       document.getElementById("show-hints").addEventListener("click", async () => {
         const hints = await invoke("detection_hints");

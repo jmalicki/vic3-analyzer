@@ -1,11 +1,32 @@
-# Real macOS Tauri screenshots (optional)
+# Real macOS Tauri screenshots
 
-Not wired in this PR. Ubuntu CI uses [`capture-desktop-mock.mjs`](../capture-desktop-mock.mjs) instead.
+Produces the locked `desktop-*.png` files under [`docs/assets/`](../../../docs/assets/README.md) from a **real** companion window (native macOS chrome included).
 
-When implementing:
+Ubuntu CI keeps using [`capture-desktop-mock.mjs`](../capture-desktop-mock.mjs) for layout drift. **Committed desktop goldens should come from this path on a Mac.**
 
-1. Run the companion with a disposable `XDG_DATA_HOME` and fixture saves/defs (same idea as MCP smoke).
-2. Drive it with Tauri WebDriver on macOS ([docs](https://v2.tauri.app/develop/tests/webdriver/)): `@wdio/tauri-service` + debug-only `tauri-plugin-wdio-webdriver` (embedded provider).
-3. Write the same locked filenames as the mock path (`desktop-*.png` in `docs/assets/`).
+## Requirements
 
-Keep WebDriver plugins behind debug/docs features so release builds and headless Linux `cargo test` stay clean.
+- macOS (Screen Recording permission for Terminal/Cursor so `screencapture -l` works)
+- Rust + Node 22+
+- One-time: `npm ci` in `scripts/docs-screenshots` and in this folder
+
+## Run
+
+From `scripts/docs-screenshots/`:
+
+```bash
+npm run docs:screenshots:desktop:tauri
+```
+
+That script:
+
+1. Builds `vic3-analyzer` with `--features webdriver` and a temporary WebDriver capability
+2. Seeds a disposable `XDG_DATA_HOME` with fixture save + defs
+3. Launches the app via `@wdio/tauri-service` (embedded WebDriver)
+4. Walks Dashboard → Saves → **Alerts** → Query → States → Prices → Timeline → Settings
+5. Captures each step with macOS `screencapture -l <windowID>` so the title bar / traffic lights are in the PNG
+
+## Notes
+
+- `tauri-plugin-wdio-webdriver` is optional (`webdriver` feature) and only initialized for these builds — do not ship that feature to players.
+- If capture fails with a blank/permission error, enable **Screen Recording** for your terminal in System Settings → Privacy & Security.

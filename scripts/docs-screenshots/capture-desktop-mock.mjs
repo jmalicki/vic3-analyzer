@@ -24,6 +24,13 @@ async function installTauriMock(page) {
     const queries = data.queries
     function pick(sql) {
       const s = String(sql).toLowerCase()
+      if (
+        s.includes('from alerts') ||
+        s.includes('suggest_mitigations') ||
+        s.includes('mitigation')
+      ) {
+        return queries.alerts_mitigations
+      }
       if (s.includes('shortage') || (s.includes('from goods') && s.includes('shortage'))) {
         return queries.shortage
       }
@@ -112,20 +119,26 @@ async function main() {
     await page.waitForSelector('#saves-body tr')
     await writeShot(page, dest, DESKTOP_SHOTS[1])
 
-    // D3 Advanced Query + shortage SQL
+    // D3 Alerts tab (README companion hero)
+    await page.click('#tab-alerts')
+    await page.waitForSelector('#alerts-root .alert-group')
+    await page.waitForSelector('#alerts-root .alert-mitigations')
+    await writeShot(page, dest, DESKTOP_SHOTS[2])
+
+    // D4 Advanced Query + shortage SQL
     await page.click('#tab-query')
     await page.click('button[data-ex="shortage"]')
     await page.click('#run-sql')
     await page.waitForSelector('#results-body td.nav-key')
-    await writeShot(page, dest, DESKTOP_SHOTS[2])
+    await writeShot(page, dest, DESKTOP_SHOTS[3])
 
-    // D4 Query → States (click state_id)
+    // D5 Query → States (click state_id)
     await page.locator('#results-body td.nav-key[data-col="state_id"]').first().click()
     await page.waitForSelector('#view-states:not(.hidden)')
     await page.waitForSelector('#states-body td')
-    await writeShot(page, dest, DESKTOP_SHOTS[3])
+    await writeShot(page, dest, DESKTOP_SHOTS[4])
 
-    // D5 Query → Prices (re-run shortage, click good)
+    // D6 Query → Prices (re-run shortage, click good)
     await page.click('#tab-query')
     await page.click('button[data-ex="shortage"]')
     await page.click('#run-sql')
@@ -133,9 +146,9 @@ async function main() {
     await page.locator('#results-body td.nav-key[data-col="good"]').first().click()
     await page.waitForSelector('#view-prices:not(.hidden)')
     await page.waitForSelector('#prices-body td')
-    await writeShot(page, dest, DESKTOP_SHOTS[4])
+    await writeShot(page, dest, DESKTOP_SHOTS[5])
 
-    // D6 Timeline GDP/research plan
+    // D7 Timeline GDP/research plan
     await page.click('#tab-query')
     await page.fill(
       '#sql-editor',
@@ -145,13 +158,13 @@ async function main() {
     await page.waitForSelector('#results-body td.nav-key[data-col="step"]')
     await page.locator('#results-body td.nav-key[data-col="step"]').first().click()
     await page.waitForSelector('#view-timeline:not(.hidden)')
-    await writeShot(page, dest, DESKTOP_SHOTS[5])
+    await writeShot(page, dest, DESKTOP_SHOTS[6])
 
-    // D7 Settings
+    // D8 Settings
     await page.click('#tab-settings')
     await page.waitForSelector('#view-settings:not(.hidden)')
     await page.waitForFunction(() => document.getElementById('cfg-game').value.length > 0)
-    await writeShot(page, dest, DESKTOP_SHOTS[6])
+    await writeShot(page, dest, DESKTOP_SHOTS[7])
 
     console.log('desktop mock: done')
     await context.close()

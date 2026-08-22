@@ -29,30 +29,67 @@ Victoria 3 gives you immense freedom, but managing a 19th-century industrial emp
 ### 1. In-Browser Web App (Zero Install)
 * **Live Demo:** [https://jmalicki.github.io/vic3-analyzer/](https://jmalicki.github.io/vic3-analyzer/)
 * Drag and drop your `.v3` save and your local `Victoria 3/game` folder.
-* **100% Client-Side:** Everything parses and solves locally inside your browser via WebAssembly (`wasm-bindgen`) and IndexedDB. Saves, definitions, and tokens are **never uploaded** to any server.
+* **100% Client-Side & Private:** Everything runs locally inside your browser and stays in your browser's private local storage. Saves, game definitions, and campaigns are **never uploaded** to any server.
 
-### 2. AI Strategic Co-Pilot (Claude Desktop / Cursor via MCP)
-* Turn Claude Desktop, Cursor, or your favorite AI assistant into your personal Grand Strategy advisor using the [Model Context Protocol (MCP)](docs/mcp.md).
+![What-If Simulator — Live price re-solve after building deltas](docs/assets/web-what-if.png)
+![Goal Gaps — War readiness checklist](docs/assets/web-gaps-war.png)
+
+---
+
+### 2. AI Strategic Co-Pilot (Claude Desktop / Cursor / ChatGPT via MCP)
+* Turn Claude Desktop, Cursor, ChatGPT, Gemini, or any MCP-capable client into your personal Grand Strategy advisor using the **[Model Context Protocol (MCP)](docs/mcp.md)**.
 * Connects seamlessly to your desktop AI tools via standard local process communication (no web servers or open network ports required).
-* The AI can automatically discover your autosaves, explain domestic shortages, run analytical queries, and preview what-if economic adjustments in real time:
-  ```json
-  {
-    "mcpServers": {
-      "vic3-analyzer": {
-        "command": "cargo",
-        "args": ["run", "-p", "vic3-analyzer", "--", "mcp"]
-      }
+* The AI automatically inspects your active campaign, explains domestic shortages, and previews what-if adjustments:
+
+```text
+You: I want to fix SoL shortages in my area — what’s actually hurting people?
+
+Assistant: Brandenburg is the hotspot: coal is short (~0.24 buy vs sell) and trading
+  at ~52.5 against a 30 base — that’s the goods-shortage alert. There’s also an
+  unmet-needs flag on this save, so pops aren’t just seeing a ticker spike; the
+  buy package is stressed. Mitigations rank a trade center vs expanding local coal;
+  I’d preview both before you queue ten construction levels that make coal worse.
+```
+
+```text
+You: Can I declare war for Alsace yet?
+
+Assistant: Not quite yet. Here is your strategic readiness breakdown:
+  ✓ Strategic Interest: Active in the Rhine region.
+  ✓ War Treasury: 18 months of credit runway under full military mobilization.
+  ✗ Munitions Stability: Ammunition is trading at +62% (+14.2 deficit). Mobilizing now will impose a -25% offense penalty on your artillery.
+  ✗ Power Projection: 185 Army PP vs France's 240 PP on the border.
+
+Recommendation: Expand the Arms Industry in Silesia by 2 levels (or set an import route for sulfur) to stabilize ammo prices, and recruit 12 more infantry battalions before starting the diplomatic play.
+```
+
+```json
+{
+  "mcpServers": {
+    "vic3-analyzer": {
+      "command": "cargo",
+      "args": ["run", "-p", "vic3-analyzer", "--", "mcp"]
     }
   }
-  ```
+}
+```
 
-### 3. Native Desktop Companion (Tauri 2 GUI)
-* Standalone desktop application with auto-discovery of local Steam installs and save directories across macOS, Windows, and Linux.
-* Includes an interactive campaign dashboard, save timeline browser, and what-if simulation tools.
-* Run locally:
-  ```bash
-  cargo run -p vic3-analyzer
-  ```
+*(See the **[MCP Server Guide](docs/mcp.md)** for full client setups, prompts, and tool contracts).*
+
+---
+
+### 3. Desktop App (Auto-Syncing Campaign Dashboard)
+* Run it on a second monitor while you play: automatically detects your Steam and Paradox save files whenever the game autosaves.
+* Surfaces critical economic **Alerts** with actionable next steps (like expanding local coal or building universities), lets you browse market prices across your states, and plots step-by-step goal timelines.
+* See the full **[Desktop App Guide](docs/desktop.md)**.
+
+```bash
+cargo run -p vic3-analyzer
+```
+
+![Desktop Dashboard — Save catalog and active session overview](docs/assets/desktop-dashboard.png)
+![Advanced Query — SQL shortage analysis in Desktop companion](docs/assets/desktop-query-shortages.png)
+![Timeline Planner — Sequenced GDP and tech progression](docs/assets/desktop-timeline-gdp.png)
 
 ---
 
@@ -71,14 +108,15 @@ Victoria 3 gives you immense freedom, but managing a 19th-century industrial emp
 ### Player & Methodology Guides
 | Document | Description |
 | --- | --- |
-| [Desktop Companion](docs/desktop.md) | Tauri companion setup, Steam save auto-discovery, and settings |
+| [Desktop Companion](docs/desktop.md) | Tauri companion setup, Steam save auto-discovery, alerts, and settings |
 | [Goal Planning DSL](docs/dsl.md) | Goal language grammar, predicates, and expansion rules (`declare-war`, `colonize`) |
 | [Save History & Timelines](docs/archive.md) | Local save archive, timeline branching, and plan comparison |
 | [Price Equilibrium Methodology](docs/prices.md) | Non-linear solver, MAPI formulas, pop need packages, and solver caveats |
 | [Strategic Planning Engine](docs/planning.md) | State representation, search heuristics, and payday debt model |
+| [AI Assistant (MCP)](docs/mcp.md) | Local MCP server configuration, tool signatures, and player chat workflows |
 
 ### 🛠️ Developer & Contributor Documentation
-For local build instructions, test workflows, crate architecture, CLI tools, MCP integration, DataFusion SQL tables, JSON schemas, and mathematical invariants, see the **[Contributor & Developer Guide](CONTRIBUTING.md)**.
+For local build instructions, test workflows, crate architecture, CLI tools, DataFusion SQL tables, JSON schemas, and mathematical invariants, see the **[Contributor & Developer Guide](CONTRIBUTING.md)**.
 
 ---
 
