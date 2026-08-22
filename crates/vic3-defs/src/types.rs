@@ -65,6 +65,10 @@ pub struct GameDefs {
     /// Production-method group id → PM ids (`common/production_method_groups`).
     #[serde(default)]
     pub production_method_groups: BTreeMap<String, Vec<String>>,
+    /// Technology id → cost / prerequisite metadata (`common/technology/technologies`).
+    /// Empty when those files were not in the selected game files.
+    #[serde(default)]
+    pub technologies: BTreeMap<String, Technology>,
 }
 
 impl Default for GameDefs {
@@ -88,6 +92,7 @@ impl Default for GameDefs {
             obsessions: BTreeMap::new(),
             pop_types: BTreeMap::new(),
             production_method_groups: BTreeMap::new(),
+            technologies: BTreeMap::new(),
         }
     }
 }
@@ -236,6 +241,22 @@ pub struct ProductionMethod {
     /// True when any modifier name contains `qualifications`.
     #[serde(default)]
     pub qualifications_boost: bool,
+}
+
+/// A technology definition (`common/technology/technologies`).
+///
+/// Vic3 scripts store prerequisites as `unlocking_technologies`. Innovation
+/// cost is often era-scoped in the full game; fixtures may set [`Self::cost`]
+/// directly. [`None`] cost means planners fall back to a model constant.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Technology {
+    pub id: String,
+    /// Innovation points to research this tech when present in script/fixture.
+    #[serde(default)]
+    pub cost: Option<f64>,
+    /// Tech ids from `unlocking_technologies = { ... }` (must own all to start).
+    #[serde(default)]
+    pub prerequisites: Vec<String>,
 }
 
 /// A constructable building definition (`common/buildings`).

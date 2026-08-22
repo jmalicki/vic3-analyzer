@@ -246,14 +246,15 @@ fn gaps_json_has_declare_war_atoms_and_limitations() {
 }
 
 #[test]
-fn plan_research_fixture_costs_default_research_days() {
+fn plan_research_fixture_costs_tech_prereq_days() {
     let archive = temp_archive();
     let assert = plan_cmd(&archive).assert().success();
     let value: Value =
         serde_json::from_slice(&assert.get_output().stdout).expect("PlanResult JSON");
 
-    assert_eq!(value["day_cost"], 365);
-    assert_eq!(value["actions"].as_array().unwrap().len(), 2);
+    // Fixture: manufacturies(50) + shaft_mining(75) + nitroglycerin(100).
+    assert_eq!(value["day_cost"], 225);
+    assert_eq!(value["actions"].as_array().unwrap().len(), 6);
     assert!(value["actions"][0]["action"]["QueueTech"].is_object());
     assert!(value["actions"][1]["action"]["WaitForEvent"].is_object());
     assert!(value["residual"].is_number());
@@ -285,7 +286,7 @@ fn archive_list_and_show_persist_plan_record() {
     assert_eq!(record["id"], id);
     assert_eq!(record["kind"], "plan");
     assert_eq!(record["label"], "rush");
-    assert_eq!(record["result"]["day_cost"], 365);
+    assert_eq!(record["result"]["day_cost"], 225);
     std::fs::remove_dir_all(archive).unwrap();
 }
 
@@ -294,6 +295,7 @@ fn archive_diff_emits_compare_result_json() {
     let archive = temp_archive();
     let records_dir = archive.join("vic3-analyzer");
     std::fs::create_dir_all(&records_dir).unwrap();
+    // Synthetic archive rows (not live plans): keep arbitrary day_cost values.
     for (id, day_cost) in [("left", 365), ("right", 480)] {
         let record = serde_json::json!({
             "id": id,

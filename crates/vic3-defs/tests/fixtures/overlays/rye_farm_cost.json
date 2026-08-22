@@ -1,0 +1,8 @@
+{
+  "buildings": {
+    "building_rye_farm": {
+      "required_construction": 999.0
+    }
+  },
+  "future_extension": "ignored by serde"
+}

@@ -16,6 +16,7 @@ use datafusion::physical_plan::ExecutionPlan;
 
 use crate::host::HostState;
 use crate::providers::{self, FactTable};
+use crate::scope::TableScope;
 use crate::SqlError;
 
 /// Lazy view over the catalog's max-mtime save for one fact table.
@@ -26,15 +27,17 @@ use crate::SqlError;
 pub struct LatestFactProvider {
     host: Arc<HostState>,
     table: FactTable,
+    scope: TableScope,
     schema: SchemaRef,
 }
 
 impl LatestFactProvider {
-    pub(crate) fn new(host: Arc<HostState>, table: FactTable) -> Self {
+    pub(crate) fn new(host: Arc<HostState>, table: FactTable, scope: TableScope) -> Self {
         Self {
             host,
             schema: table.schema(),
             table,
+            scope,
         }
     }
 }
@@ -71,7 +74,7 @@ impl TableProvider for LatestFactProvider {
         let binding = self.host.ensure_latest_binding().map_err(|e| {
             DataFusionError::External(Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         })?;
-        let inner = providers::provider_for(self.table, binding);
+        let inner = providers::provider_for(self.table, binding, self.scope);
         inner.scan(state, projection, filters, limit).await
     }
 }

@@ -1,0 +1,24 @@
+# Tiny fixture tech tree for prereq expansion tests.
+manufacturies = {
+	era = era_1
+	category = production
+	cost = 50
+}
+
+shaft_mining = {
+	era = era_1
+	category = production
+	cost = 75
+	unlocking_technologies = {
+		manufacturies
+	}
+}
+
+nitroglycerin = {
+	era = era_2
+	category = production
+	cost = 100
+	unlocking_technologies = {
+		shaft_mining
+	}
+}

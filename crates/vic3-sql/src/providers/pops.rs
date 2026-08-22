@@ -13,6 +13,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use crate::binding::SessionBinding;
 use crate::exec::memory_exec;
 use crate::schema::pops_schema;
+use crate::scope::{state_in_scope, TableScope};
 
 use super::pushdown::{matches_str, matches_u32, PushSupport};
 
@@ -26,13 +27,15 @@ const PUSH: PushSupport = PushSupport {
 #[derive(Debug)]
 pub struct PopsProvider {
     binding: Arc<SessionBinding>,
+    scope: TableScope,
     schema: SchemaRef,
 }
 
 impl PopsProvider {
-    pub fn new(binding: Arc<SessionBinding>) -> Self {
+    pub fn new(binding: Arc<SessionBinding>, scope: TableScope) -> Self {
         Self {
             binding,
+            scope,
             schema: pops_schema(),
         }
     }
@@ -46,6 +49,9 @@ impl PopsProvider {
         let mut literacy = Float64Builder::new();
 
         for pop in self.binding.prices.state_pops.iter() {
+            if !state_in_scope(self.scope, self.binding.world.as_ref(), Some(pop.state_id)) {
+                continue;
+            }
             if !matches_u32(&preds, "state_id", pop.state_id) {
                 continue;
             }

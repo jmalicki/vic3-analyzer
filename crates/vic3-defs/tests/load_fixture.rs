@@ -237,6 +237,14 @@ fn fixture_pop_types_record_qualification_sources() {
         defs.production_method_groups["pmg_base_building_rye_farm"],
         ["pm_simple_farming"]
     );
+    let nitro = &defs.technologies["nitroglycerin"];
+    assert_eq!(nitro.cost, Some(100.0));
+    assert_eq!(nitro.prerequisites, ["shaft_mining"]);
+    assert_eq!(
+        defs.technologies["shaft_mining"].prerequisites,
+        ["manufacturies"]
+    );
+    assert!(defs.technologies["manufacturies"].prerequisites.is_empty());
 }
 
 #[test]

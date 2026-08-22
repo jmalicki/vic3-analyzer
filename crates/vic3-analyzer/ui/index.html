@@ -520,6 +520,10 @@
         ["saves", "SELECT name, kind, loaded FROM saves ORDER BY mtime DESC LIMIT 10;"],
         ["alerts", "SELECT id, kind, severity, title FROM alerts() ORDER BY severity LIMIT 20;"],
         ["shortage", "SELECT good, shortage, price FROM goods WHERE shortage > 0 ORDER BY shortage DESC LIMIT 15;"],
+        [
+          "underemployed",
+          "SELECT s.state_id, s.region_name, m.action, m.title\nFROM states s\nJOIN suggest_mitigations() m USING (state_id)\nWHERE is_underemployed(s.state_id)\nORDER BY m.rank\nLIMIT 20;",
+        ],
         ["plan", "SELECT step, day, action, detail FROM plan('research(tech=nitroglycerin)') ORDER BY step;"],
       ];
 

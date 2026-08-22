@@ -73,6 +73,59 @@ jobs:
         with:
           path: web/dist
 
+  docs-screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: docs-screenshots-wasm
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: v0.12.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            scripts/docs-screenshots/package-lock.json
+      - name: Install web deps and build
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Install screenshot harness
+        working-directory: scripts/docs-screenshots
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Generate screenshots
+        working-directory: scripts/docs-screenshots
+        timeout-minutes: 12
+        env:
+          DOCS_SCREENSHOTS_OUT: ${{ runner.temp }}/docs-screenshots-out
+        run: npm run docs:screenshots
+      - name: Compare to committed assets (when goldens exist)
+        working-directory: scripts/docs-screenshots
+        env:
+          DOCS_SCREENSHOTS_OUT: ${{ runner.temp }}/docs-screenshots-out
+          CI: "true"
+        run: npm run docs:screenshots:compare
+      - name: Upload screenshot artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-screenshots
+          path: |
+            ${{ runner.temp }}/docs-screenshots-out
+          if-no-files-found: ignore
+
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: web

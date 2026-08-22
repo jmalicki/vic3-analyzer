@@ -82,9 +82,27 @@ LIMIT 10;
 
 Rows project from the loaded `World` + `PricesResult` + defs after a solve — not raw Clausewitz. Column names should align with [`json-schema.md`](json-schema.md) / `PricesResult` where practical.
 
+### Player-first catalog (**breaking**)
+
+Short names (unqualified, `active.*`, and `latest.*`) for campaign geography / ownership tables return **player-owned rows only** — same strict `World.player_tag` rule as `alerts()` (no first-country fallback). When `player_tag` is unset, those short names are empty.
+
+| Short name | Full save | Filter |
+| --- | --- | --- |
+| `states` | `world_states` | player-owned `state_id`s |
+| `goods_by_state` | `world_goods_by_state` | player-owned `state_id`s |
+| `buildings` | `world_buildings` | player-owned `state_id`s |
+| `pops` | `world_pops` | player-owned `state_id`s |
+| `state_qualifications` | `world_state_qualifications` | player-owned `state_id`s |
+| `constructions` | `world_constructions` | player country queue **or** player-owned state |
+| `countries` | `world_countries` | played country row only |
+
+**No `world_` twin** (unchanged session / defs scope): `goods`, `building_types`, `production_methods`.
+
+Happy path no longer needs `WHERE owner_tag = player_tag()` — `SELECT … FROM states` is already domestic. Use `world_*` (or `active.world_*` / `latest.world_*`) for save-wide joins.
+
 ### `states`
 
-Identity and geography for states in scope of the active save.
+Identity and geography for states in scope of the active save (player-owned under the short name; full save via `world_states`).
 
 | Column | Notes |
 | --- | --- |
@@ -327,7 +345,8 @@ Other rules:
 | --- | --- | --- |
 | `good_price(good TEXT)` | FLOAT | Active-session market price; NULL if unknown good |
 | `army_power()` | FLOAT | Player country's `army_power_projection` when known. **NULL** only if the bound world has no `player_tag`. **Errors** (logged) if a player is bound but save IR has no projection fields — never a silent `0` / NULL for “unknown.” |
-| `player_tag()` | TEXT | Bound world's played country tag (`World.player_tag`). **NULL** if unset — no first-country fallback. Use with `states.owner_tag` for domestic filters. |
+| `player_tag()` | TEXT | Bound world's played country tag (`World.player_tag`). **NULL** if unset — no first-country fallback. Short fact-table names already filter to this tag; use `world_*` for save-wide rows. |
+| `is_underemployed(state_id BIGINT)` | BOOLEAN | **True** when the bound session has an `underemployed` alert for that state (`AlertKind::Underemployed` — same detector as `alerts()` / `alerts('all')`). **NULL** if `state_id` is NULL. Runtime columnar OK (e.g. `SELECT is_underemployed(state_id) FROM states`). |
 
 ## Table-valued functions (diagnostics)
 
@@ -363,6 +382,41 @@ Nested `staffing` on employment alerts is not inlined here — use `building_sta
 - Applies `LIMIT` before mitigations when every `WHERE` clause is Exact (or there is no `WHERE`). If a residual Unsupported filter remains, LIMIT is left to DataFusion after the batch so filtering stays correct.
 
 Prefer triage queries that omit `mitigations` (and avoid `SELECT *`) until a shortlist of alert ids is known.
+
+### `suggest_mitigations([scope])`
+
+One row per **existing** alert mitigation from `vic3-prices::alerts` (same builders as the `mitigations` JSON on [`alerts()`](#alertsscope)).
+
+**Limitation:** this does **not** compute levels or actions sized to clear the problem. It exposes the current heuristic mitigations (often `extra_levels = 1`). Sizing-to-fix is an explicit future gap — do not treat flat numeric columns as clearance quantities.
+
+- **`suggest_mitigations()`** / **`suggest_mitigations('player')`** — player-scoped (same ownership rule as `alerts()`).
+- **`suggest_mitigations('all')`** — full save.
+- Any other argument is a plan error. Args must be plan-time string literals (no subquery scope in v1).
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `alert_id` | text | Parent alert id |
+| `mitigation_id` | text | |
+| `state_id` | int nullable | From the parent alert |
+| `kind` | text | Parent alert kind (snake_case) |
+| `rank` | int | Lower is better |
+| `action` | text nullable | Mitigation action `type` (`build`, `pm`, `subsidize`, `trade_alloc`, `feeder_job`, `sol_goods`) |
+| `building` | text nullable | From `build` / `feeder_job` actions |
+| `good_id` | text nullable | From `trade_alloc` / `sol_goods` actions |
+| `extra_levels` | int nullable | From `build` — heuristic (often 1), **not** sized-to-fix |
+| `title` | text | |
+| `detail` | text | Full mitigation object as JSON (remaining fields + action payload) |
+
+```sql
+SELECT action, building, extra_levels, title
+FROM suggest_mitigations()
+WHERE kind = 'goods_shortage'
+ORDER BY rank
+LIMIT 20;
+
+SELECT * FROM suggest_mitigations('all') WHERE action = 'build';
+```
+
 ### `shortage_analysis(good TEXT)`
 
 Expands goods-shortage alerts for one good (`NULL` = all electricity / transportation / goods shortage alerts). Magnitudes come from the market `goods` row; evidence/mitigations are JSON from the alert expander (no invented economics).
@@ -438,16 +492,17 @@ One row per goal atom for readiness (mirrors gaps CLI/UI).
 
 ```sql
 -- After use_save({ "name": "autosave" }) or selector latest
--- Prefer domestic (player-owned) shortages for advice; omit the owner_tag
--- filter only when you intentionally want world-wide rows.
+-- Short names are already player-scoped; use world_* for save-wide rows.
 
 SELECT s.region_name, g.good, g.shortage, g.price
 FROM states s
 JOIN goods_by_state g USING (state_id)
-WHERE s.owner_tag = player_tag()
-  AND g.shortage > 0
+WHERE g.shortage > 0
 ORDER BY g.shortage DESC
 LIMIT 20;
+
+-- Full-save geography (not player-scoped):
+-- SELECT region_name, owner_tag FROM world_states ORDER BY state_id LIMIT 20;
 
 SELECT kind, severity, count(*) AS n
 FROM alerts()
@@ -466,6 +521,23 @@ SELECT id, evidence, mitigations FROM alerts() WHERE id = 'goods:engines';
 
 SELECT good, alert_id, kind, shortage, price
 FROM shortage_analysis('engines');
+
+-- Underemployed domestic states (no owner_tag = player_tag() needed):
+SELECT state_id, region_name
+FROM states
+WHERE is_underemployed(state_id);
+
+SELECT state_id, title
+FROM alerts()
+WHERE kind = 'underemployed';
+
+-- Heuristic mitigations for those states (suggest_mitigations is player-scoped too):
+SELECT s.region_name, m.action, m.building, m.title
+FROM states s
+JOIN suggest_mitigations() m USING (state_id)
+WHERE is_underemployed(s.state_id)
+ORDER BY m.rank
+LIMIT 20;
 
 SELECT step, day, action, detail
 FROM plan('declare-war(tag=FRA, wargoal=conquer_state, state=alsace)')
@@ -492,7 +564,7 @@ The Tauri **Advanced Query** tab uses this same dialect:
 2. ~~Mitigations as JSON columns vs child TVFs.~~ **Locked:** `evidence` / `mitigations` JSON text on `alerts()` / `shortage_analysis()`; staffing via `building_staffing(state_id)`.
 3. ~~Whether unqualified names require `use_save` or may fall back to `latest.*` automatically.~~ **Locked:** unqualified ≡ `active.*`; require `use_save` / `bind` (`SqlError::Unbound`). No auto-fallback to `latest.*`.
 4. Military `formations` column list (wait for stable military JSON).
-5. Ambiguous `states.region_name` / region labels: return all rows vs error vs prefer player-owned.
+5. Ambiguous `states.region_name` / region labels: return all rows vs error vs prefer player-owned (short names are already player-owned; `world_states` remains full-save).
 6. Which DF array helpers we document for `TEXT[]` contains (`array_has` vs `array_has_any` vs custom UDF) — IO element type is locked: `List<Struct{good, good_name, qty}>` + `unnest(unnest(…))`.
 7. Whether convenience UNNEST views (`building_goods`, `production_method_goods`) ship in v1 or stay doc-only patterns.
 
@@ -505,6 +577,6 @@ The Tauri **Advanced Query** tab uses this same dialect:
 
 - Crate: `vic3-sql` registers providers on a `SessionContext` over an in-memory `SessionBinding` (`GameDefs` + `World` + `PricesResult`). Hosts hold the engine next to `vic3-api` session state and call Rust `SqlEngine::use_save` (never a mutating `SELECT`); `saves` reads `vic3-catalog`; `latest.*` loads via `vic3-api` without installing the active session.
 - Result shaping: Advanced Query uses `vic3_sql::batches_to_json` (`columns` / `rows` / `row_count`). MCP `query` uses the same JSON shape (formatter currently lives in `vic3-mcp`; keep aligned). `vic3://schema` → `schema_catalog_json()` (facts + diagnostics/planning TVFs + scalars).
-- Diagnostics: `alerts()` (player-scoped) / `alerts('all')`, `shortage_analysis(good)`, `building_staffing(state_id)`, `good_price` / `army_power` / `player_tag` wrap `vic3-prices` alerts + market rows + session identity. TVF args must be plan-time literals (`NULL` allowed for `shortage_analysis`).
+- Diagnostics: `alerts()` (player-scoped) / `alerts('all')`, `suggest_mitigations()` / `('player')` / `('all')` (heuristic mitigations as rows — **not** sized-to-fix), `shortage_analysis(good)`, `building_staffing(state_id)`, `good_price` / `army_power` / `player_tag` / `is_underemployed` wrap `vic3-prices` alerts + market rows + session identity. TVF args must be plan-time literals (`NULL` allowed for `shortage_analysis`).
 - Planning TVFs: `plan(goal [, max_days [, label]])` and `gaps(goal)` call `vic3-planning` against the bound snapshot. `label` is accepted for [`PlanOpts`](json-schema.md) parity and ignored in the result set. `limitations` is emitted on step 0 only.
 - Pages/wasm continues without this engine in v1.

@@ -10,15 +10,16 @@
 //! # Edges
 //!
 //! - **Decision** (0 days): queue tech/building/interest/army/law, `SwitchPm`,
-//!   `AdjustTax`. Emitted only when no compact queue is occupied
-//!   ([`crate::world::PlanningState::has_inflight_queue`]).
-//! - **At most one event-wait** per expansion: complete the in-flight item that
-//!   still closes an open atom, or a payday tick when a solvency atom can move
-//!   closer. **I6:** wait never decreases date; no wait if nothing in flight and
-//!   solvency is not an open progress path.
+//!   `AdjustTax`. Each track has its own occupancy check (research vs
+//!   construction may run in parallel). Instant decisions are not blocked by
+//!   other tracks' waits.
+//! - **At most one event-wait** per expansion: the earliest completion among
+//!   goal-relevant in-flight tracks (or payday). Other tracks' timers tick in
+//!   parallel via [`PlanningState::tick_parallel_tracks`]. **I6:** wait never
+//!   decreases date.
 //!
-//! Shared single in-flight slot ⇒ declare-war needing both interest and army
-//! pays the **sum** of waits even when the A* AND heuristic is their max.
+//! Independent tracks ⇒ AND goals can finish near `max` rather than `sum` of
+//! waits when work overlaps.
 //!
 //! # Invariants
 //!
@@ -110,6 +111,7 @@ fn push_military_pp_decisions(
                         building: BUILDING_BARRACKS.into(),
                     },
                     Some(economy),
+                    args.config,
                 );
             }
         }
@@ -125,6 +127,7 @@ fn push_military_pp_decisions(
                         building: BUILDING_SHIPYARD.into(),
                     },
                     Some(economy),
+                    args.config,
                 );
             }
             if admin < ships_needed && args.seen_builds.insert(BUILDING_NAVAL_ADMIN.into()) {
@@ -135,6 +138,7 @@ fn push_military_pp_decisions(
                         building: BUILDING_NAVAL_ADMIN.into(),
                     },
                     Some(economy),
+                    args.config,
                 );
             }
         }
@@ -156,6 +160,7 @@ fn push_mil_hire_decisions(args: &mut MilitaryPpDecisionArgs<'_>, branch: Milita
         result,
         state,
         economy,
+        config,
         seen_hires,
         ..
     } = args;
@@ -180,6 +185,7 @@ fn push_mil_hire_decisions(args: &mut MilitaryPpDecisionArgs<'_>, branch: Milita
                 building: row.building.clone(),
             },
             *economy,
+            *config,
         );
         pushed = true;
     }
@@ -187,6 +193,10 @@ fn push_mil_hire_decisions(args: &mut MilitaryPpDecisionArgs<'_>, branch: Milita
 }
 
 /// Immutable price-solver inputs shared by all nodes in one search.
+///
+/// [`Self::defs`] also supplies building `required_construction` when the sim
+/// enqueues a new level (`QueueBuildingLevel`); in-flight save `remaining`
+/// still wins for ETA.
 #[derive(Debug, Clone)]
 pub struct EconomyContext {
     pub base_world: World,
@@ -644,13 +654,17 @@ pub enum Event {
 
 /// Deterministic state transition (decision or wait).
 ///
-/// Decisions cost 0 days when emitted as successors; waits carry positive
-/// `days` and advance [`PlanningState::date`].
+/// Decisions cost 0 days when emitted as successors; waits carry `days`
+/// (including 0 when a track timer has already elapsed) and advance
+/// [`PlanningState::date`] by that amount.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Action {
     /// Put a goal-relevant technology in the empty research queue.
     QueueTech { tech: String },
     /// Put one goal-relevant building level in the compact construction queue.
+    ///
+    /// Sets head `remaining` from defs `required_construction` when present;
+    /// otherwise leaves it unset so wait ETA uses [`SimConfig::construction_days`].
     QueueBuildingLevel { building: String },
     /// Queue a goal-relevant interest declaration.
     QueueInterest { kind: InterestKind, id: String },
@@ -686,24 +700,31 @@ pub fn successors(state: &PlanningState, goal: &Goal, config: SimConfig) -> Vec<
 }
 
 /// Generate successors with price-solver context for building decisions.
+///
+/// When `economy.defs` carries technologies, open research gaps expand to
+/// missing ancestors and only prereq-satisfied techs are queued.
 pub fn successors_with_economy(
     state: &PlanningState,
     goal: &Goal,
     config: SimConfig,
     economy: &EconomyContext,
 ) -> Vec<Successor> {
-    let open_atoms = gaps(goal, state);
+    let open_atoms = if economy.defs.technologies.is_empty() {
+        gaps(goal, state)
+    } else {
+        crate::goals::gaps_with_defs(goal, state, &economy.defs)
+    };
     successors_for_atoms_with_economy(state, &open_atoms, config, Some(economy))
 }
 
 /// Generate successors from an already-computed list of open goal atoms.
 ///
-/// Technology, building, interest, army, law, PM, and tax decisions are emitted
-/// only when no compact queue is occupied. At most one wait edge is appended
-/// from an in-flight event that still closes an open atom, or a payday tick
-/// when a solvency-related atom is open and one payday can move debt/credit
-/// toward that atom. Idle states without an open solvency path emit no wait
-/// (I6).
+/// Decisions are gated per track (`research_busy`, `construction_busy`, …) so
+/// research and construction may run in parallel. Instant `SwitchPm` /
+/// `AdjustTax` decisions are not blocked by other tracks. At most one wait
+/// edge is appended — the earliest completion among goal-relevant in-flight
+/// tracks, or a payday tick when a solvency-related atom can move closer.
+/// Idle states without an open solvency path emit no wait (I6).
 pub fn successors_for_atoms(
     state: &PlanningState,
     open_atoms: &[Atom],
@@ -750,8 +771,9 @@ fn push_decision(
     state: &PlanningState,
     action: Action,
     economy: Option<&EconomyContext>,
+    config: SimConfig,
 ) {
-    if let Some(next) = apply_action_with_economy(state, &action, economy) {
+    if let Some(next) = apply_action_with_economy(state, &action, economy, config) {
         result.push(Successor {
             action,
             days: 0,
@@ -766,10 +788,11 @@ fn push_wait(
     event: Event,
     days: u16,
     economy: Option<&EconomyContext>,
+    config: SimConfig,
 ) {
-    let days = days.max(1);
+    // `days == 0` is allowed when the track timer has already elapsed.
     let action = Action::WaitForEvent { event, days };
-    if let Some(next) = apply_action_with_economy(state, &action, economy) {
+    if let Some(next) = apply_action_with_economy(state, &action, economy, config) {
         result.push(Successor {
             action,
             days,
@@ -792,151 +815,161 @@ fn successors_for_atoms_with_economy(
     let mut seen_mil_hires = BTreeSet::new();
     let mut seen_tax_deltas = BTreeSet::new();
 
-    if !state.has_inflight_queue() {
-        for atom in open_atoms {
-            match atom {
-                Atom::HasTech(tech) => {
-                    if state.has_tech(tech) || !seen_techs.insert(tech.clone()) {
-                        continue;
-                    }
-                    push_decision(
-                        &mut result,
-                        state,
-                        Action::QueueTech { tech: tech.clone() },
-                        economy,
-                    );
+    for atom in open_atoms {
+        match atom {
+            Atom::HasTech(tech) => {
+                if state.research_busy()
+                    || state.has_tech(tech)
+                    || !seen_techs.insert(tech.clone())
+                    || !crate::tech::tech_prereqs_satisfied(tech, state, economy.map(|e| &e.defs))
+                {
+                    continue;
                 }
-                Atom::HasLaw(law) => {
-                    if state.has_law(law) || !seen_laws.insert(crate::world::law_key(law)) {
-                        continue;
-                    }
-                    push_decision(
-                        &mut result,
-                        state,
-                        Action::QueueLaw { law: law.clone() },
-                        economy,
-                    );
-                }
-                Atom::InterestIn { kind, id } => {
-                    let key = (*kind, id.clone());
-                    if atom.eval(state) || !seen_interest.insert(key) {
-                        continue;
-                    }
-                    push_decision(
-                        &mut result,
-                        state,
-                        Action::QueueInterest {
-                            kind: *kind,
-                            id: id.clone(),
-                        },
-                        economy,
-                    );
-                }
-                Atom::ArmyPower { rel, value } => {
-                    push_military_pp_decisions(
-                        &mut MilitaryPpDecisionArgs {
-                            result: &mut result,
-                            state,
-                            economy,
-                            config,
-                            seen_builds: &mut seen_mil_builds,
-                            seen_hires: &mut seen_mil_hires,
-                        },
-                        MilitaryBranch::Army,
-                        *rel,
-                        *value,
-                    );
-                }
-                Atom::NavyPower { rel, value } => {
-                    push_military_pp_decisions(
-                        &mut MilitaryPpDecisionArgs {
-                            result: &mut result,
-                            state,
-                            economy,
-                            config,
-                            seen_builds: &mut seen_mil_builds,
-                            seen_hires: &mut seen_mil_hires,
-                        },
-                        MilitaryBranch::Navy,
-                        *rel,
-                        *value,
-                    );
-                }
-                Atom::WeeklyBalance { .. } => {
-                    for delta in tax_deltas_toward(state, atom, config) {
-                        if !seen_tax_deltas.insert(delta) {
-                            continue;
-                        }
-                        let balance_delta =
-                            f64::from(config.tax_balance_per_step) * f64::from(delta);
-                        push_decision(
-                            &mut result,
-                            state,
-                            Action::AdjustTax {
-                                delta,
-                                balance_delta_bits: balance_delta.to_bits(),
-                            },
-                            economy,
-                        );
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if let Some(economy) = economy {
-            for building in
-                economy.building_candidates(state, open_atoms, config.max_added_levels_per_type)
-            {
                 push_decision(
                     &mut result,
                     state,
-                    Action::QueueBuildingLevel { building },
-                    Some(economy),
+                    Action::QueueTech { tech: tech.clone() },
+                    economy,
+                    config,
                 );
             }
-            for (building_id, methods) in economy.pm_switch_candidates(
-                state,
-                open_atoms,
-                config.max_pm_candidates,
-                config.max_pm_overrides,
-            ) {
+            Atom::HasLaw(law) => {
+                if state.law_busy()
+                    || state.has_law(law)
+                    || !seen_laws.insert(crate::world::law_key(law))
+                {
+                    continue;
+                }
                 push_decision(
                     &mut result,
                     state,
-                    Action::SwitchPm {
-                        building_id,
-                        methods,
+                    Action::QueueLaw { law: law.clone() },
+                    economy,
+                    config,
+                );
+            }
+            Atom::InterestIn { kind, id } => {
+                let key = (*kind, id.clone());
+                if state.interest_busy() || atom.eval(state) || !seen_interest.insert(key) {
+                    continue;
+                }
+                push_decision(
+                    &mut result,
+                    state,
+                    Action::QueueInterest {
+                        kind: *kind,
+                        id: id.clone(),
                     },
-                    Some(economy),
+                    economy,
+                    config,
                 );
             }
+            Atom::ArmyPower { rel, value } => {
+                push_military_pp_decisions(
+                    &mut MilitaryPpDecisionArgs {
+                        result: &mut result,
+                        state,
+                        economy,
+                        config,
+                        seen_builds: &mut seen_mil_builds,
+                        seen_hires: &mut seen_mil_hires,
+                    },
+                    MilitaryBranch::Army,
+                    *rel,
+                    *value,
+                );
+            }
+            Atom::NavyPower { rel, value } => {
+                push_military_pp_decisions(
+                    &mut MilitaryPpDecisionArgs {
+                        result: &mut result,
+                        state,
+                        economy,
+                        config,
+                        seen_builds: &mut seen_mil_builds,
+                        seen_hires: &mut seen_mil_hires,
+                    },
+                    MilitaryBranch::Navy,
+                    *rel,
+                    *value,
+                );
+            }
+            Atom::WeeklyBalance { .. } => {
+                for delta in tax_deltas_toward(state, atom, config) {
+                    if !seen_tax_deltas.insert(delta) {
+                        continue;
+                    }
+                    let balance_delta = f64::from(config.tax_balance_per_step) * f64::from(delta);
+                    push_decision(
+                        &mut result,
+                        state,
+                        Action::AdjustTax {
+                            delta,
+                            balance_delta_bits: balance_delta.to_bits(),
+                        },
+                        economy,
+                        config,
+                    );
+                }
+            }
+            _ => {}
         }
     }
 
+    if let Some(economy) = economy {
+        for building in
+            economy.building_candidates(state, open_atoms, config.max_added_levels_per_type)
+        {
+            push_decision(
+                &mut result,
+                state,
+                Action::QueueBuildingLevel { building },
+                Some(economy),
+                config,
+            );
+        }
+        for (building_id, methods) in economy.pm_switch_candidates(
+            state,
+            open_atoms,
+            config.max_pm_candidates,
+            config.max_pm_overrides,
+        ) {
+            push_decision(
+                &mut result,
+                state,
+                Action::SwitchPm {
+                    building_id,
+                    methods,
+                },
+                Some(economy),
+                config,
+            );
+        }
+    }
+
+    // Earliest goal-relevant wait among independent tracks.
+    let mut wait_candidates: Vec<(u16, Event)> = Vec::new();
     if let Some(tech) = state.queued_tech.as_ref().filter(|queued| {
         open_atoms
             .iter()
             .any(|atom| atom.is_has_tech(queued.as_str()))
     }) {
-        push_wait(
-            &mut result,
-            state,
-            Event::TechCompleted { tech: tech.clone() },
-            config.research_days,
-            economy,
-        );
-    } else if let (Some(building), Some(economy)) = (state.queued_building.as_ref(), economy) {
-        push_wait(
-            &mut result,
-            state,
-            Event::BuildingCompleted {
-                building: building.clone(),
-            },
-            config.construction_days,
-            Some(economy),
-        );
-    } else if let Some(queued) = state.queued_interest.as_ref().filter(|queued| {
+        let days = state
+            .tech_days_left
+            .unwrap_or_else(|| research_days_for_tech(tech, config, economy));
+        wait_candidates.push((days, Event::TechCompleted { tech: tech.clone() }));
+    }
+    if let (Some(building), Some(_)) = (state.queued_building.as_ref(), economy) {
+        if let Some(days) = construction_wait_days(state, config) {
+            wait_candidates.push((
+                days,
+                Event::BuildingCompleted {
+                    building: building.clone(),
+                },
+            ));
+        }
+    }
+    if let Some(queued) = state.queued_interest.as_ref().filter(|queued| {
         open_atoms.iter().any(|atom| match atom {
             Atom::InterestIn { kind, id } => interest_matches(queued, *kind, id),
             _ => false,
@@ -946,14 +979,10 @@ fn successors_for_atoms_with_economy(
             QueuedInterest::State(id) => (InterestKind::State, id.clone()),
             QueuedInterest::Region(id) => (InterestKind::Region, id.clone()),
         };
-        push_wait(
-            &mut result,
-            state,
-            Event::InterestDeclared { kind, id },
-            config.interest_days,
-            economy,
-        );
-    } else if let Some(building) = state.queued_hire.as_ref().filter(|queued| {
+        let days = state.interest_days_left.unwrap_or(config.interest_days);
+        wait_candidates.push((days, Event::InterestDeclared { kind, id }));
+    }
+    if let Some(building) = state.queued_hire.as_ref().filter(|queued| {
         open_atoms.iter().any(|atom| {
             matches!(atom, Atom::ArmyPower { .. } | Atom::NavyPower { .. }) && !atom.eval(state)
         }) && state
@@ -961,46 +990,71 @@ fn successors_for_atoms_with_economy(
             .iter()
             .any(|row| row.building == **queued && !row.is_fully_staffed())
     }) {
-        let days = if is_barracks_building(building) {
+        let default_days = if is_barracks_building(building) {
             config.army_training_days
         } else {
             config.navy_crew_days
         };
-        push_wait(
-            &mut result,
-            state,
+        let days = state.hire_days_left.unwrap_or(default_days);
+        wait_candidates.push((
+            days,
             Event::HireCompleted {
                 building: building.clone(),
             },
-            days,
-            economy,
-        );
-    } else if let Some(law) = state.queued_law.as_ref().filter(|queued| {
+        ));
+    }
+    if let Some(law) = state.queued_law.as_ref().filter(|queued| {
         open_atoms
             .iter()
             .any(|atom| atom.is_has_law(queued.as_str()))
     }) {
-        push_wait(
-            &mut result,
-            state,
-            Event::LawEnacted { law: law.clone() },
-            config.law_days,
-            economy,
-        );
-    } else if payday_can_help(state, open_atoms) {
-        push_wait(
-            &mut result,
-            state,
-            Event::Payday {},
-            config.payday_days,
-            economy,
-        );
+        let days = state.law_days_left.unwrap_or(config.law_days);
+        wait_candidates.push((days, Event::LawEnacted { law: law.clone() }));
+    }
+    if payday_can_help(state, open_atoms) {
+        wait_candidates.push((config.payday_days, Event::Payday {}));
+    }
+
+    if let Some((days, event)) = wait_candidates.into_iter().min_by_key(|(days, _)| *days) {
+        push_wait(&mut result, state, event, days, economy, config);
     }
 
     result
 }
 
-/// Tax steps (±1) that move an open weekly-balance atom closer, within the cap.
+/// Days until the construction head finishes under [`PlanningState::construction_rate`].
+///
+/// When `remaining` is present (save in-flight work, or def
+/// `required_construction` set at enqueue), uses [`crate::tracks::days_for_work`].
+/// Otherwise falls back to [`SimConfig::construction_days`]. Returns [`None`]
+/// when rate is non-positive and remaining work is known (no finite ETA).
+fn construction_wait_days(state: &PlanningState, config: SimConfig) -> Option<u16> {
+    let remaining = state
+        .constructions
+        .first()
+        .and_then(|row| row.remaining)
+        .filter(|v| v.is_finite() && *v >= 0.0);
+    match remaining {
+        Some(work) => {
+            let days = crate::tracks::days_for_work(work, state.construction_rate)?;
+            Some(u16::try_from(days).unwrap_or(u16::MAX))
+        }
+        None => Some(config.construction_days),
+    }
+}
+
+/// Research duration for a queued tech: defs cost at [`crate::tracks::CONSTANT_RATE`]
+/// when present, otherwise [`SimConfig::research_days`].
+fn research_days_for_tech(tech: &str, config: SimConfig, economy: Option<&EconomyContext>) -> u16 {
+    let defs = economy.map(|e| &e.defs);
+    if let Some(cost) = crate::tech::tech_research_cost(tech, defs) {
+        if let Some(days) = crate::tracks::days_for_work(cost, crate::tracks::CONSTANT_RATE) {
+            return u16::try_from(days).unwrap_or(u16::MAX).max(1);
+        }
+    }
+    config.research_days.max(1)
+}
+
 fn tax_deltas_toward(state: &PlanningState, atom: &Atom, config: SimConfig) -> Vec<i8> {
     let Atom::WeeklyBalance { rel, value } = atom else {
         return Vec::new();
@@ -1134,35 +1188,55 @@ fn payday_can_help(state: &PlanningState, open_atoms: &[Atom]) -> bool {
 
 /// Apply an action if its preconditions hold.
 ///
-/// The action carries all timing information, so applying it to identical
-/// states always produces identical states (I8).
-pub fn apply_action(state: &PlanningState, action: &Action) -> Option<PlanningState> {
-    apply_action_with_economy(state, action, None)
+/// Timing comes from `config` (queue durations) and the action's wait `days`.
+/// Applying the same `(state, action, config)` always yields the same result (I8).
+pub fn apply_action(
+    state: &PlanningState,
+    action: &Action,
+    config: SimConfig,
+) -> Option<PlanningState> {
+    apply_action_with_economy(state, action, None, config)
 }
 
-/// Apply an action with optional price-solver context.
+/// Apply an action with optional price-solver context and sim timing config.
 pub fn apply_action_with_economy(
     state: &PlanningState,
     action: &Action,
     economy: Option<&EconomyContext>,
+    config: SimConfig,
 ) -> Option<PlanningState> {
     let mut next = state.clone();
     match action {
         Action::QueueTech { tech } => {
-            if tech.is_empty() || next.has_inflight_queue() || next.has_tech(tech) {
+            if tech.is_empty()
+                || next.research_busy()
+                || next.has_tech(tech)
+                || !crate::tech::tech_prereqs_satisfied(tech, &next, economy.map(|e| &e.defs))
+            {
                 return None;
             }
             next.queued_tech = Some(tech.clone());
+            next.tech_days_left = Some(research_days_for_tech(tech, config, economy));
         }
         Action::QueueBuildingLevel { building } => {
-            if building.is_empty() || next.has_inflight_queue() || economy.is_none() {
+            let economy = economy?;
+            if building.is_empty() || next.construction_busy() {
                 return None;
             }
-            // Push onto the exposed queue and set the in-flight head together.
-            next.push_construction(building.clone());
+            // Prefer defs `required_construction` as work points. When absent,
+            // leave `remaining` unset so [`construction_wait_days`] falls back
+            // to [`SimConfig::construction_days`] (and [`ensure_track_timers`]
+            // synthesizes work for parallel ticks).
+            let remaining = economy
+                .defs
+                .buildings
+                .get(building.as_str())
+                .and_then(|b| b.required_construction)
+                .filter(|c| c.is_finite() && *c >= 0.0);
+            next.push_construction(building.clone(), remaining);
         }
         Action::QueueInterest { kind, id } => {
-            if id.is_empty() || next.has_inflight_queue() {
+            if id.is_empty() || next.interest_busy() {
                 return None;
             }
             let already = match kind {
@@ -1173,9 +1247,10 @@ pub fn apply_action_with_economy(
                 return None;
             }
             next.queued_interest = Some(interest_queued(*kind, id));
+            next.interest_days_left = Some(config.interest_days);
         }
         Action::QueueHireMilitary { building } => {
-            if building.is_empty() || next.has_inflight_queue() {
+            if building.is_empty() || next.hire_busy() {
                 return None;
             }
             let row = next
@@ -1186,19 +1261,25 @@ pub fn apply_action_with_economy(
                 return None;
             }
             next.queued_hire = Some(building.clone());
+            next.hire_days_left = Some(if is_barracks_building(building) {
+                config.army_training_days
+            } else {
+                config.navy_crew_days
+            });
         }
         Action::QueueLaw { law } => {
-            if law.is_empty() || next.has_inflight_queue() || next.has_law(law) {
+            if law.is_empty() || next.law_busy() || next.has_law(law) {
                 return None;
             }
             next.queued_law = Some(law.clone());
+            next.law_days_left = Some(config.law_days);
         }
         Action::SwitchPm {
             building_id,
             methods,
         } => {
             let economy = economy?;
-            if methods.is_empty() || next.has_inflight_queue() {
+            if methods.is_empty() {
                 return None;
             }
             if next.pm_overrides.get(building_id) == Some(methods) {
@@ -1215,7 +1296,7 @@ pub fn apply_action_with_economy(
             delta,
             balance_delta_bits,
         } => {
-            if *delta == 0 || next.has_inflight_queue() {
+            if *delta == 0 {
                 return None;
             }
             let balance_delta = f64::from_bits(*balance_delta_bits);
@@ -1226,27 +1307,85 @@ pub fn apply_action_with_economy(
             next.tax_level = next.tax_level.saturating_add(*delta);
             next.weekly_balance = Some(balance + balance_delta);
         }
-        Action::WaitForEvent {
-            event: Event::TechCompleted { tech },
-            days,
-        } => {
-            if *days == 0 || next.queued_tech.as_deref() != Some(tech.as_str()) {
+        Action::WaitForEvent { event, days } => {
+            apply_wait_for_event(&mut next, event, *days, economy, config)?;
+        }
+    }
+    Some(next)
+}
+
+/// Seed missing timers from `config` so parallel ticks advance save-loaded queues.
+fn ensure_track_timers(state: &mut PlanningState, config: SimConfig) {
+    if state.queued_tech.is_some() && state.tech_days_left.is_none() {
+        state.tech_days_left = Some(config.research_days);
+    }
+    if state.queued_interest.is_some() && state.interest_days_left.is_none() {
+        state.interest_days_left = Some(config.interest_days);
+    }
+    if state.queued_hire.is_some() && state.hire_days_left.is_none() {
+        let default_days = state
+            .queued_hire
+            .as_deref()
+            .map(|building| {
+                if is_barracks_building(building) {
+                    config.army_training_days
+                } else {
+                    config.navy_crew_days
+                }
+            })
+            .unwrap_or(config.army_training_days);
+        state.hire_days_left = Some(default_days);
+    }
+    if state.queued_law.is_some() && state.law_days_left.is_none() {
+        state.law_days_left = Some(config.law_days);
+    }
+    if let Some(head) = state.constructions.first_mut() {
+        if head.remaining.is_none() {
+            head.remaining = Some(f64::from(config.construction_days) * state.construction_rate);
+        }
+    }
+}
+
+fn construction_timer_elapsed(state: &PlanningState) -> bool {
+    state
+        .constructions
+        .first()
+        .and_then(|row| row.remaining)
+        .is_some_and(|rem| rem.is_finite() && rem <= 0.0)
+}
+
+fn apply_wait_for_event(
+    next: &mut PlanningState,
+    event: &Event,
+    days: u16,
+    economy: Option<&EconomyContext>,
+    config: SimConfig,
+) -> Option<()> {
+    ensure_track_timers(next, config);
+    match event {
+        Event::TechCompleted { tech } => {
+            if next.queued_tech.as_deref() != Some(tech.as_str()) {
                 return None;
             }
-            next.date = next.date.add_days(i32::from(*days));
+            if days == 0 && next.tech_days_left != Some(0) {
+                return None;
+            }
+            next.tick_parallel_tracks(days);
+            next.date = next.date.add_days(i32::from(days));
             next.queued_tech = None;
+            next.tech_days_left = None;
             next.techs.insert(tech.clone());
         }
-        Action::WaitForEvent {
-            event: Event::BuildingCompleted { building },
-            days,
-        } => {
+        Event::BuildingCompleted { building } => {
             let economy = economy?;
-            if *days == 0 || next.queued_building.as_deref() != Some(building.as_str()) {
+            if next.queued_building.as_deref() != Some(building.as_str()) {
                 return None;
             }
-            next.date = next.date.add_days(i32::from(*days));
-            // Pop the finished order; advance head if the save queue had more.
+            if days == 0 && !construction_timer_elapsed(next) {
+                return None;
+            }
+            next.tick_parallel_tracks(days);
+            next.date = next.date.add_days(i32::from(days));
             next.complete_construction(building);
             *next
                 .building_level_deltas
@@ -1255,18 +1394,20 @@ pub fn apply_action_with_economy(
             if is_military_planning_building(building) {
                 next.push_mil_building_level(building);
             }
-            refresh_prices(&mut next, economy);
+            refresh_prices(next, economy);
         }
-        Action::WaitForEvent {
-            event: Event::InterestDeclared { kind, id },
-            days,
-        } => {
+        Event::InterestDeclared { kind, id } => {
             let expected = interest_queued(*kind, id);
-            if *days == 0 || next.queued_interest.as_ref() != Some(&expected) {
+            if next.queued_interest.as_ref() != Some(&expected) {
                 return None;
             }
-            next.date = next.date.add_days(i32::from(*days));
+            if days == 0 && next.interest_days_left != Some(0) {
+                return None;
+            }
+            next.tick_parallel_tracks(days);
+            next.date = next.date.add_days(i32::from(days));
             next.queued_interest = None;
+            next.interest_days_left = None;
             match kind {
                 InterestKind::State => {
                     next.interest_states.insert(id.clone());
@@ -1276,40 +1417,42 @@ pub fn apply_action_with_economy(
                 }
             }
         }
-        Action::WaitForEvent {
-            event: Event::HireCompleted { building },
-            days,
-        } => {
-            if *days == 0 || next.queued_hire.as_deref() != Some(building.as_str()) {
+        Event::HireCompleted { building } => {
+            if next.queued_hire.as_deref() != Some(building.as_str()) {
                 return None;
             }
-            next.date = next.date.add_days(i32::from(*days));
+            if days == 0 && next.hire_days_left != Some(0) {
+                return None;
+            }
+            next.tick_parallel_tracks(days);
+            next.date = next.date.add_days(i32::from(days));
             next.queued_hire = None;
+            next.hire_days_left = None;
             next.complete_mil_hire(building);
         }
-        Action::WaitForEvent {
-            event: Event::LawEnacted { law },
-            days,
-        } => {
-            if *days == 0 || next.queued_law.as_deref() != Some(law.as_str()) {
+        Event::LawEnacted { law } => {
+            if next.queued_law.as_deref() != Some(law.as_str()) {
                 return None;
             }
-            next.date = next.date.add_days(i32::from(*days));
+            if days == 0 && next.law_days_left != Some(0) {
+                return None;
+            }
+            next.tick_parallel_tracks(days);
+            next.date = next.date.add_days(i32::from(days));
             next.queued_law = None;
+            next.law_days_left = None;
             next.laws.insert(law.clone());
         }
-        Action::WaitForEvent {
-            event: Event::Payday {},
-            days,
-        } => {
-            if *days == 0 {
+        Event::Payday {} => {
+            if days == 0 {
                 return None;
             }
-            next.date = next.date.add_days(i32::from(*days));
-            apply_payday_effects(&mut next);
+            next.tick_parallel_tracks(days);
+            next.date = next.date.add_days(i32::from(days));
+            apply_payday_effects(next);
         }
     }
-    Some(next)
+    Some(())
 }
 
 fn refresh_prices(state: &mut PlanningState, economy: &EconomyContext) {
@@ -1518,6 +1661,51 @@ mod tests {
     }
 
     #[test]
+    fn with_tech_defs_only_eligible_prereq_leaf_is_queued() {
+        use vic3_defs::Technology;
+
+        let mut technologies = BTreeMap::new();
+        technologies.insert(
+            "manufacturies".into(),
+            Technology {
+                id: "manufacturies".into(),
+                cost: Some(50.0),
+                prerequisites: vec![],
+            },
+        );
+        technologies.insert(
+            "shaft_mining".into(),
+            Technology {
+                id: "shaft_mining".into(),
+                cost: Some(75.0),
+                prerequisites: vec!["manufacturies".into()],
+            },
+        );
+        technologies.insert(
+            "nitroglycerin".into(),
+            Technology {
+                id: "nitroglycerin".into(),
+                cost: Some(100.0),
+                prerequisites: vec!["shaft_mining".into()],
+            },
+        );
+        let defs = GameDefs {
+            technologies,
+            ..GameDefs::default()
+        };
+        let economy = EconomyContext::new(World::default(), defs, SolveOpts::default());
+        let goal = compile("research(tech=nitroglycerin)").unwrap();
+        let start = state_at(0);
+        let decisions = successors_with_economy(&start, &goal, SimConfig::default(), &economy);
+        assert_eq!(decisions.len(), 1);
+        assert!(matches!(
+            decisions[0].action,
+            Action::QueueTech { ref tech } if tech == "manufacturies"
+        ));
+        assert_eq!(decisions[0].state.tech_days_left, Some(50));
+    }
+
+    #[test]
     fn building_level_then_wait_reaches_good_price() {
         let defs = GameDefs {
             goods_order: vec!["wood".into()],
@@ -1612,7 +1800,8 @@ mod tests {
             }] if building == "building_logging_camp"
         ));
         let repeated_decision =
-            apply_action_with_economy(&state, &decisions[0].action, Some(&economy)).unwrap();
+            apply_action_with_economy(&state, &decisions[0].action, Some(&economy), config)
+                .unwrap();
         assert_eq!(repeated_decision, decisions[0].state);
         assert_eq!(
             repeated_decision.fingerprint(),
@@ -1631,9 +1820,13 @@ mod tests {
         assert!(evaluate(&goal, &waits[0].state));
         assert_eq!(waits[0].state.gdp, next_gdp);
         assert!(evaluate(&gdp_goal, &waits[0].state));
-        let repeated_wait =
-            apply_action_with_economy(&decisions[0].state, &waits[0].action, Some(&economy))
-                .unwrap();
+        let repeated_wait = apply_action_with_economy(
+            &decisions[0].state,
+            &waits[0].action,
+            Some(&economy),
+            config,
+        )
+        .unwrap();
         assert_eq!(repeated_wait, waits[0].state);
         assert_eq!(repeated_wait.fingerprint(), waits[0].state.fingerprint());
         assert_eq!(
@@ -1698,7 +1891,7 @@ mod tests {
         assert!(waits[0].state.solvent);
         assert_eq!(start.date.days_until(&waits[0].state.date), 7);
 
-        let repeated = apply_action(&start, &waits[0].action).unwrap();
+        let repeated = apply_action(&start, &waits[0].action, config).unwrap();
         assert_eq!(repeated, waits[0].state);
         assert_eq!(repeated.fingerprint(), waits[0].state.fingerprint());
     }
@@ -1960,13 +2153,490 @@ mod tests {
     }
 
     #[test]
+    fn construction_remaining_over_rate_ceils_wait_days() {
+        use crate::world::{ConstructionQueueKind, PlanningConstruction};
+
+        let defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                ..WorldState::default()
+            }],
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(1),
+                building: "building_logging_camp".into(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: Vec::new(),
+                saved_inputs: Vec::new(),
+                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+            }],
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            queued_building: Some("building_logging_camp".into()),
+            constructions: vec![PlanningConstruction {
+                order_id: 1,
+                queue: ConstructionQueueKind::Government,
+                state_id: None,
+                building: "building_logging_camp".into(),
+                remaining: Some(25.0),
+            }],
+            construction_rate: 10.0,
+            good_prices: vec![("wood".into(), 30.0)],
+            ..PlanningParts::default()
+        });
+        let goal = Goal::Atom(Atom::GoodPrice {
+            good: "wood".into(),
+            rel: Rel::Le,
+            value: 0.0,
+        });
+        let waits = successors_with_economy(&state, &goal, SimConfig::default(), &economy);
+        assert_eq!(waits.len(), 1);
+        // ceil(25/10) = 3
+        assert_eq!(waits[0].days, 3);
+        assert!(matches!(
+            waits[0].action,
+            Action::WaitForEvent {
+                event: Event::BuildingCompleted { .. },
+                days: 3,
+            }
+        ));
+    }
+
+    #[test]
+    fn new_build_uses_def_required_construction_for_wait() {
+        use vic3_defs::BuildingType;
+
+        let mut defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        defs.buildings.insert(
+            "building_logging_camp".into(),
+            BuildingType {
+                id: "building_logging_camp".into(),
+                group: None,
+                city_type: None,
+                production_method_groups: Vec::new(),
+                required_construction: Some(25.0),
+            },
+        );
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                ..WorldState::default()
+            }],
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(1),
+                building: "building_logging_camp".into(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: Vec::new(),
+                saved_inputs: Vec::new(),
+                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+            }],
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            construction_rate: 10.0,
+            good_prices: vec![("wood".into(), 30.0)],
+            ..PlanningParts::default()
+        });
+        let config = SimConfig {
+            // Large fallback so a wrong path would not accidentally match ceil(25/10).
+            construction_days: 180,
+            ..SimConfig::default()
+        };
+        let queued = apply_action_with_economy(
+            &state,
+            &Action::QueueBuildingLevel {
+                building: "building_logging_camp".into(),
+            },
+            Some(&economy),
+            config,
+        )
+        .expect("enqueue");
+        assert_eq!(
+            queued.constructions.first().and_then(|row| row.remaining),
+            Some(25.0)
+        );
+        let goal = Goal::Atom(Atom::GoodPrice {
+            good: "wood".into(),
+            rel: Rel::Le,
+            value: 0.0,
+        });
+        let waits = successors_with_economy(&queued, &goal, config, &economy);
+        assert_eq!(waits.len(), 1);
+        // ceil(25/10) = 3
+        assert_eq!(waits[0].days, 3);
+        assert!(matches!(
+            waits[0].action,
+            Action::WaitForEvent {
+                event: Event::BuildingCompleted { .. },
+                days: 3,
+            }
+        ));
+    }
+
+    #[test]
+    fn in_flight_remaining_wins_over_def_required_construction() {
+        use crate::world::{ConstructionQueueKind, PlanningConstruction};
+        use vic3_defs::BuildingType;
+
+        let mut defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        defs.buildings.insert(
+            "building_logging_camp".into(),
+            BuildingType {
+                id: "building_logging_camp".into(),
+                group: None,
+                city_type: None,
+                production_method_groups: Vec::new(),
+                // Would imply ceil(999/10)=100 if wrongly preferred over remaining.
+                required_construction: Some(999.0),
+            },
+        );
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                ..WorldState::default()
+            }],
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(1),
+                building: "building_logging_camp".into(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: Vec::new(),
+                saved_inputs: Vec::new(),
+                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+            }],
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            queued_building: Some("building_logging_camp".into()),
+            constructions: vec![PlanningConstruction {
+                order_id: 1,
+                queue: ConstructionQueueKind::Government,
+                state_id: None,
+                building: "building_logging_camp".into(),
+                remaining: Some(25.0),
+            }],
+            construction_rate: 10.0,
+            good_prices: vec![("wood".into(), 30.0)],
+            ..PlanningParts::default()
+        });
+        let goal = Goal::Atom(Atom::GoodPrice {
+            good: "wood".into(),
+            rel: Rel::Le,
+            value: 0.0,
+        });
+        let waits = successors_with_economy(&state, &goal, SimConfig::default(), &economy);
+        assert_eq!(waits.len(), 1);
+        // ceil(25/10) = 3; def cost 999 must not win
+        assert_eq!(waits[0].days, 3);
+        assert!(matches!(
+            waits[0].action,
+            Action::WaitForEvent {
+                event: Event::BuildingCompleted { .. },
+                days: 3,
+            }
+        ));
+    }
+
+    #[test]
+    fn research_and_construction_run_in_parallel_not_serialized() {
+        use crate::world::{ConstructionQueueKind, PlanningConstruction};
+
+        let defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                ..WorldState::default()
+            }],
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(1),
+                building: "building_logging_camp".into(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: Vec::new(),
+                saved_inputs: Vec::new(),
+                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+            }],
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let config = SimConfig {
+            research_days: 100,
+            construction_days: 180,
+            ..SimConfig::default()
+        };
+        let mut state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            queued_tech: Some("nitroglycerin".into()),
+            tech_days_left: Some(100),
+            queued_building: Some("building_logging_camp".into()),
+            constructions: vec![PlanningConstruction {
+                order_id: 1,
+                queue: ConstructionQueueKind::Government,
+                state_id: None,
+                building: "building_logging_camp".into(),
+                remaining: Some(50.0),
+            }],
+            construction_rate: 1.0,
+            good_prices: vec![("wood".into(), 30.0)],
+            ..PlanningParts::default()
+        });
+        let start_date = state.date;
+        let goal = Goal::And(vec![
+            Goal::Atom(Atom::HasTech("nitroglycerin".into())),
+            Goal::Atom(Atom::GoodPrice {
+                good: "wood".into(),
+                rel: Rel::Le,
+                value: 0.0,
+            }),
+        ]);
+
+        // Earliest wait is construction (50), not research+construction (150).
+        let first = successors_with_economy(&state, &goal, config, &economy);
+        let first_wait = first
+            .iter()
+            .find(|edge| matches!(&edge.action, Action::WaitForEvent { .. }))
+            .expect("expected a construction wait");
+        assert_eq!(first_wait.days, 50);
+        assert!(matches!(
+            first_wait.action,
+            Action::WaitForEvent {
+                event: Event::BuildingCompleted { .. },
+                days: 50,
+            }
+        ));
+        state = first_wait.state.clone();
+        assert!(state.queued_tech.as_deref() == Some("nitroglycerin"));
+        assert_eq!(state.tech_days_left, Some(50));
+        assert!(state.queued_building.is_none());
+
+        let second = successors_with_economy(&state, &goal, config, &economy);
+        let second_wait = second
+            .iter()
+            .find(|edge| matches!(&edge.action, Action::WaitForEvent { .. }))
+            .expect("expected a tech wait");
+        assert_eq!(second_wait.days, 50);
+        assert!(matches!(
+            second_wait.action,
+            Action::WaitForEvent {
+                event: Event::TechCompleted { .. },
+                days: 50,
+            }
+        ));
+        assert!(second_wait.state.has_tech("nitroglycerin"));
+        assert_eq!(start_date.days_until(&second_wait.state.date), 100);
+    }
+
+    #[test]
+    fn mil_queue_building_ok_while_research_busy() {
+        let defs = GameDefs::default();
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let start = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            queued_tech: Some("railways".into()),
+            tech_days_left: Some(200),
+            army_power_projection: Some(0.0),
+            army_pp_baseline: Some(0.0),
+            ..PlanningParts::default()
+        });
+        let goal = compile("army_power_projection >= 10").unwrap();
+        let edges = successors_with_economy(&start, &goal, SimConfig::default(), &economy);
+        assert!(
+            edges.iter().any(|edge| {
+                matches!(
+                    &edge.action,
+                    Action::QueueBuildingLevel { building } if building == BUILDING_BARRACKS
+                )
+            }),
+            "military construction must not be blocked by research: {edges:?}"
+        );
+        assert!(apply_action_with_economy(
+            &start,
+            &Action::QueueBuildingLevel {
+                building: BUILDING_BARRACKS.into(),
+            },
+            Some(&economy),
+            SimConfig::default(),
+        )
+        .is_some());
+        assert!(
+            apply_action(
+                &start,
+                &Action::QueueTech {
+                    tech: "nitroglycerin".into(),
+                },
+                SimConfig::default(),
+            )
+            .is_none(),
+            "second research enqueue must still respect research track"
+        );
+    }
+
+    #[test]
+    fn wait_zero_days_completes_when_timer_elapsed() {
+        let start = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            queued_tech: Some("railways".into()),
+            tech_days_left: Some(0),
+            ..PlanningParts::default()
+        });
+        let wait = Action::WaitForEvent {
+            event: Event::TechCompleted {
+                tech: "railways".into(),
+            },
+            days: 0,
+        };
+        let next = apply_action(&start, &wait, SimConfig::default()).unwrap();
+        assert!(next.has_tech("railways"));
+        assert!(next.queued_tech.is_none());
+        assert!(next.tech_days_left.is_none());
+        assert_eq!(next.date, start.date);
+
+        let rejected = Action::WaitForEvent {
+            event: Event::TechCompleted {
+                tech: "railways".into(),
+            },
+            days: 0,
+        };
+        let not_ready = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            queued_tech: Some("railways".into()),
+            tech_days_left: Some(5),
+            ..PlanningParts::default()
+        });
+        assert!(apply_action(&not_ready, &rejected, SimConfig::default()).is_none());
+    }
+
+    #[test]
+    fn tech_only_plan_cost_unchanged_after_parallel_tracks() {
+        use crate::plan::plan;
+
+        let state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            ..PlanningParts::default()
+        });
+        let result = plan(
+            state,
+            compile("research(tech=nitroglycerin)").unwrap(),
+            SimConfig::default(),
+            1000,
+            0.0,
+            Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(result.day_cost, 365);
+        assert_eq!(result.actions.len(), 2);
+    }
+
+    #[test]
     fn i8_actions_deterministic_and_hash_stable() {
         let state = state_at(7);
+        let config = SimConfig::default();
         let action = Action::QueueTech {
             tech: "railways".into(),
         };
-        let a = apply_action(&state, &action).unwrap();
-        let b = apply_action(&state.clone(), &action.clone()).unwrap();
+        let a = apply_action(&state, &action, config).unwrap();
+        let b = apply_action(&state.clone(), &action.clone(), config).unwrap();
         assert_eq!(a, b);
         assert_eq!(a.fingerprint(), b.fingerprint());
 
@@ -1976,8 +2646,8 @@ mod tests {
             },
             days: 45,
         };
-        let a = apply_action(&a, &wait).unwrap();
-        let b = apply_action(&b, &wait).unwrap();
+        let a = apply_action(&a, &wait, config).unwrap();
+        let b = apply_action(&b, &wait, config).unwrap();
         assert_eq!(a, b);
         assert_eq!(a.fingerprint(), b.fingerprint());
     }
@@ -2011,8 +2681,12 @@ mod tests {
             prop_assert!(wait_count <= 1);
             for edge in &edges {
                 prop_assert!(edge.state.date >= state.date);
-                if matches!(&edge.action, Action::WaitForEvent { .. }) {
-                    prop_assert!(edge.state.date > state.date);
+                if let Action::WaitForEvent { days, .. } = &edge.action {
+                    if *days > 0 {
+                        prop_assert!(edge.state.date > state.date);
+                    } else {
+                        prop_assert_eq!(edge.state.date, state.date);
+                    }
                 }
             }
 

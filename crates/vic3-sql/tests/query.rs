@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use datafusion::arrow::array::{Array, Float64Array, StringArray, UInt32Array};
+use datafusion::arrow::array::{Array, BooleanArray, Float64Array, StringArray, UInt32Array};
 use vic3_defs::{decode_blob, encode_blob, load_from_path};
 use vic3_load::{empty_tokens, load_slice};
 use vic3_prices::{solve, SolveOpts, World};
@@ -44,9 +44,19 @@ async fn selects_states_and_countries() {
         .downcast_ref::<UInt32Array>()
         .expect("state_id");
     assert!(!ids.is_empty());
+    let owners = batches[0]
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("owner_tag");
+    for i in 0..owners.len() {
+        if !owners.is_null(i) {
+            assert_eq!(owners.value(i), "GER", "short states is player-scoped");
+        }
+    }
 
     let countries = eng
-        .query("SELECT tag FROM countries WHERE tag = 'GER'")
+        .query("SELECT tag FROM countries")
         .await
         .expect("countries");
     let tags = countries[0]
@@ -54,7 +64,113 @@ async fn selects_states_and_countries() {
         .as_any()
         .downcast_ref::<StringArray>()
         .expect("tag");
+    assert_eq!(countries[0].num_rows(), 1);
     assert_eq!(tags.value(0), "GER");
+
+    // world_* is registered even when the plaintext fixture is single-country.
+    let world = eng
+        .query("SELECT tag FROM world_countries ORDER BY tag")
+        .await
+        .expect("world_countries");
+    assert!(world[0].num_rows() >= 1);
+}
+
+#[tokio::test]
+async fn world_tables_include_foreign_when_present() {
+    use vic3_prices::{WorldCountry, WorldState};
+
+    let defs = decode_blob(&defs_blob()).expect("decode defs");
+    let save = load_slice(&save_bytes(), empty_tokens()).expect("load save");
+    let mut world = World::from_save(&save, &defs);
+    assert_eq!(world.player_tag.as_deref(), Some("GER"));
+    let ger_id = world
+        .countries
+        .iter()
+        .find(|c| c.tag == "GER")
+        .map(|c| c.id)
+        .expect("GER");
+    let fra_id = ger_id.saturating_add(100);
+    world.countries.push(WorldCountry {
+        id: fra_id,
+        tag: "FRA".into(),
+        laws: vec![],
+        overlord: None,
+        subject_type: None,
+        states: vec![999],
+        treasury: 0.0,
+        weekly_balance: None,
+        debt_principal: None,
+        credit_limit: None,
+        credit_headroom: None,
+        solvent: true,
+        techs: vec![],
+        queued_tech: None,
+        queued_building: None,
+        army_power_projection: None,
+        navy_power_projection: None,
+        interest_states: vec![],
+        interest_regions: vec![],
+        infamy: None,
+    });
+    world.states.push(WorldState {
+        id: 999,
+        country: Some(fra_id),
+        ..WorldState::default()
+    });
+    let prices = solve(&world, &defs, SolveOpts::default());
+    assert!(
+        prices.countries.iter().any(|c| c.tag == "FRA"),
+        "solve should emit FRA"
+    );
+    assert!(
+        prices.states.iter().any(|s| s.id == 999),
+        "solve should emit state 999"
+    );
+    let eng = SqlEngine::bind(defs, world, prices).await.expect("bind");
+
+    let player_n: i64 = eng
+        .query("SELECT COUNT(*) FROM countries")
+        .await
+        .expect("player countries")[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::Int64Array>()
+        .unwrap()
+        .value(0);
+    let world_n: i64 = eng
+        .query("SELECT COUNT(*) FROM world_countries")
+        .await
+        .expect("world countries")[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::Int64Array>()
+        .unwrap()
+        .value(0);
+    assert_eq!(player_n, 1);
+    assert!(
+        world_n > player_n,
+        "world_countries {world_n} > countries {player_n}"
+    );
+
+    let player_states: i64 = eng.query("SELECT COUNT(*) FROM states").await.unwrap()[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::Int64Array>()
+        .unwrap()
+        .value(0);
+    let world_states: i64 = eng
+        .query("SELECT COUNT(*) FROM world_states")
+        .await
+        .unwrap()[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::Int64Array>()
+        .unwrap()
+        .value(0);
+    assert!(
+        world_states > player_states,
+        "world_states {world_states} > states {player_states}"
+    );
 }
 
 #[tokio::test]
@@ -133,8 +249,7 @@ async fn join_example_from_docs() {
             "SELECT s.region_name, g.good, g.shortage, g.price \
              FROM states s \
              JOIN goods_by_state g USING (state_id) \
-             WHERE s.owner_tag = player_tag() \
-               AND g.shortage > 0 \
+             WHERE g.shortage > 0 \
              ORDER BY g.shortage DESC \
              LIMIT 20",
         )
@@ -158,8 +273,9 @@ async fn player_tag_scopes_owner_states() {
     assert!(!tags.is_null(0));
     assert_eq!(tags.value(0), "GER");
 
+    // Short `states` is already player-scoped — no owner_tag filter needed.
     let owned = eng
-        .query("SELECT state_id, owner_tag FROM states WHERE owner_tag = player_tag()")
+        .query("SELECT state_id, owner_tag FROM states")
         .await
         .expect("owned states");
     let rows: usize = owned.iter().map(|b| b.num_rows()).sum();
@@ -175,12 +291,19 @@ async fn player_tag_scopes_owner_states() {
         }
     }
 
+    let world = eng
+        .query("SELECT COUNT(*) AS n FROM world_states")
+        .await
+        .expect("world_states");
+    assert_eq!(world[0].num_rows(), 1);
+    // Plaintext fixture is single-state; multi-country coverage lives in
+    // `world_tables_include_foreign_when_present`.
+
     let joined = eng
         .query(
             "SELECT s.state_id, s.owner_tag \
              FROM states s \
-             JOIN goods_by_state g USING (state_id) \
-             WHERE s.owner_tag = player_tag()",
+             JOIN goods_by_state g USING (state_id)",
         )
         .await
         .expect("domestic goods join");
@@ -347,7 +470,7 @@ async fn alerts_default_is_player_scoped() {
     let eng = engine().await;
 
     let player_states = eng
-        .query("SELECT state_id FROM states WHERE owner_tag = player_tag()")
+        .query("SELECT state_id FROM states")
         .await
         .expect("player states");
     let mut owned = std::collections::BTreeSet::new();
@@ -399,6 +522,75 @@ async fn alerts_default_is_player_scoped() {
 
     let bad = eng.query("SELECT * FROM alerts('domestic')").await;
     assert!(bad.is_err(), "unknown alerts() arg must plan_err");
+}
+
+#[tokio::test]
+async fn suggest_mitigations_player_le_all_and_columns() {
+    let eng = engine().await;
+
+    let player = eng
+        .query("SELECT * FROM suggest_mitigations()")
+        .await
+        .expect("suggest_mitigations()");
+    let player_alias = eng
+        .query("SELECT * FROM suggest_mitigations('player')")
+        .await
+        .expect("suggest_mitigations('player')");
+    let all = eng
+        .query("SELECT * FROM suggest_mitigations('all')")
+        .await
+        .expect("suggest_mitigations('all')");
+
+    let player_n: usize = player.iter().map(|b| b.num_rows()).sum();
+    let alias_n: usize = player_alias.iter().map(|b| b.num_rows()).sum();
+    let all_n: usize = all.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(player_n, alias_n, "() and ('player') must match");
+    assert!(
+        player_n <= all_n,
+        "player ({player_n}) must be ≤ all ({all_n})"
+    );
+    assert!(all_n > 0, "fixture should yield mitigations");
+
+    let schema = all[0].schema();
+    let expected = [
+        "alert_id",
+        "mitigation_id",
+        "state_id",
+        "kind",
+        "rank",
+        "action",
+        "building",
+        "good_id",
+        "extra_levels",
+        "title",
+        "detail",
+    ];
+    assert_eq!(schema.fields().len(), expected.len());
+    for (i, name) in expected.iter().enumerate() {
+        assert_eq!(schema.field(i).name(), *name);
+    }
+
+    // Smoke: detail is JSON; at least one row has a non-empty action or title.
+    let titles = all[0]
+        .column(9)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("title");
+    let details = all[0]
+        .column(10)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("detail");
+    assert!(!titles.value(0).is_empty());
+    assert!(details.value(0).starts_with('{'));
+
+    let bad = eng
+        .query("SELECT * FROM suggest_mitigations('domestic')")
+        .await;
+    assert!(
+        bad.is_err(),
+        "unknown suggest_mitigations() arg must plan_err"
+    );
 }
 
 #[tokio::test]
@@ -486,6 +678,164 @@ async fn diagnostics_alerts_and_good_price() {
     assert!(
         msg.contains("army power projection unknown") || msg.contains("army_power()"),
         "{msg}"
+    );
+}
+
+#[tokio::test]
+async fn is_underemployed_matches_alerts() {
+    let eng = engine().await;
+
+    let null_row = eng
+        .query("SELECT is_underemployed(NULL) AS u")
+        .await
+        .expect("null arg");
+    let null_col = null_row[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .expect("bool");
+    assert!(null_col.is_null(0));
+
+    let under = eng
+        .query(
+            "SELECT state_id FROM alerts('all') \
+             WHERE kind = 'underemployed' AND state_id IS NOT NULL \
+             ORDER BY state_id LIMIT 1",
+        )
+        .await
+        .expect("underemployed alert");
+    assert!(
+        !under.is_empty() && under[0].num_rows() > 0,
+        "plaintext fixture should have at least one underemployed state"
+    );
+    let sid = under[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<UInt32Array>()
+        .unwrap()
+        .value(0);
+
+    let yes = eng
+        .query(&format!("SELECT is_underemployed({sid}) AS u"))
+        .await
+        .expect("true case");
+    let yes_col = yes[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .unwrap();
+    assert!(!yes_col.is_null(0));
+    assert!(yes_col.value(0), "state {sid} has underemployed alert");
+
+    // State present in `states` but without an underemployed alert (anti-join).
+    let other = eng
+        .query(
+            "SELECT s.state_id FROM states s \
+             WHERE NOT EXISTS ( \
+               SELECT 1 FROM alerts('all') a \
+               WHERE a.kind = 'underemployed' AND a.state_id = s.state_id \
+             ) \
+             ORDER BY s.state_id LIMIT 1",
+        )
+        .await
+        .expect("non-underemployed state");
+    let other_sid = if !other.is_empty() && other[0].num_rows() > 0 {
+        other[0]
+            .column(0)
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap()
+            .value(0)
+    } else {
+        // Every fixture state is underemployed — pick an id with no alert.
+        9_999_999
+    };
+    let no = eng
+        .query(&format!("SELECT is_underemployed({other_sid}) AS u"))
+        .await
+        .expect("false scalar");
+    let no_col = no[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .unwrap();
+    assert!(!no_col.is_null(0));
+    assert!(
+        !no_col.value(0),
+        "state {other_sid} should not be underemployed"
+    );
+
+    // Columnar path: UInt32 `states.state_id` coerces into the Int64 UDF.
+    let col = eng
+        .query(&format!(
+            "SELECT is_underemployed(state_id) AS u FROM states WHERE state_id = {sid}"
+        ))
+        .await
+        .expect("columnar");
+    let col_bool = col[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .unwrap();
+    assert_eq!(col[0].num_rows(), 1);
+    assert!(col_bool.value(0));
+}
+
+/// End-to-end player scope: `is_underemployed` + `suggest_mitigations()` on short `states`
+/// without `owner_tag = player_tag()`.
+#[tokio::test]
+async fn underemployed_states_join_suggest_mitigations() {
+    let eng = engine().await;
+
+    let under = eng
+        .query("SELECT state_id FROM states WHERE is_underemployed(state_id) ORDER BY state_id")
+        .await
+        .expect("underemployed via states");
+    let under_n: usize = under.iter().map(|b| b.num_rows()).sum();
+    assert!(
+        under_n > 0,
+        "plaintext fixture should have underemployed player states"
+    );
+
+    let joined = eng
+        .query(
+            "SELECT s.state_id, s.owner_tag, m.kind, m.action, m.title \
+             FROM states s \
+             JOIN suggest_mitigations() m USING (state_id) \
+             WHERE is_underemployed(s.state_id) \
+             ORDER BY s.state_id, m.rank \
+             LIMIT 40",
+        )
+        .await
+        .expect("join suggest_mitigations on underemployed states");
+
+    let mut saw_underemployed_kind = false;
+    for batch in &joined {
+        let owners = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("owner_tag");
+        let kinds = batch
+            .column(2)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("kind");
+        for i in 0..batch.num_rows() {
+            assert_eq!(
+                owners.value(i),
+                "GER",
+                "short states is player-scoped; no owner_tag filter needed"
+            );
+            if kinds.value(i) == "underemployed" {
+                saw_underemployed_kind = true;
+            }
+        }
+    }
+    let joined_n: usize = joined.iter().map(|b| b.num_rows()).sum();
+    assert!(
+        joined_n > 0 && saw_underemployed_kind,
+        "expected underemployed mitigations joined to player states (got {joined_n} rows)"
     );
 }
 

@@ -7,6 +7,8 @@
 
 **Victoria 3 Analyzer** is an offline second-screen companion for *Victoria 3* (`.v3` save files). It solves true market price equilibria, diagnoses regional economic bottlenecks, checks strategic readiness, and finds optimal action timelines to achieve national goals.
 
+![Prices workspace — market overview with goods icons](docs/assets/web-prices.png)
+
 ---
 
 ## 🎮 How This Enhances Your Victoria 3 Campaign

@@ -13,6 +13,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use crate::binding::{goods_shortage, SessionBinding};
 use crate::exec::memory_exec;
 use crate::schema::goods_by_state_schema;
+use crate::scope::{state_in_scope, TableScope};
 
 use super::pushdown::{matches_str, matches_u32, PushSupport};
 
@@ -26,13 +27,15 @@ const PUSH: PushSupport = PushSupport {
 #[derive(Debug)]
 pub struct GoodsByStateProvider {
     binding: Arc<SessionBinding>,
+    scope: TableScope,
     schema: SchemaRef,
 }
 
 impl GoodsByStateProvider {
-    pub fn new(binding: Arc<SessionBinding>) -> Self {
+    pub fn new(binding: Arc<SessionBinding>, scope: TableScope) -> Self {
         Self {
             binding,
+            scope,
             schema: goods_by_state_schema(),
         }
     }
@@ -50,6 +53,9 @@ impl GoodsByStateProvider {
         rows.sort_by(|a, b| a.state_id.cmp(&b.state_id).then(a.good_id.cmp(&b.good_id)));
 
         for g in &rows {
+            if !state_in_scope(self.scope, self.binding.world.as_ref(), Some(g.state_id)) {
+                continue;
+            }
             if !matches_u32(&preds, "state_id", g.state_id) {
                 continue;
             }

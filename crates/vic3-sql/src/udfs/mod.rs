@@ -17,7 +17,9 @@
 //! | `good_price(good)` | Utf8 (runtime columnar OK) | NULL arg or unknown id → NULL |
 //! | `army_power()` | none | no `player_tag` → NULL |
 //! | `player_tag()` | none | no `player_tag` on world → NULL |
+//! | `is_underemployed(state_id)` | Int64 (runtime columnar OK) | NULL arg → NULL; else Underemployed alert for state |
 //! | `alerts([scope])` | optional `'all'` literal | zero-arg → player-scoped; `'all'` → full save |
+//! | `suggest_mitigations([scope])` | optional `'player'` / `'all'` | zero-arg / `'player'` → player-scoped; `'all'` → full save |
 //! | `shortage_analysis(good)` | Utf8 **or** NULL literal | NULL → all scarce-good alerts |
 //! | `building_staffing(state_id)` | non-null int | NULL / non-literal → plan error |
 //! | `plan(goal [, max_days [, label]])` | non-null str / non-neg int / optional str | `max_days` default `3650`; `label` accepted, omitted from rows |
@@ -27,8 +29,9 @@
 //!
 //! | Module | Surface |
 //! | --- | --- |
-//! | [`scalars`] | `good_price`, `army_power`, `player_tag` |
+//! | [`scalars`] | `good_price`, `army_power`, `player_tag`, `is_underemployed` |
 //! | [`alerts`] | `alerts()` / `alerts('all')` |
+//! | [`suggest`] | `suggest_mitigations()` / `('player')` / `('all')` |
 //! | [`shortage`] | `shortage_analysis(good)` |
 //! | [`staffing`] | `building_staffing(state_id)` |
 //! | [`plan`] | `plan(...)` → A\* steps |
@@ -42,6 +45,7 @@ pub mod plan;
 pub mod scalars;
 pub mod shortage;
 pub mod staffing;
+pub mod suggest;
 
 use std::sync::Arc;
 
@@ -66,6 +70,10 @@ pub fn register(ctx: &SessionContext, binding: Arc<SessionBinding>) -> Result<()
     ctx.register_udtf(
         "alerts",
         Arc::new(alerts::AlertsTvf::new(Arc::clone(&binding))),
+    );
+    ctx.register_udtf(
+        "suggest_mitigations",
+        Arc::new(suggest::SuggestMitigationsTvf::new(Arc::clone(&binding))),
     );
     ctx.register_udtf(
         "shortage_analysis",

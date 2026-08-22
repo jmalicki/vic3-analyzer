@@ -41,7 +41,7 @@ use crate::{
     path_rules::{extra_icon_kind, ICON_LEAFS, LOCALIZATION_PREFIXES},
     staging::{StagingBuyPackage, StagingDefs, StagingNeed, StagingNeedEntry, StagingPm},
     BuildingGroup, BuildingType, DefsError, DefsPathClass, GameDefs, Good, PopType,
-    QualificationFactors, DEFAULT_PRICE_RANGE,
+    QualificationFactors, Technology, DEFAULT_PRICE_RANGE,
 };
 
 /// Load definitions from a Victoria 3 install or a fixture tree.
@@ -54,6 +54,7 @@ use crate::{
 /// - `common/production_method_groups` — group id → production method ids
 /// - `common/buildings` — building type → group / city type / PM groups
 /// - `common/building_groups` — category, land usage, and default building
+/// - `common/technology/technologies` — tech cost / `unlocking_technologies`
 /// - `common/pop_types` — profession qualification scripts (static analysis)
 /// - `common/pop_needs` — need substitution tables (`entry` / min & max supply share)
 /// - `common/buy_packages` — `wealth_N` packages
@@ -78,6 +79,7 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
     defs.production_method_groups = load_production_method_groups(&data_root)?;
     defs.buildings = load_buildings(&data_root)?;
     defs.building_groups = load_building_groups(&data_root)?;
+    defs.technologies = load_technologies(&data_root)?;
     defs.pop_types = load_pop_types(&data_root)?;
     let (goods_icons, extra_icons) = load_icons(&data_root)?;
     attach_icons(&mut defs, goods_icons);
@@ -334,6 +336,7 @@ fn absorb_text_file(
     defs.buildings.extend(file.defs.buildings.clone());
     defs.building_groups
         .extend(file.defs.building_groups.clone());
+    defs.technologies.extend(file.defs.technologies.clone());
     defs.pop_types.extend(file.defs.pop_types.clone());
     defs.pop_needs.extend(file.defs.pop_needs.clone());
     defs.buy_packages.extend(file.defs.buy_packages.clone());
@@ -393,6 +396,9 @@ fn parse_defs_text(
                     },
                 )
             }));
+        } else if relative.starts_with("common/technology/technologies/") {
+            defs.technologies
+                .extend(parse_technologies_bytes(path, bytes)?);
         } else if relative.starts_with("common/pop_types/") {
             defs.pop_types.extend(parse_pop_types_bytes(path, bytes)?);
         } else if relative.starts_with("common/building_groups/") {
@@ -881,6 +887,46 @@ fn load_buildings(data_root: &Path) -> Result<BTreeMap<String, BuildingType>, De
         }));
     }
     Ok(buildings)
+}
+
+fn load_technologies(data_root: &Path) -> Result<BTreeMap<String, Technology>, DefsError> {
+    let mut technologies = BTreeMap::new();
+    for path in txt_files(&data_root.join("common/technology/technologies"))? {
+        technologies.extend(parse_technologies_file(&path)?);
+    }
+    Ok(technologies)
+}
+
+fn parse_technologies_file(path: &Path) -> Result<BTreeMap<String, Technology>, DefsError> {
+    let bytes = std::fs::read(path).map_err(|source| DefsError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    parse_technologies_bytes(path, &bytes)
+}
+
+fn parse_technologies_bytes(
+    path: &Path,
+    bytes: &[u8],
+) -> Result<BTreeMap<String, Technology>, DefsError> {
+    let bytes = strip_bom(bytes);
+    if looks_empty(bytes) {
+        return Ok(BTreeMap::new());
+    }
+    let raw: BTreeMap<String, RawTechnology> = parse_bytes(path, bytes)?;
+    Ok(raw
+        .into_iter()
+        .map(|(id, tech)| {
+            (
+                id.clone(),
+                Technology {
+                    id,
+                    cost: tech.cost.filter(|v| v.is_finite() && *v >= 0.0),
+                    prerequisites: tech.unlocking_technologies,
+                },
+            )
+        })
+        .collect())
 }
 
 fn load_building_groups(data_root: &Path) -> Result<BTreeMap<String, BuildingGroup>, DefsError> {
@@ -1396,6 +1442,16 @@ struct RawBuilding {
     /// Paradox `required_construction` (construction points for one level).
     #[serde(default)]
     required_construction: Option<f64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawTechnology {
+    /// Optional innovation cost (fixtures; vanilla often uses era costs).
+    #[serde(default)]
+    cost: Option<f64>,
+    /// Paradox `unlocking_technologies` prerequisite list.
+    #[serde(default)]
+    unlocking_technologies: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

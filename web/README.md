@@ -1,6 +1,8 @@
 # vic3-analyzer web
 
-The prices UI runs locally in the browser. Saves, optional binary token maps,
+**Player guide:** [docs/user/web.md](../docs/user/web.md) (defs setup, What-if, Goal gaps / Timeline).
+
+Developer notes below. The prices UI runs locally in the browser. Saves, optional binary token maps,
 and definitions are passed as bytes to `vic3-wasm`; every completed prices or
 what-if analysis is stored in IndexedDB. Nothing is uploaded.
 

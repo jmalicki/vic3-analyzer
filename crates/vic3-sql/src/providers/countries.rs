@@ -13,6 +13,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use crate::binding::SessionBinding;
 use crate::exec::memory_exec;
 use crate::schema::countries_schema;
+use crate::scope::{country_tag_in_scope, TableScope};
 
 use super::pushdown::{matches_str, matches_u32, PushSupport};
 
@@ -26,13 +27,15 @@ const PUSH: PushSupport = PushSupport {
 #[derive(Debug)]
 pub struct CountriesProvider {
     binding: Arc<SessionBinding>,
+    scope: TableScope,
     schema: SchemaRef,
 }
 
 impl CountriesProvider {
-    pub fn new(binding: Arc<SessionBinding>) -> Self {
+    pub fn new(binding: Arc<SessionBinding>, scope: TableScope) -> Self {
         Self {
             binding,
+            scope,
             schema: countries_schema(),
         }
     }
@@ -44,6 +47,9 @@ impl CountriesProvider {
         let mut name = StringBuilder::new();
 
         for c in &self.binding.prices.countries {
+            if !country_tag_in_scope(self.scope, self.binding.world.as_ref(), &c.tag) {
+                continue;
+            }
             if !matches_u32(&preds, "country_id", c.id) {
                 continue;
             }

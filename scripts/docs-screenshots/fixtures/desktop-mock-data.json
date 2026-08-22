@@ -1,0 +1,106 @@
+{
+  "config": {
+    "game_dir": "/Users/docs/Library/Application Support/Steam/steamapps/common/Victoria 3/game",
+    "defs_blob": null,
+    "save_dirs": [
+      "/Users/docs/Documents/Paradox Interactive/Victoria 3/save games"
+    ],
+    "tokens_path": null,
+    "auto_detect": true,
+    "config_path": "/Users/docs/Library/Application Support/vic3-analyzer/config.toml"
+  },
+  "dashboard": {
+    "game_detected": true,
+    "save_root_count": 1,
+    "save_count": 3,
+    "loaded_stub": "autosave.v3",
+    "detection_hints": [
+      "~/Library/Application Support/Steam/steamapps/common/Victoria 3/game",
+      "~/Documents/Paradox Interactive/Victoria 3/save games"
+    ]
+  },
+  "saves": [
+    {
+      "name": "autosave.v3",
+      "kind": "autosave",
+      "location": "local",
+      "mtime": 1724000000,
+      "in_game_date": "1836.6.12",
+      "country": "GER"
+    },
+    {
+      "name": "GER_1836_06_01.v3",
+      "kind": "manual",
+      "location": "local",
+      "mtime": 1723900000,
+      "in_game_date": "1836.6.1",
+      "country": "GER"
+    },
+    {
+      "name": "cloud_autosave.v3",
+      "kind": "autosave",
+      "location": "steam_cloud",
+      "mtime": 1723800000,
+      "in_game_date": "1836.5.20",
+      "country": "GER"
+    }
+  ],
+  "use_save": {
+    "summary": {
+      "tag": "GER",
+      "date": "1836.6.12",
+      "version": "1.9.0",
+      "country_id": 16777216,
+      "market_id": 1
+    }
+  },
+  "loaded_prices": "{\"status\":\"converged\",\"gdp\":4200000,\"goods\":[{\"id\":\"grain\",\"price\":22.1}]}",
+  "loaded_alerts": "{\"alerts\":[{\"id\":\"1\",\"kind\":\"shortage\",\"severity\":\"warn\",\"title\":\"Grain short\"}]}",
+  "sql_docs": {
+    "udf_md": "# UDF contract\n\nRead-only TVFs: `alerts()`, `plan()`, `gaps()`, `suggest_mitigations()`.\n",
+    "sql_md": "# SQL surface\n\nFact tables: `goods`, `states`, `buildings`, `saves`.\n"
+  },
+  "queries": {
+    "shortage": {
+      "columns": ["good", "shortage", "price", "state_id"],
+      "rows": [
+        ["grain", 120.5, 42.0, 101],
+        ["coal", 40.0, 35.2, 102],
+        ["wood", 12.0, 21.0, 101]
+      ],
+      "row_count": 3
+    },
+    "states": {
+      "columns": ["state_id", "region_id", "region_name", "owner_tag", "infrastructure"],
+      "rows": [[101, 1, "Brandenburg", "GER", 42]],
+      "row_count": 1
+    },
+    "prices": {
+      "columns": ["good", "good_name", "base", "price", "buy", "sell", "shortage"],
+      "rows": [["grain", "Grain", 20, 42.0, 800, 680, 120.5]],
+      "row_count": 1
+    },
+    "plan": {
+      "columns": ["step", "day", "action", "detail"],
+      "rows": [
+        [0, 0, "expand_building", "building_rye_farm +2 in Brandenburg"],
+        [1, 90, "expand_building", "building_wheat_farm +3 in Silesia"],
+        [2, 180, "research", "nitroglycerin"]
+      ],
+      "row_count": 3
+    },
+    "saves": {
+      "columns": ["name", "kind", "loaded"],
+      "rows": [
+        ["autosave.v3", "autosave", true],
+        ["GER_1836_06_01.v3", "manual", false]
+      ],
+      "row_count": 2
+    },
+    "default": {
+      "columns": ["ok"],
+      "rows": [[1]],
+      "row_count": 1
+    }
+  }
+}
