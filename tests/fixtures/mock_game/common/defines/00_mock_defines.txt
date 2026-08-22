@@ -1,0 +1,3 @@
+NEconomy = {
+    PRICE_RANGE = 0.75
+}

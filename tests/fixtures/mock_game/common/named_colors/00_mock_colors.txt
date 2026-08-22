@@ -1,0 +1,6 @@
+colors = {
+    blue = hsv { 0.6 0.8 0.8 }
+    white = hsv { 0 0 1.0 }
+    red = hsv { 0 0.8 0.8 }
+    yellow = hsv { 0.15 0.8 0.8 }
+}

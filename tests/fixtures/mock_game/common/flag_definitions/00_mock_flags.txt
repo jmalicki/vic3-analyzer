@@ -1,0 +1,5 @@
+mock_country_flag = {
+    coa = mock_coa_1
+    subject = yes
+    priority = 10
+}

@@ -1,0 +1,9 @@
+mock_basic_food = {
+    default = mock_lumber
+    entry = {
+        goods = mock_lumber
+        weight = 1.0
+        max_weight = 1.0
+        min_weight = 0.0
+    }
+}

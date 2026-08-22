@@ -1,0 +1,11 @@
+mock_coa_1 = {
+    pattern = "pattern_solid.tga"
+    color1 = "blue"
+    color2 = "white"
+    color3 = "red"
+    colored_emblem = {
+        texture = "ce_star.dds"
+        color1 = "yellow"
+        instance = { position = { 0.5 0.5 } scale = { 1.0 1.0 } }
+    }
+}

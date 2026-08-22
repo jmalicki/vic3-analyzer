@@ -1,0 +1,13 @@
+building_mock_lumber_camp = {
+    building_group = bg_manufacturing
+    production_method_groups = {
+        pmg_mock_lumber_camp
+    }
+}
+
+building_mock_tool_workshop = {
+    building_group = bg_manufacturing
+    production_method_groups = {
+        pmg_mock_tool_workshop
+    }
+}

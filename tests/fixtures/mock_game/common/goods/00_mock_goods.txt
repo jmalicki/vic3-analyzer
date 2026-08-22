@@ -1,0 +1,17 @@
+mock_lumber = {
+    texture = "gfx/interface/icons/goods_icons/wood.dds"
+    cost = 20
+    category = agricultural
+}
+
+mock_iron = {
+    texture = "gfx/interface/icons/goods_icons/iron.dds"
+    cost = 40
+    category = industrial
+}
+
+mock_tools = {
+    texture = "gfx/interface/icons/goods_icons/tools.dds"
+    cost = 40
+    category = industrial
+}

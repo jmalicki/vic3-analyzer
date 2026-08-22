@@ -1,0 +1,19 @@
+{
+  "name": "vic3-analyzer-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "wdio run wdio.web.conf.ts",
+    "test:tauri": "wdio run wdio.tauri.conf.ts"
+  },
+  "devDependencies": {
+    "@wdio/cli": "latest",
+    "@wdio/local-runner": "latest",
+    "@wdio/mocha-framework": "latest",
+    "@wdio/spec-reporter": "latest",
+    "@wdio/tauri-service": "latest",
+    "ts-node": "latest",
+    "typescript": "latest"
+  }
+}
