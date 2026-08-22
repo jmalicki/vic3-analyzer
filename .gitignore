@@ -15,6 +15,10 @@ web/coverage/
 .DS_Store
 .idea/
 .vscode/
+.cursor/
+.worktrees/
+__pycache__/
+*.pyc
 *.swp
 
 # Env / secrets
