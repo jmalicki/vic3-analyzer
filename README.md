@@ -29,7 +29,7 @@ Victoria 3 gives you immense freedom, but managing a 19th-century industrial emp
 ### 1. In-Browser Web App (Zero Install)
 * **Live Demo:** [https://jmalicki.github.io/vic3-analyzer/](https://jmalicki.github.io/vic3-analyzer/)
 * Drag and drop your `.v3` save and your local `Victoria 3/game` folder.
-* **100% Client-Side:** Everything parses and solves locally inside your browser via WebAssembly (`wasm-bindgen`) and IndexedDB. Saves, definitions, and tokens are **never uploaded** to any server.
+* **100% Client-Side & Private:** Everything runs locally inside your browser and stays in your browser's private local storage. Saves, game definitions, and campaigns are **never uploaded** to any server.
 
 ![What-If Simulator — Live price re-solve after building deltas](docs/assets/web-what-if.png)
 ![Goal Gaps — War readiness checklist](docs/assets/web-gaps-war.png)
