@@ -92,32 +92,9 @@ The A* planner uses priority queue pathfinding from `rust-advanced-heaps`:
 
 ---
 
-## 🛠️ Development & Testing Workflow
+## 📖 Technical Specifications Directory
 
-### Prerequisites
-* Rust stable (2021 edition)
-* Node.js (v18+) for the Web UI
-
-### Building & Testing
-```bash
-# Set up pre-commit hooks (rustfmt, clippy, web tsc)
-git config core.hooksPath .githooks
-
-# Run workspace Rust tests & MCP smoke check
-cargo test --workspace
-./scripts/mcp-smoke.sh
-
-# Run Web UI locally
-cd web
-npm install
-npm run build:wasm
-npm run build:defs
-npm run dev
-```
-
----
-
-## 📖 Developer Specifications Directory
+For developer onboarding, setup prerequisites, and testing workflows, see the **[Contributor Guide](../CONTRIBUTING.md)**.
 
 | Document | Purpose |
 | --- | --- |

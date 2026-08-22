@@ -87,7 +87,7 @@ Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the ful
 | [Strategic Planning Engine](docs/planning.md) | State representation, search heuristics, and payday debt model |
 
 ### 🛠️ Developer & Contributor Documentation
-For local build instructions, crate architecture, CLI tools, MCP assistant integration, DataFusion SQL tables, JSON schemas, and test invariants, see the central **[Developer Architecture & Specifications](docs/architecture.md)**.
+For local build instructions, test workflows, crate architecture, CLI tools, MCP integration, DataFusion SQL tables, JSON schemas, and mathematical invariants, see the **[Contributor & Developer Guide](CONTRIBUTING.md)**.
 
 ---
 
