@@ -89,3 +89,16 @@ The A* planner uses priority queue pathfinding from `rust-advanced-heaps`:
 - It surgically rewrites `building_manager.database` entries in-place.
 - It rejects binary/ironman envelopes.
 - It strictly enforces that the original save file is never overwritten, writing exclusively to the specified `--out` path.
+
+---
+
+## 📖 Developer Specifications Directory
+
+| Document | Purpose |
+| --- | --- |
+| **[CLI Reference & Batch Debugging](cli.md)** | Subcommand reference, headless scripting, and plaintext save export. |
+| **[Model Context Protocol (MCP) Server](mcp.md)** | AI assistant tool schemas, resources, and JSON-RPC protocol contracts. |
+| **[DataFusion SQL Interface](sql.md)** | Read-only SQL dialect, virtual fact tables (`active.*`), and analytical TVFs. |
+| **[Mathematical & Test Invariants](invariants.md)** | Formal property-tested invariants (I1–I9) and goal compilation guarantees. |
+| **[Dependency Registry](libraries.md)** | Crate choices, WASM compatibility constraints, and locked library rationale. |
+| **[JSON Schema Contracts](json-schema.md)** | Shared options and analytical result JSON Schema definitions (draft 2020-12). |

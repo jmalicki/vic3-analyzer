@@ -75,34 +75,19 @@ Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the ful
 
 ---
 
-## 📚 Documentation Directory
+## 📚 Documentation
 
-### User & Player Guides
+### Player & Methodology Guides
 | Document | Description |
 | --- | --- |
-| [Desktop Companion](docs/desktop.md) | Tauri app setup, automatic Steam/save discovery, and settings |
-| [Goal DSL](docs/dsl.md) | Goal language grammar, predicates, and expansion rules (`declare-war`, `colonize`) |
-| [Archive & History](docs/archive.md) | Local save archive, timeline branching, and historical plan comparison |
+| [Desktop Companion](docs/desktop.md) | Tauri companion setup, Steam save auto-discovery, and settings |
+| [Goal Planning DSL](docs/dsl.md) | Goal language grammar, predicates, and expansion rules (`declare-war`, `colonize`) |
+| [Save History & Timelines](docs/archive.md) | Local save archive, timeline branching, and plan comparison |
+| [Price Equilibrium Methodology](docs/prices.md) | Non-linear solver, MAPI formulas, pop need packages, and solver caveats |
+| [Strategic Planning Engine](docs/planning.md) | State representation, search heuristics, and payday debt model |
 
-### Economic & Planning Methodology
-| Document | Description |
-| --- | --- |
-| [Price Equilibrium](docs/prices.md) | Non-linear solver, MAPI formulas, pop need packages, and solver limitations |
-| [Strategic Planning](docs/planning.md) | `PlanningState` projection, A* graph search, heuristic bounds, and payday debt model |
-
-### Integrations & Developer Tools
-| Document | Description |
-| --- | --- |
-| [MCP Server](docs/mcp.md) | Connect AI assistants (Claude Desktop, Cursor) to your campaign via MCP |
-| [CLI Reference](docs/cli.md) | Headless batch price solves, what-if automation, and save patching |
-| [SQL Query Engine](docs/sql.md) | In-engine SQL fact tables and analytical TVFs (for developer tools and integrations) |
-
-### Developer & Architecture Specifications
-| Document | Description |
-| --- | --- |
-| [Architecture Overview](docs/architecture.md) | Crate boundaries, dataflow pipeline, asset decoding, and dependency registry |
-| [Mathematical Invariants](docs/invariants.md) | Property-tested formal invariants and solver guarantees |
-| [JSON Schema](docs/json-schema.md) | Shared result and option schema contracts |
+### 🛠️ Developer & Integration Documentation
+For crate responsibilities, dataflow pipelines, the CLI reference, MCP assistant integration, DataFusion SQL tables, JSON schemas, and test invariants, see the central **[Developer Architecture & Specifications](docs/architecture.md)**.
 
 ---
 
