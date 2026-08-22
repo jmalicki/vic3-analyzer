@@ -24,6 +24,8 @@ async function installTauriMock(page) {
     const queries = data.queries
     function pick(sql) {
       const s = String(sql).toLowerCase()
+      if (s.includes('player_tag') || s.includes('army_power')) return queries.basic
+      if (s.includes('from alerts') && s.includes('group by kind, severity')) return queries.top_alerts
       if (
         s.includes('from alerts') ||
         s.includes('suggest_mitigations') ||

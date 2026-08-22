@@ -85,7 +85,12 @@ function main() {
   console.log(
     `compare done: ${compared} ok, ${skipped} skipped (no golden), ${failed} failed`,
   )
-  if (failed > 0) process.exit(1)
+  if (failed > 0) {
+    console.error('\n*** IMPORTANT ***')
+    console.error('Screenshot comparison failed! Please revisit the user documentation to ensure it is accurate, as visual changes often mean the UI flow or layout has changed. Then regenerate the screenshots.')
+    console.error('***\n')
+    process.exit(1)
+  }
 }
 
 main()
