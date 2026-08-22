@@ -86,33 +86,8 @@ Rather than relying on un-equilibrated estimates, `vic3-analyzer` solves the ful
 | [Price Equilibrium Methodology](docs/prices.md) | Non-linear solver, MAPI formulas, pop need packages, and solver caveats |
 | [Strategic Planning Engine](docs/planning.md) | State representation, search heuristics, and payday debt model |
 
-### 🛠️ Developer & Integration Documentation
-For crate responsibilities, dataflow pipelines, the CLI reference, MCP assistant integration, DataFusion SQL tables, JSON schemas, and test invariants, see the central **[Developer Architecture & Specifications](docs/architecture.md)**.
-
----
-
-## 🛠️ Development
-
-### Prerequisites
-* Rust stable (2021 edition)
-* Node.js (v18+) for the web UI
-
-### Building & Testing
-```bash
-# Set up pre-commit hooks (fmt, clippy, web tsc)
-git config core.hooksPath .githooks
-
-# Run workspace Rust tests & MCP smoke check
-cargo test --workspace
-./scripts/mcp-smoke.sh
-
-# Run Web UI locally
-cd web
-npm install
-npm run build:wasm
-npm run build:defs
-npm run dev
-```
+### 🛠️ Developer & Contributor Documentation
+For local build instructions, crate architecture, CLI tools, MCP assistant integration, DataFusion SQL tables, JSON schemas, and test invariants, see the central **[Developer Architecture & Specifications](docs/architecture.md)**.
 
 ---
 
