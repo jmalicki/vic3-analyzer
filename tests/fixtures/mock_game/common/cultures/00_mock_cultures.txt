@@ -1,0 +1,6 @@
+mock_culture = {
+    color = { 0.1 0.1 0.1 }
+    obsessions = {
+        mock_tools
+    }
+}

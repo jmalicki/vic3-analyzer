@@ -1,0 +1,4 @@
+mock_tech_1 = {
+    era = era_1
+    category = production
+}

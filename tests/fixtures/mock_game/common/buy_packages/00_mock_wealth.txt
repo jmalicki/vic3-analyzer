@@ -1,0 +1,6 @@
+wealth_1 = {
+    political_strength = 1.0
+    goods = {
+        mock_basic_food = 10
+    }
+}

@@ -1,0 +1,11 @@
+pmg_mock_lumber_camp = {
+    production_methods = {
+        pm_mock_lumber_camp_1
+    }
+}
+
+pmg_mock_tool_workshop = {
+    production_methods = {
+        pm_mock_tool_workshop_1
+    }
+}

@@ -1,0 +1,4 @@
+bg_manufacturing = {
+    category = urban
+    always_possible = yes
+}
