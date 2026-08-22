@@ -23,8 +23,10 @@ serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.11.0"
 uuid = { version = "1.24.1", features = ["v4"] }
+vic3-catalog = { path = "../vic3-catalog" }
 vic3-defs = { path = "../vic3-defs" }
 vic3-load = { path = "../vic3-load" }
+vic3-mcp = { path = "../vic3-mcp" }
 vic3-planning = { path = "../vic3-planning" }
 vic3-prices = { path = "../vic3-prices" }
 vic3save.workspace = true
@@ -32,3 +34,4 @@ vic3save.workspace = true
 [dev-dependencies]
 assert_cmd = "2"
 serde_json.workspace = true
+tempfile = "3"

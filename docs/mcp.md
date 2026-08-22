@@ -25,9 +25,31 @@ cargo run -p vic3-analyzer -- mcp
 
 ---
 
-## Client Configuration
+## Automatic Setup (Recommended)
 
-### Claude Desktop / Cursor (`claude_desktop_config.json`)
+`vic3-cli` can automatically detect installed desktop AI applications on your machine and configure them with a single interactive command:
+
+```bash
+# Interactive setup (checkboxes for detected apps):
+cargo run -p vic3-cli -- mcp install
+
+# Automated non-interactive install to all detected apps:
+cargo run -p vic3-cli -- mcp install -y
+
+# Check detection and integration status:
+cargo run -p vic3-cli -- mcp status
+```
+
+---
+
+## Manual Client Configuration
+
+If you prefer to configure your AI applications manually, or for applications without direct file access:
+
+### 1. Claude Desktop
+* **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+* **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+* **Linux:** `~/.config/Claude/claude_desktop_config.json`
 
 ```json
 {
@@ -39,6 +61,55 @@ cargo run -p vic3-analyzer -- mcp
   }
 }
 ```
+
+### 2. LM Studio (Local GPU Models)
+* **macOS / Linux:** `~/.lmstudio/mcp.json`
+* **Windows:** `%USERPROFILE%\.lmstudio\mcp.json`
+
+```json
+{
+  "mcpServers": {
+    "vic3-analyzer": {
+      "command": "/path/to/vic3-analyzer",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### 3. Windows 11 Copilot (On-Device Registry)
+On Windows 11, register with the system AI via `odr.exe`:
+
+```cmd
+odr.exe mcp add --name vic3-analyzer --command "C:\path\to\vic3-analyzer.exe" --args "mcp"
+```
+
+### 4. OpenAI Codex CLI
+* **macOS / Linux / Windows:** `~/.codex/config.toml`
+
+```toml
+[mcp_servers.vic3-analyzer]
+command = "/path/to/vic3-analyzer"
+args = ["mcp"]
+```
+
+### 5. Cursor & Claude Code
+* **Cursor:** `~/.cursor/mcp.json`
+* **Claude Code:** `~/.claude.json`
+
+```json
+{
+  "mcpServers": {
+    "vic3-analyzer": {
+      "command": "/path/to/vic3-analyzer",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+> **Tip:** You can generate a copy-paste snippet customized for your system at any time with:
+> `vic3-cli mcp show-config --client claude-desktop` (or `--client codex` / `--client windows-copilot`).
 
 ---
 

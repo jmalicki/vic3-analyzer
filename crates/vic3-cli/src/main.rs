@@ -57,6 +57,10 @@ use vic3_prices::{
 };
 use vic3save::PdsDate;
 
+mod mcp_cli;
+
+use mcp_cli::{run_mcp, McpCli};
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -79,6 +83,7 @@ fn main() -> Result<()> {
         Commands::Plan(cmd) => run_plan(cmd),
         Commands::Defs(cmd) => run_defs(cmd),
         Commands::Archive(cmd) => run_archive(cmd),
+        Commands::Mcp(cmd) => run_mcp(cmd),
     }
 }
 
@@ -112,6 +117,8 @@ enum Commands {
     Defs(DefsCli),
     /// Browse local analysis records.
     Archive(ArchiveCli),
+    /// Configure and manage the Model Context Protocol (MCP) server for AI assistants.
+    Mcp(McpCli),
 }
 
 #[derive(Debug, Args)]
