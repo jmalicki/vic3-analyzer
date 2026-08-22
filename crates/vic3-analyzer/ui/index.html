@@ -1146,16 +1146,6 @@
         const dash = await invoke("get_dashboard");
         renderMetrics(dash);
         fillConfig(dash.config);
-        const bits = [];
-        if (!dash.game_detected) bits.push("Game folder not detected.");
-        if (dash.save_root_count === 0) bits.push("No save roots configured.");
-        bits.push(`${dash.save_count} save stub(s) indexed.`);
-        if (dash.loaded_stub) bits.push(`Session: ${dash.loaded_stub}`);
-        setStatus(
-          document.getElementById("dash-status"),
-          bits.join(" "),
-          dash.game_detected ? "ok" : "err"
-        );
         setAlertsLoadedUi(!!dash.loaded_stub);
       }
 
