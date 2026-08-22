@@ -25,6 +25,7 @@ pub const COMMON_DIRS: &[&str] = &[
     "named_colors",
     "pop_types",
     "technology",
+    "script_values",
 ];
 
 /// Prefix of every interface-icon path. Only [`ICON_LEAFS`] under it are walked.
@@ -292,6 +293,10 @@ mod tests {
         );
         assert_eq!(
             classify_defs_path("game/common/buildings/00_buildings.txt", false),
+            DefsPathClass::Read
+        );
+        assert_eq!(
+            classify_defs_path("game/common/script_values/building_values.txt", false),
             DefsPathClass::Read
         );
         assert_eq!(

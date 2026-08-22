@@ -25,6 +25,10 @@ pub(crate) struct StagingDefs {
     pub flag_defs: BTreeMap<String, Vec<FlagDefinition>>,
     pub production_methods: BTreeMap<String, StagingPm>,
     pub buildings: BTreeMap<String, BuildingType>,
+    /// Building id → script-value name for `required_construction = construction_cost_*`.
+    pub building_construction_refs: BTreeMap<String, String>,
+    /// Flat numeric script values (e.g. `construction_cost_high = 600`).
+    pub script_values: BTreeMap<String, f64>,
     pub building_groups: BTreeMap<String, BuildingGroup>,
     pub pop_needs: BTreeMap<String, StagingNeed>,
     pub buy_packages: BTreeMap<u8, StagingBuyPackage>,
@@ -48,6 +52,8 @@ impl Default for StagingDefs {
             flag_defs: BTreeMap::new(),
             production_methods: BTreeMap::new(),
             buildings: BTreeMap::new(),
+            building_construction_refs: BTreeMap::new(),
+            script_values: BTreeMap::new(),
             building_groups: BTreeMap::new(),
             pop_needs: BTreeMap::new(),
             buy_packages: BTreeMap::new(),
@@ -104,6 +110,21 @@ impl StagingDefs {
             }
         }
 
+        let mut buildings = self.buildings;
+        for (building_id, value_name) in self.building_construction_refs {
+            let Some(cost) = self.script_values.get(&value_name).copied() else {
+                continue;
+            };
+            if !(cost.is_finite() && cost >= 0.0) {
+                continue;
+            }
+            if let Some(building) = buildings.get_mut(&building_id) {
+                if building.required_construction.is_none() {
+                    building.required_construction = Some(cost);
+                }
+            }
+        }
+
         let mut defs = GameDefs {
             price_range: self.price_range,
             goods_order: self.goods_order,
@@ -115,7 +136,7 @@ impl StagingDefs {
             flags: self.flags,
             flag_defs: self.flag_defs,
             production_methods: BTreeMap::new(),
-            buildings: self.buildings,
+            buildings,
             building_groups: self.building_groups,
             pop_needs: Vec::new(),
             buy_packages: BTreeMap::new(),

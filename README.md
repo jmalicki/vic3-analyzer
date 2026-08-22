@@ -116,7 +116,7 @@ cargo run -p vic3-analyzer
 | [AI Assistant (MCP)](docs/mcp.md) | Local MCP server configuration, tool signatures, and player chat workflows |
 
 ### 🛠️ Developer & Contributor Documentation
-For local build instructions, test workflows, crate architecture, CLI tools, DataFusion SQL tables, JSON schemas, and mathematical invariants, see the **[Contributor & Developer Guide](CONTRIBUTING.md)**.
+For local build instructions, test workflows, crate architecture, CLI tools, DataFusion SQL tables, JSON schemas, and mathematical invariants, see the **[Contributor & Developer Guide](CONTRIBUTING.md)** and **[Changelog](CHANGELOG.md)**.
 
 ---
 

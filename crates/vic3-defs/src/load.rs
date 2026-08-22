@@ -33,8 +33,8 @@ use std::path::{Path, PathBuf};
 
 use jomini::text::{ObjectReader, Operator};
 use jomini::{Encoding, JominiDeserialize, TextTape};
-use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use serde::de::{self, DeserializeOwned, Visitor};
+use serde::{Deserialize, Deserializer};
 
 use crate::{
     classify_defs_path, icons,
@@ -53,6 +53,7 @@ use crate::{
 /// - `common/production_methods` — PM ids plus `goods_input_*` / `goods_output_*`
 /// - `common/production_method_groups` — group id → production method ids
 /// - `common/buildings` — building type → group / city type / PM groups
+/// - `common/script_values` — flat numeric constants (e.g. construction costs)
 /// - `common/building_groups` — category, land usage, and default building
 /// - `common/technology/technologies` — tech cost / `unlocking_technologies`
 /// - `common/pop_types` — profession qualification scripts (static analysis)
@@ -77,7 +78,8 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
     defs.labels = load_labels(&data_root)?;
     defs.production_methods = load_production_methods(&data_root)?;
     defs.production_method_groups = load_production_method_groups(&data_root)?;
-    defs.buildings = load_buildings(&data_root)?;
+    defs.script_values = load_script_values(&data_root)?;
+    defs.buildings = load_buildings(&data_root, &mut defs.building_construction_refs)?;
     defs.building_groups = load_building_groups(&data_root)?;
     defs.technologies = load_technologies(&data_root)?;
     defs.pop_types = load_pop_types(&data_root)?;
@@ -333,7 +335,15 @@ fn absorb_text_file(
         .extend(file.defs.production_methods.clone());
     defs.production_method_groups
         .extend(file.defs.production_method_groups.clone());
+    for (id, building) in &file.defs.buildings {
+        if building.required_construction.is_some() {
+            defs.building_construction_refs.remove(id);
+        }
+    }
     defs.buildings.extend(file.defs.buildings.clone());
+    defs.building_construction_refs
+        .extend(file.defs.building_construction_refs.clone());
+    defs.script_values.extend(file.defs.script_values.clone());
     defs.building_groups
         .extend(file.defs.building_groups.clone());
     defs.technologies.extend(file.defs.technologies.clone());
@@ -380,22 +390,30 @@ fn parse_defs_text(
         } else if relative.starts_with("common/production_method_groups/") {
             defs.production_method_groups
                 .extend(parse_production_method_groups_bytes(path, bytes)?);
+        } else if relative.starts_with("common/script_values/") {
+            defs.script_values
+                .extend(parse_script_values_bytes(path, bytes)?);
         } else if relative.starts_with("common/buildings/") {
             let raw: BTreeMap<String, RawBuilding> = parse_bytes(path, bytes)?;
-            defs.buildings.extend(raw.into_iter().map(|(id, building)| {
-                (
+            for (id, building) in raw {
+                let (required_construction, construction_ref) =
+                    resolve_raw_construction(&building.required_construction);
+                if let Some(name) = construction_ref {
+                    defs.building_construction_refs.insert(id.clone(), name);
+                } else {
+                    defs.building_construction_refs.remove(&id);
+                }
+                defs.buildings.insert(
                     id.clone(),
                     BuildingType {
                         id,
                         group: building.building_group,
                         city_type: building.city_type,
                         production_method_groups: building.production_method_groups,
-                        required_construction: building
-                            .required_construction
-                            .filter(|v| v.is_finite() && *v >= 0.0),
+                        required_construction,
                     },
-                )
-            }));
+                );
+            }
         } else if relative.starts_with("common/technology/technologies/") {
             defs.technologies
                 .extend(parse_technologies_bytes(path, bytes)?);
@@ -867,26 +885,88 @@ fn load_production_methods(data_root: &Path) -> Result<BTreeMap<String, StagingP
     Ok(pms)
 }
 
-fn load_buildings(data_root: &Path) -> Result<BTreeMap<String, BuildingType>, DefsError> {
+fn load_script_values(data_root: &Path) -> Result<BTreeMap<String, f64>, DefsError> {
+    let mut values = BTreeMap::new();
+    for path in txt_files(&data_root.join("common/script_values"))? {
+        let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        values.extend(parse_script_values_bytes(&path, &bytes)?);
+    }
+    Ok(values)
+}
+
+/// Collect top-level numeric script values; nested formula blocks are skipped.
+fn parse_script_values_bytes(
+    path: &Path,
+    bytes: &[u8],
+) -> Result<BTreeMap<String, f64>, DefsError> {
+    let bytes = strip_bom(bytes);
+    if looks_empty(bytes) {
+        return Ok(BTreeMap::new());
+    }
+    let tape = TextTape::from_slice(bytes).map_err(|source| DefsError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let reader = tape.utf8_reader();
+    let mut out = BTreeMap::new();
+    for (key, _op, value) in reader.fields() {
+        let id = key.read_str().to_string();
+        if let Some(num) = value.read_scalar().ok().and_then(|s| s.to_f64().ok()) {
+            if num.is_finite() {
+                out.insert(id, num);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn load_buildings(
+    data_root: &Path,
+    construction_refs: &mut BTreeMap<String, String>,
+) -> Result<BTreeMap<String, BuildingType>, DefsError> {
     let mut buildings = BTreeMap::new();
     for path in txt_files(&data_root.join("common/buildings"))? {
         let file: BTreeMap<String, RawBuilding> = parse_file(&path)?;
-        buildings.extend(file.into_iter().map(|(id, raw)| {
-            (
+        for (id, raw) in file {
+            let (required_construction, construction_ref) =
+                resolve_raw_construction(&raw.required_construction);
+            if let Some(name) = construction_ref {
+                construction_refs.insert(id.clone(), name);
+            } else {
+                construction_refs.remove(&id);
+            }
+            buildings.insert(
                 id.clone(),
                 BuildingType {
                     id,
                     group: raw.building_group,
                     city_type: raw.city_type,
                     production_method_groups: raw.production_method_groups,
-                    required_construction: raw
-                        .required_construction
-                        .filter(|v| v.is_finite() && *v >= 0.0),
+                    required_construction,
                 },
-            )
-        }));
+            );
+        }
     }
     Ok(buildings)
+}
+
+fn resolve_raw_construction(raw: &Option<NumberOrIdent>) -> (Option<f64>, Option<String>) {
+    match raw {
+        Some(NumberOrIdent::Number(v)) if v.is_finite() && *v >= 0.0 => (Some(*v), None),
+        Some(NumberOrIdent::Ident(name)) => {
+            // jomini text often yields unquoted numbers as idents.
+            if let Ok(v) = name.parse::<f64>() {
+                if v.is_finite() && v >= 0.0 {
+                    return (Some(v), None);
+                }
+            }
+            (None, Some(name.clone()))
+        }
+        _ => (None, None),
+    }
 }
 
 fn load_technologies(data_root: &Path) -> Result<BTreeMap<String, Technology>, DefsError> {
@@ -1439,9 +1519,99 @@ struct RawBuilding {
     city_type: Option<String>,
     #[serde(default)]
     production_method_groups: Vec<String>,
-    /// Paradox `required_construction` (construction points for one level).
-    #[serde(default)]
-    required_construction: Option<f64>,
+    /// Paradox `required_construction` — literal points or a script-value name.
+    #[serde(default, deserialize_with = "deserialize_opt_number_or_ident")]
+    required_construction: Option<NumberOrIdent>,
+}
+
+#[derive(Debug, Clone)]
+enum NumberOrIdent {
+    Number(f64),
+    Ident(String),
+}
+
+fn deserialize_opt_number_or_ident<'de, D>(
+    deserializer: D,
+) -> Result<Option<NumberOrIdent>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct OptNumberOrIdentVisitor;
+
+    impl<'de> Visitor<'de> for OptNumberOrIdentVisitor {
+        type Value = Option<NumberOrIdent>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a number, script-value ident, or null")
+        }
+
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_some<D2: Deserializer<'de>>(
+            self,
+            deserializer: D2,
+        ) -> Result<Self::Value, D2::Error> {
+            deserializer.deserialize_any(NumberOrIdentVisitor).map(Some)
+        }
+
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            Ok(Some(NumberOrIdent::Number(v as f64)))
+        }
+
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            Ok(Some(NumberOrIdent::Number(v as f64)))
+        }
+
+        fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+            Ok(Some(NumberOrIdent::Number(v)))
+        }
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            Ok(Some(NumberOrIdent::Ident(v.to_string())))
+        }
+
+        fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+            Ok(Some(NumberOrIdent::Ident(v)))
+        }
+    }
+
+    struct NumberOrIdentVisitor;
+
+    impl<'de> Visitor<'de> for NumberOrIdentVisitor {
+        type Value = NumberOrIdent;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a number or script-value ident")
+        }
+
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            Ok(NumberOrIdent::Number(v as f64))
+        }
+
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            Ok(NumberOrIdent::Number(v as f64))
+        }
+
+        fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+            Ok(NumberOrIdent::Number(v))
+        }
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            Ok(NumberOrIdent::Ident(v.to_string()))
+        }
+
+        fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+            Ok(NumberOrIdent::Ident(v))
+        }
+    }
+
+    deserializer.deserialize_any(OptNumberOrIdentVisitor)
 }
 
 #[derive(Debug, Default, Deserialize)]

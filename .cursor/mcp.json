@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "vic3-analyzer": {
+      "command": "/Users/josephmalicki/src/vic3-analyzer/target/debug/vic3-analyzer",
+      "args": ["mcp"]
+    }
+  }
+}
