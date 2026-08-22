@@ -36,9 +36,12 @@ jobs:
         working-directory: e2e
         run: npm install
       - name: Run WebdriverIO Web Tests
-        working-directory: e2e
-        run: npm test
-
+        run: |
+          cd web
+          npm run dev &
+          npx wait-on http://localhost:5173
+          cd ../e2e
+          npm test
   tauri:
     strategy:
       fail-fast: false

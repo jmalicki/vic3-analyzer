@@ -23,10 +23,10 @@ describe('Setup & Configuration', () => {
         await settingsTab.click()
         
         const gameInput = await $('#cfg-game')
-        await gameInput.setValue(join(__dirname, '..', '..', 'tests', 'fixtures', 'mock_game'))
+        await gameInput.setValue(join(process.cwd(), '..', 'tests', 'fixtures', 'mock_game'))
         
         const saveInput = await $('#cfg-saves')
-        await saveInput.setValue(join(__dirname, '..', '..', 'tests', 'fixtures'))
+        await saveInput.setValue(join(process.cwd(), '..', 'tests', 'fixtures'))
         
         const saveBtn = await $('#save-settings')
         await saveBtn.click()

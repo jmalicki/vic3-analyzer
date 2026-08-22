@@ -8,7 +8,7 @@ export const config = {
     capabilities: [{
         maxInstances: 1,
         'tauri:options': {
-            applicationPath: join(__dirname, '..', 'crates', 'vic3-analyzer', 'target', 'debug', 'vic3-analyzer')
+            applicationPath: join(process.cwd(), '..', 'crates', 'vic3-analyzer', 'target', 'debug', 'vic3-analyzer')
         }
     }],
     baseUrl: 'tauri://localhost'
