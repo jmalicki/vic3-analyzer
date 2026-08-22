@@ -1,6 +1,6 @@
 # Browser workbench
 
-Drop a save in the browser — **nothing uploads**. Load a save, inspect prices, run a What-if on a build, then use Goal gaps or Timeline for war readiness and GDP paths.
+Drop a [Victoria 3](https://www.paradoxinteractive.com/games/victoria-3/about) save in the browser — **nothing uploads**. Load a save, inspect prices, run a What-if on a build, then use Goal gaps or Timeline for war readiness and GDP paths. Mechanics below link to the [Victoria 3 Wiki](https://vic3.paradoxwikis.com/) on first use.
 
 **Live demo:** [https://jmalicki.github.io/vic3-analyzer/](https://jmalicki.github.io/vic3-analyzer/)
 

@@ -1,5 +1,7 @@
 # MCP server
 
+**Player guide:** [docs/user/mcp.md](user/mcp.md) (setup, example questions, LLM trajectories).
+
 **Status:** Implemented (Wave 4b) — stdio MCP via official [rmcp](https://crates.io/crates/rmcp) in `vic3-mcp`, invoked as `vic3-analyzer mcp` from the **same fat binary** as the Tauri GUI.  
 **SDK:** Official Rust [rmcp](https://crates.io/crates/rmcp) 3.x.  
 **Binary (v1):** `vic3-analyzer` opens the Tauri GUI; `vic3-analyzer mcp` runs stdio MCP **without** creating a window (early argv branch before Tauri `run`). WebView libraries may still load at process start; acceptable for v1 (no second MCP artifact unless headless forces a feature-split later).  

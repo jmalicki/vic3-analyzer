@@ -20,7 +20,7 @@ price = base * (1 + PRICE_RANGE * clamp(ratio, -1, +1))
 
 Zero orders: define a documented convention in P4 (do not divide by zero); property tests cover it.
 
-The first MAPI milestone blends the solved whole-save market price with each
+The first [Market Access Price Impact (MAPI)](https://vic3.paradoxwikis.com/Market#Local_prices) milestone blends the solved whole-save market price with each
 state's attributed-order price **inside the residual**. Wage pops shop at that
 local price (cost of living / buy-package size). Substitution still uses world
 sell-order shares, not local ones.

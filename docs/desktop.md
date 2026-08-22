@@ -1,5 +1,7 @@
 # Desktop config and auto-detect
 
+**Player guide:** [docs/user/desktop.md](user/desktop.md) (screenshots, Advanced Query, Timeline).
+
 **Status:** Implemented — companion UI (Dashboard / Saves / Query / Settings) + shared fat binary (`gui` / `mcp` argv); Settings, catalog, SQL, and MCP share config/defs resolution.  
 **Applies to:** Tauri GUI + `vic3-analyzer mcp` (same `config.toml`).  
 **Does not apply to:** GitHub Pages / wasm (browser pickers / drag-drop).

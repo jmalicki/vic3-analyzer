@@ -1,6 +1,6 @@
 # Ask your AI (MCP)
 
-Talk to your local autosave from Cursor, Claude Desktop, or any stdio MCP client. Run `vic3-analyzer mcp`: the model binds a save, reads `campaign_brief`, then uses `query` / `preview_delta`.
+Talk to your local [Victoria 3](https://www.paradoxinteractive.com/games/victoria-3/about) autosave from Cursor, Claude Desktop, or any stdio MCP client ([wiki](https://vic3.paradoxwikis.com/)). Run `vic3-analyzer mcp`: the model binds a save, reads `campaign_brief`, then uses `query` / `preview_delta`.
 
 Numbers in the [example trajectories](#example-trajectories) come from the in-repo **fixture campaign** (plaintext autosave + fixture defs).[^fixture] Your live Steam save will differ; the *shape* of the conversation is what to copy.
 

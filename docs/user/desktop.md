@@ -1,6 +1,6 @@
 # Desktop companion
 
-Play Vic3, alt-tab to a shell that already sees your autosaves. The native companion finds Steam/Paradox paths, binds a save by stub name, runs SQL on the loaded stub, then opens Timeline for a sequenced plan.
+Play [Victoria 3](https://www.paradoxinteractive.com/games/victoria-3/about), alt-tab to a shell that already sees your autosaves. The native companion finds Steam/Paradox paths, binds a save by stub name, runs SQL on the loaded stub, then opens Timeline for a sequenced plan. Game concepts in these recipes link to the [Victoria 3 Wiki](https://vic3.paradoxwikis.com/) where useful.
 
 Building-level **what-if** UI lives on the [web](web.md) workbench and via MCP `preview_delta`. The companion answers the same *questions* through **Advanced Query** and **Timeline** today.
 
