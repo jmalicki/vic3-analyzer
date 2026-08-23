@@ -52,7 +52,7 @@ jobs:
         with:
           prefix-key: web-wasm
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.12.1 --locked
+        run: cargo install wasm-pack --version 0.12.1 --locked --force
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
@@ -83,7 +83,7 @@ jobs:
         with:
           prefix-key: docs-screenshots-wasm
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.12.1 --locked
+        run: cargo install wasm-pack --version 0.12.1 --locked --force
       - uses: actions/setup-node@v7
         with:
           node-version: "22"

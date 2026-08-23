@@ -21,7 +21,7 @@ jobs:
         with:
           prefix-key: e2e-web-wasm
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.12.1 --locked
+        run: cargo install wasm-pack --version 0.12.1 --locked --force
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
@@ -73,7 +73,7 @@ jobs:
             dbus-x11
       - uses: Swatinem/rust-cache@v2
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.12.1 --locked
+        run: cargo install wasm-pack --version 0.12.1 --locked --force
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
