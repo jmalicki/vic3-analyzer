@@ -41,11 +41,15 @@ import { PriceExplorer } from './PriceExplorer'
 import { QueryPane } from './QueryPane'
 import { StatesPane } from './StatesPane'
 import { ProgressBar } from './ProgressBar'
+import { DesktopCatalog, type SaveStub } from './DesktopCatalog'
+import { isTauri } from './env'
+import { SettingsPane } from './SettingsPane'
 import {
   canUseRememberedSavePicker,
   pickSaveWithRememberedFolder,
   victoria3SavePaths,
 } from './savePicker'
+import { createTauriApi, invokeTauri } from './tauriApi'
 import type {
   AnalysisKind,
   AnalysisRecord,
@@ -69,6 +73,7 @@ import type { WasmApi } from './wasm'
 import { formatAnalysisEngineLoadError } from './wasm'
 import { loadWasmApi } from './wasmClient'
 import {
+  DESKTOP_NAV,
   hashForView,
   parseHash,
   WORKSPACE_NAV,
@@ -254,6 +259,7 @@ function kindLabel(kind: AnalysisKind): string {
 }
 
 function App({ wasmApi }: Props) {
+  const desktop = isTauri()
   const [api, setApi] = useState<WasmApi>()
   const [saveFile, setSaveFile] = useState<File>()
   const [tokensFile, setTokensFile] = useState<File>()
@@ -264,6 +270,8 @@ function App({ wasmApi }: Props) {
   const [demoDefsStatus, setDemoDefsStatus] = useState<'loading' | 'ready' | 'absent'>(
     demoDefsUrl() ? 'loading' : 'absent',
   )
+  const [desktopSaveName, setDesktopSaveName] = useState<string>()
+  const [catalogRefresh, setCatalogRefresh] = useState(0)
   const [summary, setSummary] = useState<SaveSummary>()
   const [defsSummary, setDefsSummary] = useState<DefsSummary>()
   const [goodIcons, setGoodIcons] = useState<DefsIcons>({})
@@ -367,7 +375,51 @@ function App({ wasmApi }: Props) {
     })
   }
 
+  const clearAnalysisUi = () => {
+    setResult(undefined)
+    setGapsResult(undefined)
+    setPlanResult(undefined)
+    setAlertsResult(undefined)
+    setMilitaryResult(undefined)
+    setConstructionsResult(undefined)
+    setSummary(undefined)
+    setAnalysisReady(false)
+    setPendingApply(undefined)
+  }
+
+  /** Desktop: bind a catalog stub via Rust (`use_save`) and hydrate prices. */
+  const useDesktopSave = async (stub: SaveStub) => {
+    clearAnalysisUi()
+    setBusy(true)
+    setError(undefined)
+    try {
+      const json = await invokeTauri<string>('use_save', {
+        name: stub.name,
+        location: stub.location,
+      })
+      const payload = JSON.parse(json) as {
+        summary?: SaveSummary
+      }
+      setSummary({
+        tag: payload.summary?.tag ?? stub.country ?? undefined,
+        date: payload.summary?.date ?? stub.in_game_date ?? undefined,
+        version: payload.summary?.version ?? '—',
+      })
+      setDesktopSaveName(stub.name)
+      const pricesJson = await invokeTauri<string>('loaded_prices')
+      setResult(JSON.parse(pricesJson) as PricesResult)
+      setAnalysisReady(true)
+    } catch (reason) {
+      setDesktopSaveName(undefined)
+      setError(reason instanceof Error ? reason.message : String(reason))
+      throw reason
+    } finally {
+      setBusy(false)
+    }
+  }
+
   useEffect(() => {
+    if (desktop) return
     let cancelled = false
     void loadStoredSave()
       .then(async (stored) => {
@@ -389,10 +441,14 @@ function App({ wasmApi }: Props) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [desktop])
 
   useEffect(() => {
     void listAnalyses().then(setRecords)
+    if (desktop) {
+      setApi(createTauriApi())
+      return
+    }
     void Promise.resolve(wasmApi ?? loadWasmApi())
       .then((loaded) => {
         setApi(loaded)
@@ -405,9 +461,10 @@ function App({ wasmApi }: Props) {
             : formatAnalysisEngineLoadError(reason),
         )
       })
-  }, [wasmApi])
+  }, [wasmApi, desktop])
 
   useEffect(() => {
+    if (desktop) return
     let cancelled = false
     void loadStoredDefs()
       .then((file) => {
@@ -419,9 +476,10 @@ function App({ wasmApi }: Props) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [desktop])
 
   useEffect(() => {
+    if (desktop) return
     const url = demoDefsUrl()
     if (!url) return
     let cancelled = false
@@ -443,11 +501,11 @@ function App({ wasmApi }: Props) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [desktop])
 
   useEffect(() => {
-    if (!api || !saveFile) {
-      if (!saveFile && api) void api.clear_analysis()
+    if (desktop || !api || !saveFile) {
+      if (!desktop && !saveFile && api) void api.clear_analysis()
       return
     }
     let cancelled = false
@@ -488,10 +546,11 @@ function App({ wasmApi }: Props) {
     return () => {
       cancelled = true
     }
-  }, [api, saveFile, tokensFile, effectiveDefs, sessionBytes])
+  }, [api, saveFile, tokensFile, effectiveDefs, sessionBytes, desktop])
 
   useEffect(() => {
-    if (!api || !effectiveDefs) {
+    if (desktop || !api || !effectiveDefs) {
+      if (desktop) return
       setDefsSummary(undefined)
       return
     }
@@ -522,7 +581,7 @@ function App({ wasmApi }: Props) {
     return () => {
       cancelled = true
     }
-  }, [api, defsFile, effectiveDefs])
+  }, [api, defsFile, effectiveDefs, desktop])
 
   useEffect(() => {
     const firstBuilding = summary?.buildings?.[0]
@@ -882,14 +941,17 @@ function App({ wasmApi }: Props) {
     setArchiveNote(`Reopened ${record.filename ?? record.id} from the local archive.`)
   }
 
-  const hasDefs = Boolean(effectiveDefs)
-  const ready = Boolean(api && saveFile && effectiveDefs && analysisReady)
-  const missing = [
-    ...(saveFile ? [] : ['a .v3 save']),
-    ...(hasDefs ? [] : ['game definitions']),
-  ]
+  const hasDefs = desktop || Boolean(effectiveDefs)
+  const ready = desktop
+    ? Boolean(api && desktopSaveName && analysisReady)
+    : Boolean(api && saveFile && effectiveDefs && analysisReady)
+  const missing = desktop
+    ? [...(desktopSaveName ? [] : ['a cataloged save'])]
+    : [...(saveFile ? [] : ['a .v3 save']), ...(hasDefs ? [] : ['game definitions'])]
   // The archive only reads stored records, so it stays usable without inputs.
-  const gated = missing.length > 0 && activeView !== 'archive'
+  // Settings is always available on desktop so paths can be fixed without a save.
+  const gated =
+    missing.length > 0 && activeView !== 'archive' && !(desktop && activeView === 'settings')
   const defsCounts = defsSummary
     ? ` — format v${defsSummary.blob_version}, ${defsSummary.goods} goods, ${defsSummary.labels} names, ${defsSummary.icons} icons, ${defsSummary.production_methods} production methods`
     : ''
@@ -897,15 +959,27 @@ function App({ wasmApi }: Props) {
   // folder pick that missed common/goods.
   const thinDefs = Boolean(defsSummary && defsSummary.goods < 10)
   const pricesListView = !/^#\/prices\/(good|state|building)\//.test(locationHash)
+  const navItems = desktop ? [...WORKSPACE_NAV, ...DESKTOP_NAV] : WORKSPACE_NAV
 
   return (
     <main>
       <header>
         <p className="eyebrow">LOCAL ECONOMY WORKBENCH</p>
         <h1>Victoria 3 Analyzer</h1>
-        <p>Offline market equilibrium solver, what-if simulator, and strategic planner.</p>
+        <p>
+          {desktop
+            ? 'Native companion: auto-detect game and saves, then analyze from disk — no browser upload.'
+            : 'Offline market equilibrium solver, what-if simulator, and strategic planner.'}
+        </p>
       </header>
 
+      {desktop ? (
+        <DesktopCatalog
+          loadedName={desktopSaveName}
+          refreshKey={catalogRefresh}
+          onUseSave={useDesktopSave}
+        />
+      ) : (
       <section className="inputs" aria-label="Analysis files">
         <div className="drop-zone" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
           <strong>Drop your .v3 save</strong>
@@ -1024,6 +1098,7 @@ function App({ wasmApi }: Props) {
           </div>
         </div>
       </section>
+      )}
 
       {pendingApply && result && (
         <ConfirmApply
@@ -1037,7 +1112,7 @@ function App({ wasmApi }: Props) {
         />
       )}
 
-      {builderOpen && (
+      {builderOpen && !desktop && (
         <Modal
           title="Build definitions from game files"
           locked={builderBusy}
@@ -1079,7 +1154,7 @@ function App({ wasmApi }: Props) {
             <strong>{alertsResult ? String(alertsResult.alerts.length) : '—'}</strong>
           </div>
           <div className="hud-actions">
-            <button type="button" disabled={!saveFile} onClick={() => void downloadPatched()}>
+            <button type="button" disabled={desktop || !saveFile} onClick={() => void downloadPatched()}>
               Download
             </button>
             {timelineStep?.parent_step_id ? (
@@ -1099,7 +1174,7 @@ function App({ wasmApi }: Props) {
       {error && <p role="alert">{error}</p>}
 
       <nav className="workspace-nav" aria-label="Analysis tools">
-        {WORKSPACE_NAV.map(({ view, label }) => (
+        {navItems.map(({ view, label }) => (
           <button
             type="button"
             key={view}
@@ -1113,11 +1188,13 @@ function App({ wasmApi }: Props) {
 
       {gated && (
         <p className="defs-required" role="status">
-          {!hasDefs && demoDefsStatus === 'loading'
-            ? 'Loading definitions…'
-            : `Analysis needs ${missing.join(' and ')}. Add ${
-                missing.length > 1 ? 'them' : 'it'
-              } above; the tools below stay locked until then.`}
+          {desktop
+            ? `Analysis needs ${missing.join(' and ')}. Pick a save above, or open Settings if the game folder is wrong.`
+            : !hasDefs && demoDefsStatus === 'loading'
+              ? 'Loading definitions…'
+              : `Analysis needs ${missing.join(' and ')}. Add ${
+                  missing.length > 1 ? 'them' : 'it'
+                } above; the tools below stay locked until then.`}
         </p>
       )}
 
@@ -1448,6 +1525,10 @@ function App({ wasmApi }: Props) {
       )}
 
       {activeView === 'query' && <QueryPane />}
+
+      {activeView === 'settings' && desktop && (
+        <SettingsPane onConfigChange={() => setCatalogRefresh((n) => n + 1)} />
+      )}
 
       {activeView === 'what-if' && result && (
         <>

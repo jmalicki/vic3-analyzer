@@ -10,6 +10,7 @@ export type WorkspaceView =
   | 'gaps'
   | 'query'
   | 'archive'
+  | 'settings'
 
 export type MilitaryTab = 'army' | 'navy' | 'mobilization'
 
@@ -30,7 +31,15 @@ export const WORKSPACE_NAV: readonly { view: WorkspaceView; label: string }[] = 
   { view: 'archive', label: 'Archive' },
 ]
 
-const VIEW_IDS = new Set<string>(WORKSPACE_NAV.map((item) => item.view))
+/** Desktop-only nav entry — web keeps the file-upload flow instead. */
+export const DESKTOP_NAV: readonly { view: WorkspaceView; label: string }[] = [
+  { view: 'settings', label: 'Settings' },
+]
+
+const VIEW_IDS = new Set<string>([
+  ...WORKSPACE_NAV.map((item) => item.view),
+  ...DESKTOP_NAV.map((item) => item.view),
+])
 const MILITARY_TABS = new Set<string>(['army', 'navy', 'mobilization'])
 const BUILDINGS_TABS = new Set<string>(['overview', 'queues'])
 
