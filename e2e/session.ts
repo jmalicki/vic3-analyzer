@@ -120,10 +120,29 @@ export async function configureTauriPaths(): Promise<void> {
   const settingsTab = await $('button*=Settings')
   await settingsTab.click()
 
+  // Wait for get_config to finish — otherwise it overwrites setValue and we
+  // save blank/auto-detect paths (catalog then misses fixture .v3 files).
+  await browser.waitUntil(
+    async () => {
+      const pathEl = await $('#cfg-path')
+      return (await pathEl.isExisting()) && (await pathEl.getText()).trim().length > 0
+    },
+    { timeout: 60_000, timeoutMsg: 'Settings never loaded config_path from get_config' },
+  )
+
   await $('#cfg-game').setValue(mockGameDir)
   await $('#cfg-saves').setValue(e2eSavesDir)
+  await $('#cfg-defs').setValue(mockGameDefsPostcard)
+
+  const auto = await $('#cfg-auto')
+  if (await auto.isSelected()) {
+    await auto.click()
+  }
+
   await $('#save-settings').click()
   await expect($('#settings-status')).toHaveText(expect.stringContaining('Saved'))
+  await expect($('#cfg-game')).toHaveValue(expect.stringContaining('mock_game'))
+  await expect($('#cfg-saves')).toHaveValue(expect.stringContaining('e2e_saves'))
 }
 
 export async function loadTauriSave(saveKey: SaveKey): Promise<void> {
