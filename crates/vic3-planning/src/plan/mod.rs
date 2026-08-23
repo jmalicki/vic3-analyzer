@@ -42,6 +42,9 @@ pub use timed::{TimedEdge, TimedGraph, TimedNode};
 mod vic3;
 pub use vic3::Vic3Node;
 
+mod pea;
+pub use pea::{PeaNode, DEFAULT_PEA_BEAM};
+
 mod result;
 pub use result::{
     compare, plan, plan_with_economy, ActionDiff, AnalysisRecord, CompareResult, GapDiff,

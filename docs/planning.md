@@ -52,8 +52,9 @@ Transitions between states consist of **zero-day decisions** and **event-wait ed
 
 ## A* Heuristics & Consistency
 
-Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rust-advanced-heaps`:
+Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rust-advanced-heaps`, wrapped by a PEA* adapter ([`planning-search.md`](planning-search.md)):
 
+- **Partial expansion:** domain successors are ranked by \(f-g\); only a fixed beam (16) is inserted per expand, with the parent re-queued via an expansion cursor.
 - **Admissible Heuristic $h$:** Estimates remaining calendar days by relaxing the remaining goal conjuncts into a dependency DAG:
   - Open tech, interest, military training, and law atoms contribute their minimum model durations.
   - Conjunctions (`AND`) take the maximum bound of parallelizable tracks.
@@ -107,3 +108,10 @@ flowchart TD
 
 - **Resource Tracks & ETA:** Models queues (e.g. construction sectors with aggregate construction points $R$) where job completion time is derived from prefix work divided by throughput rate: $\text{ETA} \approx \lceil \text{work} / R \rceil$.
 - **Layered Definitions Merge:** Base constants $\rightarrow$ Extracted game definition blob $\rightarrow$ Optional JSON overlay files.
+
+---
+
+## Future work: search scaling
+
+PEA* fixed-beam adapter is wired into `plan()`; EPEA* / POR notes and rejected
+dominance ideas: [`planning-search.md`](planning-search.md).
