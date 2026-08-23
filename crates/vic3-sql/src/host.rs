@@ -71,6 +71,10 @@ pub struct UseSaveResult {
     pub kind: String,
     pub in_game_date: Option<String>,
     pub country: Option<String>,
+    /// Played country id when known (desktop UI / foreign-only flags).
+    pub country_id: Option<u32>,
+    /// Played country's market id when known (our-market scope).
+    pub market_id: Option<u32>,
     /// Always `true` on success (mirrors MCP / `saves.loaded` semantics).
     pub loaded: bool,
 }
@@ -200,6 +204,8 @@ impl HostState {
             binding: Arc::new(SessionBinding::new(snap.defs, snap.world, snap.prices)),
             in_game_date: snap.date,
             country: snap.tag,
+            country_id: snap.country_id,
+            market_id: snap.market_id,
         })
     }
 
@@ -240,6 +246,8 @@ pub(crate) struct LoadedSave {
     pub binding: Arc<SessionBinding>,
     pub in_game_date: Option<String>,
     pub country: Option<String>,
+    pub country_id: Option<u32>,
+    pub market_id: Option<u32>,
 }
 
 /// Cache key: stub + location + mtime + path (path guards against root moves).

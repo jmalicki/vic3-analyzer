@@ -237,10 +237,12 @@ impl CompanionSession {
             ..Default::default()
         }))?;
         self.loaded_stub = Some(result.name.clone());
-        // Same shape the Saves tab already parses (`summary.tag` / `summary.date`).
+        // Same shape the web App parses (`summary.tag` / `country_id` / `market_id` / `date`).
         Ok(json!({
             "summary": {
                 "tag": result.country,
+                "country_id": result.country_id,
+                "market_id": result.market_id,
                 "date": result.in_game_date,
             },
             "sql": {
@@ -536,6 +538,8 @@ mod tests {
         let json = session.use_save("autosave", None, "{}").unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["summary"]["tag"], "GER");
+        assert_eq!(v["summary"]["country_id"], 16777216);
+        assert_eq!(v["summary"]["market_id"], 1);
         assert_eq!(session.loaded_stub.as_deref(), Some("autosave"));
 
         let prices = session.loaded_prices_json().unwrap();

@@ -337,6 +337,10 @@ pub struct AnalysisSnapshot {
     pub prices: PricesResult,
     /// Played country tag when known.
     pub tag: Option<String>,
+    /// Played country id when known (desktop UI / foreign-only flags).
+    pub country_id: Option<u32>,
+    /// Played country's market id when known (our-market scope).
+    pub market_id: Option<u32>,
     /// In-game date string when known.
     pub date: Option<String>,
 }
@@ -400,6 +404,8 @@ pub fn load_analysis_snapshot(
         world: loaded.world.clone(),
         prices: loaded.prices.clone(),
         tag: summary.tag,
+        country_id: summary.country_id,
+        market_id: summary.market_id,
         date: summary.date,
     };
     if install {
