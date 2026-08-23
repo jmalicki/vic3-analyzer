@@ -37,6 +37,7 @@ describe('Setup & Configuration', () => {
             return
         }
         await expect($('.inputs')).not.toBeExisting()
-        await expect($('.desktop-catalog')).toBeExisting()
+        await expect($('[aria-label="Loaded save"]')).toBeExisting()
+        await expect($('[aria-label="Desktop save catalog"]')).toBeExisting()
     })
 })

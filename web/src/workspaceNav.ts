@@ -10,6 +10,7 @@ export type WorkspaceView =
   | 'gaps'
   | 'query'
   | 'archive'
+  | 'saves'
   | 'settings'
 
 export type MilitaryTab = 'army' | 'navy' | 'mobilization'
@@ -31,8 +32,9 @@ export const WORKSPACE_NAV: readonly { view: WorkspaceView; label: string }[] = 
   { view: 'archive', label: 'Archive' },
 ]
 
-/** Desktop-only nav entry — web keeps the file-upload flow instead. */
+/** Desktop-only nav — web keeps the file-upload flow instead. */
 export const DESKTOP_NAV: readonly { view: WorkspaceView; label: string }[] = [
+  { view: 'saves', label: 'Saves' },
   { view: 'settings', label: 'Settings' },
 ]
 
