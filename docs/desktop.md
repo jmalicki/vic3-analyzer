@@ -96,3 +96,15 @@ The Desktop UI provides settings management and exposes the following internal T
 - `use_save`: Bind an active save session for diagnostics and what-if simulation.
 - `sql_query`: Execute read-only queries against the loaded save.
 - `loaded_prices` / `loaded_alerts` / `loaded_gaps`: Retrieve cached analytical projections.
+
+### Intentional UI differences vs the web app
+
+The desktop and web apps share one React SPA, with a few deliberate differences:
+
+| Concern | Web | Desktop (Tauri) |
+| --- | --- | --- |
+| Save / definitions input | Drop zone + folder → defs blob (browser-local) | Catalog from disk; no upload screen |
+| Game folder | Built once via DefsBuilder | Auto-detected; override in **Settings** |
+| Advanced Query | Not available | Native SQL engine |
+
+Use **Settings** when auto-detect is wrong; paths are shared with `vic3-analyzer mcp` via `config.toml`.

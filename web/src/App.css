@@ -9,6 +9,80 @@ header { border-bottom: 1px solid var(--line); margin-bottom: 2rem; padding-bott
 .eyebrow { color: var(--accent); font-size: .72rem; font-weight: 700; letter-spacing: .18em; }
 .inputs { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1rem; }
 
+.desktop-catalog {
+  display: grid;
+  gap: 0.85rem;
+  margin-bottom: 1.25rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 92%, white);
+}
+.desktop-catalog-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.desktop-catalog-status strong {
+  display: block;
+  margin-top: 0.15rem;
+  overflow-wrap: anywhere;
+  font-size: 0.95rem;
+}
+.desktop-catalog-hint,
+.desktop-catalog-live,
+.desktop-catalog-empty {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+.desktop-catalog-actions { display: flex; gap: 0.45rem; flex-wrap: wrap; }
+.desktop-catalog-table-wrap { overflow-x: auto; }
+.desktop-catalog-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.desktop-catalog-table th,
+.desktop-catalog-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+  vertical-align: middle;
+}
+.desktop-catalog-table tr[data-selected] td {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.settings-form {
+  display: grid;
+  gap: 0.85rem;
+  max-width: 40rem;
+}
+.settings-form label { display: grid; gap: 0.35rem; }
+.settings-form input[type='text'],
+.settings-form textarea {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+}
+.settings-check {
+  display: flex !important;
+  align-items: center;
+  gap: 0.5rem;
+  grid-template-columns: none !important;
+}
+.settings-config-path {
+  margin: 0;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.settings-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.settings-status { margin-top: 0.75rem; }
+
 .drop-zone { min-height: 190px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .65rem; border-style: dashed; }
 .drop-zone span, small, .result-heading span, time { color: var(--muted); }
 
