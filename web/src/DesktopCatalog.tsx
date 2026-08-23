@@ -86,7 +86,7 @@ export function DesktopCatalog({ loadedName, onUseSave, refreshKey = 0 }: Props)
   }
 
   return (
-    <section className="workspace-page" aria-labelledby="saves-heading" aria-label="Desktop save catalog">
+    <section className="workspace-page" aria-label="Desktop save catalog">
       <div className="tool-heading">
         <div>
           <p className="eyebrow">DESKTOP</p>
