@@ -5,7 +5,7 @@
   "identifier": "com.jmalicki.vic3-analyzer",
   "mainBinaryName": "vic3-analyzer",
   "build": {
-    "beforeBuildCommand": "VITE_TAURI=1 npm run build --prefix ../../web",
+    "beforeBuildCommand": "npm run build:desktop --prefix ../../web",
     "frontendDist": "../../web/dist"
   },
   "app": {

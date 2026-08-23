@@ -38,6 +38,7 @@ import { Modal } from './Modal'
 import { PLAN_TEMPLATES, planTemplate } from './planTemplates'
 import { PopsPane } from './PopsPane'
 import { PriceExplorer } from './PriceExplorer'
+import { QueryPane } from './QueryPane'
 import { StatesPane } from './StatesPane'
 import { ProgressBar } from './ProgressBar'
 import {
@@ -1445,6 +1446,8 @@ function App({ wasmApi }: Props) {
           <ModelInfo />
         </section>
       )}
+
+      {activeView === 'query' && <QueryPane />}
 
       {activeView === 'what-if' && result && (
         <>
