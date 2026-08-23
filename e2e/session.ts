@@ -51,6 +51,28 @@ export async function openWorkspaceTab(label: string): Promise<void> {
   await tab.click()
 }
 
+/** Body/section text check — more reliable than WebKit `*=` partial selectors. */
+export async function textIncludes(
+  needle: string,
+  opts?: { root?: string; timeout?: number; timeoutMsg?: string },
+): Promise<void> {
+  const root = opts?.root
+  const timeout = opts?.timeout ?? 30_000
+  const lowered = needle.toLowerCase()
+  await browser.waitUntil(
+    async () => {
+      const text = root
+        ? await $(root).getText().catch(() => '')
+        : await $('body').getText().catch(() => '')
+      return String(text).toLowerCase().includes(lowered)
+    },
+    {
+      timeout,
+      timeoutMsg: opts?.timeoutMsg ?? `never saw text containing "${needle}"`,
+    },
+  )
+}
+
 /** Wait until analysis is priced (campaign HUD + at least one goods row). */
 export async function waitForAnalysisReady(): Promise<void> {
   // Goods links only mount on the Prices list view — switch there first so

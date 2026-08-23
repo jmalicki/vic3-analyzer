@@ -5,7 +5,7 @@
 import { browser, $, $$, expect } from '@wdio/globals'
 import { isTauriE2e, isWebE2e } from '../runtime.js'
 import { SAVE_MARKERS, SAVES } from '../fixtures.js'
-import { bootWithSave, loadSave, openWorkspaceTab } from '../session.js'
+import { bootWithSave, loadSave, openWorkspaceTab, textIncludes } from '../session.js'
 
 // --- from 00-setup.e2e.ts ---
 describe('00 Setup — paths + primary save load', () => {
@@ -62,7 +62,11 @@ describe('01 Workspace tabs — content', () => {
   it('Pops lists mock_laborers from the shortage save', async () => {
     await openWorkspaceTab('Pops')
     await expect($('#pops-heading')).toHaveText('Pops')
-    await expect($('*=Mock Laborers')).toBeExisting()
+    await textIncludes('Mock Laborers', {
+      root: 'section[aria-labelledby="pops-heading"]',
+      timeout: 60_000,
+      timeoutMsg: 'Pops pane never listed Mock Laborers',
+    })
     await expect($('p*=Load a save to see pops')).not.toBeExisting()
     await expect($('p*=No pops in this scope')).not.toBeExisting()
   })
@@ -86,24 +90,16 @@ describe('01 Workspace tabs — content', () => {
     await expect($('button=Army')).toBeExisting()
     await expect($('button=Navy')).toBeExisting()
     await expect($('button=Mobilization')).toBeExisting()
-    await browser.waitUntil(
-      async () =>
-        (await $('*=No armies recorded in this save').isExisting())
-        || (await $('*=Military details appear after a save is priced').isExisting()),
-      {
-        timeout: 60_000,
-        timeoutMsg: 'Military pane never resolved armies empty state',
-      },
-    )
-    if (await $('*=Military details appear after a save is priced').isExisting()) {
-      await browser.waitUntil(
-        async () => (await $('*=No armies recorded in this save').isExisting()),
-        { timeout: 60_000, timeoutMsg: 'Military snapshot never arrived' },
-      )
-    }
-    await expect($('*=No armies recorded in this save')).toBeExisting()
+    await textIncludes('No armies recorded in this save', {
+      root: 'section[aria-labelledby="military-heading"]',
+      timeout: 60_000,
+      timeoutMsg: 'Military pane never resolved armies empty state',
+    })
     await $('button=Navy').click()
-    await expect($('*=No navies recorded in this save')).toBeExisting()
+    await textIncludes('No navies recorded in this save', {
+      root: 'section[aria-labelledby="military-heading"]',
+      timeout: 30_000,
+    })
   })
 
   it('Buildings lists lumber camp and tool workshop', async () => {
@@ -120,8 +116,23 @@ describe('01 Workspace tabs — content', () => {
     await expect($('#what-if-heading')).toHaveText('What-if scenario')
     const building = await $('select[aria-label="Building"], input[aria-label="Building"]')
     await expect(building).toBeExisting()
-    const tag = await building.getTagName()
-    if (tag.toLowerCase() === 'select') {
+    await browser.waitUntil(
+      async () => {
+        const tag = (await building.getTagName()).toLowerCase()
+        if (tag === 'select') {
+          const options = await building.$$('option')
+          return options.length > 0
+        }
+        const value = String(await building.getValue())
+        if (value.trim()) return true
+        // Desktop free-text fallback before summary.buildings hydrates.
+        await building.setValue('building_mock_lumber_camp')
+        return true
+      },
+      { timeout: 30_000, timeoutMsg: 'What-if building control never became usable' },
+    )
+    const tag = (await building.getTagName()).toLowerCase()
+    if (tag === 'select') {
       const options = await building.$$('option')
       const labels = []
       for (const option of options) {
@@ -131,9 +142,6 @@ describe('01 Workspace tabs — content', () => {
       if (!joined.includes('lumber') || !joined.includes('tool')) {
         throw new Error(`what-if building options missing mock types: ${labels.join(', ')}`)
       }
-    } else {
-      // Desktop may show a free-text field before summary.buildings hydrates.
-      await expect(building).toBeExisting()
     }
     await expect($('input[aria-label="Extra Levels"]')).toBeExisting()
     const run = await $('button=Run what-if')
@@ -174,12 +182,10 @@ describe('01 Workspace tabs — content', () => {
     await openWorkspaceTab('Archive')
     await expect($('#archive-heading')).toHaveText('Past saves')
     await expect($('input[aria-label="Import AnalysisRecord"]')).toBeExisting()
-    const compareHint =
-      (await $('*=Select two analyses').isExisting())
-      || (await $('*=compare').isExisting())
-    if (!compareHint) {
-      throw new Error('Archive missing compare hint')
-    }
+    await textIncludes('compare', {
+      root: 'section[aria-labelledby="archive-heading"]',
+      timeoutMsg: 'Archive missing compare hint',
+    })
     const empty = await $('*=No archived analyses yet')
     const list = await $('.archive-list')
     if (!(await empty.isExisting()) && !(await list.isExisting())) {
@@ -223,11 +229,13 @@ describe('02 Content — interactions on shortage save', () => {
 
   it('expands Mock Lumber Camp and shows per-building what-if controls', async () => {
     await openWorkspaceTab('Buildings')
-    const expand = await $('button[aria-label*="Expand Mock Lumber Camp"]')
-    await expect(expand).toBeExisting()
-    await expand.click()
+    await expect($('button[aria-label*="Expand Mock Lumber Camp"]')).toBeExisting()
+    // Row-level what-if is always visible; assert before expand (WebKit expand can be heavy).
     await expect($('button=Run what-if')).toBeExisting()
     await expect($('button=Optimize production methods')).toBeExisting()
+    const expand = await $('button[aria-label*="Expand Mock Lumber Camp"]')
+    await expand.click()
+    await expect($('button[aria-label*="Collapse Mock Lumber Camp"]')).toBeExisting()
   })
 
   it('switches Build Queues to Private', async () => {

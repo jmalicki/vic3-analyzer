@@ -237,14 +237,22 @@ impl CompanionSession {
             ..Default::default()
         }))?;
         self.loaded_stub = Some(result.name.clone());
-        // Same shape the web App parses (`summary.tag` / `country_id` / `market_id` / `date`).
+        // Full SaveSummary (buildings, country_id, market_id) — not just HUD tag/date.
+        // Falls back to the thin SQL result fields if the process session is missing.
+        let summary = vic3_api::loaded_summary_json()
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .unwrap_or_else(|| {
+                json!({
+                    "tag": result.country,
+                    "country_id": result.country_id,
+                    "market_id": result.market_id,
+                    "date": result.in_game_date,
+                    "version": "—",
+                })
+            });
         Ok(json!({
-            "summary": {
-                "tag": result.country,
-                "country_id": result.country_id,
-                "market_id": result.market_id,
-                "date": result.in_game_date,
-            },
+            "summary": summary,
             "sql": {
                 "name": result.name,
                 "kind": result.kind,
@@ -296,6 +304,33 @@ impl CompanionSession {
         let path = self.try_ensure_defs_blob()?;
         let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
         vic3_api::defs_icons_json(&bytes).map_err(|e| e.to_string())
+    }
+
+    /// Bound-session save summary JSON via `vic3-api`.
+    ///
+    /// # Errors
+    ///
+    /// [`vic3_api::ApiError`] when no analysis is loaded.
+    pub fn loaded_summary_json(&self) -> Result<String, String> {
+        vic3_api::loaded_summary_json().map_err(|e| e.to_string())
+    }
+
+    /// Bound-session military snapshot JSON via `vic3-api`.
+    ///
+    /// # Errors
+    ///
+    /// [`vic3_api::ApiError`] when no analysis is loaded.
+    pub fn loaded_military_json(&self) -> Result<String, String> {
+        vic3_api::loaded_military_json().map_err(|e| e.to_string())
+    }
+
+    /// Bound-session construction queues JSON via `vic3-api`.
+    ///
+    /// # Errors
+    ///
+    /// [`vic3_api::ApiError`] when no analysis is loaded.
+    pub fn loaded_constructions_json(&self) -> Result<String, String> {
+        vic3_api::loaded_constructions_json().map_err(|e| e.to_string())
     }
 
     /// Bound-session alerts JSON via `vic3-api`.
@@ -540,10 +575,18 @@ mod tests {
         assert_eq!(v["summary"]["tag"], "GER");
         assert_eq!(v["summary"]["country_id"], 16777216);
         assert_eq!(v["summary"]["market_id"], 1);
+        assert!(
+            v["summary"]["buildings"]
+                .as_array()
+                .is_some_and(|b| !b.is_empty()),
+            "use_save should return building type ids in summary"
+        );
         assert_eq!(session.loaded_stub.as_deref(), Some("autosave"));
 
         let prices = session.loaded_prices_json().unwrap();
         assert!(prices.contains("\"residual\""));
+        let military = session.loaded_military_json().unwrap();
+        assert!(military.contains("\"armies\""));
         let alerts = session.loaded_alerts_json().unwrap();
         assert!(alerts.contains("\"alerts\""));
 

@@ -407,7 +407,7 @@ function App({ wasmApi }: Props) {
       const payload = JSON.parse(json) as {
         summary?: SaveSummary
       }
-      // Keep country_id / market_id (and other fields) so scope filters and foreign-only flags work.
+      // Keep country_id / market_id / buildings so scope filters and What-if work.
       setSummary({
         ...(payload.summary ?? {}),
         tag: payload.summary?.tag ?? stub.country ?? undefined,
