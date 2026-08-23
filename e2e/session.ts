@@ -89,9 +89,26 @@ export async function loadWebSave(saveKey: SaveKey): Promise<void> {
     { timeout: 30_000, timeoutMsg: 'Definitions file never applied' },
   )
 
+  const savePath = join(e2eSavesDir, SAVES[saveKey])
   const saveInput = await $('input[aria-label="Save file"]')
   await expect(saveInput).toBeExisting()
-  await saveInput.setValue(join(e2eSavesDir, SAVES[saveKey]))
+  // Chromedriver often skips change events when setValue is repeated on the
+  // same file input — clear first so the second save always reloads.
+  await browser.execute(() => {
+    const input = document.querySelector('input[aria-label="Save file"]') as HTMLInputElement | null
+    if (input) {
+      input.value = ''
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+  })
+  await saveInput.setValue(savePath)
+  await browser.waitUntil(
+    async () => {
+      const text = await $('.inputs').getText().catch(() => '')
+      return text.includes(SAVES[saveKey])
+    },
+    { timeout: 30_000, timeoutMsg: `Save file ${SAVES[saveKey]} never appeared in the upload UI` },
+  )
   await waitForAnalysisReady()
 }
 
