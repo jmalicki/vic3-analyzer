@@ -11,6 +11,7 @@ commands.allow = [
   "detection_hints",
   "use_save",
   "loaded_prices",
+  "loaded_defs_icons",
   "loaded_alerts",
   "loaded_gaps",
   "sql_query",

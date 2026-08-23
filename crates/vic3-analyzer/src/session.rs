@@ -282,6 +282,20 @@ impl CompanionSession {
         vic3_api::loaded_prices_json().map_err(|e| e.to_string())
     }
 
+    /// Goods / extra icons as PNG data-URL JSON from the resolved defs blob.
+    ///
+    /// Same shape as [`vic3_api::defs_icons_json`]. Resolves the postcard via
+    /// [`Self::try_ensure_defs_blob`] (explicit blob → app-data cache → game_dir).
+    ///
+    /// # Errors
+    ///
+    /// Missing/invalid defs, I/O, or encode failures as strings.
+    pub fn loaded_defs_icons_json(&self) -> Result<String, String> {
+        let path = self.try_ensure_defs_blob()?;
+        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        vic3_api::defs_icons_json(&bytes).map_err(|e| e.to_string())
+    }
+
     /// Bound-session alerts JSON via `vic3-api`.
     ///
     /// # Errors
@@ -544,6 +558,35 @@ mod tests {
         assert_eq!(s["rows"][0][1], true);
 
         vic3_api::clear_analysis();
+    }
+
+    #[test]
+    fn loaded_defs_icons_json_from_fixture_blob() {
+        let tmp = tempfile::tempdir().unwrap();
+        let blob_path = tmp.path().join("defs.postcard");
+        fs::write(&blob_path, fixture_defs_blob()).unwrap();
+
+        let mut session = open_for_test(tmp.path());
+        session
+            .apply_config(ConfigDto {
+                game_dir: None,
+                defs_blob: Some(blob_path.display().to_string()),
+                save_dirs: vec![],
+                tokens_path: None,
+                auto_detect: false,
+                config_path: String::new(),
+            })
+            .unwrap();
+
+        let json = session.loaded_defs_icons_json().unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let goods = v["goods"].as_object().expect("goods map");
+        assert!(!goods.is_empty(), "fixture defs should include goods icons");
+        let grain = goods["grain"].as_str().expect("grain icon");
+        assert!(
+            grain.starts_with("data:image/png;base64,"),
+            "expected PNG data URL, got {grain}"
+        );
     }
 
     #[test]

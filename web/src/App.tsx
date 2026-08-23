@@ -406,7 +406,9 @@ function App({ wasmApi }: Props) {
       const payload = JSON.parse(json) as {
         summary?: SaveSummary
       }
+      // Keep country_id / market_id (and other fields) so scope filters and foreign-only flags work.
       setSummary({
+        ...(payload.summary ?? {}),
         tag: payload.summary?.tag ?? stub.country ?? undefined,
         date: payload.summary?.date ?? stub.in_game_date ?? undefined,
         version: payload.summary?.version ?? '—',
@@ -589,6 +591,26 @@ function App({ wasmApi }: Props) {
       cancelled = true
     }
   }, [api, defsFile, effectiveDefs, desktop])
+
+  /** Desktop: icons come from the companion session, not a browser defs blob. */
+  useEffect(() => {
+    if (!desktop) return
+    if (!api || !analysisReady) {
+      setGoodIcons({})
+      return
+    }
+    let cancelled = false
+    void Promise.resolve(api.defs_icons(new Uint8Array()))
+      .then((icons) => {
+        if (!cancelled) setGoodIcons(parseDefsIcons(JSON.parse(icons)))
+      })
+      .catch(() => {
+        if (!cancelled) setGoodIcons({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [desktop, api, analysisReady])
 
   useEffect(() => {
     const firstBuilding = summary?.buildings?.[0]
