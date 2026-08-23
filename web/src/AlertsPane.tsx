@@ -234,19 +234,30 @@ export function AlertsPane({
   icons,
   states = [],
   buildings = [],
+  playerCountryId,
 }: {
   result: AlertsResult
   icons?: DefsIcons
   states?: StateInfo[]
   buildings?: BuildingEconomics[]
+  /** When set, hide alerts tied to foreign states (same rule as SQL `alerts()`). */
+  playerCountryId?: number
 }) {
-  if (result.alerts.length === 0) {
+  const statesById = new Map(states.map((state) => [state.id, state]))
+  const scopedAlerts =
+    playerCountryId == null
+      ? result.alerts
+      : result.alerts.filter((alert) => {
+          if (alert.state_id == null) return true
+          const state = statesById.get(alert.state_id)
+          return state?.country_id === playerCountryId
+        })
+  if (scopedAlerts.length === 0) {
     return <p>No shortages detected in the current solve.</p>
   }
-  const statesById = new Map(states.map((state) => [state.id, state]))
   const buildingsById = new Map(buildings.map((building) => [building.id, building]))
   const groups = GROUP_ORDER.flatMap((id) => {
-    const items = result.alerts.filter((alert) => alertGroup(alert.kind).id === id)
+    const items = scopedAlerts.filter((alert) => alertGroup(alert.kind).id === id)
     if (!items.length) return []
     return [{ id, label: alertGroup(items[0].kind).label, items }]
   })

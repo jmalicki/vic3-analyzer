@@ -316,6 +316,7 @@ function App({ wasmApi }: Props) {
   const [analysisReady, setAnalysisReady] = useState(false)
   const [error, setError] = useState<string>()
   const saveInputRef = useRef<HTMLInputElement>(null)
+  const defsInputRef = useRef<HTMLInputElement>(null)
   const savePaths = useMemo(() => victoria3SavePaths(), [])
   const rememberedPicker = canUseRememberedSavePicker()
   const effectiveDefs = defsFile ?? demoDefsFile
@@ -1129,6 +1130,20 @@ function App({ wasmApi }: Props) {
               <button type="button" className="secondary" onClick={() => setBuilderOpen(true)}>
                 Build definitions from game files…
               </button>
+              <button type="button" className="secondary" onClick={() => defsInputRef.current?.click()}>
+                Choose definitions file…
+              </button>
+              <input
+                ref={defsInputRef}
+                aria-label="Definitions file"
+                type="file"
+                accept=".postcard,application/octet-stream"
+                className="visually-hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  if (file) applyDefsFile(file)
+                }}
+              />
               {defsFile && (
                 <button type="button" className="secondary" onClick={() => applyDefsFile(undefined)}>
                   Forget these definitions
@@ -1323,6 +1338,7 @@ function App({ wasmApi }: Props) {
               icons={goodIcons}
               states={result?.states}
               buildings={result?.buildings}
+              playerCountryId={summary?.country_id}
             />
           ) : (
             <p>Alerts appear after a save is priced.</p>

@@ -1,6 +1,9 @@
 import { join } from 'node:path'
 import { config as baseConfig } from './wdio.web.conf.js'
 
+// Override after importing web conf (which sets VIC3_E2E_RUNTIME=web).
+process.env.VIC3_E2E_RUNTIME = 'tauri'
+
 // Workspace cargo target; matches scripts/docs-screenshots/desktop-tauri/prepare.mjs
 const binary = join(
     process.cwd(),
@@ -41,4 +44,9 @@ export const config = {
         },
     }],
     baseUrl: 'tauri://localhost',
+    mochaOpts: {
+        ui: 'bdd',
+        // Desktop Load runs use_save + pricing on blocking workers.
+        timeout: 120_000,
+    },
 }

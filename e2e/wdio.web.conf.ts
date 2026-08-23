@@ -1,4 +1,5 @@
-import { resolve } from 'node:path'
+// Positive runtime gate for specs — not browserName (see e2e/runtime.ts).
+process.env.VIC3_E2E_RUNTIME = 'web'
 
 export const config = {
     runner: 'local',
@@ -23,6 +24,7 @@ export const config = {
     reporters: ['spec'],
     mochaOpts: {
         ui: 'bdd',
-        timeout: 60000
+        // Save loads + full workspace walk can exceed 60s on cold CI.
+        timeout: 180000
     },
 }
