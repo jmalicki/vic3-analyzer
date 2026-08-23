@@ -103,3 +103,9 @@ Every analytical result carries structured limitation strings:
 3. Employment, wages, and trade route volumes are frozen unless explicitly modified.
 4. State orders are infrastructure-access scaled into a single whole-save market; overseas convoy limits and separate custom unions are not yet modeled.
 5. The solve residual is part of the answer: a large residual indicates the model did not converge to a fixed point.
+
+---
+
+## Related design notes
+
+- [`prices-shop-cache.md`](prices-shop-cache.md) — proposed incremental shop/settle cache for planning re-solves (not implemented).

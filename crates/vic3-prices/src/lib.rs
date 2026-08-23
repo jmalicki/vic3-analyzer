@@ -2,9 +2,12 @@
 //!
 //! # Pipeline
 //!
-//! `vic3-load` + `vic3-defs` → [`World`] + [`vic3_defs::GameDefs`] → [`solve`] /
-//! [`preview`] / [`alerts`] → [`PricesResult`]. Downstream:
+//! `vic3-load` + `vic3-defs` → [`World`] + [`vic3_defs::GameDefs`] →
+//! [`equilibrate`] / [`solve`] / [`preview`] / [`alerts`]. Downstream:
 //!
+//! - [`equilibrate`] returns a compact [`SolveOutcome`] (prices + building
+//!   revenues) for planning / hot re-solves.
+//! - [`solve`] packages that into a full [`PricesResult`] via [`report`].
 //! - `vic3-planning::PlanningState::from_world_with_prices` copies good prices
 //!   (and modeled GDP) into the compact planning IR.
 //! - `vic3-api` exposes the same JSON to CLI, wasm, Tauri, and MCP/SQL hosts
@@ -52,6 +55,7 @@ mod formula;
 mod label;
 mod optimize;
 mod qualification_advice;
+mod report;
 mod result;
 mod solve;
 mod world;
@@ -72,13 +76,14 @@ pub use optimize::{
     PM_TECH_GATING_INCOMPLETE,
 };
 pub use qualification_advice::{BuildingStaffing, ProfessionGap};
+pub use report::report;
 pub use result::{
-    BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CountryInfo, ExtraLevelsDelta,
-    GoodFlow, GoodPrice, MarketInputs, PopNeedBasket, PricesResult, ProductionMethodDelta,
-    ProfessionCount, SolveOpts, SolveStatus, StateGood, StateInfo, StateNeed, StatePop,
-    StateQualification, SubsidizeDelta, WhatIfOpts, WorldDelta,
+    BuildingEconomics, BuildingGroupInfo, BuildingRevenue, BuildingTypeInfo, CountryInfo,
+    ExtraLevelsDelta, GoodFlow, GoodPrice, MarketInputs, PopNeedBasket, PricesResult,
+    ProductionMethodDelta, ProfessionCount, SolveOpts, SolveOutcome, SolveStatus, StateGood,
+    StateInfo, StateNeed, StatePop, StateQualification, SubsidizeDelta, WhatIfOpts, WorldDelta,
 };
-pub use solve::{solve, what_if};
+pub use solve::{equilibrate, solve, what_if};
 pub use world::{
     reconstruct_non_pop_orders, ConstructionQueueKind, Intern, World, WorldBuilding,
     WorldConstruction, WorldCountry, WorldPop, WorldState, WorldStatePop, WorldStateTrade,

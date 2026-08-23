@@ -167,6 +167,16 @@ impl SearchNode for PeaNode {
         match &self.inner {
             PeaInner::Ready(domain) => {
                 let ranked = Rc::new(Self::rank_successors(domain));
+                super::astar_trace::on_expand("pea-ready", || {
+                    format!(
+                        "fp={:016x} gdp={:.0} h={} ranked={} beam={}",
+                        domain.fingerprint(),
+                        domain.state().gdp,
+                        domain.heuristic(),
+                        ranked.len(),
+                        beam
+                    )
+                });
                 if ranked.is_empty() {
                     return Vec::new();
                 }
@@ -177,13 +187,29 @@ impl SearchNode for PeaNode {
                 ranked,
                 next,
                 beam,
-            } => Self::emit_beam(ranked, domain, *next, *beam),
+            } => {
+                super::astar_trace::on_expand("pea-resume", || {
+                    format!(
+                        "fp={:016x} gdp={:.0} next={}/{} beam={}",
+                        domain.fingerprint(),
+                        domain.state().gdp,
+                        next,
+                        ranked.len(),
+                        beam
+                    )
+                });
+                Self::emit_beam(ranked, domain, *next, *beam)
+            }
         }
     }
 
     fn is_goal(&self) -> bool {
         match &self.inner {
-            PeaInner::Ready(n) => n.is_goal(),
+            PeaInner::Ready(n) => {
+                let ok = n.is_goal();
+                // Vic3Node::is_goal already traces; avoid double GOAL lines.
+                ok
+            }
             PeaInner::Expanding { .. } => false,
         }
     }

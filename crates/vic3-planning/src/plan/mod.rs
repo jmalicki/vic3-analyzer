@@ -45,6 +45,9 @@ pub use vic3::Vic3Node;
 mod pea;
 pub use pea::{PeaNode, DEFAULT_PEA_BEAM};
 
+/// Temporary A* expand logging (`VIC3_PLAN_TRACE=1`).
+pub mod astar_trace;
+
 mod result;
 pub use result::{
     compare, plan, plan_with_economy, ActionDiff, AnalysisRecord, CompareResult, GapDiff,

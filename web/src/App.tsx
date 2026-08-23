@@ -212,7 +212,7 @@ function newId(): string {
 function actionLabel(action: PlanAction): string {
   if ('QueueTech' in action) return `Queue technology: ${action.QueueTech.tech}`
   if ('QueueBuildingLevel' in action) {
-    return `Queue building level: ${action.QueueBuildingLevel.building}`
+    return `Queue building level: ${action.QueueBuildingLevel.building} in state ${action.QueueBuildingLevel.state_id}`
   }
   if ('QueueInterest' in action) {
     return `Queue interest (${action.QueueInterest.kind}): ${action.QueueInterest.id}`
@@ -230,7 +230,10 @@ function actionLabel(action: PlanAction): string {
     return `Wait ${days} days for ${event.TechCompleted.tech}`
   }
   if ('BuildingCompleted' in event) {
-    return `Wait ${days} days for ${event.BuildingCompleted.building}`
+    const sid = event.BuildingCompleted.state_id
+    return sid != null
+      ? `Wait ${days} days for ${event.BuildingCompleted.building} in state ${sid}`
+      : `Wait ${days} days for ${event.BuildingCompleted.building}`
   }
   if ('InterestDeclared' in event) {
     return `Wait ${days} days for interest ${event.InterestDeclared.id}`

@@ -158,3 +158,81 @@ fn time_runs<T>(label: &str, n: usize, mut run: impl FnMut() -> T) -> T {
 fn median(times: &[Duration]) -> Duration {
     times[times.len() / 2]
 }
+
+#[test]
+#[ignore = "set VIC3_SAVE (and VIC3_TOKENS for binary) plus VIC3_GAME or VIC3_DEFS"]
+fn live_equilibrate_vs_solve_cold() {
+    use vic3_prices::equilibrate;
+    let save_path = std::env::var("VIC3_SAVE").expect("VIC3_SAVE");
+    let defs = if let Ok(path) = std::env::var("VIC3_DEFS") {
+        vic3_defs::decode_blob(&std::fs::read(path).expect("defs blob")).expect("decode blob")
+    } else {
+        vic3_defs::load_from_path(std::env::var("VIC3_GAME").expect("VIC3_GAME"))
+            .expect("game defs")
+    };
+    let tokens = match std::env::var("VIC3_TOKENS") {
+        Ok(path) => load_tokens_path(path).expect("tokens"),
+        Err(_) => empty_tokens(),
+    };
+    let save = load_path_world(&save_path, tokens).expect("load save");
+    let world = World::from_save(&save, &defs);
+    drop(save);
+
+    // Warm up once each.
+    let _ = equilibrate(&world, &defs, SolveOpts::default());
+    let _ = solve(&world, &defs, SolveOpts::default());
+
+    time_runs("cold equilibrate (no report)", 5, || {
+        equilibrate(&world, &defs, SolveOpts::default())
+    });
+    time_runs("cold solve (full PricesResult)", 5, || {
+        solve(&world, &defs, SolveOpts::default())
+    });
+}
+
+#[test]
+#[ignore = "set VIC3_SAVE (and VIC3_TOKENS for binary) plus VIC3_GAME or VIC3_DEFS"]
+fn live_equilibrate_warm_vs_cold() {
+    use vic3_prices::equilibrate;
+    let save_path = std::env::var("VIC3_SAVE").expect("VIC3_SAVE");
+    let defs = if let Ok(path) = std::env::var("VIC3_DEFS") {
+        vic3_defs::decode_blob(&std::fs::read(path).expect("defs blob")).expect("decode blob")
+    } else {
+        vic3_defs::load_from_path(std::env::var("VIC3_GAME").expect("VIC3_GAME"))
+            .expect("game defs")
+    };
+    let tokens = match std::env::var("VIC3_TOKENS") {
+        Ok(path) => load_tokens_path(path).expect("tokens"),
+        Err(_) => empty_tokens(),
+    };
+    let save = load_path_world(&save_path, tokens).expect("load save");
+    let world = World::from_save(&save, &defs);
+    drop(save);
+
+    let building = world.buildings.first().expect("buildings");
+    let bumped = world.clone().with_extra_levels_on_id(building.id, 1);
+
+    let baseline = equilibrate(&world, &defs, SolveOpts::default());
+    let relative = baseline.relative.clone();
+
+    // Warm caches / code once.
+    let _ = equilibrate(&bumped, &defs, SolveOpts::default());
+    let _ = equilibrate(&bumped, &defs, with_warm_rel(&relative));
+
+    time_runs("cold equilibrate on +1 level", 5, || {
+        equilibrate(&bumped, &defs, SolveOpts::default())
+    });
+    time_runs(
+        "warm equilibrate on +1 level (from baseline rel)",
+        5,
+        || equilibrate(&bumped, &defs, with_warm_rel(&relative)),
+    );
+
+    // Same-world warm (identity) — lower bound on warm benefit.
+    time_runs("cold equilibrate same world", 5, || {
+        equilibrate(&world, &defs, SolveOpts::default())
+    });
+    time_runs("warm equilibrate same world", 5, || {
+        equilibrate(&world, &defs, with_warm_rel(&relative))
+    });
+}

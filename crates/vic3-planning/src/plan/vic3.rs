@@ -159,8 +159,8 @@ impl Hash for Vic3Node {
 ///
 /// // TODO(anytime-ub): `h` is a lower bound only. A later PR can compute a
 /// // greedy feasible path for easy goal shapes, take its cost as incumbent
-/// // `U`, and prune nodes/edges with `g + h >= U`. That complements (does not
-/// // replace) dominance pruning at building-candidate generation.
+/// // `U`, and prune nodes/edges with `g + h >= U`. That complements wide
+/// // state-scoped building candidate sets (no type-level IO dominance prune).
 ///
 /// Goal-DAG timing lower bound used by A*.
 ///
@@ -309,7 +309,32 @@ impl SearchNode for Vic3Node {
     type Cost = u32;
 
     fn successors(&self) -> Vec<(Self, Self::Cost)> {
-        self.sim_successors()
+        let edges = self.sim_successors();
+        super::astar_trace::on_expand("vic3", || {
+            let mut kinds = std::collections::BTreeMap::<&str, u32>::new();
+            for e in &edges {
+                let k = match &e.action {
+                    crate::sim::Action::QueueTech { .. } => "QueueTech",
+                    crate::sim::Action::QueueBuildingLevel { .. } => "QueueBuilding",
+                    crate::sim::Action::QueueInterest { .. } => "QueueInterest",
+                    crate::sim::Action::QueueHireMilitary { .. } => "QueueHire",
+                    crate::sim::Action::QueueLaw { .. } => "QueueLaw",
+                    crate::sim::Action::SwitchPm { .. } => "SwitchPm",
+                    crate::sim::Action::AdjustTax { .. } => "AdjustTax",
+                    crate::sim::Action::WaitForEvent { .. } => "Wait",
+                };
+                *kinds.entry(k).or_default() += 1;
+            }
+            format!(
+                "fp={:016x} gdp={:.0} h={} branch={} {:?}",
+                self.fingerprint(),
+                self.state().gdp,
+                self.heuristic(),
+                edges.len(),
+                kinds
+            )
+        });
+        edges
             .into_iter()
             .map(|successor| {
                 (
@@ -321,7 +346,18 @@ impl SearchNode for Vic3Node {
     }
 
     fn is_goal(&self) -> bool {
-        evaluate(&self.context.goal, &self.state)
+        let ok = evaluate(&self.context.goal, &self.state);
+        if ok {
+            super::astar_trace::on_goal("vic3", || {
+                format!(
+                    "fp={:016x} gdp={:.0} date={:?}",
+                    self.fingerprint(),
+                    self.state().gdp,
+                    self.state().date
+                )
+            });
+        }
+        ok
     }
 
     /// Goal-DAG relaxation: exact for research / interest / raisable army / law
