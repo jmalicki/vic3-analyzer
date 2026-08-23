@@ -82,7 +82,11 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
 - **Capacity** `R` starts from `base_construction_capacity` and rises by `construction_per_cs_level` per Construction Sector level (projected at load; refreshed when a CS level completes on the plan branch).
 - **Cost** per queued level uses save `remaining`, else defs `required_construction`, else `default_construction_cost`.
 - **Allocation cap** `max_construction_allocation` limits points/day per job; leftover capacity fills later queue entries, so enough capacity yields parallel builds. Wait edges advance to the soonest completion under that split.
-- **Means-to-an-end:** when an open `good_price` / increasing `gdp` / army-or-navy PP atom already has another build candidate, successors also offer `QueueBuildingLevel(building_construction_sector)` so A* can invest in capacity before later factories.
+- **Building candidates** are type ids for `QueueBuildingLevel` (search branching), not placement UI:
+  - **Direct:** defs building types whose default PM IO helps open `good_price` / raising `gdp`, plus barracks/shipyards/naval admin when PP needs levels (hire stays on the military atom arm). First-of-type is allowed; completion inserts a synthetic world row so prices move.
+  - **Dominance:** drop a type only when another candidate is strictly better on modeled axes (goal-good benefit per level ↑, construction cost ↓). No top-N ranking. Incomparable types both stay.
+  - **Meta:** Construction Sector when any other build candidate already exists (capacity lever, not IO).
+  - **Deferred:** state slots / potentials and building unlock techs (`TODO(buildability)`); A* incumbent upper bound via greedy feasible path (`TODO(anytime-ub)`).
 - This is still a compact model — not full Paradox construction-goods demand or script cost tables beyond loaded `required_construction`.
 
 ---

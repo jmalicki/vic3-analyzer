@@ -4,8 +4,10 @@
 //!
 //! [`Vic3Node`] Eq/Hash inspect only the precomputed `u64` fingerprint of
 //! [`PlanningState`]. The projected state and immutable search inputs
-//! (goal, [`SimConfig`], optional [`EconomyContext`]) ride behind [`Arc`]s and
-//! are never deeply compared by the pathfinder.
+//! (goal, [`SimConfig`], optional [`EconomyContext`]) ride behind [`Rc`]s and
+//! are never deeply compared by the pathfinder. Prefer [`Rc`] while search is
+//! single-threaded; switch to [`std::sync::Arc`] when nodes must be
+//! `Send + Sync`.
 //!
 //! # Heuristic DAG
 //!
@@ -27,14 +29,14 @@ use crate::goals::{evaluate, Atom, Goal};
 use crate::sim::{EconomyContext, SimConfig, Successor};
 use crate::world::PlanningState;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::rc::Rc;
 
 /// Immutable inputs shared by every node in one planning search.
 #[derive(Debug)]
 struct SearchContext {
     goal: Goal,
     config: SimConfig,
-    economy: Option<Arc<EconomyContext>>,
+    economy: Option<Rc<EconomyContext>>,
 }
 
 /// Compact key and state handle for Vic3 planning.
@@ -45,8 +47,8 @@ struct SearchContext {
 #[derive(Clone, Debug)]
 pub struct Vic3Node {
     fingerprint: u64,
-    state: Arc<PlanningState>,
-    context: Arc<SearchContext>,
+    state: Rc<PlanningState>,
+    context: Rc<SearchContext>,
 }
 
 impl Vic3Node {
@@ -54,7 +56,7 @@ impl Vic3Node {
     pub fn new(state: PlanningState, goal: Goal, config: SimConfig) -> Self {
         Self::with_context(
             state,
-            Arc::new(SearchContext {
+            Rc::new(SearchContext {
                 goal,
                 config,
                 economy: None,
@@ -71,18 +73,18 @@ impl Vic3Node {
     ) -> Self {
         Self::with_context(
             state,
-            Arc::new(SearchContext {
+            Rc::new(SearchContext {
                 goal,
                 config,
-                economy: Some(Arc::new(economy)),
+                economy: Some(Rc::new(economy)),
             }),
         )
     }
 
-    fn with_context(state: PlanningState, context: Arc<SearchContext>) -> Self {
+    fn with_context(state: PlanningState, context: Rc<SearchContext>) -> Self {
         Self {
             fingerprint: state.fingerprint(),
-            state: Arc::new(state),
+            state: Rc::new(state),
             context,
         }
     }
@@ -149,6 +151,12 @@ impl Hash for Vic3Node {
 /// Fiscal, SoL, tax, and other atoms without a proven timing model contribute
 /// zero. This is deliberately a relaxation of the real state graph, not a
 /// replacement for A*.
+///
+/// // TODO(anytime-ub): `h` is a lower bound only. A later PR can compute a
+/// // greedy feasible path for easy goal shapes, take its cost as incumbent
+/// // `U`, and prune nodes/edges with `g + h >= U`. That complements (does not
+/// // replace) dominance pruning at building-candidate generation.
+///
 /// Goal-DAG timing lower bound used by A*.
 ///
 /// AND → max, OR → min across children (independent tracks finish near the
@@ -286,7 +294,7 @@ fn single_tech_research_eta(
 
 fn construction_eta_days(state: &PlanningState, config: SimConfig) -> u32 {
     let fallback = u32::from(config.construction_days.max(1));
-    crate::sim::construction_wait_days(state, config)
+    crate::construction::construction_wait_days(state, config)
         .map(u32::from)
         .unwrap_or(fallback)
         .max(1)
@@ -300,7 +308,7 @@ impl SearchNode for Vic3Node {
             .into_iter()
             .map(|successor| {
                 (
-                    Self::with_context(successor.state, Arc::clone(&self.context)),
+                    Self::with_context(successor.state, Rc::clone(&self.context)),
                     u32::from(successor.days),
                 )
             })
@@ -679,7 +687,7 @@ mod tests {
                 building: "building_rye_farm".into(),
                 remaining: Some(30.0),
             }],
-            construction_rate: 1.0,
+            construction_points_per_day: 1.0,
             good_prices: vec![("wood".into(), 40.0)],
             ..PlanningParts::default()
         });

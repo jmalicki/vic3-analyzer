@@ -76,7 +76,7 @@ Evaluates gross solved building output value across owned states. When planning,
 | --- | :---: | :---: | --- |
 | `research` / `has_tech` | ✅ | ✅ | `QueueTech` + research time waits |
 | `has_law` | ✅ | ✅ | `QueueLaw` + checkpoint waits |
-| `gdp` / `good_price` | ✅ | ✅ | Bounded building expansions + Construction Sector capacity lever + `SwitchPm` + price re-solves |
+| `gdp` / `good_price` | ✅ | ✅ | Defs-based building candidates (first-of-type + dominance prune) + Construction Sector meta lever + `SwitchPm` + price re-solves |
 | `interest_in` | ✅ | ✅ | `QueueInterest` + establishment wait |
 | `army_power_projection` | ✅ | ✅ | Staffed barracks construction + recruitment |
 | `navy_power_projection` | ✅ | ✅ | Shipyards + naval administrations construction |

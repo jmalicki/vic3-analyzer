@@ -16,7 +16,8 @@
 //! `SearchNode: Clone + Eq + Hash` is stored in the pathfinder's HashMap.
 //! Fat worlds must not be key bodies: [`TimedNode`] hashes a `u32` id;
 //! [`Vic3Node`] hashes only [`crate::world::PlanningState::fingerprint`]. State,
-//! goal, and economy ride behind [`std::sync::Arc`].
+//! goal, and economy ride behind [`std::rc::Rc`] (upgrade to [`std::sync::Arc`]
+//! when search must be `Send + Sync`).
 //!
 //! # Heuristic (I7)
 //!

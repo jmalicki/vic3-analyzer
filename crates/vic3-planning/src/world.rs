@@ -22,7 +22,7 @@
 //! | army / navy / interest | country cache + formations; PP `None` when IR omits | `None` / empty |
 //! | `building_level_deltas`, `pm_overrides`, `tax_level` | empty / `0` | sim branches |
 //! | `queued_interest`, `queued_hire`, `queued_law`, `mil_buildings` | empty / `None` | sim in-flight queues |
-//! | `construction_rate` | derived from Construction Sector levels (base 1.0 + 5/level) | sim / tests |
+//! | `construction_points_per_day` | Construction Sector levels → points/day (base 1 + 5/level) | sim / tests |
 //! | `tech_days_left` / `interest_days_left` / `hire_days_left` / `law_days_left` | `None` at load | set on queue / decremented by [`PlanningState::tick_parallel_tracks`] |
 //!
 //! Missing principal/credit leaves `solvent` false (no treasury-sign guess).
@@ -36,12 +36,11 @@ use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 use vic3_prices::{PricesResult, World, WorldCountry};
 
-use crate::military::{
-    recompute_army_pp, recompute_navy_pp, ModeledMilBuilding, UnitCombatStats,
-    BUILDING_CONSTRUCTION_SECTOR,
+use crate::construction::{
+    construction_points_per_day_from_save, construction_points_per_day_from_world,
 };
+use crate::military::{recompute_army_pp, recompute_navy_pp, ModeledMilBuilding, UnitCombatStats};
 
-use vic3_load::WorldSnapshot;
 pub use vic3_load::{ConstructionQueueKind, Save, Vic3Date};
 
 /// Limitation when save IR has no army power projection (not a measured zero).
@@ -189,7 +188,7 @@ pub struct PlanningParts {
     /// Tax level offset from the saved baseline (`0` at load).
     pub tax_level: i8,
     /// Construction points completed per day (default 1.0).
-    pub construction_rate: f64,
+    pub construction_points_per_day: f64,
     /// Days left on the research queue head (`None` when idle).
     pub tech_days_left: Option<u16>,
     /// Days left on the interest queue head.
@@ -233,7 +232,7 @@ impl Default for PlanningParts {
             infamy: None,
             pm_overrides: BTreeMap::new(),
             tax_level: 0,
-            construction_rate: 1.0,
+            construction_points_per_day: 1.0,
             tech_days_left: None,
             interest_days_left: None,
             hire_days_left: None,
@@ -312,9 +311,13 @@ pub struct PlanningState {
     pub pm_overrides: BTreeMap<u32, Vec<String>>,
     /// Tax offset from saved baseline (`0` at load; sim `AdjustTax`).
     pub tax_level: i8,
-    /// Construction worker-pool rate (work units per day). Used with queue
-    /// `remaining` for ETA; default `1.0` so points map 1:1 to days.
-    pub construction_rate: f64,
+    /// National construction throughput in **construction points per day**.
+    ///
+    /// Derived from Construction Sector levels (see [`crate::construction`]).
+    /// Used with queue `remaining` (points) so ETA is
+    /// `ceil(remaining / construction_points_per_day)` when a job gets the
+    /// full pool (or less under the per-job allocation cap).
+    pub construction_points_per_day: f64,
     /// Remaining days on [`Self::queued_tech`] (model timer).
     pub tech_days_left: Option<u16>,
     /// Remaining days on [`Self::queued_interest`].
@@ -366,7 +369,10 @@ impl PartialEq for PlanningState {
             && f64_option_bits_eq(self.infamy, other.infamy)
             && self.pm_overrides == other.pm_overrides
             && self.tax_level == other.tax_level
-            && f64_bits_eq(self.construction_rate, other.construction_rate)
+            && f64_bits_eq(
+                self.construction_points_per_day,
+                other.construction_points_per_day,
+            )
             && self.tech_days_left == other.tech_days_left
             && self.interest_days_left == other.interest_days_left
             && self.hire_days_left == other.hire_days_left
@@ -416,7 +422,7 @@ impl Hash for PlanningState {
             methods.hash(state);
         }
         self.tax_level.hash(state);
-        self.construction_rate.to_bits().hash(state);
+        self.construction_points_per_day.to_bits().hash(state);
         self.tech_days_left.hash(state);
         self.interest_days_left.hash(state);
         self.hire_days_left.hash(state);
@@ -520,10 +526,10 @@ impl PlanningState {
             infamy: parts.infamy,
             pm_overrides: parts.pm_overrides,
             tax_level: parts.tax_level,
-            construction_rate: if parts.construction_rate.is_finite()
-                && parts.construction_rate > 0.0
+            construction_points_per_day: if parts.construction_points_per_day.is_finite()
+                && parts.construction_points_per_day > 0.0
             {
-                parts.construction_rate
+                parts.construction_points_per_day
             } else {
                 1.0
             },
@@ -860,7 +866,7 @@ impl PlanningState {
             infamy: country.infamy.filter(|value| value.is_finite()),
             pm_overrides: BTreeMap::new(),
             tax_level: 0,
-            construction_rate: construction_rate_from_save(save, country_id),
+            construction_points_per_day: construction_points_per_day_from_save(save, country_id),
             tech_days_left: None,
             interest_days_left: None,
             hire_days_left: None,
@@ -955,7 +961,7 @@ impl PlanningState {
             infamy: country.infamy,
             pm_overrides: BTreeMap::new(),
             tax_level: 0,
-            construction_rate: construction_rate_from_world(world, country.id),
+            construction_points_per_day: construction_points_per_day_from_world(world, country.id),
             tech_days_left: None,
             interest_days_left: None,
             hire_days_left: None,
@@ -1036,69 +1042,6 @@ pub fn law_key(raw: &str) -> String {
         .strip_prefix("law_")
         .unwrap_or(lower.as_str())
         .to_string()
-}
-
-/// Default base capacity with zero Construction Sectors (matches [`crate::sim::SimConfig`]).
-const LOAD_BASE_CONSTRUCTION_CAPACITY: f64 = 1.0;
-/// Capacity per Construction Sector level at load (matches [`crate::sim::SimConfig`]).
-const LOAD_CONSTRUCTION_PER_CS_LEVEL: f64 = 5.0;
-
-fn construction_rate_from_cs_levels(cs_levels: f64) -> f64 {
-    let rate =
-        LOAD_BASE_CONSTRUCTION_CAPACITY + LOAD_CONSTRUCTION_PER_CS_LEVEL * cs_levels.max(0.0);
-    if rate.is_finite() && rate > 0.0 {
-        rate
-    } else {
-        LOAD_BASE_CONSTRUCTION_CAPACITY
-    }
-}
-
-fn construction_rate_from_save(save: &Save, country_id: u32) -> f64 {
-    let mut owned_states: BTreeSet<u32> = save
-        .states
-        .iter_present()
-        .filter_map(|(id, state)| (state.country == Some(country_id)).then_some(id))
-        .collect();
-    if owned_states.is_empty() {
-        if let Some((_, country)) = save.countries().find(|(id, _)| *id == country_id) {
-            owned_states.extend(country.states.iter().copied());
-        }
-    }
-    let levels: f64 = save
-        .building_manager()
-        .iter_present()
-        .filter_map(|(_, building)| {
-            let state = building.state?;
-            if !owned_states.contains(&state) {
-                return None;
-            }
-            if building.building != BUILDING_CONSTRUCTION_SECTOR {
-                return None;
-            }
-            Some(f64::from(building.level.max(0)))
-        })
-        .sum();
-    construction_rate_from_cs_levels(levels)
-}
-
-fn construction_rate_from_world(world: &World, country_id: u32) -> f64 {
-    let owned_states: BTreeSet<u32> = world
-        .states
-        .iter()
-        .filter_map(|state| (state.country == Some(country_id)).then_some(state.id))
-        .collect();
-    let levels: f64 = world
-        .buildings
-        .iter()
-        .filter(|building| {
-            building.building == BUILDING_CONSTRUCTION_SECTOR
-                && building
-                    .state
-                    .is_some_and(|state_id| owned_states.contains(&state_id))
-        })
-        .map(|building| building.level.max(0.0))
-        .sum();
-    construction_rate_from_cs_levels(levels)
 }
 
 fn owned_state_ids(world: &World, country: &WorldCountry) -> BTreeSet<u32> {

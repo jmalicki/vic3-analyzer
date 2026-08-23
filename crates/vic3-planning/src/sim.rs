@@ -4,8 +4,16 @@
 //!
 //! Enumerating the whole game is intractable. [`successors`] / [`successors_for_atoms`]
 //! open only edges that can close currently failing [`crate::goals::Atom`]s (plus
-//! capped building / PM candidates when an [`EconomyContext`] is present). Idle
+//! building / PM candidates when an [`EconomyContext`] is present). Idle
 //! atoms with no model action emit nothing.
+//!
+//! Building candidates are type ids for [`Action::QueueBuildingLevel`]: defs-based
+//! goal-relevant types (first-of-type allowed), dominance-pruned when one type is
+//! strictly inferior on modeled axes, plus Construction Sector as a meta lever.
+//!
+//! // TODO(anytime-ub): wide non-dominated candidate sets are acceptable without
+//! // top-N ranking; a later PR can seed a greedy feasible path as incumbent `U`
+//! // and prune search nodes with `g + h >= U`.
 //!
 //! # Edges
 //!
@@ -29,17 +37,23 @@
 //! This module does **not** search; `crate::plan` owns A*.
 //! See [`docs/planning.md`](../../../docs/planning.md).
 
+use crate::construction::{
+    construction_points_per_day_per_job, construction_queue_full, construction_wait_target,
+    construction_work_complete, construction_work_points_for_enqueue,
+    ensure_construction_work_points, maybe_add_construction_sector_candidate,
+    sync_construction_points_per_day, BUILDING_CONSTRUCTION_SECTOR,
+};
 use crate::goals::{gaps, Atom, Goal, InterestKind, Rel};
 use crate::military::{
     is_barracks_building, is_military_planning_building, is_naval_admin_building,
-    is_shipyard_building, UnitCombatStats, BUILDING_BARRACKS, BUILDING_CONSTRUCTION_SECTOR,
-    BUILDING_NAVAL_ADMIN, BUILDING_SHIPYARD, MIL_INPUT_PRICE_FACTOR,
+    is_shipyard_building, UnitCombatStats, BUILDING_BARRACKS, BUILDING_NAVAL_ADMIN,
+    BUILDING_SHIPYARD, MIL_INPUT_PRICE_FACTOR,
 };
 use crate::world::{PlanningState, QueuedInterest};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
-use vic3_defs::GameDefs;
-use vic3_prices::{solve, PricesResult, SolveOpts, World, ORDER_EPS};
+use std::collections::BTreeSet;
+use vic3_defs::{BuildingType, GameDefs};
+use vic3_prices::{solve, PricesResult, SolveOpts, World, WorldBuilding, ORDER_EPS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MilitaryBranch {
@@ -54,7 +68,6 @@ struct MilitaryPpDecisionArgs<'a> {
     state: &'a PlanningState,
     economy: Option<&'a EconomyContext>,
     config: SimConfig,
-    seen_builds: &'a mut BTreeSet<String>,
     seen_hires: &'a mut BTreeSet<String>,
 }
 
@@ -87,62 +100,9 @@ fn push_military_pp_decisions(
         return;
     }
     // Prefer staffing existing underemployed capacity before building more.
-    if push_mil_hire_decisions(args, branch) {
-        return;
-    }
-    let Some(economy) = args.economy else {
-        return;
-    };
-    let unit = match branch {
-        MilitaryBranch::Army => UnitCombatStats::army_default(),
-        MilitaryBranch::Navy => UnitCombatStats::navy_default(),
-    };
-    let per = unit.full_power_projection().max(1.0);
-    let levels_needed = (needed / per).ceil().max(1.0) as u32;
-    let cap = u32::from(args.config.max_added_levels_per_type);
-    match branch {
-        MilitaryBranch::Army => {
-            let have = mil_levels(args.state, is_barracks_building);
-            if have < levels_needed.min(cap) && args.seen_builds.insert(BUILDING_BARRACKS.into()) {
-                push_decision(
-                    args.result,
-                    args.state,
-                    Action::QueueBuildingLevel {
-                        building: BUILDING_BARRACKS.into(),
-                    },
-                    Some(economy),
-                    args.config,
-                );
-            }
-        }
-        MilitaryBranch::Navy => {
-            let ships_needed = levels_needed.min(cap);
-            let shipyard = mil_levels(args.state, is_shipyard_building);
-            let admin = mil_levels(args.state, is_naval_admin_building);
-            if shipyard < ships_needed && args.seen_builds.insert(BUILDING_SHIPYARD.into()) {
-                push_decision(
-                    args.result,
-                    args.state,
-                    Action::QueueBuildingLevel {
-                        building: BUILDING_SHIPYARD.into(),
-                    },
-                    Some(economy),
-                    args.config,
-                );
-            }
-            if admin < ships_needed && args.seen_builds.insert(BUILDING_NAVAL_ADMIN.into()) {
-                push_decision(
-                    args.result,
-                    args.state,
-                    Action::QueueBuildingLevel {
-                        building: BUILDING_NAVAL_ADMIN.into(),
-                    },
-                    Some(economy),
-                    args.config,
-                );
-            }
-        }
-    }
+    // Barracks / shipyards / naval admin levels are queued via
+    // [`EconomyContext::building_candidates`] like any other building.
+    let _ = push_mil_hire_decisions(args, branch);
 }
 
 fn mil_levels(state: &PlanningState, pred: fn(&str) -> bool) -> u32 {
@@ -152,6 +112,115 @@ fn mil_levels(state: &PlanningState, pred: fn(&str) -> bool) -> u32 {
         .filter(|b| pred(&b.building))
         .map(|b| b.levels.floor() as u32)
         .sum()
+}
+
+/// Modeled axes for dominance among building-type candidates for one atom.
+struct CandidateMetrics {
+    id: String,
+    /// Prefer higher (goal-good IO or priced GDP contribution per level).
+    benefit: f64,
+    /// Prefer lower (construction points per level).
+    cost: f64,
+}
+
+/// Drop types strictly dominated on (benefit ↑, cost ↓); equal vectors keep lower id.
+fn prune_dominated_candidates(items: Vec<CandidateMetrics>) -> Vec<String> {
+    let mut keep = Vec::new();
+    'outer: for (i, a) in items.iter().enumerate() {
+        for (j, b) in items.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            let b_ge_benefit = b.benefit >= a.benefit;
+            let b_le_cost = b.cost <= a.cost;
+            let strict = b.benefit > a.benefit || b.cost < a.cost;
+            if b_ge_benefit && b_le_cost && strict {
+                continue 'outer;
+            }
+            if (b.benefit - a.benefit).abs() <= ORDER_EPS
+                && (b.cost - a.cost).abs() <= ORDER_EPS
+                && b.id < a.id
+            {
+                continue 'outer;
+            }
+        }
+        keep.push(a.id.clone());
+    }
+    keep
+}
+
+fn construction_cost_for_type(building_type: &BuildingType, default_cost: f64) -> f64 {
+    building_type
+        .required_construction
+        .filter(|c| c.is_finite() && *c >= 0.0)
+        .unwrap_or(default_cost)
+}
+
+/// Default production methods: first PM id in each production-method group.
+fn default_pms_for_building(defs: &GameDefs, building_type: &BuildingType) -> Vec<String> {
+    building_type
+        .production_method_groups
+        .iter()
+        .filter_map(|group_id| {
+            defs.production_method_groups
+                .get(group_id)
+                .and_then(|pms| pms.first())
+                .cloned()
+        })
+        .collect()
+}
+
+/// Per-level IO from default PMs (scale = 1.0 staffed level).
+fn default_building_io_per_level(
+    defs: &GameDefs,
+    building_type: &BuildingType,
+) -> (vic3_defs::GoodsVec, vic3_defs::GoodsVec) {
+    let mut inputs = vic3_defs::GoodsVec::zeros(defs.goods_order.len());
+    let mut outputs = vic3_defs::GoodsVec::zeros(defs.goods_order.len());
+    for pm_id in default_pms_for_building(defs, building_type) {
+        let Some(pm) = defs.production_methods.get(&pm_id) else {
+            continue;
+        };
+        for (good, qty) in &pm.inputs {
+            inputs.add(*good, *qty);
+        }
+        for (good, qty) in &pm.outputs {
+            outputs.add(*good, *qty);
+        }
+    }
+    (inputs, outputs)
+}
+
+/// Synthetic fully-staffed row for a type absent from the base world (greenfield).
+fn synthetic_world_building(
+    defs: &GameDefs,
+    world: &World,
+    building: &str,
+    levels: u32,
+) -> Option<WorldBuilding> {
+    let building_type = defs.buildings.get(building)?;
+    let level = f64::from(levels);
+    if level <= 0.0 {
+        return None;
+    }
+    let next_id = world
+        .buildings
+        .iter()
+        .map(|row| row.id)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    Some(WorldBuilding {
+        id: next_id,
+        // TODO(buildability): pick an owned state with a free slot / potential.
+        state: None,
+        building: building.to_string(),
+        level,
+        staffing: level,
+        production_methods: default_pms_for_building(defs, building_type),
+        saved_inputs: Vec::new(),
+        saved_outputs: Vec::new(),
+    })
 }
 
 /// Queue hire for underemployed buildings on this branch. Returns true if any hire was pushed.
@@ -205,6 +274,7 @@ pub struct EconomyContext {
 }
 
 impl EconomyContext {
+    /// Build an economy context from a base world, defs, and solver options.
     pub fn new(base_world: World, defs: GameDefs, solve_opts: SolveOpts) -> Self {
         Self {
             base_world,
@@ -213,54 +283,104 @@ impl EconomyContext {
         }
     }
 
-    fn world_for(&self, state: &PlanningState) -> World {
-        let with_levels = state
-            .building_level_deltas
-            .iter()
-            .fold(self.base_world.clone(), |world, (building, levels)| {
-                world.with_extra_levels(building, *levels)
-            });
+    /// Apply this planning branch onto a clone of [`Self::base_world`].
+    ///
+    /// Applies [`PlanningState::building_level_deltas`] and PM overrides. Used for
+    /// construction capacity and price re-solves.
+    ///
+    /// Types present only via deltas (first-of-type / greenfield) get a
+    /// planner-added fully-staffed [`WorldBuilding`] so prices and GDP move.
+    /// Real state placement / slots are deferred (`TODO(buildability)` on
+    /// [`Self::building_candidates`]).
+    pub(crate) fn apply_planning_to_world(&self, state: &PlanningState) -> World {
+        let mut world = self.base_world.clone();
+        for (building, levels) in &state.building_level_deltas {
+            if *levels == 0 {
+                continue;
+            }
+            if world.buildings.iter().any(|row| row.building == *building) {
+                world = world.with_extra_levels(building, *levels);
+            } else if let Some(row) =
+                synthetic_world_building(&self.defs, &world, building, *levels)
+            {
+                world.buildings.push(row);
+            }
+        }
         state
             .pm_overrides
             .iter()
-            .fold(with_levels, |world, (building_id, methods)| {
+            .fold(world, |world, (building_id, methods)| {
                 world.with_production_methods(*building_id, methods.clone())
             })
     }
 
-    fn building_candidates(&self, state: &PlanningState, atoms: &[Atom], cap: u16) -> Vec<String> {
-        let world = self.world_for(state);
+    /// Goal-relevant building types to offer as `QueueBuildingLevel` decisions.
+    ///
+    /// A **candidate** is a type id the planner may queue—not Vic3 placement UI.
+    /// Direct candidates come from defs (IO / GDP / mil PP), not “already in
+    /// country.” Construction Sector is a **meta** candidate when any direct
+    /// build is already present. Hire stays on the military atom arm.
+    ///
+    /// After relevance, types that are **strictly dominated** on modeled axes
+    /// (goal-good benefit per level vs construction cost) are dropped. Equal
+    /// vectors keep the lexicographically smaller id. No top-N ranking.
+    ///
+    /// // TODO(buildability): before offering a type, require (1) unlock tech /
+    /// // PM `unlocking_technologies` researched, and (2) some owned state with
+    /// // a free slot / potential (arable / capped resources / shared farm-mine
+    /// // plantation caps). Not loaded yet—`arable_land` exists but unused.
+    /// //
+    /// // TODO(anytime-ub): non-dominated width may stay large; later PR can
+    /// // compute a greedy feasible path as incumbent `U` and prune search with
+    /// // `g + h >= U` without replacing dominance here.
+    fn building_candidates(
+        &self,
+        state: &PlanningState,
+        atoms: &[Atom],
+        config: SimConfig,
+    ) -> Vec<String> {
+        let cap = config.max_added_levels_per_type;
+        let default_cost = f64::from(config.default_construction_cost);
         let mut candidates = BTreeSet::new();
+
         for atom in atoms {
             let Atom::GoodPrice { good, rel, .. } = atom else {
                 continue;
             };
-            for building in &world.buildings {
+            let Some(good_idx) = self.defs.index_of(good) else {
+                continue;
+            };
+            let mut scored = Vec::new();
+            for (building_id, building_type) in &self.defs.buildings {
                 if state
                     .building_level_deltas
-                    .get(&building.building)
+                    .get(building_id)
                     .copied()
                     .unwrap_or(0)
                     >= u32::from(cap)
                 {
                     continue;
                 }
-                let (inputs, outputs) = building.goods_io(&self.defs);
-                let Some(good_idx) = self.defs.index_of(good) else {
-                    continue;
-                };
-                let produces = outputs[good_idx] > ORDER_EPS;
-                let consumes = inputs[good_idx] > ORDER_EPS;
-                let relevant = match rel {
+                let (inputs, outputs) = default_building_io_per_level(&self.defs, building_type);
+                let produces = outputs[good_idx];
+                let consumes = inputs[good_idx];
+                let benefit = match rel {
                     Rel::Le | Rel::Lt => produces,
                     Rel::Ge | Rel::Gt => consumes,
-                    Rel::Eq => produces || consumes,
+                    Rel::Eq => produces.max(consumes),
                 };
-                if relevant {
-                    candidates.insert(building.building.clone());
+                if benefit <= ORDER_EPS || !benefit.is_finite() {
+                    continue;
                 }
+                scored.push(CandidateMetrics {
+                    id: building_id.clone(),
+                    benefit,
+                    cost: construction_cost_for_type(building_type, default_cost),
+                });
             }
+            candidates.extend(prune_dominated_candidates(scored));
         }
+
         if atoms.iter().any(|atom| {
             matches!(
                 atom,
@@ -270,20 +390,19 @@ impl EconomyContext {
                 }
             )
         }) {
-            let mut scores = BTreeMap::<String, f64>::new();
-            for building in &world.buildings {
+            let mut scored = Vec::new();
+            for (building_id, building_type) in &self.defs.buildings {
                 if state
                     .building_level_deltas
-                    .get(&building.building)
+                    .get(building_id)
                     .copied()
                     .unwrap_or(0)
                     >= u32::from(cap)
                 {
                     continue;
                 }
-                let (_, outputs) = building.goods_io(&self.defs);
-                let per_level = building.level.max(1.0);
-                let score = outputs
+                let (_, outputs) = default_building_io_per_level(&self.defs, building_type);
+                let benefit = outputs
                     .iter_indexed()
                     .filter(|(_, quantity)| *quantity > ORDER_EPS)
                     .map(|(good, quantity)| {
@@ -292,69 +411,140 @@ impl EconomyContext {
                                 .price(id)
                                 .or_else(|| self.defs.goods.get(id).map(|g| g.base_price))
                         });
-                        price.unwrap_or(0.0) * quantity.max(0.0) / per_level
+                        price.unwrap_or(0.0) * quantity.max(0.0)
                     })
                     .sum::<f64>();
-                *scores.entry(building.building.clone()).or_default() += score;
+                if benefit <= ORDER_EPS || !benefit.is_finite() {
+                    continue;
+                }
+                scored.push(CandidateMetrics {
+                    id: building_id.clone(),
+                    benefit,
+                    cost: construction_cost_for_type(building_type, default_cost),
+                });
             }
-            let mut ranked: Vec<_> = scores
-                .into_iter()
-                .filter(|(_, score)| score.is_finite() && *score > 0.0)
-                .collect();
-            ranked.sort_by(|(left_id, left), (right_id, right)| {
-                right.total_cmp(left).then_with(|| left_id.cmp(right_id))
-            });
-            candidates.extend(ranked.into_iter().take(3).map(|(building, _)| building));
+            candidates.extend(prune_dominated_candidates(scored));
         }
-        // When army/navy PP is open, queue producers for expensive mil/shipyard inputs.
+
+        self.add_military_building_candidates(state, atoms, &mut candidates, cap);
         if atoms
             .iter()
             .any(|atom| matches!(atom, Atom::ArmyPower { .. } | Atom::NavyPower { .. }))
         {
-            self.add_mil_input_producer_candidates(state, &world, &mut candidates, cap);
+            self.add_mil_input_producer_candidates(state, &mut candidates, cap);
         }
-        // Construction Sector as means-to-an-end: raise capacity for later builds.
-        // Emit only when another build path already exists (or mil PP is open), so
-        // CS is an intermediate lever rather than a lone substitute.
-        let mil_needs_build = atoms
-            .iter()
-            .any(|atom| matches!(atom, Atom::ArmyPower { .. } | Atom::NavyPower { .. }));
-        if (mil_needs_build || !candidates.is_empty())
-            && atoms_need_construction(atoms)
-            && state
-                .building_level_deltas
-                .get(BUILDING_CONSTRUCTION_SECTOR)
-                .copied()
-                .unwrap_or(0)
-                < u32::from(cap)
-        {
-            candidates.insert(BUILDING_CONSTRUCTION_SECTOR.to_string());
-        }
+        maybe_add_construction_sector_candidate(state, &mut candidates, cap);
         candidates.into_iter().collect()
+    }
+
+    /// Barracks / shipyards / naval admin when open PP atoms need more levels.
+    ///
+    /// Skipped while that branch is underemployed so hire runs first (see
+    /// [`push_military_pp_decisions`]). Types need not already exist in the world.
+    fn add_military_building_candidates(
+        &self,
+        state: &PlanningState,
+        atoms: &[Atom],
+        candidates: &mut BTreeSet<String>,
+        cap: u16,
+    ) {
+        for atom in atoms {
+            match atom {
+                Atom::ArmyPower { rel, value } => {
+                    if !state.army_buildings_fully_staffed() {
+                        continue;
+                    }
+                    let Some(needed) =
+                        power_raise_needed(*rel, *value, state.army_power_projection)
+                    else {
+                        continue;
+                    };
+                    if needed <= 0.0 {
+                        continue;
+                    }
+                    let per = UnitCombatStats::army_default()
+                        .full_power_projection()
+                        .max(1.0);
+                    let levels_needed = (needed / per).ceil().max(1.0) as u32;
+                    let have = mil_levels(state, is_barracks_building);
+                    if have < levels_needed.min(u32::from(cap))
+                        && state
+                            .building_level_deltas
+                            .get(BUILDING_BARRACKS)
+                            .copied()
+                            .unwrap_or(0)
+                            < u32::from(cap)
+                    {
+                        candidates.insert(BUILDING_BARRACKS.to_string());
+                    }
+                }
+                Atom::NavyPower { rel, value } => {
+                    if !state.navy_buildings_fully_staffed() {
+                        continue;
+                    }
+                    let Some(needed) =
+                        power_raise_needed(*rel, *value, state.navy_power_projection)
+                    else {
+                        continue;
+                    };
+                    if needed <= 0.0 {
+                        continue;
+                    }
+                    let per = UnitCombatStats::navy_default()
+                        .full_power_projection()
+                        .max(1.0);
+                    let levels_needed = (needed / per).ceil().max(1.0) as u32;
+                    let ships_needed = levels_needed.min(u32::from(cap));
+                    let shipyard = mil_levels(state, is_shipyard_building);
+                    let admin = mil_levels(state, is_naval_admin_building);
+                    if shipyard < ships_needed
+                        && state
+                            .building_level_deltas
+                            .get(BUILDING_SHIPYARD)
+                            .copied()
+                            .unwrap_or(0)
+                            < u32::from(cap)
+                    {
+                        candidates.insert(BUILDING_SHIPYARD.to_string());
+                    }
+                    if admin < ships_needed
+                        && state
+                            .building_level_deltas
+                            .get(BUILDING_NAVAL_ADMIN)
+                            .copied()
+                            .unwrap_or(0)
+                            < u32::from(cap)
+                    {
+                        candidates.insert(BUILDING_NAVAL_ADMIN.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     fn add_mil_input_producer_candidates(
         &self,
         state: &PlanningState,
-        world: &World,
         candidates: &mut BTreeSet<String>,
         cap: u16,
     ) {
-        let mil_types: Vec<&str> = world
+        let mil_types: Vec<&str> = self
+            .defs
             .buildings
-            .iter()
-            .map(|b| b.building.as_str())
+            .keys()
+            .map(String::as_str)
             .chain([BUILDING_BARRACKS, BUILDING_SHIPYARD, BUILDING_NAVAL_ADMIN])
             .filter(|id| is_military_planning_building(id))
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
         let mut expensive_inputs = BTreeSet::new();
-        for building in &world.buildings {
-            if !is_military_planning_building(&building.building) {
+        for mil_id in mil_types {
+            let Some(building_type) = self.defs.buildings.get(mil_id) else {
                 continue;
-            }
-            let (inputs, _) = building.goods_io(&self.defs);
+            };
+            let (inputs, _) = default_building_io_per_level(&self.defs, building_type);
             for (good_idx, qty) in inputs.iter_indexed() {
                 if qty <= ORDER_EPS {
                     continue;
@@ -371,50 +561,22 @@ impl EconomyContext {
                 }
             }
         }
-        // Also consider defs for mil types not yet in the world (e.g. first shipyard).
-        for mil_id in mil_types {
-            let Some(building_type) = self.defs.buildings.get(mil_id) else {
-                continue;
-            };
-            for group_id in &building_type.production_method_groups {
-                let Some(pms) = self.defs.production_method_groups.get(group_id) else {
-                    continue;
-                };
-                for pm_id in pms {
-                    let Some(pm) = self.defs.production_methods.get(pm_id) else {
-                        continue;
-                    };
-                    for (good_idx, qty) in &pm.inputs {
-                        if *qty <= ORDER_EPS {
-                            continue;
-                        }
-                        let Some(good_id) = self.defs.good_by_index(*good_idx) else {
-                            continue;
-                        };
-                        let Some(def) = self.defs.goods.get(good_id) else {
-                            continue;
-                        };
-                        let price = state.price(good_id).unwrap_or(def.base_price);
-                        if price > def.base_price * MIL_INPUT_PRICE_FACTOR {
-                            expensive_inputs.insert(*good_idx);
-                        }
-                    }
-                }
-            }
+        if expensive_inputs.is_empty() {
+            return;
         }
-        for building in &world.buildings {
+        for (building_id, building_type) in &self.defs.buildings {
             if state
                 .building_level_deltas
-                .get(&building.building)
+                .get(building_id)
                 .copied()
                 .unwrap_or(0)
                 >= u32::from(cap)
             {
                 continue;
             }
-            let (_, outputs) = building.goods_io(&self.defs);
+            let (_, outputs) = default_building_io_per_level(&self.defs, building_type);
             if expensive_inputs.iter().any(|idx| outputs[*idx] > ORDER_EPS) {
-                candidates.insert(building.building.clone());
+                candidates.insert(building_id.clone());
             }
         }
     }
@@ -475,7 +637,7 @@ impl EconomyContext {
         if !wants_price && !wants_gdp {
             return Vec::new();
         }
-        let world = self.world_for(state);
+        let world = self.apply_planning_to_world(state);
         let country_id = world
             .countries
             .iter()
@@ -632,12 +794,22 @@ pub struct SimConfig {
     /// Max SwitchPm decision edges emitted in one expansion.
     pub max_pm_candidates: u16,
     /// National construction capacity with zero Construction Sector levels.
+    ///
+    /// Combined with [`Self::construction_per_cs_level`] by
+    /// [`crate::construction::capacity_from_sectors`].
     pub base_construction_capacity: u16,
     /// Capacity added per Construction Sector level.
     pub construction_per_cs_level: u16,
     /// Max construction points/day any single job may receive from the pool.
+    ///
+    /// With capacity `C` and this cap `A`, up to `floor(C / A)` jobs progress in
+    /// parallel ([`crate::construction::max_parallel_jobs`]). A high default
+    /// keeps one job at full capacity until config lowers the cap.
     pub max_construction_allocation: u16,
     /// Work points for a new level when defs omit `required_construction`.
+    ///
+    /// Also used by [`crate::construction::ensure_construction_work_points`] for
+    /// save-loaded rows without `remaining`.
     pub default_construction_cost: u16,
 }
 
@@ -845,7 +1017,6 @@ fn successors_for_atoms_with_economy(
     let mut seen_techs = BTreeSet::new();
     let mut seen_laws = BTreeSet::new();
     let mut seen_interest = BTreeSet::new();
-    let mut seen_mil_builds = BTreeSet::new();
     let mut seen_mil_hires = BTreeSet::new();
     let mut seen_tax_deltas = BTreeSet::new();
 
@@ -905,7 +1076,6 @@ fn successors_for_atoms_with_economy(
                         state,
                         economy,
                         config,
-                        seen_builds: &mut seen_mil_builds,
                         seen_hires: &mut seen_mil_hires,
                     },
                     MilitaryBranch::Army,
@@ -920,7 +1090,6 @@ fn successors_for_atoms_with_economy(
                         state,
                         economy,
                         config,
-                        seen_builds: &mut seen_mil_builds,
                         seen_hires: &mut seen_mil_hires,
                     },
                     MilitaryBranch::Navy,
@@ -951,9 +1120,7 @@ fn successors_for_atoms_with_economy(
     }
 
     if let Some(economy) = economy {
-        for building in
-            economy.building_candidates(state, open_atoms, config.max_added_levels_per_type)
-        {
+        for building in economy.building_candidates(state, open_atoms, config) {
             push_decision(
                 &mut result,
                 state,
@@ -1049,146 +1216,6 @@ fn successors_for_atoms_with_economy(
     }
 
     result
-}
-
-/// Days until the soonest active construction job finishes under capacity split.
-///
-/// Capacity is [`PlanningState::construction_rate`]. Each active job receives at
-/// most [`SimConfig::max_construction_allocation`] points/day; leftover capacity
-/// fills later queue entries. When `remaining` is present (save in-flight work,
-/// or def `required_construction` set at enqueue), uses
-/// [`crate::tracks::days_for_work`]. Otherwise falls back to
-/// [`SimConfig::construction_days`]. Returns [`None`] when rate is non-positive
-/// and remaining work is known (no finite ETA).
-fn construction_wait_target(state: &PlanningState, config: SimConfig) -> Option<(u16, String)> {
-    let allocs = construction_job_allocations(state, config);
-    let mut best: Option<(u16, String)> = None;
-    for (job, rate) in state.constructions.iter().zip(allocs.iter().copied()) {
-        if rate <= 0.0 {
-            continue;
-        }
-        let days = match job.remaining.filter(|v| v.is_finite() && *v >= 0.0) {
-            Some(work) => {
-                let days = crate::tracks::days_for_work(work, rate)?;
-                u16::try_from(days).unwrap_or(u16::MAX)
-            }
-            None => config.construction_days,
-        };
-        let replace = match &best {
-            None => true,
-            Some((best_days, best_building)) => {
-                days < *best_days || (days == *best_days && job.building < *best_building)
-            }
-        };
-        if replace {
-            best = Some((days, job.building.clone()));
-        }
-    }
-    best
-}
-
-/// Days until the soonest construction completion (heuristic / tests).
-pub fn construction_wait_days(state: &PlanningState, config: SimConfig) -> Option<u16> {
-    construction_wait_target(state, config).map(|(days, _)| days)
-}
-
-/// Open atoms that imply the planner may need to build something.
-fn atoms_need_construction(atoms: &[Atom]) -> bool {
-    atoms.iter().any(|atom| {
-        matches!(
-            atom,
-            Atom::GoodPrice { .. }
-                | Atom::Gdp {
-                    rel: Rel::Ge | Rel::Gt | Rel::Eq,
-                    ..
-                }
-                | Atom::ArmyPower { .. }
-                | Atom::NavyPower { .. }
-        )
-    })
-}
-
-/// Construction Sector levels on the planning branch (world + deltas).
-pub fn construction_sector_levels(state: &PlanningState, economy: Option<&EconomyContext>) -> f64 {
-    if let Some(economy) = economy {
-        return economy
-            .world_for(state)
-            .buildings
-            .iter()
-            .filter(|b| b.building == BUILDING_CONSTRUCTION_SECTOR)
-            .map(|b| b.level.max(0.0))
-            .sum();
-    }
-    f64::from(
-        state
-            .building_level_deltas
-            .get(BUILDING_CONSTRUCTION_SECTOR)
-            .copied()
-            .unwrap_or(0),
-    )
-}
-
-/// National construction capacity from CS levels and [`SimConfig`] bases.
-pub fn construction_capacity_from_sectors(
-    state: &PlanningState,
-    economy: Option<&EconomyContext>,
-    config: SimConfig,
-) -> f64 {
-    let levels = construction_sector_levels(state, economy);
-    let capacity = f64::from(config.base_construction_capacity)
-        + f64::from(config.construction_per_cs_level) * levels;
-    if capacity.is_finite() && capacity > 0.0 {
-        capacity
-    } else {
-        f64::from(config.base_construction_capacity.max(1))
-    }
-}
-
-/// Sync [`PlanningState::construction_rate`] from Construction Sector levels.
-pub fn sync_construction_capacity(
-    state: &mut PlanningState,
-    economy: &EconomyContext,
-    config: SimConfig,
-) {
-    state.construction_rate = construction_capacity_from_sectors(state, Some(economy), config);
-}
-
-/// How many construction jobs may receive points under current capacity.
-pub fn max_parallel_construction_jobs(capacity: f64, allocation_cap: u16) -> usize {
-    let cap = f64::from(allocation_cap.max(1));
-    if !capacity.is_finite() || capacity <= 0.0 {
-        return 1;
-    }
-    ((capacity / cap).floor() as usize).max(1)
-}
-
-/// True when the compact parallel construction slots are full.
-fn construction_queue_full(state: &PlanningState, config: SimConfig) -> bool {
-    let max =
-        max_parallel_construction_jobs(state.construction_rate, config.max_construction_allocation);
-    state.constructions.len() >= max
-}
-
-/// Per-job points/day from the national pool (queue order, allocation cap).
-fn construction_job_allocations(state: &PlanningState, config: SimConfig) -> Vec<f64> {
-    let capacity = state.construction_rate;
-    let alloc_cap = f64::from(config.max_construction_allocation.max(1));
-    let max_jobs = max_parallel_construction_jobs(capacity, config.max_construction_allocation);
-    let mut remaining = if capacity.is_finite() && capacity > 0.0 {
-        capacity
-    } else {
-        0.0
-    };
-    let mut out = vec![0.0; state.constructions.len()];
-    for rate in out.iter_mut().take(max_jobs) {
-        if remaining <= 0.0 {
-            break;
-        }
-        let take = alloc_cap.min(remaining);
-        *rate = take;
-        remaining -= take;
-    }
-    out
 }
 
 /// Research duration for a queued tech: defs cost at [`crate::tracks::CONSTANT_RATE`]
@@ -1371,16 +1398,7 @@ pub fn apply_action_with_economy(
             if building.is_empty() || construction_queue_full(&next, config) {
                 return None;
             }
-            // Prefer defs `required_construction` as work points. When absent,
-            // use [`SimConfig::default_construction_cost`] so allocation-based
-            // ETA stays well-defined.
-            let remaining = economy
-                .defs
-                .buildings
-                .get(building.as_str())
-                .and_then(|b| b.required_construction)
-                .filter(|c| c.is_finite() && *c >= 0.0)
-                .or(Some(f64::from(config.default_construction_cost)));
+            let remaining = construction_work_points_for_enqueue(building, economy, config);
             next.push_construction(building.clone(), remaining);
         }
         Action::QueueInterest { kind, id } => {
@@ -1433,7 +1451,7 @@ pub fn apply_action_with_economy(
             if next.pm_overrides.get(building_id) == Some(methods) {
                 return None;
             }
-            let world = economy.world_for(&next);
+            let world = economy.apply_planning_to_world(&next);
             if !world.buildings.iter().any(|b| b.id == *building_id) {
                 return None;
             }
@@ -1462,7 +1480,11 @@ pub fn apply_action_with_economy(
     Some(next)
 }
 
-/// Seed missing timers from `config` so parallel ticks advance save-loaded queues.
+/// Seed missing track timers from `config` so parallel ticks advance save-loaded queues.
+///
+/// Research / interest / hire / law get their fixed-day counters when absent.
+/// Construction rows without `remaining` are filled via
+/// [`ensure_construction_work_points`].
 fn ensure_track_timers(state: &mut PlanningState, config: SimConfig) {
     if state.queued_tech.is_some() && state.tech_days_left.is_none() {
         state.tech_days_left = Some(config.research_days);
@@ -1487,25 +1509,7 @@ fn ensure_track_timers(state: &mut PlanningState, config: SimConfig) {
     if state.queued_law.is_some() && state.law_days_left.is_none() {
         state.law_days_left = Some(config.law_days);
     }
-    if let Some(head) = state.constructions.first_mut() {
-        if head.remaining.is_none() {
-            head.remaining = Some(f64::from(config.default_construction_cost));
-        }
-    }
-    for job in state.constructions.iter_mut().skip(1) {
-        if job.remaining.is_none() {
-            job.remaining = Some(f64::from(config.default_construction_cost));
-        }
-    }
-}
-
-fn construction_timer_elapsed(state: &PlanningState, building: &str) -> bool {
-    state.constructions.iter().any(|row| {
-        row.building == building
-            && row
-                .remaining
-                .is_some_and(|rem| rem.is_finite() && rem <= 0.0)
-    })
+    ensure_construction_work_points(state, config);
 }
 
 fn apply_wait_for_event(
@@ -1524,7 +1528,7 @@ fn apply_wait_for_event(
             if days == 0 && next.tech_days_left != Some(0) {
                 return None;
             }
-            next.tick_parallel_tracks(days, &construction_job_allocations(next, config));
+            next.tick_parallel_tracks(days, &construction_points_per_day_per_job(next, config));
             next.date = next.date.add_days(i32::from(days));
             next.queued_tech = None;
             next.tech_days_left = None;
@@ -1539,10 +1543,10 @@ fn apply_wait_for_event(
             {
                 return None;
             }
-            if days == 0 && !construction_timer_elapsed(next, building) {
+            if days == 0 && !construction_work_complete(next, building) {
                 return None;
             }
-            next.tick_parallel_tracks(days, &construction_job_allocations(next, config));
+            next.tick_parallel_tracks(days, &construction_points_per_day_per_job(next, config));
             next.date = next.date.add_days(i32::from(days));
             next.complete_construction(building);
             *next
@@ -1553,7 +1557,7 @@ fn apply_wait_for_event(
                 next.push_mil_building_level(building);
             }
             if building == BUILDING_CONSTRUCTION_SECTOR {
-                sync_construction_capacity(next, economy, config);
+                sync_construction_points_per_day(next, economy, config);
             }
             refresh_prices(next, economy);
         }
@@ -1565,7 +1569,7 @@ fn apply_wait_for_event(
             if days == 0 && next.interest_days_left != Some(0) {
                 return None;
             }
-            next.tick_parallel_tracks(days, &construction_job_allocations(next, config));
+            next.tick_parallel_tracks(days, &construction_points_per_day_per_job(next, config));
             next.date = next.date.add_days(i32::from(days));
             next.queued_interest = None;
             next.interest_days_left = None;
@@ -1585,7 +1589,7 @@ fn apply_wait_for_event(
             if days == 0 && next.hire_days_left != Some(0) {
                 return None;
             }
-            next.tick_parallel_tracks(days, &construction_job_allocations(next, config));
+            next.tick_parallel_tracks(days, &construction_points_per_day_per_job(next, config));
             next.date = next.date.add_days(i32::from(days));
             next.queued_hire = None;
             next.hire_days_left = None;
@@ -1598,7 +1602,7 @@ fn apply_wait_for_event(
             if days == 0 && next.law_days_left != Some(0) {
                 return None;
             }
-            next.tick_parallel_tracks(days, &construction_job_allocations(next, config));
+            next.tick_parallel_tracks(days, &construction_points_per_day_per_job(next, config));
             next.date = next.date.add_days(i32::from(days));
             next.queued_law = None;
             next.law_days_left = None;
@@ -1608,7 +1612,7 @@ fn apply_wait_for_event(
             if days == 0 {
                 return None;
             }
-            next.tick_parallel_tracks(days, &construction_job_allocations(next, config));
+            next.tick_parallel_tracks(days, &construction_points_per_day_per_job(next, config));
             next.date = next.date.add_days(i32::from(days));
             apply_payday_effects(next);
         }
@@ -1618,7 +1622,7 @@ fn apply_wait_for_event(
 
 fn refresh_prices(state: &mut PlanningState, economy: &EconomyContext) {
     let prices = solve(
-        &economy.world_for(state),
+        &economy.apply_planning_to_world(state),
         &economy.defs,
         economy.solve_opts.clone(),
     );
@@ -1638,6 +1642,7 @@ pub fn version() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::construction::{construction_wait_days, max_parallel_construction_jobs};
     use crate::goals::{compile, evaluate};
     use crate::world::{PlanningParts, Vic3Date};
     use proptest::prelude::*;
@@ -1868,7 +1873,10 @@ mod tests {
 
     #[test]
     fn building_level_then_wait_reaches_good_price() {
-        let defs = GameDefs {
+        use vic3_defs::{BuildingType, ProductionMethod};
+
+        let wood = GoodIdx::from_usize(0);
+        let mut defs = GameDefs {
             goods_order: vec!["wood".into()],
             goods: BTreeMap::from([(
                 "wood".into(),
@@ -1882,6 +1890,26 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
+        defs.buildings.insert(
+            "building_logging_camp".into(),
+            BuildingType {
+                id: "building_logging_camp".into(),
+                group: None,
+                city_type: None,
+                production_method_groups: vec!["pmg_logging".into()],
+                required_construction: Some(30.0),
+            },
+        );
+        defs.production_method_groups
+            .insert("pmg_logging".into(), vec!["pm_sawmills".into()]);
+        defs.production_methods.insert(
+            "pm_sawmills".into(),
+            ProductionMethod {
+                id: "pm_sawmills".into(),
+                outputs: vec![(wood, 10.0)],
+                ..Default::default()
+            },
+        );
         let world = World {
             countries: vec![WorldCountry {
                 id: 1,
@@ -1899,9 +1927,9 @@ mod tests {
                 building: "building_logging_camp".into(),
                 level: 1.0,
                 staffing: 1.0,
-                production_methods: Vec::new(),
+                production_methods: vec!["pm_sawmills".into()],
                 saved_inputs: Vec::new(),
-                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+                saved_outputs: vec![(wood, 10.0)],
             }],
             frozen_buy: GoodsVec::from_vec(vec![15.0]),
             ..World::default()
@@ -2398,7 +2426,7 @@ mod tests {
                 building: "building_logging_camp".into(),
                 remaining: Some(25.0),
             }],
-            construction_rate: 10.0,
+            construction_points_per_day: 10.0,
             good_prices: vec![("wood".into(), 30.0)],
             ..PlanningParts::default()
         });
@@ -2475,7 +2503,7 @@ mod tests {
         let economy = EconomyContext::new(world, defs, SolveOpts::default());
         let state = PlanningState::from_parts(PlanningParts {
             country: "GER".into(),
-            construction_rate: 10.0,
+            construction_points_per_day: 10.0,
             good_prices: vec![("wood".into(), 30.0)],
             ..PlanningParts::default()
         });
@@ -2580,7 +2608,7 @@ mod tests {
                 building: "building_logging_camp".into(),
                 remaining: Some(25.0),
             }],
-            construction_rate: 10.0,
+            construction_points_per_day: 10.0,
             good_prices: vec![("wood".into(), 30.0)],
             ..PlanningParts::default()
         });
@@ -2662,7 +2690,7 @@ mod tests {
                 building: "building_logging_camp".into(),
                 remaining: Some(50.0),
             }],
-            construction_rate: 1.0,
+            construction_points_per_day: 1.0,
             good_prices: vec![("wood".into(), 30.0)],
             ..PlanningParts::default()
         });
@@ -2771,7 +2799,7 @@ mod tests {
             country: "GER".into(),
             queued_building: Some("building_logging_camp".into()),
             constructions: vec![job()],
-            construction_rate: 5.0,
+            construction_points_per_day: 5.0,
             good_prices: vec![("wood".into(), 30.0)],
             ..PlanningParts::default()
         });
@@ -2779,7 +2807,7 @@ mod tests {
             country: "GER".into(),
             queued_building: Some("building_logging_camp".into()),
             constructions: vec![job()],
-            construction_rate: 20.0,
+            construction_points_per_day: 20.0,
             good_prices: vec![("wood".into(), 30.0)],
             ..PlanningParts::default()
         });
@@ -2859,7 +2887,7 @@ mod tests {
                     remaining: Some(50.0),
                 },
             ],
-            construction_rate: 10.0,
+            construction_points_per_day: 10.0,
             good_prices: vec![("wood".into(), 30.0)],
             ..PlanningParts::default()
         });
@@ -2960,7 +2988,7 @@ mod tests {
         };
         let state = PlanningState::from_parts(PlanningParts {
             country: "GER".into(),
-            construction_rate: 1.0,
+            construction_points_per_day: 1.0,
             good_prices: vec![("wood".into(), 30.0)],
             ..PlanningParts::default()
         });
@@ -2990,12 +3018,15 @@ mod tests {
             Some(&1)
         );
         // base 1 + 5 per CS level
-        assert!((done.construction_rate - 6.0).abs() < 1e-9);
+        assert!((done.construction_points_per_day - 6.0).abs() < 1e-9);
     }
 
     #[test]
     fn gdp_goal_can_queue_construction_sector_as_means_to_an_end() {
-        let defs = GameDefs {
+        use vic3_defs::{BuildingType, ProductionMethod};
+
+        let wood = GoodIdx::from_usize(0);
+        let mut defs = GameDefs {
             goods_order: vec!["wood".into()],
             goods: BTreeMap::from([(
                 "wood".into(),
@@ -3009,6 +3040,26 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
+        defs.buildings.insert(
+            "building_logging_camp".into(),
+            BuildingType {
+                id: "building_logging_camp".into(),
+                group: None,
+                city_type: None,
+                production_method_groups: vec!["pmg_logging".into()],
+                required_construction: Some(100.0),
+            },
+        );
+        defs.production_method_groups
+            .insert("pmg_logging".into(), vec!["pm_sawmills".into()]);
+        defs.production_methods.insert(
+            "pm_sawmills".into(),
+            ProductionMethod {
+                id: "pm_sawmills".into(),
+                outputs: vec![(wood, 10.0)],
+                ..Default::default()
+            },
+        );
         let world = World {
             countries: vec![WorldCountry {
                 id: 1,
@@ -3026,9 +3077,9 @@ mod tests {
                 building: "building_logging_camp".into(),
                 level: 1.0,
                 staffing: 1.0,
-                production_methods: Vec::new(),
+                production_methods: vec!["pm_sawmills".into()],
                 saved_inputs: Vec::new(),
-                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+                saved_outputs: vec![(wood, 10.0)],
             }],
             frozen_buy: GoodsVec::from_vec(vec![15.0]),
             ..World::default()
@@ -3054,6 +3105,201 @@ mod tests {
                 )
             }),
             "expected CS means-to-an-end edge among {edges:?}"
+        );
+    }
+
+    #[test]
+    fn first_of_type_building_candidate_and_greenfield_prices() {
+        use vic3_defs::{BuildingType, ProductionMethod};
+
+        let wood = GoodIdx::from_usize(0);
+        let mut defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        defs.buildings.insert(
+            "building_logging_camp".into(),
+            BuildingType {
+                id: "building_logging_camp".into(),
+                group: None,
+                city_type: None,
+                production_method_groups: vec!["pmg_logging".into()],
+                required_construction: Some(30.0),
+            },
+        );
+        defs.production_method_groups
+            .insert("pmg_logging".into(), vec!["pm_sawmills".into()]);
+        defs.production_methods.insert(
+            "pm_sawmills".into(),
+            ProductionMethod {
+                id: "pm_sawmills".into(),
+                outputs: vec![(wood, 20.0)],
+                ..Default::default()
+            },
+        );
+        // No logging camp in the world — first-of-type.
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                ..WorldState::default()
+            }],
+            buildings: Vec::new(),
+            frozen_buy: GoodsVec::from_vec(vec![30.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            good_prices: vec![("wood".into(), 35.0)],
+            gdp: 0.0,
+            ..PlanningParts::default()
+        });
+        let goal = Goal::Atom(Atom::GoodPrice {
+            good: "wood".into(),
+            rel: Rel::Le,
+            value: 10.0,
+        });
+        let config = SimConfig {
+            default_construction_cost: 30,
+            ..SimConfig::default()
+        };
+        let edges = successors_with_economy(&state, &goal, config, &economy);
+        assert!(
+            edges.iter().any(|edge| {
+                matches!(
+                    &edge.action,
+                    Action::QueueBuildingLevel { building } if building == "building_logging_camp"
+                )
+            }),
+            "first-of-type logging camp must be a candidate: {edges:?}"
+        );
+
+        let queued = apply_action_with_economy(
+            &state,
+            &Action::QueueBuildingLevel {
+                building: "building_logging_camp".into(),
+            },
+            Some(&economy),
+            config,
+        )
+        .expect("enqueue first-of-type");
+        let completed = apply_action_with_economy(
+            &queued,
+            &Action::WaitForEvent {
+                event: Event::BuildingCompleted {
+                    building: "building_logging_camp".into(),
+                },
+                days: construction_wait_days(&queued, config).expect("wait"),
+            },
+            Some(&economy),
+            config,
+        )
+        .expect("complete first-of-type");
+        assert_eq!(
+            completed
+                .building_level_deltas
+                .get("building_logging_camp")
+                .copied(),
+            Some(1)
+        );
+        let price = completed.price("wood").expect("price after greenfield");
+        assert!(
+            price < 35.0,
+            "greenfield completion should move wood price, got {price}"
+        );
+    }
+
+    #[test]
+    fn dominated_building_candidate_is_pruned() {
+        use vic3_defs::{BuildingType, ProductionMethod};
+
+        let wood = GoodIdx::from_usize(0);
+        let mut defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        for (id, cost, out) in [
+            ("building_good_mill", 50.0, 10.0),
+            ("building_expensive_mill", 200.0, 10.0),
+            ("building_weak_mill", 50.0, 2.0),
+        ] {
+            defs.buildings.insert(
+                id.into(),
+                BuildingType {
+                    id: id.into(),
+                    group: None,
+                    city_type: None,
+                    production_method_groups: vec![format!("pmg_{id}")],
+                    required_construction: Some(cost),
+                },
+            );
+            defs.production_method_groups
+                .insert(format!("pmg_{id}"), vec![format!("pm_{id}")]);
+            defs.production_methods.insert(
+                format!("pm_{id}"),
+                ProductionMethod {
+                    id: format!("pm_{id}"),
+                    outputs: vec![(wood, out)],
+                    ..Default::default()
+                },
+            );
+        }
+        let economy = EconomyContext::new(World::default(), defs, SolveOpts::default());
+        let state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            good_prices: vec![("wood".into(), 40.0)],
+            ..PlanningParts::default()
+        });
+        let goal = Goal::Atom(Atom::GoodPrice {
+            good: "wood".into(),
+            rel: Rel::Le,
+            value: 1.0,
+        });
+        let edges = successors_with_economy(&state, &goal, SimConfig::default(), &economy);
+        let queued: BTreeSet<_> = edges
+            .iter()
+            .filter_map(|edge| match &edge.action {
+                Action::QueueBuildingLevel { building } => Some(building.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            queued.contains("building_good_mill"),
+            "non-dominated mill must remain: {queued:?}"
+        );
+        assert!(
+            !queued.contains("building_expensive_mill"),
+            "same IO, higher cost must be dominated: {queued:?}"
+        );
+        assert!(
+            !queued.contains("building_weak_mill"),
+            "same cost, less IO must be dominated: {queued:?}"
         );
     }
 
