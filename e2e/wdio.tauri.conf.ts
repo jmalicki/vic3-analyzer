@@ -44,9 +44,11 @@ export const config = {
         },
     }],
     baseUrl: 'tauri://localhost',
+    // WebKit is slow; keep explicit waits in helpers rather than 10s default.
+    waitforTimeout: 3000,
     mochaOpts: {
         ui: 'bdd',
-        // Desktop Load runs use_save + pricing on blocking workers.
-        timeout: 300_000,
+        // Desktop Load + pricing + WebKit IPC can exceed 5 minutes on CI.
+        timeout: 600_000,
     },
 }
