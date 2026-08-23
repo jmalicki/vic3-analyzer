@@ -35,8 +35,8 @@ pub use military::{
     is_military_planning_building, is_naval_admin_building, is_shipyard_building,
     military_buildings_fully_staffed, navy_buildings_fully_staffed, navy_pp_from_buildings,
     recompute_army_pp, recompute_navy_pp, ModeledMilBuilding, UnitCombatStats, BUILDING_BARRACKS,
-    BUILDING_NAVAL_ADMIN, BUILDING_SHIPYARD, BUILDING_SHIPYARD_ALT, MIL_INPUT_PRICE_FACTOR,
-    STAFFING_EPS,
+    BUILDING_CONSTRUCTION_SECTOR, BUILDING_NAVAL_ADMIN, BUILDING_SHIPYARD, BUILDING_SHIPYARD_ALT,
+    MIL_INPUT_PRICE_FACTOR, STAFFING_EPS,
 };
 pub use plan::{
     compare, plan, plan_with_economy, ActionDiff, AnalysisRecord, CompareResult, GapDiff,

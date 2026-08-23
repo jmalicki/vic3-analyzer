@@ -15,6 +15,8 @@ pub const BUILDING_SHIPYARD: &str = "building_shipyards";
 pub const BUILDING_SHIPYARD_ALT: &str = "building_shipyard";
 /// Naval administrations that crew ships (1.13+).
 pub const BUILDING_NAVAL_ADMIN: &str = "building_naval_administration";
+/// Construction sectors that raise national construction capacity.
+pub const BUILDING_CONSTRUCTION_SECTOR: &str = "building_construction_sector";
 
 /// Default infantry-like stats when combat-unit defs are absent.
 pub const DEFAULT_ARMY_OFFENSE: f64 = 20.0;

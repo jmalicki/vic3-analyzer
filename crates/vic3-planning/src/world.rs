@@ -22,7 +22,7 @@
 //! | army / navy / interest | country cache + formations; PP `None` when IR omits | `None` / empty |
 //! | `building_level_deltas`, `pm_overrides`, `tax_level` | empty / `0` | sim branches |
 //! | `queued_interest`, `queued_hire`, `queued_law`, `mil_buildings` | empty / `None` | sim in-flight queues |
-//! | `construction_rate` | `1.0` (save does not yet project sectors) | sim / tests |
+//! | `construction_rate` | derived from Construction Sector levels (base 1.0 + 5/level) | sim / tests |
 //! | `tech_days_left` / `interest_days_left` / `hire_days_left` / `law_days_left` | `None` at load | set on queue / decremented by [`PlanningState::tick_parallel_tracks`] |
 //!
 //! Missing principal/credit leaves `solvent` false (no treasury-sign guess).
@@ -36,8 +36,12 @@ use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 use vic3_prices::{PricesResult, World, WorldCountry};
 
-use crate::military::{recompute_army_pp, recompute_navy_pp, ModeledMilBuilding, UnitCombatStats};
+use crate::military::{
+    recompute_army_pp, recompute_navy_pp, ModeledMilBuilding, UnitCombatStats,
+    BUILDING_CONSTRUCTION_SECTOR,
+};
 
+use vic3_load::WorldSnapshot;
 pub use vic3_load::{ConstructionQueueKind, Save, Vic3Date};
 
 /// Limitation when save IR has no army power projection (not a measured zero).
@@ -566,10 +570,11 @@ impl PlanningState {
 
     /// Advance parallel track timers by `days` without completing the waited event.
     ///
-    /// Construction head `remaining` loses `days * construction_rate` work.
-    /// Fixed-day tracks decrement their `*_days_left` counters (saturating at 0).
-    /// A zero-day tick is a no-op.
-    pub fn tick_parallel_tracks(&mut self, days: u16) {
+    /// Each construction job loses `days * alloc[i]` work when `construction_alloc`
+    /// provides a per-index rate (capacity split). When the slice is shorter than
+    /// the queue, missing entries receive zero. Fixed-day tracks decrement their
+    /// `*_days_left` counters (saturating at 0). A zero-day tick is a no-op.
+    pub fn tick_parallel_tracks(&mut self, days: u16, construction_alloc: &[f64]) {
         if days == 0 {
             return;
         }
@@ -585,13 +590,13 @@ impl PlanningState {
         if let Some(left) = self.law_days_left.as_mut() {
             *left = left.saturating_sub(days);
         }
-        let rate = self.construction_rate;
-        if rate.is_finite() && rate > 0.0 {
-            if let Some(head) = self.constructions.first_mut() {
-                if let Some(rem) = head.remaining.as_mut() {
-                    if rem.is_finite() {
-                        *rem = (*rem - f64::from(days) * rate).max(0.0);
-                    }
+        for (job, rate) in self.constructions.iter_mut().zip(construction_alloc.iter()) {
+            if !rate.is_finite() || *rate <= 0.0 {
+                continue;
+            }
+            if let Some(rem) = job.remaining.as_mut() {
+                if rem.is_finite() {
+                    *rem = (*rem - f64::from(days) * *rate).max(0.0);
                 }
             }
         }
@@ -705,13 +710,14 @@ impl PlanningState {
             .map(|entry| entry.building.clone());
     }
 
-    /// Append a government construction (sim `QueueBuildingLevel`) and set the head.
+    /// Append a government construction (sim `QueueBuildingLevel`).
     ///
     /// `remaining` is construction work points when known (typically
     /// [`vic3_defs::BuildingType::required_construction`] for a new enqueue).
     /// Pass [`None`] when the def omits cost so wait ETA can fall back to
     /// [`crate::sim::SimConfig::construction_days`]. In-flight save rows keep
-    /// their own `remaining` and are not rewritten here.
+    /// their own `remaining` and are not rewritten here. The in-flight head
+    /// stays the first queue entry (`sync_queued_building_from_constructions`).
     pub fn push_construction(&mut self, building: String, remaining: Option<f64>) {
         let order_id = self
             .constructions
@@ -724,19 +730,29 @@ impl PlanningState {
             order_id,
             queue: ConstructionQueueKind::Government,
             state_id: None,
-            building: building.clone(),
+            building,
             remaining,
         });
-        self.queued_building = Some(building);
+        self.sync_queued_building_from_constructions();
     }
 
-    /// Remove the completed head entry matching `building`, then advance the head.
+    /// Remove a completed construction entry matching `building`, then advance the head.
+    ///
+    /// Prefers a finished row (`remaining <= 0`) when several share the type so
+    /// parallel completions pop the right job.
     pub fn complete_construction(&mut self, building: &str) {
-        if let Some(idx) = self
-            .constructions
-            .iter()
-            .position(|entry| entry.building == building)
-        {
+        let finished = self.constructions.iter().position(|entry| {
+            entry.building == building
+                && entry
+                    .remaining
+                    .is_some_and(|rem| rem.is_finite() && rem <= 0.0)
+        });
+        let idx = finished.or_else(|| {
+            self.constructions
+                .iter()
+                .position(|entry| entry.building == building)
+        });
+        if let Some(idx) = idx {
             self.constructions.remove(idx);
         }
         self.sync_queued_building_from_constructions();
@@ -844,7 +860,7 @@ impl PlanningState {
             infamy: country.infamy.filter(|value| value.is_finite()),
             pm_overrides: BTreeMap::new(),
             tax_level: 0,
-            construction_rate: 1.0,
+            construction_rate: construction_rate_from_save(save, country_id),
             tech_days_left: None,
             interest_days_left: None,
             hire_days_left: None,
@@ -939,7 +955,7 @@ impl PlanningState {
             infamy: country.infamy,
             pm_overrides: BTreeMap::new(),
             tax_level: 0,
-            construction_rate: 1.0,
+            construction_rate: construction_rate_from_world(world, country.id),
             tech_days_left: None,
             interest_days_left: None,
             hire_days_left: None,
@@ -1020,6 +1036,69 @@ pub fn law_key(raw: &str) -> String {
         .strip_prefix("law_")
         .unwrap_or(lower.as_str())
         .to_string()
+}
+
+/// Default base capacity with zero Construction Sectors (matches [`crate::sim::SimConfig`]).
+const LOAD_BASE_CONSTRUCTION_CAPACITY: f64 = 1.0;
+/// Capacity per Construction Sector level at load (matches [`crate::sim::SimConfig`]).
+const LOAD_CONSTRUCTION_PER_CS_LEVEL: f64 = 5.0;
+
+fn construction_rate_from_cs_levels(cs_levels: f64) -> f64 {
+    let rate =
+        LOAD_BASE_CONSTRUCTION_CAPACITY + LOAD_CONSTRUCTION_PER_CS_LEVEL * cs_levels.max(0.0);
+    if rate.is_finite() && rate > 0.0 {
+        rate
+    } else {
+        LOAD_BASE_CONSTRUCTION_CAPACITY
+    }
+}
+
+fn construction_rate_from_save(save: &Save, country_id: u32) -> f64 {
+    let mut owned_states: BTreeSet<u32> = save
+        .states
+        .iter_present()
+        .filter_map(|(id, state)| (state.country == Some(country_id)).then_some(id))
+        .collect();
+    if owned_states.is_empty() {
+        if let Some((_, country)) = save.countries().find(|(id, _)| *id == country_id) {
+            owned_states.extend(country.states.iter().copied());
+        }
+    }
+    let levels: f64 = save
+        .building_manager()
+        .iter_present()
+        .filter_map(|(_, building)| {
+            let state = building.state?;
+            if !owned_states.contains(&state) {
+                return None;
+            }
+            if building.building != BUILDING_CONSTRUCTION_SECTOR {
+                return None;
+            }
+            Some(f64::from(building.level.max(0)))
+        })
+        .sum();
+    construction_rate_from_cs_levels(levels)
+}
+
+fn construction_rate_from_world(world: &World, country_id: u32) -> f64 {
+    let owned_states: BTreeSet<u32> = world
+        .states
+        .iter()
+        .filter_map(|state| (state.country == Some(country_id)).then_some(state.id))
+        .collect();
+    let levels: f64 = world
+        .buildings
+        .iter()
+        .filter(|building| {
+            building.building == BUILDING_CONSTRUCTION_SECTOR
+                && building
+                    .state
+                    .is_some_and(|state_id| owned_states.contains(&state_id))
+        })
+        .map(|building| building.level.max(0.0))
+        .sum();
+    construction_rate_from_cs_levels(levels)
 }
 
 fn owned_state_ids(world: &World, country: &WorldCountry) -> BTreeSet<u32> {

@@ -24,6 +24,7 @@ A `PlanningState` is a compact, deterministic projection of the save file and th
 | `population_weighted_wealth` | Pop-weighted average wealth across owned states |
 | `army_power_projection`, `navy_power_projection` | Projected military and naval strength from combat formations and staffing |
 | `building_level_deltas`, `pm_overrides`, `tax_level` | Sim-only mutations applied along the planning search branch |
+| `construction_rate` | National construction capacity (base + Construction Sector levels) |
 
 **Invariants:**
 - **Deterministic State Hashing (I8):** Identical planning states produce identical hashes; applying an action is strictly deterministic.
@@ -76,6 +77,13 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
 
 ### 3. Production Method Switching
 - When an economy context is present, the planner evaluates candidate PM switches on relevant industries, applies the override, and triggers an immediate price re-solve.
+
+### 4. Construction capacity (compact model)
+- **Capacity** `R` starts from `base_construction_capacity` and rises by `construction_per_cs_level` per Construction Sector level (projected at load; refreshed when a CS level completes on the plan branch).
+- **Cost** per queued level uses save `remaining`, else defs `required_construction`, else `default_construction_cost`.
+- **Allocation cap** `max_construction_allocation` limits points/day per job; leftover capacity fills later queue entries, so enough capacity yields parallel builds. Wait edges advance to the soonest completion under that split.
+- **Means-to-an-end:** when an open `good_price` / increasing `gdp` / army-or-navy PP atom already has another build candidate, successors also offer `QueueBuildingLevel(building_construction_sector)` so A* can invest in capacity before later factories.
+- This is still a compact model — not full Paradox construction-goods demand or script cost tables beyond loaded `required_construction`.
 
 ---
 

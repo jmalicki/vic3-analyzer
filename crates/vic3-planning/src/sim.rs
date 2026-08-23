@@ -32,8 +32,8 @@
 use crate::goals::{gaps, Atom, Goal, InterestKind, Rel};
 use crate::military::{
     is_barracks_building, is_military_planning_building, is_naval_admin_building,
-    is_shipyard_building, UnitCombatStats, BUILDING_BARRACKS, BUILDING_NAVAL_ADMIN,
-    BUILDING_SHIPYARD, MIL_INPUT_PRICE_FACTOR,
+    is_shipyard_building, UnitCombatStats, BUILDING_BARRACKS, BUILDING_CONSTRUCTION_SECTOR,
+    BUILDING_NAVAL_ADMIN, BUILDING_SHIPYARD, MIL_INPUT_PRICE_FACTOR,
 };
 use crate::world::{PlanningState, QueuedInterest};
 use serde::{Deserialize, Serialize};
@@ -312,6 +312,23 @@ impl EconomyContext {
             .any(|atom| matches!(atom, Atom::ArmyPower { .. } | Atom::NavyPower { .. }))
         {
             self.add_mil_input_producer_candidates(state, &world, &mut candidates, cap);
+        }
+        // Construction Sector as means-to-an-end: raise capacity for later builds.
+        // Emit only when another build path already exists (or mil PP is open), so
+        // CS is an intermediate lever rather than a lone substitute.
+        let mil_needs_build = atoms
+            .iter()
+            .any(|atom| matches!(atom, Atom::ArmyPower { .. } | Atom::NavyPower { .. }));
+        if (mil_needs_build || !candidates.is_empty())
+            && atoms_need_construction(atoms)
+            && state
+                .building_level_deltas
+                .get(BUILDING_CONSTRUCTION_SECTOR)
+                .copied()
+                .unwrap_or(0)
+                < u32::from(cap)
+        {
+            candidates.insert(BUILDING_CONSTRUCTION_SECTOR.to_string());
         }
         candidates.into_iter().collect()
     }
@@ -592,7 +609,7 @@ fn pm_affects_open_atoms(defs: &GameDefs, pm_id: &str, atoms: &[Atom], wants_gdp
 pub struct SimConfig {
     /// Fixed research duration in the phase-8 model.
     pub research_days: u16,
-    /// Fixed duration for one modeled building-level expansion.
+    /// Fallback duration when a construction job has no known work points.
     pub construction_days: u16,
     /// Days between modeled budget/debt paydays.
     pub payday_days: u16,
@@ -614,6 +631,14 @@ pub struct SimConfig {
     pub max_pm_overrides: u16,
     /// Max SwitchPm decision edges emitted in one expansion.
     pub max_pm_candidates: u16,
+    /// National construction capacity with zero Construction Sector levels.
+    pub base_construction_capacity: u16,
+    /// Capacity added per Construction Sector level.
+    pub construction_per_cs_level: u16,
+    /// Max construction points/day any single job may receive from the pool.
+    pub max_construction_allocation: u16,
+    /// Work points for a new level when defs omit `required_construction`.
+    pub default_construction_cost: u16,
 }
 
 impl Default for SimConfig {
@@ -631,6 +656,12 @@ impl Default for SimConfig {
             max_tax_steps: 3,
             max_pm_overrides: 4,
             max_pm_candidates: 4,
+            // High default keeps one active job at full capacity; lower it in
+            // tests/config to enable parallel allocation across jobs.
+            base_construction_capacity: 1,
+            construction_per_cs_level: 5,
+            max_construction_allocation: 1000,
+            default_construction_cost: 180,
         }
     }
 }
@@ -661,10 +692,13 @@ pub enum Event {
 pub enum Action {
     /// Put a goal-relevant technology in the empty research queue.
     QueueTech { tech: String },
-    /// Put one goal-relevant building level in the compact construction queue.
+    /// Put one goal-relevant building level in the construction queue.
     ///
-    /// Sets head `remaining` from defs `required_construction` when present;
-    /// otherwise leaves it unset so wait ETA uses [`SimConfig::construction_days`].
+    /// Sets `remaining` from defs `required_construction` when present;
+    /// otherwise [`SimConfig::default_construction_cost`]. Allowed while other
+    /// jobs are in flight until parallel slots from capacity ÷ allocation cap
+    /// are full. Construction Sector levels are offered as a capacity lever
+    /// when other build candidates already exist for open economy/military atoms.
     QueueBuildingLevel { building: String },
     /// Queue a goal-relevant interest declaration.
     QueueInterest { kind: InterestKind, id: String },
@@ -959,14 +993,9 @@ fn successors_for_atoms_with_economy(
             .unwrap_or_else(|| research_days_for_tech(tech, config, economy));
         wait_candidates.push((days, Event::TechCompleted { tech: tech.clone() }));
     }
-    if let (Some(building), Some(_)) = (state.queued_building.as_ref(), economy) {
-        if let Some(days) = construction_wait_days(state, config) {
-            wait_candidates.push((
-                days,
-                Event::BuildingCompleted {
-                    building: building.clone(),
-                },
-            ));
+    if let (Some(_), Some(_)) = (state.queued_building.as_ref(), economy) {
+        if let Some((days, building)) = construction_wait_target(state, config) {
+            wait_candidates.push((days, Event::BuildingCompleted { building }));
         }
     }
     if let Some(queued) = state.queued_interest.as_ref().filter(|queued| {
@@ -1022,25 +1051,144 @@ fn successors_for_atoms_with_economy(
     result
 }
 
-/// Days until the construction head finishes under [`PlanningState::construction_rate`].
+/// Days until the soonest active construction job finishes under capacity split.
 ///
-/// When `remaining` is present (save in-flight work, or def
-/// `required_construction` set at enqueue), uses [`crate::tracks::days_for_work`].
-/// Otherwise falls back to [`SimConfig::construction_days`]. Returns [`None`]
-/// when rate is non-positive and remaining work is known (no finite ETA).
-fn construction_wait_days(state: &PlanningState, config: SimConfig) -> Option<u16> {
-    let remaining = state
-        .constructions
-        .first()
-        .and_then(|row| row.remaining)
-        .filter(|v| v.is_finite() && *v >= 0.0);
-    match remaining {
-        Some(work) => {
-            let days = crate::tracks::days_for_work(work, state.construction_rate)?;
-            Some(u16::try_from(days).unwrap_or(u16::MAX))
+/// Capacity is [`PlanningState::construction_rate`]. Each active job receives at
+/// most [`SimConfig::max_construction_allocation`] points/day; leftover capacity
+/// fills later queue entries. When `remaining` is present (save in-flight work,
+/// or def `required_construction` set at enqueue), uses
+/// [`crate::tracks::days_for_work`]. Otherwise falls back to
+/// [`SimConfig::construction_days`]. Returns [`None`] when rate is non-positive
+/// and remaining work is known (no finite ETA).
+fn construction_wait_target(state: &PlanningState, config: SimConfig) -> Option<(u16, String)> {
+    let allocs = construction_job_allocations(state, config);
+    let mut best: Option<(u16, String)> = None;
+    for (job, rate) in state.constructions.iter().zip(allocs.iter().copied()) {
+        if rate <= 0.0 {
+            continue;
         }
-        None => Some(config.construction_days),
+        let days = match job.remaining.filter(|v| v.is_finite() && *v >= 0.0) {
+            Some(work) => {
+                let days = crate::tracks::days_for_work(work, rate)?;
+                u16::try_from(days).unwrap_or(u16::MAX)
+            }
+            None => config.construction_days,
+        };
+        let replace = match &best {
+            None => true,
+            Some((best_days, best_building)) => {
+                days < *best_days || (days == *best_days && job.building < *best_building)
+            }
+        };
+        if replace {
+            best = Some((days, job.building.clone()));
+        }
     }
+    best
+}
+
+/// Days until the soonest construction completion (heuristic / tests).
+pub fn construction_wait_days(state: &PlanningState, config: SimConfig) -> Option<u16> {
+    construction_wait_target(state, config).map(|(days, _)| days)
+}
+
+/// Open atoms that imply the planner may need to build something.
+fn atoms_need_construction(atoms: &[Atom]) -> bool {
+    atoms.iter().any(|atom| {
+        matches!(
+            atom,
+            Atom::GoodPrice { .. }
+                | Atom::Gdp {
+                    rel: Rel::Ge | Rel::Gt | Rel::Eq,
+                    ..
+                }
+                | Atom::ArmyPower { .. }
+                | Atom::NavyPower { .. }
+        )
+    })
+}
+
+/// Construction Sector levels on the planning branch (world + deltas).
+pub fn construction_sector_levels(state: &PlanningState, economy: Option<&EconomyContext>) -> f64 {
+    if let Some(economy) = economy {
+        return economy
+            .world_for(state)
+            .buildings
+            .iter()
+            .filter(|b| b.building == BUILDING_CONSTRUCTION_SECTOR)
+            .map(|b| b.level.max(0.0))
+            .sum();
+    }
+    f64::from(
+        state
+            .building_level_deltas
+            .get(BUILDING_CONSTRUCTION_SECTOR)
+            .copied()
+            .unwrap_or(0),
+    )
+}
+
+/// National construction capacity from CS levels and [`SimConfig`] bases.
+pub fn construction_capacity_from_sectors(
+    state: &PlanningState,
+    economy: Option<&EconomyContext>,
+    config: SimConfig,
+) -> f64 {
+    let levels = construction_sector_levels(state, economy);
+    let capacity = f64::from(config.base_construction_capacity)
+        + f64::from(config.construction_per_cs_level) * levels;
+    if capacity.is_finite() && capacity > 0.0 {
+        capacity
+    } else {
+        f64::from(config.base_construction_capacity.max(1))
+    }
+}
+
+/// Sync [`PlanningState::construction_rate`] from Construction Sector levels.
+pub fn sync_construction_capacity(
+    state: &mut PlanningState,
+    economy: &EconomyContext,
+    config: SimConfig,
+) {
+    state.construction_rate = construction_capacity_from_sectors(state, Some(economy), config);
+}
+
+/// How many construction jobs may receive points under current capacity.
+pub fn max_parallel_construction_jobs(capacity: f64, allocation_cap: u16) -> usize {
+    let cap = f64::from(allocation_cap.max(1));
+    if !capacity.is_finite() || capacity <= 0.0 {
+        return 1;
+    }
+    ((capacity / cap).floor() as usize).max(1)
+}
+
+/// True when the compact parallel construction slots are full.
+fn construction_queue_full(state: &PlanningState, config: SimConfig) -> bool {
+    let max =
+        max_parallel_construction_jobs(state.construction_rate, config.max_construction_allocation);
+    state.constructions.len() >= max
+}
+
+/// Per-job points/day from the national pool (queue order, allocation cap).
+fn construction_job_allocations(state: &PlanningState, config: SimConfig) -> Vec<f64> {
+    let capacity = state.construction_rate;
+    let alloc_cap = f64::from(config.max_construction_allocation.max(1));
+    let max_jobs = max_parallel_construction_jobs(capacity, config.max_construction_allocation);
+    let mut remaining = if capacity.is_finite() && capacity > 0.0 {
+        capacity
+    } else {
+        0.0
+    };
+    let mut out = vec![0.0; state.constructions.len()];
+    for rate in out.iter_mut().take(max_jobs) {
+        if remaining <= 0.0 {
+            break;
+        }
+        let take = alloc_cap.min(remaining);
+        *rate = take;
+        remaining -= take;
+    }
+    out
 }
 
 /// Research duration for a queued tech: defs cost at [`crate::tracks::CONSTANT_RATE`]
@@ -1220,19 +1368,19 @@ pub fn apply_action_with_economy(
         }
         Action::QueueBuildingLevel { building } => {
             let economy = economy?;
-            if building.is_empty() || next.construction_busy() {
+            if building.is_empty() || construction_queue_full(&next, config) {
                 return None;
             }
             // Prefer defs `required_construction` as work points. When absent,
-            // leave `remaining` unset so [`construction_wait_days`] falls back
-            // to [`SimConfig::construction_days`] (and [`ensure_track_timers`]
-            // synthesizes work for parallel ticks).
+            // use [`SimConfig::default_construction_cost`] so allocation-based
+            // ETA stays well-defined.
             let remaining = economy
                 .defs
                 .buildings
                 .get(building.as_str())
                 .and_then(|b| b.required_construction)
-                .filter(|c| c.is_finite() && *c >= 0.0);
+                .filter(|c| c.is_finite() && *c >= 0.0)
+                .or(Some(f64::from(config.default_construction_cost)));
             next.push_construction(building.clone(), remaining);
         }
         Action::QueueInterest { kind, id } => {
@@ -1341,17 +1489,23 @@ fn ensure_track_timers(state: &mut PlanningState, config: SimConfig) {
     }
     if let Some(head) = state.constructions.first_mut() {
         if head.remaining.is_none() {
-            head.remaining = Some(f64::from(config.construction_days) * state.construction_rate);
+            head.remaining = Some(f64::from(config.default_construction_cost));
+        }
+    }
+    for job in state.constructions.iter_mut().skip(1) {
+        if job.remaining.is_none() {
+            job.remaining = Some(f64::from(config.default_construction_cost));
         }
     }
 }
 
-fn construction_timer_elapsed(state: &PlanningState) -> bool {
-    state
-        .constructions
-        .first()
-        .and_then(|row| row.remaining)
-        .is_some_and(|rem| rem.is_finite() && rem <= 0.0)
+fn construction_timer_elapsed(state: &PlanningState, building: &str) -> bool {
+    state.constructions.iter().any(|row| {
+        row.building == building
+            && row
+                .remaining
+                .is_some_and(|rem| rem.is_finite() && rem <= 0.0)
+    })
 }
 
 fn apply_wait_for_event(
@@ -1370,7 +1524,7 @@ fn apply_wait_for_event(
             if days == 0 && next.tech_days_left != Some(0) {
                 return None;
             }
-            next.tick_parallel_tracks(days);
+            next.tick_parallel_tracks(days, &construction_job_allocations(next, config));
             next.date = next.date.add_days(i32::from(days));
             next.queued_tech = None;
             next.tech_days_left = None;
@@ -1378,13 +1532,17 @@ fn apply_wait_for_event(
         }
         Event::BuildingCompleted { building } => {
             let economy = economy?;
-            if next.queued_building.as_deref() != Some(building.as_str()) {
+            if !next
+                .constructions
+                .iter()
+                .any(|row| row.building == *building)
+            {
                 return None;
             }
-            if days == 0 && !construction_timer_elapsed(next) {
+            if days == 0 && !construction_timer_elapsed(next, building) {
                 return None;
             }
-            next.tick_parallel_tracks(days);
+            next.tick_parallel_tracks(days, &construction_job_allocations(next, config));
             next.date = next.date.add_days(i32::from(days));
             next.complete_construction(building);
             *next
@@ -1393,6 +1551,9 @@ fn apply_wait_for_event(
                 .or_default() += 1;
             if is_military_planning_building(building) {
                 next.push_mil_building_level(building);
+            }
+            if building == BUILDING_CONSTRUCTION_SECTOR {
+                sync_construction_capacity(next, economy, config);
             }
             refresh_prices(next, economy);
         }
@@ -1404,7 +1565,7 @@ fn apply_wait_for_event(
             if days == 0 && next.interest_days_left != Some(0) {
                 return None;
             }
-            next.tick_parallel_tracks(days);
+            next.tick_parallel_tracks(days, &construction_job_allocations(next, config));
             next.date = next.date.add_days(i32::from(days));
             next.queued_interest = None;
             next.interest_days_left = None;
@@ -1424,7 +1585,7 @@ fn apply_wait_for_event(
             if days == 0 && next.hire_days_left != Some(0) {
                 return None;
             }
-            next.tick_parallel_tracks(days);
+            next.tick_parallel_tracks(days, &construction_job_allocations(next, config));
             next.date = next.date.add_days(i32::from(days));
             next.queued_hire = None;
             next.hire_days_left = None;
@@ -1437,7 +1598,7 @@ fn apply_wait_for_event(
             if days == 0 && next.law_days_left != Some(0) {
                 return None;
             }
-            next.tick_parallel_tracks(days);
+            next.tick_parallel_tracks(days, &construction_job_allocations(next, config));
             next.date = next.date.add_days(i32::from(days));
             next.queued_law = None;
             next.law_days_left = None;
@@ -1447,7 +1608,7 @@ fn apply_wait_for_event(
             if days == 0 {
                 return None;
             }
-            next.tick_parallel_tracks(days);
+            next.tick_parallel_tracks(days, &construction_job_allocations(next, config));
             next.date = next.date.add_days(i32::from(days));
             apply_payday_effects(next);
         }
@@ -1773,6 +1934,7 @@ mod tests {
         let economy = EconomyContext::new(world, defs, solve_opts);
         let config = SimConfig {
             construction_days: 30,
+            default_construction_cost: 30,
             max_added_levels_per_type: 2,
             ..SimConfig::default()
         };
@@ -1782,53 +1944,64 @@ mod tests {
             value: (initial_gdp + next_gdp) / 2.0,
         });
         let gdp_decisions = successors_with_economy(&state, &gdp_goal, config, &economy);
-        assert!(matches!(
-            gdp_decisions.as_slice(),
-            [Successor {
-                action: Action::QueueBuildingLevel { building },
-                ..
-            }] if building == "building_logging_camp"
-        ));
+        assert!(
+            gdp_decisions.iter().any(|edge| {
+                matches!(
+                    &edge.action,
+                    Action::QueueBuildingLevel { building } if building == "building_logging_camp"
+                )
+            }),
+            "gdp goal should queue logging camp; got {gdp_decisions:?}"
+        );
+        assert!(
+            gdp_decisions.iter().any(|edge| {
+                matches!(
+                    &edge.action,
+                    Action::QueueBuildingLevel { building }
+                        if building == BUILDING_CONSTRUCTION_SECTOR
+                )
+            }),
+            "gdp goal should also offer construction sector as capacity lever"
+        );
 
         let decisions = successors_with_economy(&state, &goal, config, &economy);
-        assert!(matches!(
-            decisions.as_slice(),
-            [Successor {
-                action: Action::QueueBuildingLevel { building },
-                days: 0,
-                ..
-            }] if building == "building_logging_camp"
-        ));
+        let logging = decisions
+            .iter()
+            .find(|edge| {
+                matches!(
+                    &edge.action,
+                    Action::QueueBuildingLevel { building } if building == "building_logging_camp"
+                )
+            })
+            .expect("good_price goal should queue logging camp");
+        assert_eq!(logging.days, 0);
         let repeated_decision =
-            apply_action_with_economy(&state, &decisions[0].action, Some(&economy), config)
-                .unwrap();
-        assert_eq!(repeated_decision, decisions[0].state);
-        assert_eq!(
-            repeated_decision.fingerprint(),
-            decisions[0].state.fingerprint()
-        );
-        let waits = successors_with_economy(&decisions[0].state, &goal, config, &economy);
-        assert_eq!(waits.len(), 1);
-        assert_eq!(waits[0].days, 30);
+            apply_action_with_economy(&state, &logging.action, Some(&economy), config).unwrap();
+        assert_eq!(repeated_decision, logging.state);
+        assert_eq!(repeated_decision.fingerprint(), logging.state.fingerprint());
+        let waits = successors_with_economy(&logging.state, &goal, config, &economy);
+        // May also offer CS if a parallel slot opens; filter to the wait edge.
+        let wait = waits
+            .iter()
+            .find(|edge| matches!(&edge.action, Action::WaitForEvent { .. }))
+            .expect("expected construction wait");
+        // With remaining=default_construction_cost (30) at rate 1.0 → 30 days.
+        assert_eq!(wait.days, 30);
         assert!(matches!(
-            waits[0].action,
+            wait.action,
             Action::WaitForEvent {
                 event: Event::BuildingCompleted { .. },
                 days: 30,
             }
         ));
-        assert!(evaluate(&goal, &waits[0].state));
-        assert_eq!(waits[0].state.gdp, next_gdp);
-        assert!(evaluate(&gdp_goal, &waits[0].state));
-        let repeated_wait = apply_action_with_economy(
-            &decisions[0].state,
-            &waits[0].action,
-            Some(&economy),
-            config,
-        )
-        .unwrap();
-        assert_eq!(repeated_wait, waits[0].state);
-        assert_eq!(repeated_wait.fingerprint(), waits[0].state.fingerprint());
+        assert!(evaluate(&goal, &wait.state));
+        assert_eq!(wait.state.gdp, next_gdp);
+        assert!(evaluate(&gdp_goal, &wait.state));
+        let repeated_wait =
+            apply_action_with_economy(&logging.state, &wait.action, Some(&economy), config)
+                .unwrap();
+        assert_eq!(repeated_wait, wait.state);
+        assert_eq!(repeated_wait.fingerprint(), wait.state.fingerprint());
         assert_eq!(
             waits[0]
                 .state
@@ -1844,15 +2017,35 @@ mod tests {
         let mut capped = state;
         for _ in 0..config.max_added_levels_per_type {
             let queue = successors_with_economy(&capped, &unreachable_gdp, config, &economy);
-            assert_eq!(queue.len(), 1);
+            let logging = queue
+                .iter()
+                .find(|edge| {
+                    matches!(
+                        &edge.action,
+                        Action::QueueBuildingLevel { building }
+                            if building == "building_logging_camp"
+                    )
+                })
+                .expect("should still offer logging camp under GDP");
             let complete =
-                successors_with_economy(&queue[0].state, &unreachable_gdp, config, &economy);
-            assert_eq!(complete.len(), 1);
-            capped = complete[0].state.clone();
+                successors_with_economy(&logging.state, &unreachable_gdp, config, &economy);
+            let wait = complete
+                .iter()
+                .find(|edge| matches!(&edge.action, Action::WaitForEvent { .. }))
+                .expect("expected construction wait after enqueue");
+            capped = wait.state.clone();
         }
         assert!(
-            successors_with_economy(&capped, &unreachable_gdp, config, &economy).is_empty(),
-            "per-type cap must make an unreachable GDP search finite"
+            successors_with_economy(&capped, &unreachable_gdp, config, &economy)
+                .iter()
+                .all(|edge| {
+                    !matches!(
+                        &edge.action,
+                        Action::QueueBuildingLevel { building }
+                            if building == "building_logging_camp"
+                    )
+                }),
+            "per-type cap must stop further logging camp levels"
         );
     }
 
@@ -2517,6 +2710,351 @@ mod tests {
         ));
         assert!(second_wait.state.has_tech("nitroglycerin"));
         assert_eq!(start_date.days_until(&second_wait.state.date), 100);
+    }
+
+    #[test]
+    fn higher_cs_capacity_shortens_construction_wait() {
+        use crate::world::{ConstructionQueueKind, PlanningConstruction};
+
+        let defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                ..WorldState::default()
+            }],
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(1),
+                building: "building_logging_camp".into(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: Vec::new(),
+                saved_inputs: Vec::new(),
+                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+            }],
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let goal = Goal::Atom(Atom::GoodPrice {
+            good: "wood".into(),
+            rel: Rel::Le,
+            value: 0.0,
+        });
+        let job = || PlanningConstruction {
+            order_id: 1,
+            queue: ConstructionQueueKind::Government,
+            state_id: None,
+            building: "building_logging_camp".into(),
+            remaining: Some(100.0),
+        };
+        let slow = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            queued_building: Some("building_logging_camp".into()),
+            constructions: vec![job()],
+            construction_rate: 5.0,
+            good_prices: vec![("wood".into(), 30.0)],
+            ..PlanningParts::default()
+        });
+        let fast = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            queued_building: Some("building_logging_camp".into()),
+            constructions: vec![job()],
+            construction_rate: 20.0,
+            good_prices: vec![("wood".into(), 30.0)],
+            ..PlanningParts::default()
+        });
+        let config = SimConfig::default();
+        let slow_days = construction_wait_days(&slow, config).unwrap();
+        let fast_days = construction_wait_days(&fast, config).unwrap();
+        assert_eq!(slow_days, 20); // ceil(100/5)
+        assert_eq!(fast_days, 5); // ceil(100/20)
+        assert!(fast_days < slow_days);
+        let _ = (&economy, &goal);
+    }
+
+    #[test]
+    fn parallel_allocation_advances_two_jobs_under_capacity_cap() {
+        use crate::world::{ConstructionQueueKind, PlanningConstruction};
+
+        let defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                ..WorldState::default()
+            }],
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(1),
+                building: "building_logging_camp".into(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: Vec::new(),
+                saved_inputs: Vec::new(),
+                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+            }],
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let config = SimConfig {
+            max_construction_allocation: 5,
+            ..SimConfig::default()
+        };
+        // Capacity 10 / alloc 5 → two parallel slots.
+        let state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            queued_building: Some("building_a".into()),
+            constructions: vec![
+                PlanningConstruction {
+                    order_id: 1,
+                    queue: ConstructionQueueKind::Government,
+                    state_id: None,
+                    building: "building_a".into(),
+                    remaining: Some(50.0),
+                },
+                PlanningConstruction {
+                    order_id: 2,
+                    queue: ConstructionQueueKind::Government,
+                    state_id: None,
+                    building: "building_b".into(),
+                    remaining: Some(50.0),
+                },
+            ],
+            construction_rate: 10.0,
+            good_prices: vec![("wood".into(), 30.0)],
+            ..PlanningParts::default()
+        });
+        assert_eq!(max_parallel_construction_jobs(10.0, 5), 2);
+        // Each job gets 5/day → ceil(50/5)=10 days to first completion.
+        assert_eq!(construction_wait_days(&state, config), Some(10));
+        let goal = Goal::Atom(Atom::GoodPrice {
+            good: "wood".into(),
+            rel: Rel::Le,
+            value: 0.0,
+        });
+        let waits = successors_with_economy(&state, &goal, config, &economy);
+        let wait = waits
+            .iter()
+            .find(|edge| matches!(&edge.action, Action::WaitForEvent { .. }))
+            .expect("wait");
+        assert_eq!(wait.days, 10);
+        // After completing one, the other should have 0 remaining (also finished).
+        assert!(wait.state.constructions.len() <= 1);
+        if let Some(left) = wait.state.constructions.first() {
+            assert!(
+                left.remaining.is_some_and(|r| r <= 0.0 + 1e-9),
+                "peer job should be drained in parallel: {left:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn completing_construction_sector_raises_capacity() {
+        use vic3_defs::BuildingType;
+
+        let mut defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        defs.buildings.insert(
+            BUILDING_CONSTRUCTION_SECTOR.into(),
+            BuildingType {
+                id: BUILDING_CONSTRUCTION_SECTOR.into(),
+                group: None,
+                city_type: None,
+                production_method_groups: Vec::new(),
+                required_construction: Some(10.0),
+            },
+        );
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                ..WorldState::default()
+            }],
+            buildings: vec![
+                WorldBuilding {
+                    id: 1,
+                    state: Some(1),
+                    building: "building_logging_camp".into(),
+                    level: 1.0,
+                    staffing: 1.0,
+                    production_methods: Vec::new(),
+                    saved_inputs: Vec::new(),
+                    saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+                },
+                WorldBuilding {
+                    id: 2,
+                    state: Some(1),
+                    building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                    level: 0.0,
+                    staffing: 0.0,
+                    production_methods: Vec::new(),
+                    saved_inputs: Vec::new(),
+                    saved_outputs: Vec::new(),
+                },
+            ],
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let config = SimConfig {
+            base_construction_capacity: 1,
+            construction_per_cs_level: 5,
+            default_construction_cost: 10,
+            ..SimConfig::default()
+        };
+        let state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            construction_rate: 1.0,
+            good_prices: vec![("wood".into(), 30.0)],
+            ..PlanningParts::default()
+        });
+        let queued = apply_action_with_economy(
+            &state,
+            &Action::QueueBuildingLevel {
+                building: BUILDING_CONSTRUCTION_SECTOR.into(),
+            },
+            Some(&economy),
+            config,
+        )
+        .expect("queue CS");
+        let done = apply_action_with_economy(
+            &queued,
+            &Action::WaitForEvent {
+                event: Event::BuildingCompleted {
+                    building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                },
+                days: 10,
+            },
+            Some(&economy),
+            config,
+        )
+        .expect("complete CS");
+        assert_eq!(
+            done.building_level_deltas.get(BUILDING_CONSTRUCTION_SECTOR),
+            Some(&1)
+        );
+        // base 1 + 5 per CS level
+        assert!((done.construction_rate - 6.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn gdp_goal_can_queue_construction_sector_as_means_to_an_end() {
+        let defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                ..WorldState::default()
+            }],
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(1),
+                building: "building_logging_camp".into(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: Vec::new(),
+                saved_inputs: Vec::new(),
+                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+            }],
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            gdp: 1.0,
+            good_prices: vec![("wood".into(), 20.0)],
+            ..PlanningParts::default()
+        });
+        let goal = Goal::Atom(Atom::Gdp {
+            rel: Rel::Ge,
+            value: 1.0e12,
+        });
+        let edges = successors_with_economy(&state, &goal, SimConfig::default(), &economy);
+        assert!(
+            edges.iter().any(|edge| {
+                matches!(
+                    &edge.action,
+                    Action::QueueBuildingLevel { building }
+                        if building == BUILDING_CONSTRUCTION_SECTOR
+                )
+            }),
+            "expected CS means-to-an-end edge among {edges:?}"
+        );
     }
 
     #[test]

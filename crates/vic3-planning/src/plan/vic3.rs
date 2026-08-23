@@ -286,15 +286,10 @@ fn single_tech_research_eta(
 
 fn construction_eta_days(state: &PlanningState, config: SimConfig) -> u32 {
     let fallback = u32::from(config.construction_days.max(1));
-    let Some(work) = state
-        .constructions
-        .first()
-        .and_then(|row| row.remaining)
-        .filter(|v| v.is_finite() && *v >= 0.0)
-    else {
-        return fallback;
-    };
-    crate::tracks::days_for_work(work, state.construction_rate).unwrap_or(fallback)
+    crate::sim::construction_wait_days(state, config)
+        .map(u32::from)
+        .unwrap_or(fallback)
+        .max(1)
 }
 
 impl SearchNode for Vic3Node {
