@@ -224,6 +224,150 @@ mod tests {
     }
 
     #[test]
+    fn spotcheck_pea_agrees_with_full_astar_on_branching_fixtures() {
+        use crate::military::{ModeledMilBuilding, UnitCombatStats, BUILDING_BARRACKS};
+        use crate::plan::plan;
+
+        let cases: Vec<(&str, Vic3Node)> = vec![
+            (
+                "research",
+                Vic3Node::new(
+                    PlanningState::from_parts(PlanningParts {
+                        country: "GER".into(),
+                        ..PlanningParts::default()
+                    }),
+                    compile("research(tech=nitroglycerin)").unwrap(),
+                    SimConfig::default(),
+                ),
+            ),
+            (
+                "research_and",
+                Vic3Node::new(
+                    PlanningState::from_parts(PlanningParts {
+                        country: "GER".into(),
+                        ..PlanningParts::default()
+                    }),
+                    compile("has_tech(railways) && has_tech(nitroglycerin)").unwrap(),
+                    SimConfig::default(),
+                ),
+            ),
+            (
+                "interest",
+                Vic3Node::new(
+                    PlanningState::default(),
+                    compile("interest_in(region=region_western_europe)").unwrap(),
+                    SimConfig {
+                        interest_days: 25,
+                        ..SimConfig::default()
+                    },
+                ),
+            ),
+            (
+                "law",
+                Vic3Node::new(
+                    PlanningState::default(),
+                    compile("has_law(law_homesteading)").unwrap(),
+                    SimConfig::default(),
+                ),
+            ),
+            (
+                "declare_war",
+                Vic3Node::new(
+                    PlanningState::from_parts(PlanningParts {
+                        country: "GER".into(),
+                        solvent: true,
+                        good_prices: vec![("ammunition".into(), 30.0)],
+                        army_power_projection: Some(150.0),
+                        army_pp_baseline: Some(150.0),
+                        ..PlanningParts::default()
+                    }),
+                    compile("declare-war(state=alsace)").unwrap(),
+                    SimConfig {
+                        interest_days: 30,
+                        ..SimConfig::default()
+                    },
+                ),
+            ),
+            ("army", {
+                let per = UnitCombatStats::army_default().full_power_projection();
+                let levels = (100.0 / per).ceil();
+                Vic3Node::new(
+                    PlanningState::from_parts(PlanningParts {
+                        country: "GER".into(),
+                        army_power_projection: Some(0.0),
+                        army_pp_baseline: Some(0.0),
+                        mil_buildings: vec![ModeledMilBuilding {
+                            building: BUILDING_BARRACKS.into(),
+                            levels,
+                            staffing: 0.0,
+                        }],
+                        ..PlanningParts::default()
+                    }),
+                    compile("army_power_projection >= 100").unwrap(),
+                    SimConfig {
+                        army_training_days: 77,
+                        ..SimConfig::default()
+                    },
+                )
+            }),
+            (
+                "solvent",
+                Vic3Node::new(
+                    PlanningState::from_parts(PlanningParts {
+                        country: "GER".into(),
+                        debt_principal: Some(1_000.0),
+                        credit_limit: Some(1_000.0),
+                        credit_headroom: Some(0.0),
+                        solvent: false,
+                        weekly_balance: Some(100.0),
+                        treasury: 0.0,
+                        ..PlanningParts::default()
+                    }),
+                    compile("solvent").unwrap(),
+                    SimConfig {
+                        payday_days: 7,
+                        ..SimConfig::default()
+                    },
+                ),
+            ),
+        ];
+
+        for (name, root) in cases {
+            let branch = root.sim_successors().len();
+            let (_, vic3_cost) = shortest_path::<_, PairingHeap<_, _>>(&root)
+                .unwrap_or_else(|| panic!("{name}: full A* unreachable"));
+            let pea_root = PeaNode::ready(root.clone());
+            let pea_branch = pea_root.successors().len();
+            let (_, pea_cost) = shortest_path::<_, PairingHeap<_, _>>(&pea_root)
+                .unwrap_or_else(|| panic!("{name}: PEA* unreachable"));
+            assert_eq!(
+                pea_cost, vic3_cost,
+                "{name}: PEA day_cost {pea_cost} != full A* {vic3_cost} (sim_branch={branch}, pea_first_expand={pea_branch})"
+            );
+
+            // Production `plan()` path (PEA-wired) must match full A* cost.
+            let via_plan = plan(
+                root.state().clone(),
+                root.goal().clone(),
+                root.config(),
+                10_000,
+                0.0,
+                vec![],
+            )
+            .unwrap_or_else(|e| panic!("{name}: plan() failed: {e}"));
+            assert_eq!(
+                via_plan.day_cost, vic3_cost,
+                "{name}: plan() day_cost {} != full A* {vic3_cost}",
+                via_plan.day_cost
+            );
+            eprintln!(
+                "spotcheck ok {name}: days={vic3_cost} sim_branch={branch} pea_inserts={pea_branch} actions={}",
+                via_plan.actions.len()
+            );
+        }
+    }
+
+    #[test]
     fn emit_beam_defers_past_fixed_width() {
         // Synthetic: build a Ready node and inspect successor count shape by
         // ensuring Expanding identity differs from Ready when deferred.
@@ -242,5 +386,70 @@ mod tests {
             .iter()
             .all(|(n, _)| matches!(n.inner, PeaInner::Ready(_))));
         assert!(!succs.is_empty());
+    }
+
+    /// Live Prussia GDP bump: PEA* day cost must match full A*.
+    ///
+    /// ```text
+    /// VIC3_SAVE=…/prussia_1836_01_01.v3 VIC3_DEFS=…/defs.postcard \
+    ///   cargo test -p vic3-planning --lib \
+    ///   plan::pea::tests::spotcheck_live_save_gdp_pea_vs_full_astar \
+    ///   -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "set VIC3_SAVE and VIC3_DEFS for live Prussia GDP spot-check"]
+    fn spotcheck_live_save_gdp_pea_vs_full_astar() {
+        use crate::sim::EconomyContext;
+        use std::time::Instant;
+        use vic3_load::{empty_tokens, load_path_world, load_tokens_path};
+        use vic3_prices::{solve, SolveOpts, World};
+
+        let save_path = std::env::var("VIC3_SAVE").expect("VIC3_SAVE");
+        let defs = {
+            let path = std::env::var("VIC3_DEFS").expect("VIC3_DEFS");
+            vic3_defs::decode_blob(&std::fs::read(path).expect("defs blob")).expect("decode")
+        };
+        let tokens = match std::env::var("VIC3_TOKENS") {
+            Ok(path) => load_tokens_path(path).expect("tokens"),
+            Err(_) => empty_tokens(),
+        };
+        let save = load_path_world(&save_path, tokens).expect("load save");
+        let world = World::from_save(&save, &defs);
+        let country = world.player_country_tag().expect("player tag").to_string();
+        let prices = solve(&world, &defs, SolveOpts::default());
+        let state =
+            PlanningState::from_world_with_prices(&world, &country, &prices).expect("state");
+        let current_gdp = state.gdp;
+        let target = (current_gdp * 1.005).max(current_gdp + 500.0);
+        let goal_src = format!("gdp >= {target}");
+        eprintln!("live: country={country} gdp={current_gdp} target={target}");
+
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let root = Vic3Node::new_with_economy(
+            state,
+            compile(&goal_src).expect("compile"),
+            SimConfig::default(),
+            economy,
+        );
+        let branch = root.sim_successors().len();
+        let pea_inserts = PeaNode::ready(root.clone()).successors().len();
+        eprintln!("live: sim_branch={branch} pea_first_expand_inserts={pea_inserts} (beam={DEFAULT_PEA_BEAM})");
+        assert!(branch > 0, "expected GDP successors; got 0");
+        // Note: building-candidate generation may already apply first-of-type /
+        // dominance filters, so branch can be < beam (no Expanding cursor).
+        // Spot-check still requires PEA* and full A* agree on day cost.
+
+        let t0 = Instant::now();
+        let (_, vic3_cost) =
+            shortest_path::<_, PairingHeap<_, _>>(&root).expect("full A* GDP bump");
+        let vic3_ms = t0.elapsed().as_millis();
+
+        let t1 = Instant::now();
+        let (_, pea_cost) =
+            shortest_path::<_, PairingHeap<_, _>>(&PeaNode::ready(root)).expect("PEA* GDP bump");
+        let pea_ms = t1.elapsed().as_millis();
+
+        eprintln!("live: full_A*={vic3_cost}d ({vic3_ms}ms) PEA*={pea_cost}d ({pea_ms}ms)");
+        assert_eq!(pea_cost, vic3_cost);
     }
 }
