@@ -47,6 +47,6 @@ export const config = {
     mochaOpts: {
         ui: 'bdd',
         // Desktop Load runs use_save + pricing on blocking workers.
-        timeout: 120_000,
+        timeout: 300_000,
     },
 }

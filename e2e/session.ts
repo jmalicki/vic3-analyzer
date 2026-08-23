@@ -21,9 +21,13 @@ export async function ensureAppOpen(): Promise<void> {
     await browser.url('')
   }
   await expect($('body')).toBeExisting()
+  // Linux WebKit / cold Tauri can take well over 15s before the title is ready.
   await browser.waitUntil(
     async () => (await browser.getTitle()).includes('Victoria 3 Analyzer'),
-    { timeout: 15_000, timeoutMsg: 'title never contained Victoria 3 Analyzer' },
+    {
+      timeout: isTauriE2e() ? 120_000 : 15_000,
+      timeoutMsg: 'title never contained Victoria 3 Analyzer',
+    },
   )
 }
 
