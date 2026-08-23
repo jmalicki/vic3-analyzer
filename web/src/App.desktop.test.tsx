@@ -1,4 +1,5 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { invokeTauri } from './tauriApi'
@@ -42,6 +43,7 @@ const invoke = vi.mocked(invokeTauri)
 
 describe('App (desktop / Tauri)', () => {
   beforeEach(() => {
+    window.location.hash = ''
     invoke.mockReset()
     invoke.mockImplementation(async (cmd) => {
       if (cmd === 'get_dashboard') {
@@ -70,15 +72,27 @@ describe('App (desktop / Tauri)', () => {
     cleanup()
   })
 
-  it('hides the upload drop zone and shows the catalog', async () => {
+  it('hides upload, shows a compact save chip, and puts the catalog on Saves', async () => {
+    const user = userEvent.setup()
     render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Loaded save/i)).toBeInTheDocument()
+    })
+    expect(screen.queryByLabelText(/Analysis files/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Choose save/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Saves' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
+
+    // Default desktop landing is the Saves workspace.
     await waitFor(() => {
       expect(screen.getByLabelText(/Desktop save catalog/i)).toBeInTheDocument()
     })
-    expect(screen.queryByLabelText(/Analysis files/i)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
-    expect(
-      screen.getByText(/auto-detect game and saves/i),
-    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Prices' }))
+    await waitFor(() => {
+      expect(screen.queryByLabelText(/Desktop save catalog/i)).not.toBeInTheDocument()
+    })
+    expect(screen.getByLabelText(/Loaded save/i)).toBeInTheDocument()
   })
 })

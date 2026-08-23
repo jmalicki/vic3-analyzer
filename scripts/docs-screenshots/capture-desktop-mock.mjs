@@ -136,7 +136,7 @@ async function main() {
     await installTauriMock(page)
 
     await page.goto(server.url, { waitUntil: 'domcontentloaded', timeout: 60_000 })
-    // Desktop path: no IndexedDB defs / file upload — catalog + use_save via __TAURI__ mock.
+    // Desktop lands on Saves; catalog + use_save via __TAURI__ mock.
     await page.getByLabel('Desktop save catalog').waitFor({ timeout: 60_000 })
     await page.getByRole('button', { name: 'Load' }).first().click()
     await waitReady(page)

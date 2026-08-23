@@ -103,8 +103,9 @@ The desktop and web apps share one React SPA, with a few deliberate differences:
 
 | Concern | Web | Desktop (Tauri) |
 | --- | --- | --- |
-| Save / definitions input | Drop zone + folder → defs blob (browser-local) | Catalog from disk; no upload screen |
+| Save / definitions input | Drop zone + folder → defs blob (browser-local) | **Saves** workspace lists disk catalog; compact chip shows the loaded stub |
 | Game folder | Built once via DefsBuilder | Auto-detected; override in **Settings** |
+| Heavy load | wasm worker | `use_save` / SQL run on a blocking pool (UI stays responsive) |
 | Advanced Query | Not available | Native SQL engine |
 
-Use **Settings** when auto-detect is wrong; paths are shared with `vic3-analyzer mcp` via `config.toml`.
+Use **Saves** to pick a campaign; use **Settings** when auto-detect is wrong. Paths are shared with `vic3-analyzer mcp` via `config.toml`.

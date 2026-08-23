@@ -117,6 +117,9 @@ pub fn read_save_bytes(location: String) -> Result<Vec<u8>, String> {
 
 /// Bind analysis + SQL session by filename stub.
 ///
+/// Runs on a blocking thread pool so the WebView / UI thread stay responsive
+/// (save parse + defs + price solve can take many seconds).
+///
 /// # Arguments
 ///
 /// * `name` — stub (`autosave` or `autosave.v3`).
@@ -127,15 +130,20 @@ pub fn read_save_bytes(location: String) -> Result<Vec<u8>, String> {
 ///
 /// Ambiguous/missing stub, missing defs/tokens, load/solve failure (message string).
 #[tauri::command]
-pub fn use_save(
-    state: State<'_, AppState>,
+pub async fn use_save(
+    app: AppHandle,
     name: String,
     location: Option<String>,
     solve_opts_json: Option<String>,
 ) -> Result<String, String> {
-    let mut session = state.inner.lock().map_err(|_| "state lock poisoned")?;
     let opts = solve_opts_json.unwrap_or_else(|| "{}".into());
-    session.use_save(&name, location.as_deref(), &opts)
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut session = state.inner.lock().map_err(|_| "state lock poisoned")?;
+        session.use_save(&name, location.as_deref(), &opts)
+    })
+    .await
+    .map_err(|e| format!("use_save join: {e}"))?
 }
 
 /// Prices JSON for the bound analysis session (`vic3-api`).
@@ -170,22 +178,33 @@ pub fn loaded_alerts(state: State<'_, AppState>) -> Result<String, String> {
 ///
 /// No loaded analysis, goal parse/plan failure, or lock poison.
 #[tauri::command]
-pub fn loaded_gaps(state: State<'_, AppState>, goal: String) -> Result<String, String> {
-    let session = state.inner.lock().map_err(|_| "state lock poisoned")?;
-    session.loaded_gaps_json(&goal)
+pub async fn loaded_gaps(app: AppHandle, goal: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let session = state.inner.lock().map_err(|_| "state lock poisoned")?;
+        session.loaded_gaps_json(&goal)
+    })
+    .await
+    .map_err(|e| format!("loaded_gaps join: {e}"))?
 }
 
 /// Advanced Query: one read-only statement → `{ columns, rows, row_count }` JSON.
 ///
 /// Same result shape as MCP `query` (`docs/mcp.md` / `docs/sql.md`).
+/// Off the UI thread so long queries do not beachball the WebView.
 ///
 /// # Errors
 ///
 /// SQL / session errors as strings; lock poison.
 #[tauri::command]
-pub fn sql_query(state: State<'_, AppState>, sql: String) -> Result<String, String> {
-    let mut session = state.inner.lock().map_err(|_| "state lock poisoned")?;
-    session.sql_query(&sql)
+pub async fn sql_query(app: AppHandle, sql: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut session = state.inner.lock().map_err(|_| "state lock poisoned")?;
+        session.sql_query(&sql)
+    })
+    .await
+    .map_err(|e| format!("sql_query join: {e}"))?
 }
 
 /// Advanced Query docs panel: `docs/sql.md` + UDF index (future `vic3://docs/sql`).

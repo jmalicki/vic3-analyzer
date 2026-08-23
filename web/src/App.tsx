@@ -41,7 +41,7 @@ import { PriceExplorer } from './PriceExplorer'
 import { QueryPane } from './QueryPane'
 import { StatesPane } from './StatesPane'
 import { ProgressBar } from './ProgressBar'
-import { DesktopCatalog, type SaveStub } from './DesktopCatalog'
+import { DesktopCatalog, DesktopSaveChip, type SaveStub } from './DesktopCatalog'
 import { isTauri } from './env'
 import { SettingsPane } from './SettingsPane'
 import {
@@ -73,7 +73,6 @@ import type { WasmApi } from './wasm'
 import { formatAnalysisEngineLoadError } from './wasm'
 import { loadWasmApi } from './wasmClient'
 import {
-  DESKTOP_NAV,
   hashForView,
   parseHash,
   WORKSPACE_NAV,
@@ -295,7 +294,11 @@ function App({ wasmApi }: Props) {
     building: '',
     extra_levels: 1,
   })
-  const [activeView, setActiveView] = useState<WorkspaceView>(() => parseHash().view ?? 'prices')
+  const [activeView, setActiveView] = useState<WorkspaceView>(() => {
+    const parsed = parseHash().view
+    if (parsed) return parsed
+    return isTauri() ? 'saves' : 'prices'
+  })
   const [militaryTab, setMilitaryTab] = useState<MilitaryTab>(() => parseHash().militaryTab)
   const [buildingsTab, setBuildingsTab] = useState<BuildingsTab>(
     () => parseHash().buildingsTab,
@@ -409,6 +412,7 @@ function App({ wasmApi }: Props) {
       const pricesJson = await invokeTauri<string>('loaded_prices')
       setResult(JSON.parse(pricesJson) as PricesResult)
       setAnalysisReady(true)
+      selectView('prices')
     } catch (reason) {
       setDesktopSaveName(undefined)
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -949,9 +953,11 @@ function App({ wasmApi }: Props) {
     ? [...(desktopSaveName ? [] : ['a cataloged save'])]
     : [...(saveFile ? [] : ['a .v3 save']), ...(hasDefs ? [] : ['game definitions'])]
   // The archive only reads stored records, so it stays usable without inputs.
-  // Settings is always available on desktop so paths can be fixed without a save.
+  // Saves / Settings stay available on desktop so paths and catalog work without a bind.
   const gated =
-    missing.length > 0 && activeView !== 'archive' && !(desktop && activeView === 'settings')
+    missing.length > 0 &&
+    activeView !== 'archive' &&
+    !(desktop && (activeView === 'settings' || activeView === 'saves'))
   const defsCounts = defsSummary
     ? ` — format v${defsSummary.blob_version}, ${defsSummary.goods} goods, ${defsSummary.labels} names, ${defsSummary.icons} icons, ${defsSummary.production_methods} production methods`
     : ''
@@ -959,7 +965,13 @@ function App({ wasmApi }: Props) {
   // folder pick that missed common/goods.
   const thinDefs = Boolean(defsSummary && defsSummary.goods < 10)
   const pricesListView = !/^#\/prices\/(good|state|building)\//.test(locationHash)
-  const navItems = desktop ? [...WORKSPACE_NAV, ...DESKTOP_NAV] : WORKSPACE_NAV
+  const navItems = desktop
+    ? [
+        { view: 'saves' as const, label: 'Saves' },
+        ...WORKSPACE_NAV,
+        { view: 'settings' as const, label: 'Settings' },
+      ]
+    : WORKSPACE_NAV
 
   return (
     <main>
@@ -974,10 +986,12 @@ function App({ wasmApi }: Props) {
       </header>
 
       {desktop ? (
-        <DesktopCatalog
+        <DesktopSaveChip
           loadedName={desktopSaveName}
-          refreshKey={catalogRefresh}
-          onUseSave={useDesktopSave}
+          summaryTag={summary?.tag}
+          summaryDate={summary?.date}
+          busy={busy}
+          onOpenSaves={() => selectView('saves')}
         />
       ) : (
       <section className="inputs" aria-label="Analysis files">
@@ -1189,7 +1203,7 @@ function App({ wasmApi }: Props) {
       {gated && (
         <p className="defs-required" role="status">
           {desktop
-            ? `Analysis needs ${missing.join(' and ')}. Pick a save above, or open Settings if the game folder is wrong.`
+            ? `Analysis needs ${missing.join(' and ')}. Open Saves to pick one, or Settings if the game folder is wrong.`
             : !hasDefs && demoDefsStatus === 'loading'
               ? 'Loading definitions…'
               : `Analysis needs ${missing.join(' and ')}. Add ${
@@ -1525,6 +1539,14 @@ function App({ wasmApi }: Props) {
       )}
 
       {activeView === 'query' && <QueryPane />}
+
+      {activeView === 'saves' && desktop && (
+        <DesktopCatalog
+          loadedName={desktopSaveName}
+          refreshKey={catalogRefresh}
+          onUseSave={useDesktopSave}
+        />
+      )}
 
       {activeView === 'settings' && desktop && (
         <SettingsPane onConfigChange={() => setCatalogRefresh((n) => n + 1)} />

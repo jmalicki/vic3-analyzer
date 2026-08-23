@@ -37,6 +37,7 @@ function formatMtime(mtime: number): string {
   }
 }
 
+/** Full-page save picker (desktop `#/saves`). */
 export function DesktopCatalog({ loadedName, onUseSave, refreshKey = 0 }: Props) {
   const [dashboard, setDashboard] = useState<DashboardDto>()
   const [saves, setSaves] = useState<SaveStub[]>([])
@@ -85,37 +86,38 @@ export function DesktopCatalog({ loadedName, onUseSave, refreshKey = 0 }: Props)
   }
 
   return (
-    <section className="desktop-catalog" aria-label="Desktop save catalog">
-      <div className="desktop-catalog-status">
+    <section className="workspace-page" aria-labelledby="saves-heading" aria-label="Desktop save catalog">
+      <div className="tool-heading">
         <div>
           <p className="eyebrow">DESKTOP</p>
-          <strong>
-            {dashboard?.config.game_dir
-              ? dashboard.config.game_dir
-              : dashboard?.game_detected
-                ? 'Game folder auto-detected'
-                : 'No game folder yet'}
-          </strong>
-          <p className="desktop-catalog-hint">
-            Saves and definitions come from disk — configure paths in Settings if auto-detect is
-            wrong.
+          <h2 id="saves-heading">Saves</h2>
+          <p>
+            Pick a cataloged save from disk. Paths stay in Rust — configure the game folder in
+            Settings if auto-detect is wrong.
           </p>
         </div>
-        <div className="desktop-catalog-actions">
-          <button type="button" className="secondary" id="refresh-saves" onClick={() => void refresh()}>
-            Refresh list
-          </button>
-        </div>
+        <button type="button" className="secondary" id="refresh-saves" onClick={() => void refresh()}>
+          Refresh list
+        </button>
       </div>
 
-      {status && (
-        <p className="desktop-catalog-live" id="saves-status" role="status">
-          {status}
-        </p>
-      )}
+      <p className="desktop-catalog-live" id="saves-status" role="status">
+        {dashboard?.config.game_dir
+          ? dashboard.config.game_dir
+          : dashboard?.game_detected
+            ? 'Game folder auto-detected'
+            : 'No game folder yet'}
+        {status ? ` · ${status}` : ''}
+      </p>
       {error && (
         <p className="desktop-catalog-live" role="alert">
           {error}
+        </p>
+      )}
+      {busy && (
+        <p className="desktop-catalog-live" role="status">
+          Loading {loadingName}… the window should stay responsive while analysis runs in the
+          background.
         </p>
       )}
 
@@ -165,5 +167,40 @@ export function DesktopCatalog({ loadedName, onUseSave, refreshKey = 0 }: Props)
         </div>
       )}
     </section>
+  )
+}
+
+interface ChipProps {
+  loadedName?: string
+  summaryTag?: string
+  summaryDate?: string
+  busy?: boolean
+  onOpenSaves: () => void
+}
+
+/** Compact loaded-save chip for the desktop chrome (not the full catalog). */
+export function DesktopSaveChip({
+  loadedName,
+  summaryTag,
+  summaryDate,
+  busy,
+  onOpenSaves,
+}: ChipProps) {
+  const detail =
+    loadedName && (summaryTag || summaryDate)
+      ? [summaryTag, summaryDate].filter(Boolean).join(' · ')
+      : undefined
+
+  return (
+    <div className="desktop-save-chip" role="status" aria-label="Loaded save">
+      <div className="desktop-save-chip-text">
+        <span className="hud-label">Save</span>
+        <strong>{busy ? 'Loading…' : loadedName ?? 'None loaded'}</strong>
+        {detail && !busy ? <span className="desktop-save-chip-detail">{detail}</span> : null}
+      </div>
+      <button type="button" className="secondary" onClick={onOpenSaves}>
+        {loadedName ? 'Change save…' : 'Choose save…'}
+      </button>
+    </div>
   )
 }
