@@ -8,6 +8,8 @@ import {
   desktopUiDir,
   outDir,
   packageRoot,
+  requireDefsBlob,
+  requireWasm,
   saveFixture,
 } from './lib/paths.mjs'
 import { newShotPage, writeShot } from './lib/shot.mjs'
@@ -20,7 +22,7 @@ const fixture = JSON.parse(
 )
 
 /**
- * Install window.__TAURI__ before the companion script runs.
+ * Install window.__TAURI__ before the React app runs (enables Query pane).
  * @param {import('playwright').Page} page
  */
 async function installTauriMock(page) {
@@ -41,7 +43,7 @@ async function installTauriMock(page) {
         return queries.shortage
       }
       if (s.includes('from states')) return queries.states
-      if (s.includes('from goods where') || s.includes("good =")) return queries.prices
+      if (s.includes('from goods where') || s.includes('good =')) return queries.prices
       if (s.includes('plan(')) return queries.plan
       if (s.includes('from saves')) return queries.saves
       return queries.default
@@ -65,11 +67,11 @@ async function installTauriMock(page) {
             case 'read_save_bytes':
               return window.__MOCK_SAVE_BYTES__
             case 'list_saves':
-              return data.queries.saves.rows.map(row => ({
+              return data.queries.saves.rows.map((row) => ({
                 name: row[0],
                 kind: row[1],
                 mtime: 1672531200000,
-                location: 'local'
+                location: 'local',
               }))
             case 'use_save':
               loaded = args.name || loaded
@@ -104,6 +106,7 @@ async function installTauriMock(page) {
 
 async function startStaticServer(root) {
   const server = createServer((request, response) => {
+    // Pages builds use base `/vic3-analyzer/`; strip that prefix for static serve.
     if (request.url.startsWith('/vic3-analyzer/')) {
       request.url = request.url.substring('/vic3-analyzer'.length)
     }
@@ -113,66 +116,89 @@ async function startStaticServer(root) {
   const { port } = server.address()
   return {
     url: `http://127.0.0.1:${port}/index.html`,
-    close: () => new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+    close: () =>
+      new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
   }
 }
 
+/** @param {import('playwright').Page} page */
+async function waitReady(page) {
+  await page.getByRole('region', { name: 'Campaign summary' }).waitFor({ timeout: 90_000 })
+  await page.getByRole('heading', { name: 'Goods prices' }).waitFor({ timeout: 90_000 })
+}
+
+/** @param {import('playwright').Page} page */
+async function goView(page, label) {
+  await page
+    .getByRole('navigation', { name: 'Analysis tools' })
+    .getByRole('button', { name: label })
+    .click()
+}
+
 async function main() {
+  requireWasm()
+  requireDefsBlob()
+
   const dest = outDir()
   const server = await startStaticServer(desktopUiDir)
   const browser = await chromium.launch({ headless: true })
   try {
     const { context, page } = await newShotPage(browser)
-    page.on('console', msg => console.log('PAGE LOG:', msg.text()))
+    page.on('console', (msg) => console.log('PAGE LOG:', msg.text()))
     await installTauriMock(page)
     await page.addInitScript((bytes) => {
       window.__MOCK_SAVE_BYTES__ = bytes
     }, Array.from(readFileSync(saveFixture)))
+
     await page.goto(server.url, { waitUntil: 'domcontentloaded', timeout: 60_000 })
     await seedDefsIndexedDb(page)
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 })
-    await page.waitForSelector('.saves-table tbody tr td', { timeout: 30_000 })
-    await page.waitForFunction(() => {
-      const text = document.querySelector('.defs-required')?.textContent || ''
-      return !text.includes('definitions') && !text.includes('Loading')
-    }, { timeout: 30_000 })
-    await page.click('.saves-table tbody tr td')
-    await page.waitForSelector('.active-save-bar', { timeout: 30_000 })
+    await page.getByText(/Using your file: defs\.postcard/).waitFor({ timeout: 60_000 })
 
-    // D1 Dashboard
+    await page.getByLabel('Save file').setInputFiles({
+      name: 'plaintext.v3',
+      mimeType: 'text/plain',
+      buffer: readFileSync(saveFixture),
+    })
+    await waitReady(page)
+
+    // D1 Dashboard / prices overview
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await sleep(200)
     await writeShot(page, dest, DESKTOP_SHOTS[0])
 
-    // D2 Saves
-    await page.getByRole('button', { name: 'Change Save' }).click()
-    await page.waitForSelector('.saves-table')
+    // D2 Saves catalog via Advanced Query (desktop-only SQL surface)
+    await goView(page, 'Query')
+    await page.getByRole('heading', { name: 'Advanced SQL Queries' }).waitFor({ timeout: 30_000 })
+    await page.click('button[data-ex="saves"]')
+    await page.click('#run-sql')
+    await page.waitForSelector('#results-body tr', { timeout: 10_000 })
     await writeShot(page, dest, DESKTOP_SHOTS[1])
-    await page.getByRole('button', { name: 'Cancel' }).click()
 
     // D3 Alert mitigations
-    await page.click('button:has-text("Alerts")')
+    await goView(page, 'Alerts')
     await page.waitForSelector('.alert-groups', { timeout: 30_000 })
     await writeShot(page, dest, DESKTOP_SHOTS[2])
 
-    // D4 Advanced Query + shortage SQL
-    await page.getByRole('navigation', { name: 'Analysis tools' }).getByRole('button', { name: 'Query' }).click()
+    // D4 Advanced Query + shortage / alerts SQL
+    await goView(page, 'Query')
     await page.click('button[data-ex="alerts"]')
     await page.click('#run-sql')
-    await sleep(2000)
-    await page.waitForSelector('#results-body tr', { timeout: 5000 })
+    await page.waitForSelector('#results-body tr', { timeout: 10_000 })
     await writeShot(page, dest, DESKTOP_SHOTS[3])
 
     // D5 States
-    await page.getByRole('navigation', { name: 'Analysis tools' }).getByRole('button', { name: 'States' }).click()
+    await goView(page, 'States')
     await sleep(300)
     await writeShot(page, dest, DESKTOP_SHOTS[4])
 
     // D6 Prices
-    await page.getByRole('navigation', { name: 'Analysis tools' }).getByRole('button', { name: 'Prices' }).click()
+    await goView(page, 'Prices')
     await sleep(300)
     await writeShot(page, dest, DESKTOP_SHOTS[5])
 
     // D7 Timeline
-    await page.getByRole('navigation', { name: 'Analysis tools' }).getByRole('button', { name: 'Timeline' }).click()
+    await goView(page, 'Timeline')
     await page.waitForSelector('.guided-form', { timeout: 30_000 })
     await writeShot(page, dest, DESKTOP_SHOTS[6])
 

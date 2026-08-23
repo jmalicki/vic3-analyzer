@@ -8,14 +8,18 @@ describe('Victoria 3 Analyzer App', () => {
             await browser.url('')
         }
 
-        // Wait for the app to initialize (e.g., look for a known element like the title or a load button)
-        const title = await $('title')
-        if (await title.isExisting()) {
-            await expect(title).toHaveText(expect.stringContaining('Victoria 3 Analyzer'))
-        }
+        // Use getTitle() — $('title').getText() is empty for <head> nodes in Chrome.
+        await browser.waitUntil(
+            async () => (await browser.getTitle()).includes('Victoria 3 Analyzer'),
+            {
+                timeout: 15_000,
+                timeoutMsg: 'document title never contained Victoria 3 Analyzer',
+            },
+        )
+        expect(await browser.getTitle()).toContain('Victoria 3 Analyzer')
 
-        // Check if there is a file input or a recognizable UI element
         const body = await $('body')
         await expect(body).toBeExisting()
+        await expect($('h1')).toHaveText(expect.stringContaining('Victoria 3 Analyzer'))
     })
 })

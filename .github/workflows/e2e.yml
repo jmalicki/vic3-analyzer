@@ -53,6 +53,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: v0.12.1
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -72,9 +76,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - name: Install E2E Deps
         working-directory: e2e
         run: npm install
+      - name: Build desktop web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build:desktop
       - name: Build Tauri App (Debug)
         working-directory: crates/vic3-analyzer
         run: cargo build
