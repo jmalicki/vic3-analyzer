@@ -6,13 +6,13 @@
 //! // TODO: remove this module once GDP search blow-up is diagnosed.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 static ENABLED: OnceLock<bool> = OnceLock::new();
 static EVERY: OnceLock<u64> = OnceLock::new();
 static EXPANDS: AtomicU64 = AtomicU64::new(0);
-static STARTED: OnceLock<Instant> = OnceLock::new();
+static STARTED: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// Whether expand tracing is on (`VIC3_PLAN_TRACE`).
 pub fn enabled() -> bool {
@@ -35,14 +35,22 @@ fn every() -> u64 {
     })
 }
 
+fn elapsed_secs() -> f64 {
+    STARTED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(Instant::now)
+        .elapsed()
+        .as_secs_f64()
+}
+
 /// Reset counters (call once at the start of a plan / spot-check).
 pub fn reset() {
     if !enabled() {
         return;
     }
     EXPANDS.store(0, Ordering::Relaxed);
-    let _ = STARTED.set(Instant::now());
-    // OnceLock can only set once; if already set, leave the start clock.
+    *STARTED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
     eprintln!("[astar] trace on (every {}); reset expands", every());
 }
 
@@ -56,8 +64,7 @@ pub fn on_expand(kind: &str, detail: impl FnOnce() -> String) {
     if n != 1 && !n.is_multiple_of(every) {
         return;
     }
-    let secs = STARTED.get_or_init(Instant::now).elapsed().as_secs_f64();
-    eprintln!("[astar] #{n} +{secs:.2}s {kind} {}", detail());
+    eprintln!("[astar] #{n} +{:.2}s {kind} {}", elapsed_secs(), detail());
 }
 
 /// Log when a goal node is closed.
@@ -66,9 +73,9 @@ pub fn on_goal(kind: &str, detail: impl FnOnce() -> String) {
         return;
     }
     let n = EXPANDS.load(Ordering::Relaxed);
-    let secs = STARTED.get_or_init(Instant::now).elapsed().as_secs_f64();
     eprintln!(
-        "[astar] GOAL after {n} expands +{secs:.2}s {kind} {}",
+        "[astar] GOAL after {n} expands +{:.2}s {kind} {}",
+        elapsed_secs(),
         detail()
     );
 }

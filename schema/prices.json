@@ -700,7 +700,7 @@
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Price-equilibrium output. Every solve / preview / what-if returns this shape.\n\n`limitations` is always at least the crate [`crate::LIMITATIONS`] (preview may\nappend extras). `residual` is always present (I5). `relative` mirrors\n`goods` order for [`SolveOpts::warm_rel`].\n\nDownstream: `PlanningState` takes `goods` prices; SQL/MCP diagnostics read\nthe same JSON via `vic3-api` / the SQL session’s last solve.",
+  "description": "Price-equilibrium output. Every solve / preview / what-if returns this shape.\n\n`limitations` is always at least the crate [`crate::LIMITATIONS`] (preview may\nappend extras). `residual` is always present (I5). `relative` mirrors\n`goods` order for [`SolveOpts::warm_rel`].\n\nBuilt by [`crate::report`] from a [`SolveOutcome`]. Downstream: SQL/MCP\ndiagnostics read the same JSON via `vic3-api` / the SQL session’s last solve.",
   "properties": {
     "building_groups": {
       "items": {

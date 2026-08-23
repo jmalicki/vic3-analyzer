@@ -264,24 +264,27 @@ impl EconomyContext {
             if *levels == 0 {
                 continue;
             }
-            let has_row = world
-                .buildings
-                .iter()
-                .any(|row| row.building == *building && row.state == Some(*state_id));
-            if has_row {
-                world = world.with_extra_levels_in_state(building, *state_id, *levels);
-            } else if let Some(row) =
-                synthetic_world_building(&self.defs, &world, building, *state_id, *levels)
-            {
-                world.buildings.push(row);
+            let mut found = false;
+            for row in &mut world.buildings {
+                if row.building == *building && row.state == Some(*state_id) {
+                    row.add_extra_levels(*levels);
+                    found = true;
+                }
+            }
+            if !found {
+                if let Some(row) =
+                    synthetic_world_building(&self.defs, &world, building, *state_id, *levels)
+                {
+                    world.buildings.push(row);
+                }
             }
         }
-        state
-            .pm_overrides
-            .iter()
-            .fold(world, |world, (building_id, methods)| {
-                world.with_production_methods(*building_id, methods.clone())
-            })
+        for (building_id, methods) in &state.pm_overrides {
+            if let Some(building) = world.buildings.iter_mut().find(|b| b.id == *building_id) {
+                *building = building.with_methods(methods.clone());
+            }
+        }
+        world
     }
 
     fn owned_state_ids(&self, country: &str) -> BTreeSet<u32> {
@@ -306,12 +309,16 @@ impl EconomyContext {
     /// Prefers states that already have the type (base world, completed deltas,
     /// or in-flight queue). If none, offers every owned state (first-of-type /
     /// greenfield) until `TODO(buildability)` gates on slots.
-    fn placement_states_for(&self, state: &PlanningState, building: &str) -> Vec<u32> {
+    fn placement_states_for(
+        &self,
+        state: &PlanningState,
+        world: &World,
+        building: &str,
+    ) -> Vec<u32> {
         let owned = self.owned_state_ids(&state.country);
         if owned.is_empty() {
             return Vec::new();
         }
-        let world = self.apply_planning_to_world(state);
         let mut have: BTreeSet<u32> = world
             .buildings
             .iter()
@@ -335,8 +342,8 @@ impl EconomyContext {
     fn levels_added_in_state(state: &PlanningState, building: &str, state_id: u32) -> u32 {
         state
             .building_level_deltas
-            .get(&(building.to_string(), state_id))
-            .copied()
+            .iter()
+            .find_map(|((b, sid), n)| (b.as_str() == building && *sid == state_id).then_some(*n))
             .unwrap_or(0)
     }
 
@@ -426,9 +433,10 @@ impl EconomyContext {
         }
         maybe_add_construction_sector_candidate(state, &mut types, cap);
 
+        let world = self.apply_planning_to_world(state);
         let mut out = BTreeSet::new();
         for building in types {
-            for state_id in self.placement_states_for(state, &building) {
+            for state_id in self.placement_states_for(state, &world, &building) {
                 if Self::levels_added_in_state(state, &building, state_id) < u32::from(cap) {
                     out.insert((building.clone(), state_id));
                 }
@@ -1499,12 +1507,11 @@ pub fn apply_action_with_economy(
             if next.pm_overrides.get(building_id) == Some(methods) {
                 return None;
             }
-            let world = economy.apply_planning_to_world(&next);
-            if !world.buildings.iter().any(|b| b.id == *building_id) {
-                return None;
-            }
+            let mut world = economy.apply_planning_to_world(&next);
+            let building = world.buildings.iter_mut().find(|b| b.id == *building_id)?;
+            *building = building.with_methods(methods.clone());
             next.pm_overrides.insert(*building_id, methods.clone());
-            refresh_prices(&mut next, economy);
+            refresh_prices_on_world(&mut next, economy, &world);
         }
         Action::AdjustTax {
             delta,
@@ -1684,11 +1691,12 @@ fn apply_wait_for_event(
 }
 
 fn refresh_prices(state: &mut PlanningState, economy: &EconomyContext) {
-    let outcome = equilibrate(
-        &economy.apply_planning_to_world(state),
-        &economy.defs,
-        economy.solve_opts.clone(),
-    );
+    let world = economy.apply_planning_to_world(state);
+    refresh_prices_on_world(state, economy, &world);
+}
+
+fn refresh_prices_on_world(state: &mut PlanningState, economy: &EconomyContext, world: &World) {
+    let outcome = equilibrate(world, &economy.defs, economy.solve_opts.clone());
     state.gdp = economy.modeled_gdp(state, &outcome);
     state.good_prices = outcome
         .goods

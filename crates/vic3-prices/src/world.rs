@@ -555,7 +555,7 @@ impl World {
 
 impl WorldBuilding {
     /// Scale level, staffing, and saved IO by `extra_levels` (see [`World::with_extra_levels`]).
-    pub(crate) fn add_extra_levels(&mut self, extra_levels: u32) {
+    pub fn add_extra_levels(&mut self, extra_levels: u32) {
         let extra = f64::from(extra_levels);
         let old_level = self.level.max(0.0);
         let new_level = old_level + extra;
