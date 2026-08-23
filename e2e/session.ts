@@ -6,7 +6,11 @@ import { e2eSavesDir, mockGameDefsPostcard, mockGameDir, SAVES, type SaveKey } f
 const ANALYSIS_TIMEOUT = 120_000
 
 export async function openWorkspaceTab(label: string): Promise<void> {
-  const tab = await $(`nav[aria-label="Analysis tools"] button*=${label}`)
+  // Chain CSS + WDIO text selectors — a single "nav … button*=" string is
+  // invalid CSS and Chromium rejects it (BiDi + classic).
+  const nav = await $('nav[aria-label="Analysis tools"]')
+  await expect(nav).toBeExisting()
+  const tab = await nav.$(`button*=${label}`)
   await expect(tab).toBeExisting()
   await tab.click()
 }

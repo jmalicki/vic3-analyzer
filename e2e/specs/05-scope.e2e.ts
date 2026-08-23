@@ -1,4 +1,4 @@
-import { browser, $, expect } from '@wdio/globals'
+import { browser, $, $$, expect } from '@wdio/globals'
 import { isTauriE2e } from '../runtime.js'
 import { loadSave, openWorkspaceTab } from '../session.js'
 
