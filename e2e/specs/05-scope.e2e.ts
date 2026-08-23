@@ -101,18 +101,17 @@ describe('05 Scope — foreign alerts hidden; domestic vs market geography', () 
   })
 
   it('State Local Prices shows Market price and State price columns without Rivalia under Our market', async () => {
+    // Land on Home state detail via hash (goods list has no state-links).
     await openWorkspaceTab('Prices')
-    const homeLink = await $('//a[contains(@class,"state-link") and contains(., "Home")]')
-    if (await homeLink.isExisting()) {
-      await homeLink.click()
-    } else {
-      await browser.execute(() => {
-        window.location.hash = '#/prices/state/1'
-      })
-    }
+    await browser.execute(() => {
+      window.location.hash = '#/prices/state/1'
+    })
+    await browser.waitUntil(
+      async () => (await $('button=Local Prices').isExisting()),
+      { timeout: 15_000, timeoutMsg: 'Home state detail never mounted' },
+    )
 
     const localTab = await $('button=Local Prices')
-    await expect(localTab).toBeExisting()
     await localTab.click()
 
     await expect($('th*=Market price')).toBeExisting()

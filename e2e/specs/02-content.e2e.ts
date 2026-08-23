@@ -8,12 +8,13 @@ describe('02 Content — interactions on shortage save', () => {
     await bootWithSave('shortage')
   })
 
-  it('expands Mock Lumber Camp and shows Optimize', async () => {
+  it('expands Mock Lumber Camp and shows per-building what-if controls', async () => {
     await openWorkspaceTab('Buildings')
     const expand = await $('button[aria-label*="Expand Mock Lumber Camp"]')
     await expect(expand).toBeExisting()
     await expand.click()
-    await expect($('button=Optimize')).toBeExisting()
+    await expect($('button=Run what-if')).toBeExisting()
+    await expect($('button=Optimize production methods')).toBeExisting()
   })
 
   it('switches Build Queues to Private', async () => {

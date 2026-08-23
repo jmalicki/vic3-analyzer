@@ -49,6 +49,16 @@ export async function openWorkspaceTab(label: string): Promise<void> {
 
 /** Wait until analysis is priced (campaign HUD + at least one goods row). */
 export async function waitForAnalysisReady(): Promise<void> {
+  // Goods links only mount on the Prices list view — switch there first so
+  // mid-suite save reloads (e.g. Buildings → load balanced) still converge.
+  const nav = await $('nav[aria-label="Analysis tools"]')
+  if (await nav.isExisting()) {
+    const prices = await nav.$('button*=Prices')
+    if (await prices.isExisting()) {
+      await prices.click()
+    }
+  }
+
   await browser.waitUntil(
     async () => {
       const hud = await $('section[aria-label="Campaign summary"]')
