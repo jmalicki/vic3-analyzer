@@ -1,11 +1,11 @@
 import { $, expect } from '@wdio/globals'
 import { isWebE2e } from '../runtime.js'
-import { loadSave, openWorkspaceTab } from '../session.js'
+import { bootWithSave, openWorkspaceTab } from '../session.js'
 
-/** Deeper interactions on top of 01’s content checks (after possible matrix switches). */
+/** Deeper interactions on the shortage save (fresh session). */
 describe('02 Content — interactions on shortage save', () => {
   before(async () => {
-    await loadSave('shortage')
+    await bootWithSave('shortage')
   })
 
   it('expands Mock Lumber Camp and shows Optimize', async () => {

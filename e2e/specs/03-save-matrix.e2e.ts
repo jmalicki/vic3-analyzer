@@ -1,14 +1,18 @@
 import { $, expect } from '@wdio/globals'
 import { isTauriE2e } from '../runtime.js'
 import { SAVE_MARKERS, SAVES } from '../fixtures.js'
-import { loadSave, openWorkspaceTab } from '../session.js'
+import { bootWithSave, loadSave, openWorkspaceTab } from '../session.js'
 
 /**
  * Different saves → different UI markers (PR #76 multi-save plan).
+ * Fresh session: boot shortage, then switch to balanced in-process.
  */
 describe('03 Save matrix — different results per save', () => {
+  before(async () => {
+    await bootWithSave('shortage')
+  })
+
   it('shortage save shows lumber camp, tool workshop, and mock_lumber', async () => {
-    await loadSave('shortage')
     await openWorkspaceTab('Prices')
     await expect($('*=mock_lumber')).toBeExisting()
 

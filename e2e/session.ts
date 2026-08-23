@@ -1,9 +1,41 @@
 import { browser, $, expect } from '@wdio/globals'
 import { join } from 'node:path'
-import { isTauriE2e } from './runtime.js'
-import { e2eSavesDir, mockGameDefsPostcard, mockGameDir, SAVES, type SaveKey } from './fixtures.js'
+import { isTauriE2e, isWebE2e } from './runtime.js'
+import {
+  e2eSavesDir,
+  mockGameDefsPostcard,
+  mockGameDir,
+  prepareE2eSaves,
+  SAVES,
+  type SaveKey,
+} from './fixtures.js'
 
 const ANALYSIS_TIMEOUT = 120_000
+
+/**
+ * WDIO starts a fresh browser/app session per spec file. Always open the app
+ * (and optionally load a save) in each suite — do not rely on 00-setup state.
+ */
+export async function ensureAppOpen(): Promise<void> {
+  if (isWebE2e()) {
+    await browser.url('')
+  }
+  await expect($('body')).toBeExisting()
+  await browser.waitUntil(
+    async () => (await browser.getTitle()).includes('Victoria 3 Analyzer'),
+    { timeout: 15_000, timeoutMsg: 'title never contained Victoria 3 Analyzer' },
+  )
+}
+
+/** Prepare fixtures, open the app, configure desktop paths, load a save. */
+export async function bootWithSave(saveKey: SaveKey): Promise<void> {
+  prepareE2eSaves()
+  await ensureAppOpen()
+  if (isTauriE2e()) {
+    await configureTauriPaths()
+  }
+  await loadSave(saveKey)
+}
 
 export async function openWorkspaceTab(label: string): Promise<void> {
   // Chain CSS + WDIO text selectors — a single "nav … button*=" string is

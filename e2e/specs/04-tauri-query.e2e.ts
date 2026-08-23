@@ -1,16 +1,16 @@
 import { browser, $, expect } from '@wdio/globals'
 import { isTauriE2e } from '../runtime.js'
-import { loadSave, openWorkspaceTab } from '../session.js'
+import { bootWithSave, openWorkspaceTab } from '../session.js'
 
 describe('04 Tauri Query', () => {
-  before(function () {
+  before(async function () {
     if (!isTauriE2e()) {
       this.skip()
     }
+    await bootWithSave('shortage')
   })
 
   it('runs SQL against the loaded shortage session', async () => {
-    await loadSave('shortage')
     await openWorkspaceTab('Query')
 
     const editor = await $('#sql-editor')

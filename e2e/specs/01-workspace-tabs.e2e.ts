@@ -1,12 +1,16 @@
 import { browser, $, expect } from '@wdio/globals'
 import { isTauriE2e, isWebE2e } from '../runtime.js'
-import { openWorkspaceTab } from '../session.js'
+import { bootWithSave, openWorkspaceTab } from '../session.js'
 
 /**
- * After 00-setup loads mock_shortage, verify each workspace pane shows
- * shortage-economy content — not just that the tab heading mounts.
+ * Fresh session per spec file: boot shortage, then verify each workspace pane
+ * shows shortage-economy content — not just that the tab heading mounts.
  */
 describe('01 Workspace tabs — content', () => {
+  before(async () => {
+    await bootWithSave('shortage')
+  })
+
   it('Prices lists mock goods from the shortage solve', async () => {
     await openWorkspaceTab('Prices')
     await expect($('#prices-tool-heading')).toHaveText('Goods prices')

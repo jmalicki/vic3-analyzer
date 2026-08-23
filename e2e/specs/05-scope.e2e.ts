@@ -1,6 +1,6 @@
 import { browser, $, $$, expect } from '@wdio/globals'
 import { isTauriE2e } from '../runtime.js'
-import { loadSave, openWorkspaceTab } from '../session.js'
+import { bootWithSave, openWorkspaceTab } from '../session.js'
 
 /**
  * Player-scoped alerts + Domestic / Our market geography (PR #76 plan).
@@ -8,7 +8,7 @@ import { loadSave, openWorkspaceTab } from '../session.js'
  */
 describe('05 Scope — foreign alerts hidden; domestic vs market geography', () => {
   before(async () => {
-    await loadSave('twoCountries')
+    await bootWithSave('twoCountries')
   })
 
   it('Alerts shows player Home pressure but not Rivalia alerts', async () => {
