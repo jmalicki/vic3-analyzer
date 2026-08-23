@@ -22,7 +22,7 @@
 //! | army / navy / interest | country cache + formations; PP `None` when IR omits | `None` / empty |
 //! | `building_level_deltas`, `pm_overrides`, `tax_level` | empty / `0` | sim branches |
 //! | `queued_interest`, `queued_hire`, `queued_law`, `mil_buildings` | empty / `None` | sim in-flight queues |
-//! | `construction_rate` | `1.0` (save does not yet project sectors) | sim / tests |
+//! | `construction_points_per_day` | Construction Sector levels → points/day (base 1 + 5/level) | sim / tests |
 //! | `tech_days_left` / `interest_days_left` / `hire_days_left` / `law_days_left` | `None` at load | set on queue / decremented by [`PlanningState::tick_parallel_tracks`] |
 //!
 //! Missing principal/credit leaves `solvent` false (no treasury-sign guess).
@@ -36,6 +36,9 @@ use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 use vic3_prices::{PricesResult, World, WorldCountry};
 
+use crate::construction::{
+    construction_points_per_day_from_save, construction_points_per_day_from_world,
+};
 use crate::military::{recompute_army_pp, recompute_navy_pp, ModeledMilBuilding, UnitCombatStats};
 
 pub use vic3_load::{ConstructionQueueKind, Save, Vic3Date};
@@ -185,7 +188,7 @@ pub struct PlanningParts {
     /// Tax level offset from the saved baseline (`0` at load).
     pub tax_level: i8,
     /// Construction points completed per day (default 1.0).
-    pub construction_rate: f64,
+    pub construction_points_per_day: f64,
     /// Days left on the research queue head (`None` when idle).
     pub tech_days_left: Option<u16>,
     /// Days left on the interest queue head.
@@ -229,7 +232,7 @@ impl Default for PlanningParts {
             infamy: None,
             pm_overrides: BTreeMap::new(),
             tax_level: 0,
-            construction_rate: 1.0,
+            construction_points_per_day: 1.0,
             tech_days_left: None,
             interest_days_left: None,
             hire_days_left: None,
@@ -308,9 +311,13 @@ pub struct PlanningState {
     pub pm_overrides: BTreeMap<u32, Vec<String>>,
     /// Tax offset from saved baseline (`0` at load; sim `AdjustTax`).
     pub tax_level: i8,
-    /// Construction worker-pool rate (work units per day). Used with queue
-    /// `remaining` for ETA; default `1.0` so points map 1:1 to days.
-    pub construction_rate: f64,
+    /// National construction throughput in **construction points per day**.
+    ///
+    /// Derived from Construction Sector levels (see [`crate::construction`]).
+    /// Used with queue `remaining` (points) so ETA is
+    /// `ceil(remaining / construction_points_per_day)` when a job gets the
+    /// full pool (or less under the per-job allocation cap).
+    pub construction_points_per_day: f64,
     /// Remaining days on [`Self::queued_tech`] (model timer).
     pub tech_days_left: Option<u16>,
     /// Remaining days on [`Self::queued_interest`].
@@ -362,7 +369,10 @@ impl PartialEq for PlanningState {
             && f64_option_bits_eq(self.infamy, other.infamy)
             && self.pm_overrides == other.pm_overrides
             && self.tax_level == other.tax_level
-            && f64_bits_eq(self.construction_rate, other.construction_rate)
+            && f64_bits_eq(
+                self.construction_points_per_day,
+                other.construction_points_per_day,
+            )
             && self.tech_days_left == other.tech_days_left
             && self.interest_days_left == other.interest_days_left
             && self.hire_days_left == other.hire_days_left
@@ -412,7 +422,7 @@ impl Hash for PlanningState {
             methods.hash(state);
         }
         self.tax_level.hash(state);
-        self.construction_rate.to_bits().hash(state);
+        self.construction_points_per_day.to_bits().hash(state);
         self.tech_days_left.hash(state);
         self.interest_days_left.hash(state);
         self.hire_days_left.hash(state);
@@ -516,10 +526,10 @@ impl PlanningState {
             infamy: parts.infamy,
             pm_overrides: parts.pm_overrides,
             tax_level: parts.tax_level,
-            construction_rate: if parts.construction_rate.is_finite()
-                && parts.construction_rate > 0.0
+            construction_points_per_day: if parts.construction_points_per_day.is_finite()
+                && parts.construction_points_per_day > 0.0
             {
-                parts.construction_rate
+                parts.construction_points_per_day
             } else {
                 1.0
             },
@@ -566,10 +576,11 @@ impl PlanningState {
 
     /// Advance parallel track timers by `days` without completing the waited event.
     ///
-    /// Construction head `remaining` loses `days * construction_rate` work.
-    /// Fixed-day tracks decrement their `*_days_left` counters (saturating at 0).
-    /// A zero-day tick is a no-op.
-    pub fn tick_parallel_tracks(&mut self, days: u16) {
+    /// Each construction job loses `days * alloc[i]` work when `construction_alloc`
+    /// provides a per-index rate (capacity split). When the slice is shorter than
+    /// the queue, missing entries receive zero. Fixed-day tracks decrement their
+    /// `*_days_left` counters (saturating at 0). A zero-day tick is a no-op.
+    pub fn tick_parallel_tracks(&mut self, days: u16, construction_alloc: &[f64]) {
         if days == 0 {
             return;
         }
@@ -585,13 +596,13 @@ impl PlanningState {
         if let Some(left) = self.law_days_left.as_mut() {
             *left = left.saturating_sub(days);
         }
-        let rate = self.construction_rate;
-        if rate.is_finite() && rate > 0.0 {
-            if let Some(head) = self.constructions.first_mut() {
-                if let Some(rem) = head.remaining.as_mut() {
-                    if rem.is_finite() {
-                        *rem = (*rem - f64::from(days) * rate).max(0.0);
-                    }
+        for (job, rate) in self.constructions.iter_mut().zip(construction_alloc.iter()) {
+            if !rate.is_finite() || *rate <= 0.0 {
+                continue;
+            }
+            if let Some(rem) = job.remaining.as_mut() {
+                if rem.is_finite() {
+                    *rem = (*rem - f64::from(days) * *rate).max(0.0);
                 }
             }
         }
@@ -705,13 +716,14 @@ impl PlanningState {
             .map(|entry| entry.building.clone());
     }
 
-    /// Append a government construction (sim `QueueBuildingLevel`) and set the head.
+    /// Append a government construction (sim `QueueBuildingLevel`).
     ///
     /// `remaining` is construction work points when known (typically
     /// [`vic3_defs::BuildingType::required_construction`] for a new enqueue).
     /// Pass [`None`] when the def omits cost so wait ETA can fall back to
     /// [`crate::sim::SimConfig::construction_days`]. In-flight save rows keep
-    /// their own `remaining` and are not rewritten here.
+    /// their own `remaining` and are not rewritten here. The in-flight head
+    /// stays the first queue entry (`sync_queued_building_from_constructions`).
     pub fn push_construction(&mut self, building: String, remaining: Option<f64>) {
         let order_id = self
             .constructions
@@ -724,19 +736,29 @@ impl PlanningState {
             order_id,
             queue: ConstructionQueueKind::Government,
             state_id: None,
-            building: building.clone(),
+            building,
             remaining,
         });
-        self.queued_building = Some(building);
+        self.sync_queued_building_from_constructions();
     }
 
-    /// Remove the completed head entry matching `building`, then advance the head.
+    /// Remove a completed construction entry matching `building`, then advance the head.
+    ///
+    /// Prefers a finished row (`remaining <= 0`) when several share the type so
+    /// parallel completions pop the right job.
     pub fn complete_construction(&mut self, building: &str) {
-        if let Some(idx) = self
-            .constructions
-            .iter()
-            .position(|entry| entry.building == building)
-        {
+        let finished = self.constructions.iter().position(|entry| {
+            entry.building == building
+                && entry
+                    .remaining
+                    .is_some_and(|rem| rem.is_finite() && rem <= 0.0)
+        });
+        let idx = finished.or_else(|| {
+            self.constructions
+                .iter()
+                .position(|entry| entry.building == building)
+        });
+        if let Some(idx) = idx {
             self.constructions.remove(idx);
         }
         self.sync_queued_building_from_constructions();
@@ -844,7 +866,7 @@ impl PlanningState {
             infamy: country.infamy.filter(|value| value.is_finite()),
             pm_overrides: BTreeMap::new(),
             tax_level: 0,
-            construction_rate: 1.0,
+            construction_points_per_day: construction_points_per_day_from_save(save, country_id),
             tech_days_left: None,
             interest_days_left: None,
             hire_days_left: None,
@@ -939,7 +961,7 @@ impl PlanningState {
             infamy: country.infamy,
             pm_overrides: BTreeMap::new(),
             tax_level: 0,
-            construction_rate: 1.0,
+            construction_points_per_day: construction_points_per_day_from_world(world, country.id),
             tech_days_left: None,
             interest_days_left: None,
             hire_days_left: None,

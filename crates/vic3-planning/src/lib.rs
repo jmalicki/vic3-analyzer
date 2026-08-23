@@ -16,6 +16,7 @@
 //!
 //! Do **not** use crates.io `pathfinding`. See [`docs/planning.md`](../../../docs/planning.md).
 
+pub mod construction;
 pub mod goals;
 pub mod military;
 pub mod plan;
@@ -24,6 +25,14 @@ pub mod tech;
 pub mod tracks;
 pub mod world;
 
+pub use construction::{
+    construction_points_per_day_from_save, construction_points_per_day_from_sector_levels,
+    construction_points_per_day_from_sectors, construction_points_per_day_from_world,
+    construction_points_per_day_per_job, construction_sector_levels, construction_wait_days,
+    construction_wait_target, max_parallel_construction_jobs, sync_construction_points_per_day,
+    BUILDING_CONSTRUCTION_SECTOR, LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY,
+    LOAD_CONSTRUCTION_POINTS_PER_DAY_PER_SECTOR_LEVEL,
+};
 pub use goals::{
     compile, evaluate, gaps, gaps_with_defs, parse, Atom, Goal, GoalError, InterestKind, Rel,
     COLONIZE_ARMY_THRESHOLD, COLONIZE_NAVY_THRESHOLD, COLONIZE_QUININE_TECH, COLONIZE_TECH,
