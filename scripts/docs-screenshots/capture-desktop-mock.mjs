@@ -8,8 +8,12 @@ import {
   desktopUiDir,
   outDir,
   packageRoot,
+  saveFixture,
 } from './lib/paths.mjs'
 import { newShotPage, writeShot } from './lib/shot.mjs'
+import { seedDefsIndexedDb } from './lib/seed-web.mjs'
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const fixture = JSON.parse(
   readFileSync(join(packageRoot, 'fixtures/desktop-mock-data.json'), 'utf8'),
@@ -58,8 +62,15 @@ async function installTauriMock(page) {
                 loaded_stub: loaded,
                 detection_hints: data.dashboard.detection_hints,
               }
+            case 'read_save_bytes':
+              return window.__MOCK_SAVE_BYTES__
             case 'list_saves':
-              return data.saves
+              return data.queries.saves.rows.map(row => ({
+                name: row[0],
+                kind: row[1],
+                mtime: 1672531200000,
+                location: 'local'
+              }))
             case 'use_save':
               loaded = args.name || loaded
               return JSON.stringify(data.use_save)
@@ -92,9 +103,12 @@ async function installTauriMock(page) {
 }
 
 async function startStaticServer(root) {
-  const server = createServer((request, response) =>
-    handler(request, response, { public: root }),
-  )
+  const server = createServer((request, response) => {
+    if (request.url.startsWith('/vic3-analyzer/')) {
+      request.url = request.url.substring('/vic3-analyzer'.length)
+    }
+    return handler(request, response, { public: root })
+  })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   const { port } = server.address()
   return {
@@ -109,64 +123,59 @@ async function main() {
   const browser = await chromium.launch({ headless: true })
   try {
     const { context, page } = await newShotPage(browser)
+    page.on('console', msg => console.log('PAGE LOG:', msg.text()))
     await installTauriMock(page)
+    await page.addInitScript((bytes) => {
+      window.__MOCK_SAVE_BYTES__ = bytes
+    }, Array.from(readFileSync(saveFixture)))
     await page.goto(server.url, { waitUntil: 'domcontentloaded', timeout: 60_000 })
-    await page.waitForSelector('#metrics .metric', { timeout: 30_000 })
+    await seedDefsIndexedDb(page)
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 })
+    await page.waitForSelector('.saves-table tbody tr td', { timeout: 30_000 })
+    await page.waitForFunction(() => {
+      const text = document.querySelector('.defs-required')?.textContent || ''
+      return !text.includes('definitions') && !text.includes('Loading')
+    }, { timeout: 30_000 })
+    await page.click('.saves-table tbody tr td')
+    await page.waitForSelector('.active-save-bar', { timeout: 30_000 })
 
     // D1 Dashboard
     await writeShot(page, dest, DESKTOP_SHOTS[0])
 
     // D2 Saves
-    await page.click('#tab-saves')
-    await page.waitForSelector('#saves-body tr')
+    await page.getByRole('button', { name: 'Change Save' }).click()
+    await page.waitForSelector('.saves-table')
     await writeShot(page, dest, DESKTOP_SHOTS[1])
+    await page.getByRole('button', { name: 'Cancel' }).click()
 
-    // D3 Alerts tab (README companion hero)
-    await page.click('#tab-alerts')
-    await page.waitForSelector('#alerts-root .alert-group')
-    await page.waitForSelector('#alerts-root .alert-mitigations')
+    // D3 Alert mitigations
+    await page.click('button:has-text("Alerts")')
+    await page.waitForSelector('.alert-groups', { timeout: 30_000 })
     await writeShot(page, dest, DESKTOP_SHOTS[2])
 
     // D4 Advanced Query + shortage SQL
-    await page.click('#tab-query')
-    await page.click('button[data-ex="shortage"]')
+    await page.getByRole('navigation', { name: 'Analysis tools' }).getByRole('button', { name: 'Query' }).click()
+    await page.click('button[data-ex="alerts"]')
     await page.click('#run-sql')
-    await page.waitForSelector('#results-body td.nav-key')
+    await sleep(2000)
+    await page.screenshot({ path: join(dest, 'debug-query-after.png') })
+    await page.waitForSelector('#results-body tr', { timeout: 5000 })
     await writeShot(page, dest, DESKTOP_SHOTS[3])
 
-    // D5 Query → States (click state_id)
-    await page.locator('#results-body td.nav-key[data-col="state_id"]').first().click()
-    await page.waitForSelector('#view-states:not(.hidden)')
-    await page.waitForSelector('#states-body td')
+    // D5 States
+    await page.getByRole('navigation', { name: 'Analysis tools' }).getByRole('button', { name: 'States' }).click()
+    await sleep(300)
     await writeShot(page, dest, DESKTOP_SHOTS[4])
 
-    // D6 Query → Prices (re-run shortage, click good)
-    await page.click('#tab-query')
-    await page.click('button[data-ex="shortage"]')
-    await page.click('#run-sql')
-    await page.waitForSelector('#results-body td.nav-key[data-col="good"]')
-    await page.locator('#results-body td.nav-key[data-col="good"]').first().click()
-    await page.waitForSelector('#view-prices:not(.hidden)')
-    await page.waitForSelector('#prices-body td')
+    // D6 Prices
+    await page.getByRole('navigation', { name: 'Analysis tools' }).getByRole('button', { name: 'Prices' }).click()
+    await sleep(300)
     await writeShot(page, dest, DESKTOP_SHOTS[5])
 
-    // D7 Timeline GDP/research plan
-    await page.click('#tab-query')
-    await page.fill(
-      '#sql-editor',
-      "SELECT step, day, action, detail FROM plan('gdp >= 100000000') ORDER BY step;",
-    )
-    await page.click('#run-sql')
-    await page.waitForSelector('#results-body td.nav-key[data-col="step"]')
-    await page.locator('#results-body td.nav-key[data-col="step"]').first().click()
-    await page.waitForSelector('#view-timeline:not(.hidden)')
+    // D7 Timeline
+    await page.getByRole('navigation', { name: 'Analysis tools' }).getByRole('button', { name: 'Timeline' }).click()
+    await page.waitForSelector('.guided-form', { timeout: 30_000 })
     await writeShot(page, dest, DESKTOP_SHOTS[6])
-
-    // D8 Settings
-    await page.click('#tab-settings')
-    await page.waitForSelector('#view-settings:not(.hidden)')
-    await page.waitForFunction(() => document.getElementById('cfg-game').value.length > 0)
-    await writeShot(page, dest, DESKTOP_SHOTS[7])
 
     console.log('desktop mock: done')
     await context.close()

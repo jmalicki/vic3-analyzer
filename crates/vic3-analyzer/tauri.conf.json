@@ -5,7 +5,10 @@
   "identifier": "com.jmalicki.vic3-analyzer",
   "mainBinaryName": "vic3-analyzer",
   "build": {
-    "frontendDist": "ui"
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "npm run build --prefix ../../web",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../../web/dist"
   },
   "app": {
     "withGlobalTauri": true,

@@ -14,7 +14,7 @@ export const assetsDir = resolve(repoRoot, 'docs/assets')
 
 export const webRoot = resolve(repoRoot, 'web')
 
-export const desktopUiDir = resolve(repoRoot, 'crates/vic3-analyzer/ui')
+export const desktopUiDir = resolve(repoRoot, 'web/dist')
 
 export const saveFixture = resolve(
   repoRoot,
@@ -45,7 +45,6 @@ export const DESKTOP_SHOTS = [
   'desktop-states.png',
   'desktop-prices.png',
   'desktop-timeline-gdp.png',
-  'desktop-settings.png',
 ]
 
 export const ALL_SHOTS = [...WEB_SHOTS, ...DESKTOP_SHOTS]

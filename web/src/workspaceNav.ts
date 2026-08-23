@@ -8,6 +8,7 @@ export type WorkspaceView =
   | 'what-if'
   | 'timeline'
   | 'gaps'
+  | 'query'
   | 'archive'
 
 export type MilitaryTab = 'army' | 'navy' | 'mobilization'
@@ -25,6 +26,7 @@ export const WORKSPACE_NAV: readonly { view: WorkspaceView; label: string }[] = 
   { view: 'what-if', label: 'What-if' },
   { view: 'timeline', label: 'Timeline' },
   { view: 'gaps', label: 'Goal gaps' },
+  { view: 'query', label: 'Query' },
   { view: 'archive', label: 'Archive' },
 ]
 

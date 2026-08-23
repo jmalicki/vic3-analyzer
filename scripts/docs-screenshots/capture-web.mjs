@@ -182,6 +182,7 @@ async function main() {
     await writeShot(page, dest, WEB_SHOTS[8])
 
     // W9 Defs builder modal
+    await page.getByRole('button', { name: 'Change Save' }).click()
     await page.getByRole('button', { name: /Build definitions from game files/ }).click()
     await page.getByRole('heading', { name: /Build definitions/i }).waitFor({ timeout: 30_000 })
     await sleep(300)
