@@ -15,7 +15,7 @@ describe('00 Setup — paths + primary save load', () => {
     if (isTauriE2e()) {
       await expect($('.inputs')).not.toBeExisting()
       await expect($('[aria-label="Loaded save"]')).toHaveText(
-        expect.stringContaining(SAVES.shortage),
+        expect.stringContaining(SAVES.shortage.replace(/\.v3$/i, '')),
       )
     } else {
       await expect($('.inputs')).toBeExisting()
@@ -188,7 +188,7 @@ describe('01 Workspace tabs — content', () => {
     }
     await $('button*=Saves').click()
     await expect($('[aria-label="Desktop save catalog"]')).toBeExisting()
-    await expect($('td*=mock_shortage.v3')).toBeExisting()
+    await expect($('td*=mock_shortage')).toBeExisting()
     await expect($('#refresh-saves')).toBeExisting()
 
     await $('button*=Settings').click()
@@ -290,7 +290,7 @@ describe('03 Save matrix — different results per save', () => {
 
     if (isTauriE2e()) {
       await expect($('[aria-label="Loaded save"]')).toHaveText(
-        expect.stringContaining(SAVES.balanced),
+        expect.stringContaining(SAVES.balanced.replace(/\.v3$/i, '')),
       )
     }
   })
@@ -302,7 +302,8 @@ describe('03 Save matrix — different results per save', () => {
     await $('button*=Saves').click()
     await $('#refresh-saves').click()
     for (const name of Object.values(SAVES)) {
-      await expect($(`td*=${name}`)).toBeExisting()
+      const stub = name.replace(/\.v3$/i, '')
+      await expect($(`td*=${stub}`)).toBeExisting()
     }
     expect(SAVE_MARKERS.shortage.expectVisible.length).toBeGreaterThan(0)
   })

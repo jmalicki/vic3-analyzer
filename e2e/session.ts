@@ -146,18 +146,26 @@ export async function configureTauriPaths(): Promise<void> {
 }
 
 export async function loadTauriSave(saveKey: SaveKey): Promise<void> {
-  const name = SAVES[saveKey]
+  // Catalog stubs strip the .v3 suffix (normalize_stub).
+  const fileName = SAVES[saveKey]
+  const stub = fileName.replace(/\.v3$/i, '')
   await $('button*=Saves').click()
   await $('#refresh-saves').click()
 
-  await expect($(`td*=${name}`)).toBeExisting()
-  await $(`tr*=${name}`).$('button*=Load').click()
+  await browser.waitUntil(
+    async () => (await $(`td*=${stub}`).isExisting()),
+    {
+      timeout: 30_000,
+      timeoutMsg: `Catalog never listed stub ${stub} (from ${fileName})`,
+    },
+  )
+  await $(`tr*=${stub}`).$('button*=Load').click()
 
   await browser.waitUntil(
-    async () => (await $('#saves-status').getText()).includes(`Loaded ${name}`),
+    async () => (await $('#saves-status').getText()).includes(`Loaded ${stub}`),
     {
       timeout: ANALYSIS_TIMEOUT,
-      timeoutMsg: `Saves status never showed Loaded ${name}`,
+      timeoutMsg: `Saves status never showed Loaded ${stub}`,
     },
   )
   await waitForAnalysisReady()
