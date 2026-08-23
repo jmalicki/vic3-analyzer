@@ -148,7 +148,7 @@
         padding: 0.65rem 0.8rem;
         min-height: 2.4rem;
         white-space: pre-wrap;
-        word-break: break-word;
+        overflow-wrap: anywhere;
       }
       .status.ok {
         color: var(--ok);

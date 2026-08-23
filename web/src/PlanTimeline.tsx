@@ -19,6 +19,7 @@ function formatAction(action: PlanAction): string {
     if ('InterestDeclared' in ev) return `Wait for Interest: ${ev.InterestDeclared.kind} in ${ev.InterestDeclared.id}`
     if ('HireCompleted' in ev) return `Wait for Hire: ${ev.HireCompleted.building}`
     if ('LawEnacted' in ev) return `Wait for Law: ${ev.LawEnacted.law}`
+    if ('Payday' in ev) return 'Wait for Payday'
   }
   return JSON.stringify(action)
 }

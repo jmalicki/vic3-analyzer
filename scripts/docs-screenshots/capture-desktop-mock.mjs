@@ -158,7 +158,6 @@ async function main() {
     await page.click('button[data-ex="alerts"]')
     await page.click('#run-sql')
     await sleep(2000)
-    await page.screenshot({ path: join(dest, 'debug-query-after.png') })
     await page.waitForSelector('#results-body tr', { timeout: 5000 })
     await writeShot(page, dest, DESKTOP_SHOTS[3])
 

@@ -321,7 +321,6 @@ h2 > .good-icon { margin-right: .45rem; }
 .state-building-group h3 {
   border-bottom: 1px solid var(--line);
   color: var(--accent);
-  color: var(--accent);
   font-weight: 400;
   margin-bottom: .5rem;
   padding-bottom: .35rem;
@@ -458,7 +457,6 @@ h2 > .good-icon { margin-right: .45rem; }
   width: 100%;
 }
 .need-basket h4 {
-  color: var(--accent);
   color: var(--accent);
   font-weight: 400;
   margin: 0 0 .35rem;
