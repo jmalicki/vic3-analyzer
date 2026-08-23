@@ -103,11 +103,81 @@ function wasmCacheBust(): string {
     : 'dev'
 }
 
-/** Root-relative public/wasm URL. `new URL(file, relativeJsUrl)` throws. */
+/**
+ * Root-absolute public/wasm URL. Must stay absolute: dynamic `import()` and
+ * workers resolve relative URLs against the JS module path (`…/assets/…`), not
+ * the app root — a `./wasm/…` glue URL then 404s as HTML and Chromium reports
+ * `'text/html' is not a valid JavaScript MIME type`.
+ *
+ * `new URL(file, cacheBustedJsUrl)` also throws (query string), which is how
+ * wasm-bindgen init used to break when given a relative sibling path.
+ */
 export function wasmPublicUrl(file: string): string {
-  const base = import.meta.env.BASE_URL || '/'
+  let base = import.meta.env.BASE_URL || '/'
+  if (!base.startsWith('/')) {
+    base = '/'
+  }
   const prefix = base.endsWith('/') ? base : `${base}/`
   return `${prefix}wasm/${file}?v=${wasmCacheBust()}`
+}
+
+/** User-facing copy when the wasm glue or `.wasm` binary fails to load. */
+export function formatAnalysisEngineLoadError(reason: unknown, sourceUrl?: string): string {
+  const detail =
+    reason instanceof Error
+      ? reason.message
+      : typeof reason === 'string'
+        ? reason
+        : reason != null
+          ? String(reason)
+          : ''
+  if (detail.startsWith('Could not load the analysis engine')) {
+    return detail
+  }
+
+  const lower = detail.toLowerCase()
+  const where = sourceUrl ? ` Tried: ${sourceUrl}.` : ''
+  const desktop =
+    typeof globalThis !== 'undefined' &&
+    typeof (globalThis as { window?: unknown }).window !== 'undefined' &&
+    '__TAURI__' in (globalThis as { window: object }).window
+
+  if (
+    lower.includes('mime type') ||
+    (lower.includes('text/html') && lower.includes('javascript'))
+  ) {
+    // Chromium says this when the glue URL 404s as HTML (wrong base / missing wasm).
+    const fix = desktop
+      ? 'Rebuild the desktop UI (`npm run build:desktop --prefix web`) and run the app again.'
+      : 'The deployed UI is missing `/wasm/` assets or was built with the wrong Vite base.'
+    return (
+      `Could not load the analysis engine: the WebAssembly script URL returned a web page ` +
+      `instead of JavaScript.${where} ${fix}`
+    )
+  }
+
+  if (lower.includes('failed to construct') && lower.includes('url')) {
+    return (
+      `Could not load the analysis engine: could not build a URL for the WebAssembly module.${where}` +
+      (detail ? ` (${detail})` : '')
+    )
+  }
+
+  if (
+    lower.includes('failed to fetch') ||
+    lower.includes('networkerror') ||
+    lower.includes('load failed') ||
+    lower.includes('error loading dynamically imported module')
+  ) {
+    return (
+      `Could not load the analysis engine: could not download the WebAssembly module.${where}` +
+      (detail ? ` (${detail})` : ' Check that the wasm files are present next to the UI.')
+    )
+  }
+
+  return detail
+    ? `Could not load the analysis engine. ${detail}${where}`
+    : `Could not load the analysis engine.${where || ''}`
 }
 
 export function loadWasm(options?: LoadWasmOptions): Promise<WasmApi> {
@@ -130,7 +200,15 @@ export function loadWasm(options?: LoadWasmOptions): Promise<WasmApi> {
     })
     .catch((error) => {
       cached = undefined
-      throw error
+      if (
+        error instanceof Error &&
+        error.message.startsWith('Could not load the analysis engine')
+      ) {
+        throw error
+      }
+      throw new Error(formatAnalysisEngineLoadError(error, wasmPath), {
+        cause: error,
+      })
     })
   return cached
 }

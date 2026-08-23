@@ -17,9 +17,17 @@ const revision = (() => {
 })()
 const buildTime = new Date().toISOString()
 
+// GitHub Pages needs `/vic3-analyzer/`. Tauri embeds `web/dist` at the asset
+// root (`tauri://localhost`), so Pages prefixes blank the WebView. Use `/`
+// (not `./`): `wasmPublicUrl` + dynamic `import()` must be root-absolute —
+// relative URLs resolve against `/assets/*.js` and fetch HTML 404s.
+// `tauri build` sets TAURI_ENV_*; `VITE_TAURI=1` covers `cargo run` rebuilds.
+const isTauri =
+  Boolean(process.env.TAURI_ENV_PLATFORM) || process.env.VITE_TAURI === '1'
+
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/vic3-analyzer/',
+  base: isTauri ? '/' : '/vic3-analyzer/',
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
     __BUILD_TIME__: JSON.stringify(buildTime),

@@ -65,6 +65,7 @@ import type {
   WorldDelta,
 } from './types'
 import type { WasmApi } from './wasm'
+import { formatAnalysisEngineLoadError } from './wasm'
 import { loadWasmApi } from './wasmClient'
 import {
   hashForView,
@@ -396,10 +397,11 @@ function App({ wasmApi }: Props) {
         setApi(loaded)
       })
       .catch((reason: unknown) => {
+        // loadWasm already formats known failures; keep a single prefix if something else rejects.
         setError(
-          reason instanceof Error
-            ? `Could not load the analysis engine. ${reason.message}`
-            : 'Could not load the analysis engine.',
+          reason instanceof Error && reason.message.startsWith('Could not load the analysis engine')
+            ? reason.message
+            : formatAnalysisEngineLoadError(reason),
         )
       })
   }, [wasmApi])

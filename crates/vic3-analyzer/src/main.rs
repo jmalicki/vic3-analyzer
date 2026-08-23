@@ -17,6 +17,10 @@
 //! open a window; it is acceptable for v1. A second MCP-only artifact is
 //! deferred unless headless CI forces a feature-split.
 
+// Apple ld: this fat Tauri+SQL link exceeds the 16MB compact-unwind `__eh_frame`
+// budget. Harmless performance note; not fixable without splitting the binary.
+#![allow(linker_messages)]
+
 use std::process::ExitCode;
 use vic3_analyzer_lib::Mode;
 

@@ -47,11 +47,16 @@ npm run dev            # Starts Vite local dev server at http://localhost:5173
 ```
 
 ### 4. Run the Native Desktop Companion
-To test the native Tauri desktop GUI:
+Build the web UI into `web/dist` with a Tauri-relative asset base, then run the
+binary (debug loads the embedded dist — no Vite server required):
 
 ```bash
+npm run build:desktop --prefix web
 cargo run -p vic3-analyzer
 ```
+
+Rebuild `web` after frontend changes; Rust re-embeds `frontendDist` on the next
+`cargo run`. For browser-only work, use §3 (`npm run dev`) instead.
 
 ---
 

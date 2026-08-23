@@ -21,9 +21,12 @@ npm run build
 builds wasm + the fixture defs blob, then exercises the real wrapper against
 in-repo save fixtures.
 
-The Vite `base` is `/vic3-analyzer/` so assets resolve on GitHub Pages at
-`https://jmalicki.github.io/vic3-analyzer/`. `loadWasm` joins
-`import.meta.env.BASE_URL` with `wasm/vic3_wasm.js`.
+The Vite `base` is `/vic3-analyzer/` for GitHub Pages
+(`https://jmalicki.github.io/vic3-analyzer/`). Desktop embeds use
+`npm run build:desktop` (`VITE_TAURI=1` → `base: '/'`) so Tauri can serve
+assets from `tauri://localhost`. Keep that base root-absolute: `loadWasm`
+dynamic-imports `/wasm/vic3_wasm.js`, and a relative `./wasm/…` would resolve
+under `/assets/` and fail with a MIME-type error.
 
 The UI explains token maps / definitions via accessible help and shows the usual
 Victoria 3 save folder for your OS. Chromium can remember the last chosen save
