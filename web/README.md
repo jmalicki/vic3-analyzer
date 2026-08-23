@@ -23,7 +23,7 @@ in-repo save fixtures.
 
 The Vite `base` is `/vic3-analyzer/` for GitHub Pages
 (`https://jmalicki.github.io/vic3-analyzer/`). Desktop embeds use
-`npm run build:desktop` (`VITE_TAURI=1` → `base: '/'`) so Tauri can serve
+`npm run build:desktop` (`vite build --mode desktop` → `base: '/'`) so Tauri can serve
 assets from `tauri://localhost`. Keep that base root-absolute: `loadWasm`
 dynamic-imports `/wasm/vic3_wasm.js`, and a relative `./wasm/…` would resolve
 under `/assets/` and fail with a MIME-type error.
