@@ -10,9 +10,9 @@ describe('02 Content — interactions on shortage save', () => {
 
   it('expands Mock Lumber Camp and shows Optimize', async () => {
     await openWorkspaceTab('Buildings')
-    const lumberCampRow = await $('*=Mock Lumber Camp')
-    await expect(lumberCampRow).toBeExisting()
-    await lumberCampRow.click()
+    const expand = await $('button[aria-label*="Expand Mock Lumber Camp"]')
+    await expect(expand).toBeExisting()
+    await expand.click()
     await expect($('button=Optimize')).toBeExisting()
   })
 
@@ -22,17 +22,17 @@ describe('02 Content — interactions on shortage save', () => {
     const privateTab = await $('button=Private')
     await expect(privateTab).toBeExisting()
     await privateTab.click()
-    await expect(privateTab).toHaveAttribute('aria-pressed', 'true')
+    await expect(privateTab).toHaveAttribute('aria-selected', 'true')
   })
 
   it('sorts Prices and opens the mock_lumber row', async () => {
     await openWorkspaceTab('Prices')
-    const priceHeader = await $('button*=Sort by Price')
+    const priceHeader = await $('button[aria-label="Sort by Price"]')
     await expect(priceHeader).toBeExisting()
     await priceHeader.click()
-    const lumberRow = await $('*=mock_lumber')
-    await expect(lumberRow).toBeExisting()
-    await lumberRow.click()
+    const lumber = await $('a.good-link[href*="mock_lumber"]')
+    await expect(lumber).toBeExisting()
+    await lumber.click()
   })
 
   it('expands the mock_lumber shortage alert', async () => {

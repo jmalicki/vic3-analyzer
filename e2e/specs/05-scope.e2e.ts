@@ -36,47 +36,50 @@ describe('05 Scope — foreign alerts hidden; domestic vs market geography', () 
 
     await $('button=Our market').click()
     await expect($('button=Our market')).toHaveAttribute('aria-pressed', 'true')
-    await expect($('*=Home')).toBeExisting()
-    await expect($('*=Rivalia')).not.toBeExisting()
+    await expect($('//a[contains(@class,"state-link") and contains(., "Home")]')).toBeExisting()
+    await expect($('//a[contains(@class,"state-link") and contains(., "Rivalia")]')).not.toBeExisting()
 
     await $('button=Domestic').click()
     await expect($('button=Domestic')).toHaveAttribute('aria-pressed', 'true')
-    await expect($('*=Home')).toBeExisting()
-    await expect($('*=Rivalia')).not.toBeExisting()
+    await expect($('//a[contains(@class,"state-link") and contains(., "Home")]')).toBeExisting()
+    await expect($('//a[contains(@class,"state-link") and contains(., "Rivalia")]')).not.toBeExisting()
 
     await $('button=All').click()
     await expect($('button=All')).toHaveAttribute('aria-pressed', 'true')
-    await expect($('*=Home')).toBeExisting()
-    await expect($('*=Rivalia')).toBeExisting()
+    await expect($('//a[contains(@class,"state-link") and contains(., "Home")]')).toBeExisting()
+    await expect($('//a[contains(@class,"state-link") and contains(., "Rivalia")]')).toBeExisting()
   })
 
   it('Buildings Domestic keeps player camps; All includes foreign workshops', async () => {
     await openWorkspaceTab('Buildings')
     await $('button=Domestic').click()
     await expect($('button=Domestic')).toHaveAttribute('aria-pressed', 'true')
-    await expect($('*=Mock Lumber Camp')).toBeExisting()
+    await expect($('button[aria-label*="Mock Lumber Camp"]')).toBeExisting()
 
     await $('button=All').click()
     await expect($('button=All')).toHaveAttribute('aria-pressed', 'true')
-    await expect($('*=Mock Tool Workshop')).toBeExisting()
+    await expect($('button[aria-label*="Mock Tool Workshop"]')).toBeExisting()
   })
 
   it('Prices good drill-down scopes Rivalia out of Our market / Domestic', async () => {
     await openWorkspaceTab('Prices')
-    const goodLink = await $('a.good-link')
-    // Prefer the mock_lumber good link when present.
-    const links = await $$('a.good-link')
-    let clicked = false
-    for (const link of links) {
-      const text = await link.getText()
-      if (text.toLowerCase().includes('lumber')) {
-        await link.click()
-        clicked = true
-        break
+    const lumber = await $('a.good-link[href*="mock_lumber"]')
+    if (await lumber.isExisting()) {
+      await lumber.click()
+    } else {
+      const links = await $$('a.good-link')
+      let clicked = false
+      for (const link of links) {
+        const text = await link.getText()
+        if (text.toLowerCase().includes('lumber')) {
+          await link.click()
+          clicked = true
+          break
+        }
       }
-    }
-    if (!clicked) {
-      await $('*=mock_lumber').click()
+      if (!clicked) {
+        throw new Error('no lumber good-link to open')
+      }
     }
 
     await browser.waitUntil(
@@ -85,36 +88,36 @@ describe('05 Scope — foreign alerts hidden; domestic vs market geography', () 
     )
 
     await $('button=Our market').click()
-    await expect($('*=Home')).toBeExisting()
-    await expect($('*=Rivalia')).not.toBeExisting()
-    await expect($('button*=Sort by State price')).toBeExisting()
+    await expect($('//a[contains(@class,"state-link") and contains(., "Home")]')).toBeExisting()
+    await expect($('//a[contains(@class,"state-link") and contains(., "Rivalia")]')).not.toBeExisting()
+    await expect($('button[aria-label="Sort by State price"]')).toBeExisting()
 
     await $('button=Domestic').click()
-    await expect($('*=Home')).toBeExisting()
-    await expect($('*=Rivalia')).not.toBeExisting()
+    await expect($('//a[contains(@class,"state-link") and contains(., "Home")]')).toBeExisting()
+    await expect($('//a[contains(@class,"state-link") and contains(., "Rivalia")]')).not.toBeExisting()
 
     await $('button=All').click()
-    await expect($('*=Rivalia')).toBeExisting()
+    await expect($('//a[contains(@class,"state-link") and contains(., "Rivalia")]')).toBeExisting()
   })
 
   it('State Local Prices shows Market price and State price columns without Rivalia under Our market', async () => {
-    // Enter Home state detail from the good page (All may have Rivalia links).
     await openWorkspaceTab('Prices')
-    const homeLink = await $('a*=Home')
+    const homeLink = await $('//a[contains(@class,"state-link") and contains(., "Home")]')
     if (await homeLink.isExisting()) {
       await homeLink.click()
     } else {
-      await browser.url('#/prices/state/1')
+      await browser.execute(() => {
+        window.location.hash = '#/prices/state/1'
+      })
     }
 
-    const localTab = await $('button*=Local Prices')
+    const localTab = await $('button=Local Prices')
     await expect(localTab).toBeExisting()
     await localTab.click()
 
     await expect($('th*=Market price')).toBeExisting()
     await expect($('th*=State price')).toBeExisting()
-    await expect($('*=mock_lumber')).toBeExisting()
-    // State detail is one state — Rivalia must not appear as a sibling state here.
+    await expect($('a.good-link[href*="mock_lumber"]')).toBeExisting()
     await expect($('*=Rivalia')).not.toBeExisting()
   })
 

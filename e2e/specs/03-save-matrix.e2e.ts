@@ -14,22 +14,22 @@ describe('03 Save matrix — different results per save', () => {
 
   it('shortage save shows lumber camp, tool workshop, and mock_lumber', async () => {
     await openWorkspaceTab('Prices')
-    await expect($('*=mock_lumber')).toBeExisting()
+    await expect($('a.good-link[href*="mock_lumber"]')).toBeExisting()
 
     await openWorkspaceTab('Buildings')
-    await expect($('*=Mock Lumber Camp')).toBeExisting()
-    await expect($('*=Mock Tool Workshop')).toBeExisting()
+    await expect($('button[aria-label*="Mock Lumber Camp"]')).toBeExisting()
+    await expect($('button[aria-label*="Mock Tool Workshop"]')).toBeExisting()
   })
 
   it('balanced save drops the tool workshop but keeps the lumber camp', async () => {
     await loadSave('balanced')
 
     await openWorkspaceTab('Buildings')
-    await expect($('*=Mock Lumber Camp')).toBeExisting()
-    await expect($('*=Mock Tool Workshop')).not.toBeExisting()
+    await expect($('button[aria-label*="Mock Lumber Camp"]')).toBeExisting()
+    await expect($('button[aria-label*="Mock Tool Workshop"]')).not.toBeExisting()
 
     await openWorkspaceTab('Prices')
-    await expect($('*=mock_lumber')).toBeExisting()
+    await expect($('a.good-link[href*="mock_lumber"]')).toBeExisting()
 
     if (isTauriE2e()) {
       await expect($('[aria-label="Loaded save"]')).toHaveText(

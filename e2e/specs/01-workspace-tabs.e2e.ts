@@ -5,6 +5,8 @@ import { bootWithSave, openWorkspaceTab } from '../session.js'
 /**
  * Fresh session per spec file: boot shortage, then verify each workspace pane
  * shows shortage-economy content — not just that the tab heading mounts.
+ *
+ * UI labels use displayId (mock_lumber → "Mock Lumber"); prefer href / aria-label.
  */
 describe('01 Workspace tabs — content', () => {
   before(async () => {
@@ -15,25 +17,26 @@ describe('01 Workspace tabs — content', () => {
     await openWorkspaceTab('Prices')
     await expect($('#prices-tool-heading')).toHaveText('Goods prices')
     await expect($('p*=Prices appear after a save is priced')).not.toBeExisting()
-    await expect($('*=mock_lumber')).toBeExisting()
-    await expect($('*=mock_tools')).toBeExisting()
-    await expect($('*=mock_iron')).toBeExisting()
-    await expect($('button*=Sort by Price')).toBeExisting()
+    await expect($('a.good-link[href*="mock_lumber"]')).toBeExisting()
+    await expect($('a.good-link[href*="mock_tools"]')).toBeExisting()
+    await expect($('a.good-link[href*="mock_iron"]')).toBeExisting()
+    await expect($('button[aria-label="Sort by Price"]')).toBeExisting()
   })
 
   it('States lists STATE_MOCK / Mock with a state table', async () => {
     await openWorkspaceTab('States')
     await expect($('#states-heading')).toHaveText('States')
     await expect($('*=1 states')).toBeExisting()
-    await expect($('*=Mock')).toBeExisting()
-    await expect($('button*=Sort by Name')).toBeExisting()
+    await expect($('a.state-link[href*="/states/1"]')).toBeExisting()
+    await expect($('//a[contains(@class,"state-link") and contains(., "Mock")]')).toBeExisting()
+    await expect($('button[aria-label="Sort by Name"]')).toBeExisting()
     await expect($('p*=Load a save to see states')).not.toBeExisting()
   })
 
   it('Pops lists mock_laborers from the shortage save', async () => {
     await openWorkspaceTab('Pops')
     await expect($('#pops-heading')).toHaveText('Pops')
-    await expect($('*=mock_laborers')).toBeExisting()
+    await expect($('*=Mock Laborers')).toBeExisting()
     await expect($('p*=Load a save to see pops')).not.toBeExisting()
     await expect($('p*=No pops in this scope')).not.toBeExisting()
   })
@@ -66,7 +69,6 @@ describe('01 Workspace tabs — content', () => {
         timeoutMsg: 'Military pane never resolved armies empty state',
       },
     )
-    // Prefer the real empty snapshot once military invoke finishes.
     if (await $('*=Military details appear after a save is priced').isExisting()) {
       await browser.waitUntil(
         async () => (await $('*=No armies recorded in this save').isExisting()),
@@ -81,8 +83,8 @@ describe('01 Workspace tabs — content', () => {
   it('Buildings lists lumber camp and tool workshop', async () => {
     await openWorkspaceTab('Buildings')
     await expect($('#buildings-heading')).toHaveText('Buildings')
-    await expect($('*=Mock Lumber Camp')).toBeExisting()
-    await expect($('*=Mock Tool Workshop')).toBeExisting()
+    await expect($('button[aria-label*="Mock Lumber Camp"]')).toBeExisting()
+    await expect($('button[aria-label*="Mock Tool Workshop"]')).toBeExisting()
     await expect($('button=Overview')).toBeExisting()
     await expect($('button=Queues')).toBeExisting()
   })
@@ -95,7 +97,10 @@ describe('01 Workspace tabs — content', () => {
     const tag = await building.getTagName()
     if (tag.toLowerCase() === 'select') {
       const options = await building.$$('option')
-      const labels = await Promise.all(options.map((o) => o.getText()))
+      const labels = []
+      for (const option of options) {
+        labels.push(await option.getText())
+      }
       const joined = labels.join(' ').toLowerCase()
       if (!joined.includes('lumber') || !joined.includes('tool')) {
         throw new Error(`what-if building options missing mock types: ${labels.join(', ')}`)
@@ -114,7 +119,6 @@ describe('01 Workspace tabs — content', () => {
     await expect($('#timeline-tool-heading')).toHaveText('Plan timeline')
     await expect($('button=Build timeline')).toBeExisting()
     await expect($('input[aria-label="Plan label"]')).toBeExisting()
-    // Goal builder is fed shortage goods ids
     const page = await $('section[aria-labelledby="timeline-tool-heading"]')
     const text = (await page.getText()).toLowerCase()
     if (!text.includes('mock_lumber') && !text.includes('lumber') && !text.includes('goal')) {

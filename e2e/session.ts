@@ -1,4 +1,4 @@
-import { browser, $, expect } from '@wdio/globals'
+import { browser, $, $$, expect } from '@wdio/globals'
 import { join } from 'node:path'
 import { isTauriE2e, isWebE2e } from './runtime.js'
 import {
@@ -47,7 +47,7 @@ export async function openWorkspaceTab(label: string): Promise<void> {
   await tab.click()
 }
 
-/** Wait until analysis is priced (campaign HUD + goods prices, not empty state). */
+/** Wait until analysis is priced (campaign HUD + at least one goods row). */
 export async function waitForAnalysisReady(): Promise<void> {
   await browser.waitUntil(
     async () => {
@@ -55,11 +55,14 @@ export async function waitForAnalysisReady(): Promise<void> {
       if (!(await hud.isExisting())) return false
       const empty = await $('p*=Prices appear after a save is priced')
       if (await empty.isExisting()) return false
-      return (await $('#prices-tool-heading').isExisting())
+      // Heading alone is not enough (chrome mounts before rows). Goods use
+      // displayId labels ("Mock Lumber"); href keeps the script id.
+      const links = await $$('a.good-link')
+      return links.length > 0
     },
     {
       timeout: ANALYSIS_TIMEOUT,
-      timeoutMsg: 'Analysis never became ready (HUD + Goods prices)',
+      timeoutMsg: 'Analysis never became ready (HUD + goods links)',
     },
   )
 }
