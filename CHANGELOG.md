@@ -5,6 +5,15 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.7.0] - 2026-08-22
+
+### 🌟 Added / Changed
+- **UI Refresh:** Restored legacy light theme aesthetic to the Tauri desktop app, removing the injected dark SPA styles for improved visual consistency.
+- **Documentation Integrity:** Updated all user-facing documentation screenshots to reflect the new UI aesthetic.
+- **Testing Improvements:** Fixed the desktop UI screenshot capture pipeline (mock API logic and page wait selectors) to work properly with Tauri application architecture changes.
+
+---
+
 ## [0.6.0] - 2026-08-22
 
 ### 🌟 Added
