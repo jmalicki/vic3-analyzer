@@ -89,6 +89,11 @@ impl Vic3Node {
         }
     }
 
+    /// New domain node sharing this node's search context (PEA* child construction).
+    pub(crate) fn with_shared_context(state: PlanningState, template: &Self) -> Self {
+        Self::with_context(state, Rc::clone(&template.context))
+    }
+
     /// Compact identity used by the pathfinder's intern map.
     pub fn fingerprint(&self) -> u64 {
         self.fingerprint

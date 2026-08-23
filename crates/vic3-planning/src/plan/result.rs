@@ -2,9 +2,10 @@
 //!
 //! [`PlanOpts`] / [`PlanResult`] are the shared contract for CLI, wasm, Tauri,
 //! and SQL `plan(goal [, max_days [, label]])` (label accepted, not emitted).
-//! [`plan`] runs A* via [`Vic3Node`]; failures are [`PlanError`].
+//! [`plan`] runs PEA*-wrapped A* via [`PeaNode`] / [`Vic3Node`]; failures are
+//! [`PlanError`].
 
-use super::{pathfinding::shortest_path, Vic3Node};
+use super::{pathfinding::shortest_path, PeaNode, Vic3Node};
 use crate::goals::Goal;
 use crate::sim::{Action, EconomyContext, SimConfig};
 use crate::world::PlanningState;
@@ -294,8 +295,8 @@ fn plan_from_root(
     residual: f64,
     limitations: Vec<String>,
 ) -> Result<PlanResult, PlanError> {
-    let (path, day_cost) =
-        shortest_path::<_, PairingHeap<_, _>>(&root).ok_or(PlanError::Unreachable)?;
+    let (pea_path, day_cost) = shortest_path::<_, PairingHeap<_, _>>(&PeaNode::ready(root))
+        .ok_or(PlanError::Unreachable)?;
     if day_cost > max_days {
         return Err(PlanError::MaxDays {
             cost: day_cost,
@@ -303,11 +304,24 @@ fn plan_from_root(
         });
     }
 
+    // Drop PEA* expansion cursors; keep domain fingerprint changes only.
+    let mut domain_path: Vec<&Vic3Node> = Vec::with_capacity(pea_path.len());
+    for node in &pea_path {
+        let domain = node.domain();
+        if domain_path
+            .last()
+            .is_some_and(|prev| prev.fingerprint() == domain.fingerprint())
+        {
+            continue;
+        }
+        domain_path.push(domain);
+    }
+
     let mut elapsed = 0;
-    let mut actions = Vec::with_capacity(path.len().saturating_sub(1));
-    for pair in path.windows(2) {
-        let from = &pair[0];
-        let to = &pair[1];
+    let mut actions = Vec::with_capacity(domain_path.len().saturating_sub(1));
+    for pair in domain_path.windows(2) {
+        let from = pair[0];
+        let to = pair[1];
         let edge = from
             .sim_successors()
             .into_iter()
