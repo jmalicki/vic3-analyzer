@@ -8,12 +8,8 @@ import {
   desktopUiDir,
   outDir,
   packageRoot,
-  requireDefsBlob,
-  requireWasm,
-  saveFixture,
 } from './lib/paths.mjs'
 import { newShotPage, writeShot } from './lib/shot.mjs'
-import { seedDefsIndexedDb } from './lib/seed-web.mjs'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -67,12 +63,7 @@ async function installTauriMock(page) {
             case 'read_save_bytes':
               return window.__MOCK_SAVE_BYTES__
             case 'list_saves':
-              return data.queries.saves.rows.map((row) => ({
-                name: row[0],
-                kind: row[1],
-                mtime: 1672531200000,
-                location: 'local',
-              }))
+              return data.saves
             case 'use_save':
               loaded = args.name || loaded
               return JSON.stringify(data.use_save)
@@ -136,9 +127,6 @@ async function goView(page, label) {
 }
 
 async function main() {
-  requireWasm()
-  requireDefsBlob()
-
   const dest = outDir()
   const server = await startStaticServer(desktopUiDir)
   const browser = await chromium.launch({ headless: true })
@@ -146,20 +134,11 @@ async function main() {
     const { context, page } = await newShotPage(browser)
     page.on('console', (msg) => console.log('PAGE LOG:', msg.text()))
     await installTauriMock(page)
-    await page.addInitScript((bytes) => {
-      window.__MOCK_SAVE_BYTES__ = bytes
-    }, Array.from(readFileSync(saveFixture)))
 
     await page.goto(server.url, { waitUntil: 'domcontentloaded', timeout: 60_000 })
-    await seedDefsIndexedDb(page)
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 })
-    await page.getByText(/Using your file: defs\.postcard/).waitFor({ timeout: 60_000 })
-
-    await page.getByLabel('Save file').setInputFiles({
-      name: 'plaintext.v3',
-      mimeType: 'text/plain',
-      buffer: readFileSync(saveFixture),
-    })
+    // Desktop path: no IndexedDB defs / file upload — catalog + use_save via __TAURI__ mock.
+    await page.getByLabel('Desktop save catalog').waitFor({ timeout: 60_000 })
+    await page.getByRole('button', { name: 'Load' }).first().click()
     await waitReady(page)
 
     // D1 Dashboard / prices overview
