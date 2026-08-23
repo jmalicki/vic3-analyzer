@@ -695,14 +695,37 @@ fn materialize_state_pop(tables: &EmitTables, row: &CompactStatePop) -> StatePop
     }
 }
 
+/// Compact price-equilibrium output (no UI/SQL packaging).
+///
+/// Produced by [`crate::solve::equilibrate`]. Feed into [`crate::report::report`]
+/// for a full [`PricesResult`], or use directly from planning.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SolveOutcome {
+    pub goods: Vec<GoodPrice>,
+    /// `‖r − r_formula(orders(r))‖₂`. Always present (I5).
+    pub residual: f64,
+    pub status: SolveStatus,
+    /// Relative prices `price / base` in the same order as [`Self::goods`].
+    pub relative: Vec<f64>,
+    /// Building revenues at solved local prices (for modeled GDP).
+    pub building_revenues: Vec<BuildingRevenue>,
+}
+
+/// One building's revenue after a compact solve (planning GDP).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuildingRevenue {
+    pub state_id: Option<u32>,
+    pub revenue: f64,
+}
+
 /// Price-equilibrium output. Every solve / preview / what-if returns this shape.
 ///
 /// `limitations` is always at least the crate [`crate::LIMITATIONS`] (preview may
 /// append extras). `residual` is always present (I5). `relative` mirrors
 /// `goods` order for [`SolveOpts::warm_rel`].
 ///
-/// Downstream: `PlanningState` takes `goods` prices; SQL/MCP diagnostics read
-/// the same JSON via `vic3-api` / the SQL session’s last solve.
+/// Built by [`crate::report`] from a [`SolveOutcome`]. Downstream: SQL/MCP
+/// diagnostics read the same JSON via `vic3-api` / the SQL session’s last solve.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PricesResult {
     /// Prices currently solve one synthetic economy for the whole save.

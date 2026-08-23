@@ -166,8 +166,8 @@ pub fn atoms_need_construction(atoms: &[Atom]) -> bool {
 ///
 /// When `economy` is present, reads levels from
 /// [`EconomyContext::apply_planning_to_world`] (base world plus `building_level_deltas`).
-/// Without economy, falls back to the CS entry in
-/// [`PlanningState::building_level_deltas`] alone.
+/// Without economy, falls back to summing CS entries in
+/// [`PlanningState::building_level_deltas`].
 pub fn construction_sector_levels(state: &PlanningState, economy: Option<&EconomyContext>) -> f64 {
     if let Some(economy) = economy {
         return economy
@@ -181,9 +181,10 @@ pub fn construction_sector_levels(state: &PlanningState, economy: Option<&Econom
     f64::from(
         state
             .building_level_deltas
-            .get(BUILDING_CONSTRUCTION_SECTOR)
-            .copied()
-            .unwrap_or(0),
+            .iter()
+            .filter(|((building, _), _)| building == BUILDING_CONSTRUCTION_SECTOR)
+            .map(|(_, levels)| *levels)
+            .sum::<u32>(),
     )
 }
 
@@ -279,19 +280,22 @@ pub fn construction_points_per_day_per_job(state: &PlanningState, config: SimCon
     out
 }
 
-/// Days and building id for the soonest active construction completion.
+/// Days, building id, and placement state for the soonest active construction completion.
 ///
 /// Uses [`construction_points_per_day_per_job`]. When `remaining` is set (save
 /// in-flight work or def `required_construction`), ETA is
 /// [`crate::tracks::days_for_work`] (`ceil(points / points_per_day)`). Otherwise
 /// falls back to [`SimConfig::construction_days`]. Ties break by building id
-/// ascending.
+/// ascending, then `state_id`.
 ///
 /// Returns [`None`] when every active feed is non-positive and remaining work
 /// is known (no finite ETA), or when the queue is empty.
-pub fn construction_wait_target(state: &PlanningState, config: SimConfig) -> Option<(u16, String)> {
+pub fn construction_wait_target(
+    state: &PlanningState,
+    config: SimConfig,
+) -> Option<(u16, String, Option<u32>)> {
     let feeds = construction_points_per_day_per_job(state, config);
-    let mut best: Option<(u16, String)> = None;
+    let mut best: Option<(u16, String, Option<u32>)> = None;
     for (job, points_per_day) in state.constructions.iter().zip(feeds.iter().copied()) {
         if points_per_day <= 0.0 {
             continue;
@@ -305,12 +309,16 @@ pub fn construction_wait_target(state: &PlanningState, config: SimConfig) -> Opt
         };
         let replace = match &best {
             None => true,
-            Some((best_days, best_building)) => {
-                days < *best_days || (days == *best_days && job.building < *best_building)
+            Some((best_days, best_building, best_state)) => {
+                days < *best_days
+                    || (days == *best_days && job.building < *best_building)
+                    || (days == *best_days
+                        && job.building == *best_building
+                        && job.state_id < *best_state)
             }
         };
         if replace {
-            best = Some((days, job.building.clone()));
+            best = Some((days, job.building.clone(), job.state_id));
         }
     }
     best
@@ -318,18 +326,25 @@ pub fn construction_wait_target(state: &PlanningState, config: SimConfig) -> Opt
 
 /// Calendar days until the soonest construction completion (heuristic / tests).
 ///
-/// Thin wrapper over [`construction_wait_target`] that drops the building id.
+/// Thin wrapper over [`construction_wait_target`] that drops building / state.
 pub fn construction_wait_days(state: &PlanningState, config: SimConfig) -> Option<u16> {
-    construction_wait_target(state, config).map(|(days, _)| days)
+    construction_wait_target(state, config).map(|(days, _, _)| days)
 }
 
-/// True when `building` has a queue row with non-positive finite `remaining` points.
+/// True when `building` (+ optional state) has a queue row with non-positive finite `remaining`.
 ///
 /// Authorizes zero-day [`crate::sim::Event::BuildingCompleted`] waits after a
 /// prior tick drained the job.
-pub fn construction_work_complete(state: &PlanningState, building: &str) -> bool {
+pub fn construction_work_complete(
+    state: &PlanningState,
+    building: &str,
+    state_id: Option<u32>,
+) -> bool {
     state.constructions.iter().any(|row| {
         row.building == building
+            && state_id
+                .map(|want| row.state_id == Some(want) || row.state_id.is_none())
+                .unwrap_or(true)
             && row
                 .remaining
                 .is_some_and(|rem| rem.is_finite() && rem <= 0.0)
@@ -353,24 +368,14 @@ pub fn ensure_construction_work_points(state: &mut PlanningState, config: SimCon
 /// Insert [`BUILDING_CONSTRUCTION_SECTOR`] into `candidates` when appropriate.
 ///
 /// Emits CS only as a **means-to-an-end** meta lever: some other build type is
-/// already a candidate (`!candidates.is_empty()`), and CS levels added on this
-/// branch are still under `cap`. CS is not compared on IO dominance against
-/// mills—capacity for later builds is the reason.
+/// already a candidate (`!candidates.is_empty()`). Per-state level caps are
+/// applied when expanding types to placement states.
 pub fn maybe_add_construction_sector_candidate(
-    state: &PlanningState,
+    _state: &PlanningState,
     candidates: &mut BTreeSet<String>,
-    cap: u16,
+    _cap: u16,
 ) {
     if candidates.is_empty() {
-        return;
-    }
-    if state
-        .building_level_deltas
-        .get(BUILDING_CONSTRUCTION_SECTOR)
-        .copied()
-        .unwrap_or(0)
-        >= u32::from(cap)
-    {
         return;
     }
     candidates.insert(BUILDING_CONSTRUCTION_SECTOR.to_string());
@@ -526,7 +531,7 @@ mod tests {
         let mut state = PlanningState::from_parts(PlanningParts {
             country: "GER".into(),
             construction_points_per_day: 1.0,
-            building_level_deltas: BTreeMap::from([(BUILDING_CONSTRUCTION_SECTOR.into(), 1)]),
+            building_level_deltas: BTreeMap::from([((BUILDING_CONSTRUCTION_SECTOR.into(), 1), 1)]),
             ..PlanningParts::default()
         });
         sync_construction_points_per_day(&mut state, &economy, config);

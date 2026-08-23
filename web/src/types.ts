@@ -241,7 +241,7 @@ export interface GapsResult {
 
 export type PlanAction =
   | { QueueTech: { tech: string } }
-  | { QueueBuildingLevel: { building: string } }
+  | { QueueBuildingLevel: { building: string; state_id: number } }
   | { QueueInterest: { kind: string; id: string } }
   | { QueueHireMilitary: { building: string } }
   | { QueueLaw: { law: string } }
@@ -251,7 +251,7 @@ export type PlanAction =
       WaitForEvent: {
         event:
           | { TechCompleted: { tech: string } }
-          | { BuildingCompleted: { building: string } }
+          | { BuildingCompleted: { building: string; state_id?: number | null } }
           | { InterestDeclared: { kind: string; id: string } }
           | { HireCompleted: { building: string } }
           | { LawEnacted: { law: string } }

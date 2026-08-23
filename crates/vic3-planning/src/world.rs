@@ -168,7 +168,8 @@ pub struct PlanningParts {
     pub debt_principal: Option<f64>,
     pub credit_limit: Option<f64>,
     pub credit_headroom: Option<f64>,
-    pub building_level_deltas: BTreeMap<String, u32>,
+    /// `(building_type, state_id)` → added levels on this branch.
+    pub building_level_deltas: BTreeMap<(String, u32), u32>,
     pub queued_building: Option<String>,
     /// Full private then government queue for this country (exposure / sim sync).
     pub constructions: Vec<PlanningConstruction>,
@@ -283,8 +284,10 @@ pub struct PlanningState {
     pub credit_limit: Option<f64>,
     /// `credit_limit - debt_principal` when both are known.
     pub credit_headroom: Option<f64>,
-    /// Added levels by building type on this simulated branch (empty at load).
-    pub building_level_deltas: BTreeMap<String, u32>,
+    /// Added levels by `(building_type, state_id)` on this branch (empty at load).
+    ///
+    /// Matches Vic3 construction placement: a level is always queued in a state.
+    pub building_level_deltas: BTreeMap<(String, u32), u32>,
     /// Construction queue head from save, or sim `QueueBuildingLevel`.
     ///
     /// Prefer private over government at load. Kept in sync with
@@ -724,7 +727,9 @@ impl PlanningState {
     /// [`crate::sim::SimConfig::construction_days`]. In-flight save rows keep
     /// their own `remaining` and are not rewritten here. The in-flight head
     /// stays the first queue entry (`sync_queued_building_from_constructions`).
-    pub fn push_construction(&mut self, building: String, remaining: Option<f64>) {
+    ///
+    /// `state_id` is the Vic3 placement state (required for planner enqueues).
+    pub fn push_construction(&mut self, building: String, state_id: u32, remaining: Option<f64>) {
         let order_id = self
             .constructions
             .iter()
@@ -735,29 +740,32 @@ impl PlanningState {
         self.constructions.push(PlanningConstruction {
             order_id,
             queue: ConstructionQueueKind::Government,
-            state_id: None,
+            state_id: Some(state_id),
             building,
             remaining,
         });
         self.sync_queued_building_from_constructions();
     }
 
-    /// Remove a completed construction entry matching `building`, then advance the head.
+    /// Remove a completed construction entry matching `building` (+ optional state), then advance the head.
     ///
     /// Prefers a finished row (`remaining <= 0`) when several share the type so
-    /// parallel completions pop the right job.
-    pub fn complete_construction(&mut self, building: &str) {
-        let finished = self.constructions.iter().position(|entry| {
+    /// parallel completions pop the right job. When `state_id` is [`Some`], only
+    /// that placement matches; [`None`] matches any state (save rows).
+    pub fn complete_construction(&mut self, building: &str, state_id: Option<u32>) {
+        let matches = |entry: &PlanningConstruction| {
             entry.building == building
+                && state_id
+                    .map(|want| entry.state_id == Some(want) || entry.state_id.is_none())
+                    .unwrap_or(true)
+        };
+        let finished = self.constructions.iter().position(|entry| {
+            matches(entry)
                 && entry
                     .remaining
                     .is_some_and(|rem| rem.is_finite() && rem <= 0.0)
         });
-        let idx = finished.or_else(|| {
-            self.constructions
-                .iter()
-                .position(|entry| entry.building == building)
-        });
+        let idx = finished.or_else(|| self.constructions.iter().position(matches));
         if let Some(idx) = idx {
             self.constructions.remove(idx);
         }

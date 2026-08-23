@@ -6,7 +6,8 @@ interface Props {
 
 function formatAction(action: PlanAction): string {
   if ('QueueTech' in action) return `Queue Tech: ${action.QueueTech.tech}`
-  if ('QueueBuildingLevel' in action) return `Queue Building: ${action.QueueBuildingLevel.building}`
+  if ('QueueBuildingLevel' in action)
+    return `Queue Building: ${action.QueueBuildingLevel.building} (state ${action.QueueBuildingLevel.state_id})`
   if ('QueueInterest' in action) return `Declare Interest: ${action.QueueInterest.kind} in ${action.QueueInterest.id}`
   if ('QueueHireMilitary' in action) return `Hire Military: ${action.QueueHireMilitary.building}`
   if ('QueueLaw' in action) return `Enact Law: ${action.QueueLaw.law}`
@@ -15,7 +16,12 @@ function formatAction(action: PlanAction): string {
   if ('WaitForEvent' in action) {
     const ev = action.WaitForEvent.event
     if ('TechCompleted' in ev) return `Wait for Tech: ${ev.TechCompleted.tech}`
-    if ('BuildingCompleted' in ev) return `Wait for Building: ${ev.BuildingCompleted.building}`
+    if ('BuildingCompleted' in ev) {
+      const sid = ev.BuildingCompleted.state_id
+      return sid != null
+        ? `Wait for Building: ${ev.BuildingCompleted.building} (state ${sid})`
+        : `Wait for Building: ${ev.BuildingCompleted.building}`
+    }
     if ('InterestDeclared' in ev) return `Wait for Interest: ${ev.InterestDeclared.kind} in ${ev.InterestDeclared.id}`
     if ('HireCompleted' in ev) return `Wait for Hire: ${ev.HireCompleted.building}`
     if ('LawEnacted' in ev) return `Wait for Law: ${ev.LawEnacted.law}`

@@ -10,6 +10,7 @@ use crate::goals::Goal;
 use crate::sim::{Action, EconomyContext, SimConfig};
 use crate::world::PlanningState;
 use rust_advanced_heaps::pairing::PairingHeap;
+use rust_advanced_heaps::pathfinding::SearchNode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -295,8 +296,27 @@ fn plan_from_root(
     residual: f64,
     limitations: Vec<String>,
 ) -> Result<PlanResult, PlanError> {
+    super::astar_trace::reset();
+    if super::astar_trace::enabled() {
+        let branch = root.sim_successors().len();
+        eprintln!(
+            "[astar] plan start gdp={:.0} h={} sim_branch={} max_days={}",
+            root.state().gdp,
+            root.heuristic(),
+            branch,
+            max_days
+        );
+    }
     let (pea_path, day_cost) = shortest_path::<_, PairingHeap<_, _>>(&PeaNode::ready(root))
         .ok_or(PlanError::Unreachable)?;
+    if super::astar_trace::enabled() {
+        eprintln!(
+            "[astar] plan done expands={} day_cost={} path_len={}",
+            super::astar_trace::expands(),
+            day_cost,
+            pea_path.len()
+        );
+    }
     if day_cost > max_days {
         return Err(PlanError::MaxDays {
             cost: day_cost,

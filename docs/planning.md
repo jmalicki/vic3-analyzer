@@ -23,7 +23,7 @@ A `PlanningState` is a compact, deterministic projection of the save file and th
 | `treasury`, `weekly_balance`, `debt_*`, `credit_*`, `solvent` | Country fiscal balance and credit headroom |
 | `population_weighted_wealth` | Pop-weighted average wealth across owned states |
 | `army_power_projection`, `navy_power_projection` | Projected military and naval strength from combat formations and staffing |
-| `building_level_deltas`, `pm_overrides`, `tax_level` | Sim-only mutations applied along the planning search branch |
+| `building_level_deltas`, `pm_overrides`, `tax_level` | Sim-only mutations along the branch (`(building_type, state_id)` level adds, PM overrides, tax offset) |
 | `construction_rate` | National construction capacity (base + Construction Sector levels) |
 
 **Invariants:**
@@ -38,7 +38,7 @@ Transitions between states consist of **zero-day decisions** and **event-wait ed
 
 ### 1. Decision Edges (0 Days)
 - `QueueTech`: Selects a tech that unlocks prerequisites for open goal atoms.
-- `QueueBuildingLevel`: Adds a level of barracks, shipyards, or economic buildings.
+- `QueueBuildingLevel`: Adds a level of a building type in a specific state (barracks, shipyards, or economic buildings).
 - `SwitchPm`: Swaps production methods to boost GDP or relieve a specific goods shortage.
 - `QueueLaw`: Begins a law passage checkpoint.
 - `QueueInterest`: Declares a strategic interest in a target region.
@@ -83,11 +83,11 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
 - **Capacity** `R` starts from `base_construction_capacity` and rises by `construction_per_cs_level` per Construction Sector level (projected at load; refreshed when a CS level completes on the plan branch).
 - **Cost** per queued level uses save `remaining`, else defs `required_construction`, else `default_construction_cost`.
 - **Allocation cap** `max_construction_allocation` limits points/day per job; leftover capacity fills later queue entries, so enough capacity yields parallel builds. Wait edges advance to the soonest completion under that split.
-- **Building candidates** are type ids for `QueueBuildingLevel` (search branching), not placement UI:
-  - **Direct:** defs building types whose default PM IO helps open `good_price` / raising `gdp`, plus barracks/shipyards/naval admin when PP needs levels (hire stays on the military atom arm). First-of-type is allowed; completion inserts a synthetic world row so prices move.
-  - **Dominance:** drop a type only when another candidate is strictly better on modeled axes (goal-good benefit per level ↑, construction cost ↓). No top-N ranking. Incomparable types both stay.
-  - **Meta:** Construction Sector when any other build candidate already exists (capacity lever, not IO).
-  - **Deferred:** state slots / potentials and building unlock techs (`TODO(buildability)`); A* incumbent upper bound via greedy feasible path (`TODO(anytime-ub)`).
+- **Building candidates** are `(building_type, state_id)` for `QueueBuildingLevel` (Vic3 placement):
+  - **Direct:** defs building types whose default PM IO helps open `good_price` / raising `gdp`, plus barracks/shipyards/naval admin when PP needs levels (hire stays on the military atom arm). Each type expands to states that already have that building, or every owned state for first-of-type / greenfield. Completion bumps levels in that state (synthetic row when absent) so prices move.
+  - **No type-level dominance prune:** modeled benefit/cost axes omit slots, local markets, and unlocks, so “strictly better type” is not sound.
+  - **Meta:** Construction Sector when any other build candidate already exists (capacity lever, not IO), also placed by state.
+  - **Deferred:** free slots / potentials and building unlock techs (`TODO(buildability)`); A* incumbent upper bound via greedy feasible path (`TODO(anytime-ub)`).
 - This is still a compact model — not full Paradox construction-goods demand or script cost tables beyond loaded `required_construction`.
 
 ---

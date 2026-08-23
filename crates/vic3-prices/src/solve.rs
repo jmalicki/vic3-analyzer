@@ -1,6 +1,6 @@
 //! Bound-constrained NLS ([`basin::Trf`]) plus successive-substitution warm start.
 //!
-//! # Algorithm (same [`solve`] API)
+//! # Algorithm (same [`equilibrate`] / [`solve`] API)
 //!
 //! 1. Build access-scaled frozen non-pop orders and state shops (pops at local
 //!    prices; buildings + post-1.9 trade frozen).
@@ -12,34 +12,27 @@
 //! 4. Polish with successive substitution (also the fallback after
 //!    `SolverFailed`). TRF stays strictly inside the box; SS may sit on a bound.
 //!
-//! Timing notes (late autosave, rough): NLS / settle ~1 ms; building shops
-//! ~80 ms; [`finished`] (full UI payload) dominates ~250 ms. CLI `prices` and
-//! wasm `load_analysis` pay the same. There is no goods-only public solve —
-//! the default table still needs pop/need rows for the UI contract.
+//! [`equilibrate`] returns a compact [`SolveOutcome`] (goods, residual, relative,
+//! building revenues). [`solve`] packages that into a full [`PricesResult`] via
+//! [`crate::report`] for CLI / UI / SQL. Planning should call [`equilibrate`].
 //!
-//! Downstream: [`PricesResult`] feeds `PlanningState` and `vic3-api` JSON;
-//! see the crate root docs.
+//! Downstream: [`PricesResult`] feeds `vic3-api` JSON; see the crate root docs.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 
 use basin::{
     BoxConstraints, CostFunction, DenseMatrix, Executor, Jacobian, Residual, TerminationReason, Trf,
 };
-use vic3_defs::{GameDefs, GoodIdx, GoodsVec, NeedIdx};
+use vic3_defs::{GameDefs, GoodIdx, GoodsVec};
 
 use crate::consumption::{
-    add_pop_from_units, add_wage_bins, consumption, pop_compact_needs, wage_bins_from_pops,
-    NeedShares, UnitBaskets, UnitNeedBaskets, WealthBin,
+    add_pop_from_units, add_wage_bins, wage_bins_from_pops, NeedShares, UnitBaskets, WealthBin,
 };
 use crate::formula::{effective_mapi, local_price, market_access, price};
-use crate::result::{
-    BuildingEconomics, BuildingGroupInfo, BuildingTypeInfo, CompactNeed, CompactStatePop,
-    CountryInfo, EmitTables, GoodFlow, GoodPrice, MarketInputs, PricesResult, ProfessionCount,
-    SolveOpts, SolveStatus, StateGood, StateInfo, StateNeed, StatePopList, StateQualification,
-};
-use crate::world::{qty_value, World, WorldPop, WorldStatePop};
-use crate::LIMITATIONS;
+use crate::report::{building_revenues, report_from_solve};
+use crate::result::{GoodPrice, PricesResult, SolveOpts, SolveOutcome, SolveStatus};
+use crate::world::{World, WorldPop};
 
 const WARM_START_ALPHA: f64 = 0.5;
 const FD_STEP: f64 = 1e-7;
@@ -49,37 +42,38 @@ const LOCAL_EPS: f64 = 1e-10;
 /// Find relative prices `r` minimizing `‖r − r_formula(orders(r))‖²`
 /// with box bounds `r ∈ [1 − PRICE_RANGE, 1 + PRICE_RANGE]`.
 ///
-/// Warm-starts (and, on Basin failure, falls back to) successive substitution
-/// `r ← (1−α)r + α P(c(r))` inside this same API. See the module docs for the
-/// step order and [`SolveOpts::warm_rel`] skip rule.
-///
-/// # Arguments
-///
-/// * `world` — pops (in-loop), buildings / trade / wages (**frozen**), states
-///   (infrastructure → market access / MAPI).
-/// * `defs` — goods bases, `PRICE_RANGE`, needs / buy packages / PMs.
-/// * `opts` — `residual_eps`, `max_iters`, optional `warm_rel`.
-///
-/// # Returns
-///
-/// Always a [`PricesResult`]: `residual`, `status`, `limitations` (= crate
-/// [`LIMITATIONS`]), goods table, state locals, building economics, relative
-/// vector for a later warm start. Empty goods (no positive base prices) yields
-/// `Converged` with residual `0` and empty rows; non-positive bases yield
-/// `Failed` with infinite residual.
-///
-/// No `Result` error channel — callers inspect `status` / residual (I5).
-///
-/// # Limitations
-///
-/// Same list as [`LIMITATIONS`]:
-///
-/// 1. Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.
-/// 2. Prices are clamped to ±PRICE_RANGE; the clamp is part of the model.
-/// 3. Employment, wages, and trade volumes are frozen except explicit what-if deltas.
-/// 4. Pops shop at each state's MAPI-blended local prices; those orders are access-scaled into one whole-save market. Extra MAPI modifiers and overseas constraints are not modeled.
-/// 5. The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.
+/// Returns a compact [`SolveOutcome`] without building the full UI/SQL tables.
+/// Use [`solve`] when callers need [`PricesResult`].
+pub fn equilibrate(world: &World, defs: &GameDefs, opts: SolveOpts) -> SolveOutcome {
+    equilibrate_inner(world, defs, opts).0
+}
+
+/// Full public solve: [`equilibrate`] then [`crate::report`].
 pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
+    let (outcome, snapshot) = equilibrate_inner(world, defs, opts);
+    report_from_solve(world, defs, &outcome, snapshot.as_ref())
+}
+
+/// Apply a building-level delta and re-solve. Employment (`staffing`) stays frozen.
+///
+/// Equivalent to cloning via [`World::with_extra_levels`] then [`solve`]. Prefer
+/// [`crate::preview`] with a [`crate::WorldDelta`] when swapping PMs or targeting
+/// a building id.
+pub fn what_if(
+    world: &World,
+    defs: &GameDefs,
+    delta: &crate::result::WhatIfOpts,
+    opts: SolveOpts,
+) -> PricesResult {
+    let next = world.with_extra_levels(&delta.building, delta.extra_levels);
+    solve(&next, defs, opts)
+}
+
+fn equilibrate_inner(
+    world: &World,
+    defs: &GameDefs,
+    opts: SolveOpts,
+) -> (SolveOutcome, Option<ShopSnapshot>) {
     let base_prices: GoodsVec = defs
         .goods_order
         .iter()
@@ -87,27 +81,29 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
         .collect();
     let goods = market_goods(&base_prices);
     if goods.is_empty() {
-        return finished(
-            world,
-            defs,
-            Vec::new(),
-            0.0,
-            SolveStatus::Converged,
+        return (
+            SolveOutcome {
+                goods: Vec::new(),
+                residual: 0.0,
+                status: SolveStatus::Converged,
+                relative: Vec::new(),
+                building_revenues: Vec::new(),
+            },
             None,
-            Vec::new(),
         );
     }
 
     let bases: Vec<f64> = goods.iter().map(|&idx| base_prices[idx]).collect();
     if bases.iter().any(|b| *b <= 0.0) {
-        return finished(
-            world,
-            defs,
-            Vec::new(),
-            f64::INFINITY,
-            SolveStatus::Failed,
+        return (
+            SolveOutcome {
+                goods: Vec::new(),
+                residual: f64::INFINITY,
+                status: SolveStatus::Failed,
+                relative: Vec::new(),
+                building_revenues: Vec::new(),
+            },
             None,
-            Vec::new(),
         );
     }
 
@@ -195,767 +191,17 @@ pub fn solve(world: &World, defs: &GameDefs, opts: SolveOpts) -> PricesResult {
         SolveStatus::MaxIters
     };
 
-    finished(world, defs, rows, residual, status, Some(&snapshot), rel)
-}
-
-/// Apply a building-level delta and re-solve. Employment (`staffing`) stays frozen.
-///
-/// Equivalent to cloning via [`World::with_extra_levels`] then [`solve`]. Prefer
-/// [`crate::preview`] with a [`crate::WorldDelta`] when swapping PMs or targeting
-/// a building id.
-///
-/// # Arguments
-///
-/// * `world` — unchanged; matching buildings get `extra_levels` on a clone.
-/// * `defs` / `opts` — same as [`solve`].
-/// * `delta` — building type id + non-negative extra levels.
-pub fn what_if(
-    world: &World,
-    defs: &GameDefs,
-    delta: &crate::result::WhatIfOpts,
-    opts: SolveOpts,
-) -> PricesResult {
-    let next = world.with_extra_levels(&delta.building, delta.extra_levels);
-    solve(&next, defs, opts)
-}
-
-fn finished(
-    world: &World,
-    defs: &GameDefs,
-    goods: Vec<GoodPrice>,
-    residual: f64,
-    status: SolveStatus,
-    snapshot: Option<&ShopSnapshot>,
-    relative: Vec<f64>,
-) -> PricesResult {
-    let detail = detail_rows(world, defs, &goods, snapshot);
-    let countries = country_rows(world, defs);
-    let building_types = defs
-        .buildings
-        .values()
-        .map(|building| BuildingTypeInfo {
-            id: building.id.clone(),
-            name: defs.labels.get(&building.id).cloned(),
-            group_id: building.group.clone(),
-            city_type: building.city_type.clone(),
-        })
-        .collect();
-    let building_groups = defs
-        .building_groups
-        .values()
-        .map(|group| BuildingGroupInfo {
-            id: group.id.clone(),
-            name: defs.labels.get(&group.id).cloned(),
-            category: group.category.clone(),
-            land_usage: group.land_usage.clone(),
-            always_possible: group.always_possible,
-            default_building: group.default_building.clone(),
-            parent_group: group.parent_group.clone(),
-        })
-        .collect();
-    let inputs = MarketInputs {
-        pops: world.pop_count(),
-        skipped_pops: world.skipped_pops,
-        buildings: world.buildings.len(),
-        skipped_buildings: world.skipped_buildings,
-        buildings_without_method: world
-            .buildings
-            .iter()
-            .filter(|building| !building.has_known_method(defs))
-            .count(),
-        buildings_without_orders: world
-            .buildings
-            .iter()
-            .filter(|building| !building.has_orders(defs))
-            .count(),
-        goods_with_orders: goods
-            .iter()
-            .filter(|good| good.buy > crate::ORDER_EPS || good.sell > crate::ORDER_EPS)
-            .count(),
-    };
-    PricesResult {
-        scope: "whole_save_synthetic".to_string(),
-        goods,
-        countries,
-        states: detail.states,
-        state_goods: detail.state_goods,
-        buildings: detail.buildings,
-        building_types,
-        building_groups,
-        state_pops: detail.state_pops,
-        state_qualifications: detail.state_qualifications,
-        state_needs: detail.state_needs,
-        inputs,
-        residual,
-        status,
-        limitations: LIMITATIONS.iter().map(|s| (*s).to_string()).collect(),
-        relative,
-    }
-}
-
-struct DetailRows {
-    states: Vec<StateInfo>,
-    state_goods: Vec<StateGood>,
-    buildings: Vec<BuildingEconomics>,
-    state_pops: StatePopList,
-    state_qualifications: Vec<StateQualification>,
-    state_needs: Vec<StateNeed>,
-}
-
-fn detail_rows(
-    world: &World,
-    defs: &GameDefs,
-    goods: &[GoodPrice],
-    snapshot: Option<&ShopSnapshot>,
-) -> DetailRows {
-    let mut prices = GoodsVec::zeros(defs.goods_order.len());
-    let mut base_prices = GoodsVec::zeros(defs.goods_order.len());
-    let mut sell_orders = GoodsVec::zeros(defs.goods_order.len());
-    for good in goods {
-        if let Some(idx) = defs.index_of(&good.id) {
-            prices[idx] = good.price;
-            base_prices[idx] = good.base;
-            sell_orders[idx] = good.sell;
-        }
-    }
-    let rows = goods
-        .iter()
-        .filter_map(|good| Some((defs.index_of(&good.id)?, good)))
-        .collect::<BTreeMap<_, _>>();
-    let frozen_sell = world.frozen_sell.aligned(defs.goods_order.len());
-    let shares = NeedShares::from_sell(defs, &sell_orders);
-    let units = UnitBaskets::from_shares(defs, &base_prices, &shares);
-    let need_units = UnitNeedBaskets::from_shares(defs, &base_prices, &shares);
-    let mut state_buy = BTreeMap::<(u32, GoodIdx), f64>::new();
-    let mut state_sell = BTreeMap::<(u32, GoodIdx), f64>::new();
-
-    let pops_by_state = snapshot.is_none().then(|| {
-        let mut index = BTreeMap::<u32, Vec<WorldPop>>::new();
-        for pop in world.iter_pops() {
-            if let Some(state) = pop.state {
-                index.entry(state).or_default().push(pop);
-            }
-        }
-        index
-    });
-
-    for state in &world.states {
-        let pop_buy = snapshot
-            .and_then(|snap| snap.pop_buy_by_state.get(&state.id))
-            .cloned()
-            .unwrap_or_else(|| {
-                let empty: &[WorldPop] = &[];
-                let pops = pops_by_state
-                    .as_ref()
-                    .and_then(|index| index.get(&state.id))
-                    .map(Vec::as_slice)
-                    .unwrap_or(empty);
-                consumption(pops, &prices, &base_prices, defs, &frozen_sell)
-            });
-        for (good, quantity) in pop_buy.iter_indexed() {
-            if quantity.abs() > crate::ORDER_EPS {
-                *state_buy.entry((state.id, good)).or_default() += quantity;
-            }
-        }
-    }
-
-    let employees_by_building = building_employees(world, defs);
-
-    let mut buildings = Vec::new();
-    for building in &world.buildings {
-        let (input_qty, output_qty) = building.goods_io(defs);
-        let local = building
-            .state
-            .and_then(|state| snapshot.and_then(|snap| snap.local_by_state.get(&state)))
-            .unwrap_or(&prices);
-        let inputs = priced_flows(input_qty, local, defs, building.state, &mut state_buy);
-        let outputs = priced_flows(output_qty, local, defs, building.state, &mut state_sell);
-        let cost = inputs.iter().map(|flow| flow.value).sum::<f64>();
-        let revenue = outputs.iter().map(|flow| flow.value).sum::<f64>();
-        let short_inputs = inputs
-            .iter()
-            .filter(|flow| {
-                defs.index_of(&flow.good_id)
-                    .and_then(|idx| rows.get(&idx).copied())
-                    .is_none_or(|row| {
-                        row.sell <= crate::ORDER_EPS
-                            || row.price
-                                >= row.base * (1.0 + defs.price_range.max(0.0)) - crate::ORDER_EPS
-                    })
-            })
-            .map(|flow| flow.good_id.clone())
-            .collect();
-        buildings.push(BuildingEconomics {
-            id: building.id,
-            state_id: building.state,
-            type_id: building.building.clone(),
-            level: building.level,
-            staffing: building.staffing,
-            production_method_ids: building.production_methods.clone(),
-            inputs,
-            outputs,
-            revenue,
-            cost,
-            profit: revenue - cost,
-            short_inputs,
-            employees: employees_by_building
-                .get(&building.id)
-                .cloned()
-                .unwrap_or_default(),
-        });
-    }
-
-    for trade in &world.state_trade {
-        if trade.quantity > 0.0 {
-            *state_sell.entry((trade.state, trade.good)).or_default() += trade.quantity;
-        } else if trade.quantity < 0.0 {
-            *state_buy.entry((trade.state, trade.good)).or_default() -= trade.quantity;
-        }
-    }
-
-    let state_goods = world
-        .states
-        .iter()
-        .flat_map(|state| rows.iter().map(move |(&idx, row)| (state, idx, *row)))
-        .filter_map(|(state, idx, row)| {
-            let good_id = defs.good_by_index(idx)?.to_string();
-            let buy = state_buy.get(&(state.id, idx)).copied().unwrap_or(0.0);
-            let sell = state_sell.get(&(state.id, idx)).copied().unwrap_or(0.0);
-            let state_price = price(row.base, buy, sell, defs.price_range.max(0.0));
-            let market_access = market_access(state.infrastructure, state.infrastructure_usage);
-            let effective_mapi = effective_mapi(market_access);
-            let price = snapshot
-                .and_then(|snap| snap.local_by_state.get(&state.id))
-                .map(|local| local[idx])
-                .unwrap_or_else(|| local_price(effective_mapi, row.price, state_price));
-            Some(StateGood {
-                state_id: state.id,
-                good_id,
-                buy,
-                sell,
-                price,
-                market_price: row.price,
-                state_price,
-                market_access,
-                effective_mapi,
-                base: row.base,
-            })
-        })
-        .collect();
-    let states = world
-        .states
-        .iter()
-        .map(|state| StateInfo {
-            id: state.id,
-            region_id: state.region.clone(),
-            region_name: state
-                .region
-                .as_ref()
-                .map(|id| crate::label::script_label(defs, id)),
-            country_id: state.country,
-            market_id: state.market,
-            arable_land: state.arable_land,
-            infrastructure: state.infrastructure,
-            infrastructure_usage: state.infrastructure_usage,
-        })
-        .collect();
-    let tables = EmitTables::from_world(world, defs);
-    let compact_pops =
-        collapsed_state_pops(world, &prices, &base_prices, &units, &need_units, snapshot);
-    let state_needs = aggregate_state_needs(&compact_pops, &tables);
-    let state_pops = StatePopList::compact(tables, compact_pops);
-    let state_qualifications = state_qualification_rows(world, defs, &employees_by_building);
-    DetailRows {
-        states,
-        state_goods,
-        buildings,
-        state_pops,
-        state_qualifications,
-        state_needs,
-    }
-}
-
-fn profession_counts<I>(pairs: I, world: &World, defs: &GameDefs) -> Vec<ProfessionCount>
-where
-    I: IntoIterator<Item = (u16, f64)>,
-{
-    pairs
-        .into_iter()
-        .filter(|(_, count)| *count > 0.0)
-        .filter_map(|(id, count)| {
-            let profession_id = world.name(id)?.to_string();
-            Some(ProfessionCount {
-                profession_name: defs.labels.get(&profession_id).cloned(),
-                profession_id,
-                count,
-            })
-        })
-        .collect()
-}
-
-fn building_employees(world: &World, defs: &GameDefs) -> BTreeMap<u32, Vec<ProfessionCount>> {
-    let mut counts: BTreeMap<u32, BTreeMap<u16, f64>> = BTreeMap::new();
-    for pop in &world.state_pops {
-        let Some(building_id) = pop.workplace_id else {
-            continue;
-        };
-        let Some(profession) = pop.profession else {
-            continue;
-        };
-        let workforce = pop.workforce.unwrap_or(0.0);
-        if workforce <= 0.0 {
-            continue;
-        }
-        *counts
-            .entry(building_id)
-            .or_default()
-            .entry(profession)
-            .or_default() += workforce;
-    }
-    counts
-        .into_iter()
-        .map(|(building_id, by_prof)| (building_id, profession_counts(by_prof, world, defs)))
-        .collect()
-}
-
-type GroupKey = (u32, Option<u16>, Option<u16>, Option<i32>);
-
-struct PopGroup {
-    id: u32,
-    state: u32,
-    demand_size: Option<f64>,
-    workforce: Option<f64>,
-    dependents: Option<f64>,
-    wealth: Option<i32>,
-    wages: Option<f64>,
-    culture: Option<u16>,
-    profession: Option<u16>,
-    literate: Option<f64>,
-    workplace_id: Option<u32>,
-    qualifications: Vec<(u16, f64)>,
-}
-
-impl PopGroup {
-    fn from_state_pop(pop: &WorldStatePop, state: u32) -> Self {
-        Self {
-            id: pop.id,
-            state,
-            demand_size: pop.demand_size,
-            workforce: pop.workforce,
-            dependents: pop.dependents,
-            wealth: pop.wealth,
-            wages: pop.wages,
-            culture: pop.culture,
-            profession: pop.profession,
-            literate: pop.literate,
-            workplace_id: pop.workplace_id,
-            qualifications: pop.qualifications.clone(),
-        }
-    }
-
-    fn from_world_pop(id: u32, pop: &WorldPop, state: u32) -> Self {
-        Self {
-            id,
-            state,
-            demand_size: Some(pop.size),
-            workforce: Some(pop.size),
-            dependents: Some(0.0),
-            wealth: Some(i32::from(pop.wealth)),
-            wages: Some(pop.wages),
-            culture: pop.culture,
-            profession: pop.profession,
-            literate: None,
-            workplace_id: None,
-            qualifications: Vec::new(),
-        }
-    }
-
-    fn add_state_pop(&mut self, pop: &WorldStatePop) {
-        self.demand_size = Some(self.demand_size.unwrap_or(0.0) + pop.demand_size.unwrap_or(0.0));
-        self.workforce = Some(self.workforce.unwrap_or(0.0) + pop.workforce.unwrap_or(0.0));
-        self.dependents = Some(self.dependents.unwrap_or(0.0) + pop.dependents.unwrap_or(0.0));
-        self.literate = match (self.literate, pop.literate) {
-            (Some(left), Some(right)) => Some(left + right),
-            (Some(left), None) => Some(left),
-            (None, Some(right)) => Some(right),
-            (None, None) => None,
-        };
-        if self.workplace_id != pop.workplace_id {
-            self.workplace_id = None;
-        }
-        add_qty(&mut self.qualifications, &pop.qualifications);
-    }
-
-    fn add_world_pop(&mut self, pop: &WorldPop) {
-        self.demand_size = Some(self.demand_size.unwrap_or(0.0) + pop.size);
-        self.workforce = Some(self.workforce.unwrap_or(0.0) + pop.size);
-        if self.workplace_id.is_some() {
-            self.workplace_id = None;
-        }
-    }
-}
-
-fn add_qty(dst: &mut Vec<(u16, f64)>, src: &[(u16, f64)]) {
-    for &(id, qty) in src {
-        if let Some(existing) = dst.iter_mut().find(|(stored, _)| *stored == id) {
-            existing.1 += qty;
-        } else {
-            dst.push((id, qty));
-        }
-    }
-}
-
-fn collapsed_state_pops(
-    world: &World,
-    prices: &GoodsVec,
-    base_prices: &GoodsVec,
-    units: &UnitBaskets,
-    need_units: &UnitNeedBaskets,
-    snapshot: Option<&ShopSnapshot>,
-) -> Vec<CompactStatePop> {
-    // HashMap insert is cheaper than BTreeMap on the late-save grouping
-    // sample. Sort groups afterward so JSON `state_pops` stays ordered by
-    // (state, profession, culture, wealth).
-    let mut groups: HashMap<GroupKey, PopGroup> =
-        HashMap::with_capacity(world.state_pops.len().max(world.pops.len()));
-    if world.state_pops.is_empty() {
-        for (index, pop) in world.iter_pops().enumerate() {
-            let Some(state_id) = pop.state else {
-                continue;
-            };
-            let key = (
-                state_id,
-                pop.profession,
-                pop.culture,
-                Some(i32::from(pop.wealth)),
-            );
-            groups
-                .entry(key)
-                .and_modify(|existing| existing.add_world_pop(&pop))
-                .or_insert_with(|| {
-                    PopGroup::from_world_pop(u32::try_from(index).unwrap_or(0), &pop, state_id)
-                });
-        }
-    } else {
-        for pop in &world.state_pops {
-            let Some(state_id) = pop.state else {
-                continue;
-            };
-            let key = (state_id, pop.profession, pop.culture, pop.wealth);
-            groups
-                .entry(key)
-                .and_modify(|existing| existing.add_state_pop(pop))
-                .or_insert_with(|| PopGroup::from_state_pop(pop, state_id));
-        }
-    }
-
-    let mut groups: Vec<PopGroup> = groups.into_values().collect();
-    groups.sort_unstable_by_key(|pop| (pop.state, pop.profession, pop.culture, pop.wealth));
-    groups
-        .into_iter()
-        .map(|mut pop| {
-            pop.qualifications
-                .sort_unstable_by_key(|(profession, _)| *profession);
-            let local = snapshot
-                .and_then(|snap| snap.local_by_state.get(&pop.state))
-                .unwrap_or(prices);
-            let needs = pop_needs_for(&pop, local, base_prices, units, need_units);
-            CompactStatePop {
-                id: Some(pop.id),
-                state_id: pop.state,
-                profession: pop.profession,
-                demand_size: pop.demand_size,
-                workforce: pop.workforce,
-                dependents: pop.dependents,
-                wealth: pop.wealth,
-                culture: pop.culture,
-                literate: pop.literate,
-                workplace_id: pop.workplace_id,
-                qualifications: pop
-                    .qualifications
-                    .into_iter()
-                    .filter(|(_, count)| *count > 0.0)
-                    .collect(),
-                needs,
-            }
-        })
-        .collect()
-}
-
-fn pop_needs_for(
-    pop: &PopGroup,
-    prices: &GoodsVec,
-    base_prices: &GoodsVec,
-    units: &UnitBaskets,
-    need_units: &UnitNeedBaskets,
-) -> Vec<CompactNeed> {
-    let Some(size) = pop.demand_size.filter(|size| *size > 0.0) else {
-        return Vec::new();
-    };
-    let Some(wealth) = pop.wealth else {
-        return Vec::new();
-    };
-    let Ok(wealth) = u8::try_from(wealth.clamp(1, 99)) else {
-        return Vec::new();
-    };
-    let world_pop = WorldPop {
-        state: Some(pop.state),
-        size,
-        wealth,
-        wages: pop.wages.filter(|wages| *wages > 0.0).unwrap_or(0.0),
-        culture: None,
-        profession: None,
-    };
-    pop_compact_needs(&world_pop, prices, base_prices, units, need_units)
-}
-
-fn add_need_good(dst: &mut Vec<(GoodIdx, f64, f64)>, idx: GoodIdx, quantity: f64, value: f64) {
-    if let Some(existing) = dst.iter_mut().find(|(stored, _, _)| *stored == idx) {
-        existing.1 += quantity;
-        existing.2 += value;
-    } else {
-        dst.push((idx, quantity, value));
-    }
-}
-
-struct NeedAgg {
-    state_id: u32,
-    need_idx: NeedIdx,
-    package_value: f64,
-    goods: Vec<(GoodIdx, f64, f64)>,
-}
-
-fn aggregate_state_needs(pops: &[CompactStatePop], tables: &EmitTables) -> Vec<StateNeed> {
-    let mut by_state: HashMap<(u32, NeedIdx), NeedAgg> = HashMap::new();
-    for pop in pops {
-        for need in &pop.needs {
-            let entry = by_state
-                .entry((pop.state_id, need.need_idx))
-                .or_insert_with(|| NeedAgg {
-                    state_id: pop.state_id,
-                    need_idx: need.need_idx,
-                    package_value: 0.0,
-                    goods: Vec::new(),
-                });
-            entry.package_value += need.package_value;
-            for &(idx, quantity, value) in &need.goods {
-                add_need_good(&mut entry.goods, idx, quantity, value);
-            }
-        }
-    }
-
-    let mut rows: Vec<NeedAgg> = by_state.into_values().collect();
-    rows.sort_unstable_by_key(|row| (row.state_id, row.need_idx));
-    rows.into_iter()
-        .filter_map(|mut row| {
-            let need_id = tables.need(row.need_idx)?.to_string();
-            row.goods.sort_unstable_by_key(|(idx, _, _)| *idx);
-            Some(StateNeed {
-                state_id: row.state_id,
-                need_name: tables.label(&need_id).map(str::to_string),
-                need_id,
-                package_value: row.package_value,
-                goods: row
-                    .goods
-                    .into_iter()
-                    .filter_map(|(idx, quantity, value)| {
-                        Some(GoodFlow {
-                            good_id: tables.good(idx)?.to_string(),
-                            quantity,
-                            value,
-                        })
-                    })
-                    .collect(),
-            })
-        })
-        .collect()
-}
-
-fn state_qualification_rows(
-    world: &World,
-    defs: &GameDefs,
-    employees_by_building: &BTreeMap<u32, Vec<ProfessionCount>>,
-) -> Vec<StateQualification> {
-    let mut jobs_by_state: BTreeMap<(u32, u16), f64> = BTreeMap::new();
-    let building_state: BTreeMap<u32, Option<u32>> = world
-        .buildings
-        .iter()
-        .map(|building| (building.id, building.state))
-        .collect();
-    for (building_id, employees) in employees_by_building {
-        let Some(Some(state_id)) = building_state.get(building_id) else {
-            continue;
-        };
-        for employee in employees {
-            let Some(profession) = world.names.id_of(&employee.profession_id) else {
-                continue;
-            };
-            *jobs_by_state.entry((*state_id, profession)).or_default() += employee.count;
-        }
-    }
-
-    let mut employed_by_state: BTreeMap<(u32, u16), f64> = BTreeMap::new();
-    let mut qualified_from_pops: BTreeMap<(u32, u16), f64> = BTreeMap::new();
-    for pop in &world.state_pops {
-        let Some(state_id) = pop.state else {
-            continue;
-        };
-        if let Some(profession) = pop.profession {
-            let workforce = pop.workforce.unwrap_or(0.0);
-            if pop.workplace_id.is_some() && workforce > 0.0 {
-                *employed_by_state.entry((state_id, profession)).or_default() += workforce;
-            }
-            if workforce > 0.0 {
-                *qualified_from_pops
-                    .entry((state_id, profession))
-                    .or_default() += workforce;
-            }
-        }
-        for &(profession, count) in &pop.qualifications {
-            *qualified_from_pops
-                .entry((state_id, profession))
-                .or_default() += count;
-        }
-    }
-
-    let mut rows = Vec::new();
-    for state in &world.states {
-        let mut professions: BTreeMap<u16, ()> = BTreeMap::new();
-        for &(id, _) in &state.qualifications {
-            professions.insert(id, ());
-        }
-        for &(id, _) in &state.employable_qualifications {
-            professions.insert(id, ());
-        }
-        for &(id, _) in &state.workforce_by_type {
-            professions.insert(id, ());
-        }
-        for &(state_id, profession) in employed_by_state.keys() {
-            if state_id == state.id {
-                professions.insert(profession, ());
-            }
-        }
-        for &(state_id, profession) in jobs_by_state.keys() {
-            if state_id == state.id {
-                professions.insert(profession, ());
-            }
-        }
-        for &(state_id, profession) in qualified_from_pops.keys() {
-            if state_id == state.id {
-                professions.insert(profession, ());
-            }
-        }
-        for profession in professions.keys().copied() {
-            let Some(profession_id) = world.name(profession).map(str::to_string) else {
-                continue;
-            };
-            let qualified = qty_value(&state.qualifications, profession).unwrap_or_else(|| {
-                qualified_from_pops
-                    .get(&(state.id, profession))
-                    .copied()
-                    .unwrap_or(0.0)
-            });
-            let employable = qty_value(&state.employable_qualifications, profession);
-            let employed = employed_by_state
-                .get(&(state.id, profession))
-                .copied()
-                .or_else(|| qty_value(&state.workforce_by_type, profession))
-                .unwrap_or(0.0);
-            let jobs = jobs_by_state
-                .get(&(state.id, profession))
-                .copied()
-                .unwrap_or(employed);
-            let stock = employable.unwrap_or(qualified);
-            rows.push(StateQualification {
-                state_id: state.id,
-                profession_name: defs.labels.get(&profession_id).cloned(),
-                profession_id,
-                qualified,
-                employable,
-                employed,
-                jobs,
-                shortage: (jobs - stock).max(0.0),
-                monthly_change: None,
-            });
-        }
-    }
-    rows
-}
-
-fn country_rows(world: &World, defs: &GameDefs) -> Vec<CountryInfo> {
-    world
-        .countries
-        .iter()
-        .map(|country| {
-            let flag_coa = vic3_defs::select_flag_coa(
-                &defs.flag_defs,
-                &defs.flags,
-                &country.tag,
-                &country.laws,
-            );
-            let flag_data_url = flag_coa.as_ref().and_then(|coa| {
-                defs.flags
-                    .get(coa)
-                    .map(|png| format!("data:image/png;base64,{}", base64_encode(png)))
-            });
-            CountryInfo {
-                id: country.id,
-                tag: country.tag.clone(),
-                name: defs.labels.get(&country.tag).cloned(),
-                flag_coa,
-                flag_data_url,
-            }
-        })
-        .collect()
-}
-
-fn base64_encode(bytes: &[u8]) -> String {
-    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let a = chunk[0] as u32;
-        let b = chunk.get(1).copied().unwrap_or(0) as u32;
-        let c = chunk.get(2).copied().unwrap_or(0) as u32;
-        let triple = (a << 16) | (b << 8) | c;
-        out.push(TABLE[((triple >> 18) & 63) as usize] as char);
-        out.push(TABLE[((triple >> 12) & 63) as usize] as char);
-        out.push(if chunk.len() > 1 {
-            TABLE[((triple >> 6) & 63) as usize] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            TABLE[(triple & 63) as usize] as char
-        } else {
-            '='
-        });
-    }
-    out
-}
-
-/// Value one side of a building's goods flows, also crediting the quantities to
-/// the building's state.
-fn priced_flows(
-    quantities: GoodsVec,
-    prices: &GoodsVec,
-    defs: &GameDefs,
-    state: Option<u32>,
-    state_side: &mut BTreeMap<(u32, GoodIdx), f64>,
-) -> Vec<GoodFlow> {
-    quantities
-        .iter_indexed()
-        .filter(|(_, quantity)| quantity.abs() > crate::ORDER_EPS)
-        .filter_map(|(good, quantity)| {
-            if let Some(state_id) = state {
-                *state_side.entry((state_id, good)).or_default() += quantity;
-            }
-            Some(GoodFlow {
-                value: prices[good] * quantity,
-                good_id: defs.good_by_index(good)?.to_string(),
-                quantity,
-            })
-        })
-        .collect()
+    let building_revenues = building_revenues(world, defs, &rows, Some(&snapshot));
+    (
+        SolveOutcome {
+            goods: rows,
+            residual,
+            status,
+            relative: rel,
+            building_revenues,
+        },
+        Some(snapshot),
+    )
 }
 
 fn market_goods(base_prices: &GoodsVec) -> Vec<GoodIdx> {
@@ -1026,10 +272,10 @@ struct StateShop {
 }
 
 #[derive(Clone, Default)]
-struct ShopSnapshot {
-    world_pop_buy: GoodsVec,
-    local_by_state: BTreeMap<u32, GoodsVec>,
-    pop_buy_by_state: BTreeMap<u32, GoodsVec>,
+pub(crate) struct ShopSnapshot {
+    pub(crate) world_pop_buy: GoodsVec,
+    pub(crate) local_by_state: BTreeMap<u32, GoodsVec>,
+    pub(crate) pop_buy_by_state: BTreeMap<u32, GoodsVec>,
 }
 
 fn state_shops(

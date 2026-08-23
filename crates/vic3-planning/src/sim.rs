@@ -7,13 +7,19 @@
 //! building / PM candidates when an [`EconomyContext`] is present). Idle
 //! atoms with no model action emit nothing.
 //!
-//! Building candidates are type ids for [`Action::QueueBuildingLevel`]: defs-based
-//! goal-relevant types (first-of-type allowed), dominance-pruned when one type is
-//! strictly inferior on modeled axes, plus Construction Sector as a meta lever.
+//! Building candidates are `(building_type, state_id)` for [`Action::QueueBuildingLevel`]:
+//! defs-based goal-relevant types (first-of-type allowed), expanded to Vic3
+//! placement states (existing instances, else every owned state), plus
+//! Construction Sector as a meta lever. No IO “dominance” prune — modeled
+//! axes omit slots, local markets, and unlock gates, so type-only dominance
+//! is not sound.
 //!
-//! // TODO(anytime-ub): wide non-dominated candidate sets are acceptable without
-//! // top-N ranking; a later PR can seed a greedy feasible path as incumbent `U`
+//! // TODO(anytime-ub): wide candidate sets are acceptable without top-N
+//! // ranking; a later PR can seed a greedy feasible path as incumbent `U`
 //! // and prune search nodes with `g + h >= U`.
+//!
+//! // TODO(buildability): gate placements on unlock techs + free slots /
+//! // potentials before offering a state.
 //!
 //! # Edges
 //!
@@ -22,9 +28,10 @@
 //!   construction may run in parallel). Instant decisions are not blocked by
 //!   other tracks' waits.
 //! - **At most one event-wait** per expansion: the earliest completion among
-//!   goal-relevant in-flight tracks (or payday). Other tracks' timers tick in
-//!   parallel via [`PlanningState::tick_parallel_tracks`]. **I6:** wait never
-//!   decreases date.
+//!   in-flight tracks that open atoms still need (including finishing an
+//!   unrelated save queue that blocks the track), or payday. Other tracks'
+//!   timers tick in parallel via [`PlanningState::tick_parallel_tracks`].
+//!   **I6:** wait never decreases date.
 //!
 //! Independent tracks ⇒ AND goals can finish near `max` rather than `sum` of
 //! waits when work overlaps.
@@ -53,7 +60,7 @@ use crate::world::{PlanningState, QueuedInterest};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use vic3_defs::{BuildingType, GameDefs};
-use vic3_prices::{solve, PricesResult, SolveOpts, World, WorldBuilding, ORDER_EPS};
+use vic3_prices::{equilibrate, SolveOpts, SolveOutcome, World, WorldBuilding, ORDER_EPS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MilitaryBranch {
@@ -114,48 +121,6 @@ fn mil_levels(state: &PlanningState, pred: fn(&str) -> bool) -> u32 {
         .sum()
 }
 
-/// Modeled axes for dominance among building-type candidates for one atom.
-struct CandidateMetrics {
-    id: String,
-    /// Prefer higher (goal-good IO or priced GDP contribution per level).
-    benefit: f64,
-    /// Prefer lower (construction points per level).
-    cost: f64,
-}
-
-/// Drop types strictly dominated on (benefit ↑, cost ↓); equal vectors keep lower id.
-fn prune_dominated_candidates(items: Vec<CandidateMetrics>) -> Vec<String> {
-    let mut keep = Vec::new();
-    'outer: for (i, a) in items.iter().enumerate() {
-        for (j, b) in items.iter().enumerate() {
-            if i == j {
-                continue;
-            }
-            let b_ge_benefit = b.benefit >= a.benefit;
-            let b_le_cost = b.cost <= a.cost;
-            let strict = b.benefit > a.benefit || b.cost < a.cost;
-            if b_ge_benefit && b_le_cost && strict {
-                continue 'outer;
-            }
-            if (b.benefit - a.benefit).abs() <= ORDER_EPS
-                && (b.cost - a.cost).abs() <= ORDER_EPS
-                && b.id < a.id
-            {
-                continue 'outer;
-            }
-        }
-        keep.push(a.id.clone());
-    }
-    keep
-}
-
-fn construction_cost_for_type(building_type: &BuildingType, default_cost: f64) -> f64 {
-    building_type
-        .required_construction
-        .filter(|c| c.is_finite() && *c >= 0.0)
-        .unwrap_or(default_cost)
-}
-
 /// Default production methods: first PM id in each production-method group.
 fn default_pms_for_building(defs: &GameDefs, building_type: &BuildingType) -> Vec<String> {
     building_type
@@ -196,6 +161,7 @@ fn synthetic_world_building(
     defs: &GameDefs,
     world: &World,
     building: &str,
+    state_id: u32,
     levels: u32,
 ) -> Option<WorldBuilding> {
     let building_type = defs.buildings.get(building)?;
@@ -212,8 +178,8 @@ fn synthetic_world_building(
         .saturating_add(1);
     Some(WorldBuilding {
         id: next_id,
-        // TODO(buildability): pick an owned state with a free slot / potential.
-        state: None,
+        // TODO(buildability): verify free slot / potential in this state.
+        state: Some(state_id),
         building: building.to_string(),
         level,
         staffing: level,
@@ -289,19 +255,23 @@ impl EconomyContext {
     /// construction capacity and price re-solves.
     ///
     /// Types present only via deltas (first-of-type / greenfield) get a
-    /// planner-added fully-staffed [`WorldBuilding`] so prices and GDP move.
-    /// Real state placement / slots are deferred (`TODO(buildability)` on
-    /// [`Self::building_candidates`]).
+    /// planner-added fully-staffed [`WorldBuilding`] in the delta's `state_id`
+    /// so prices and GDP move.
+    /// // TODO(buildability): verify free slots / potentials before insert.
     pub(crate) fn apply_planning_to_world(&self, state: &PlanningState) -> World {
         let mut world = self.base_world.clone();
-        for (building, levels) in &state.building_level_deltas {
+        for ((building, state_id), levels) in &state.building_level_deltas {
             if *levels == 0 {
                 continue;
             }
-            if world.buildings.iter().any(|row| row.building == *building) {
-                world = world.with_extra_levels(building, *levels);
+            let has_row = world
+                .buildings
+                .iter()
+                .any(|row| row.building == *building && row.state == Some(*state_id));
+            if has_row {
+                world = world.with_extra_levels_in_state(building, *state_id, *levels);
             } else if let Some(row) =
-                synthetic_world_building(&self.defs, &world, building, *levels)
+                synthetic_world_building(&self.defs, &world, building, *state_id, *levels)
             {
                 world.buildings.push(row);
             }
@@ -314,34 +284,85 @@ impl EconomyContext {
             })
     }
 
-    /// Goal-relevant building types to offer as `QueueBuildingLevel` decisions.
+    fn owned_state_ids(&self, country: &str) -> BTreeSet<u32> {
+        let Some(country_id) = self
+            .base_world
+            .countries
+            .iter()
+            .find(|c| c.tag == country)
+            .map(|c| c.id)
+        else {
+            return BTreeSet::new();
+        };
+        self.base_world
+            .states
+            .iter()
+            .filter_map(|s| (s.country == Some(country_id)).then_some(s.id))
+            .collect()
+    }
+
+    /// Vic3 placement states for a building type on this branch.
     ///
-    /// A **candidate** is a type id the planner may queue—not Vic3 placement UI.
-    /// Direct candidates come from defs (IO / GDP / mil PP), not “already in
-    /// country.” Construction Sector is a **meta** candidate when any direct
-    /// build is already present. Hire stays on the military atom arm.
+    /// Prefers states that already have the type (base world, completed deltas,
+    /// or in-flight queue). If none, offers every owned state (first-of-type /
+    /// greenfield) until `TODO(buildability)` gates on slots.
+    fn placement_states_for(&self, state: &PlanningState, building: &str) -> Vec<u32> {
+        let owned = self.owned_state_ids(&state.country);
+        if owned.is_empty() {
+            return Vec::new();
+        }
+        let world = self.apply_planning_to_world(state);
+        let mut have: BTreeSet<u32> = world
+            .buildings
+            .iter()
+            .filter(|row| row.building == building)
+            .filter_map(|row| row.state.filter(|sid| owned.contains(sid)))
+            .collect();
+        for job in &state.constructions {
+            if job.building == building {
+                if let Some(sid) = job.state_id.filter(|sid| owned.contains(sid)) {
+                    have.insert(sid);
+                }
+            }
+        }
+        if have.is_empty() {
+            owned.into_iter().collect()
+        } else {
+            have.into_iter().collect()
+        }
+    }
+
+    fn levels_added_in_state(state: &PlanningState, building: &str, state_id: u32) -> u32 {
+        state
+            .building_level_deltas
+            .get(&(building.to_string(), state_id))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Goal-relevant `(building_type, state_id)` pairs for `QueueBuildingLevel`.
     ///
-    /// After relevance, types that are **strictly dominated** on modeled axes
-    /// (goal-good benefit per level vs construction cost) are dropped. Equal
-    /// vectors keep the lexicographically smaller id. No top-N ranking.
+    /// Direct types come from defs (IO / GDP / mil PP), not “already in country.”
+    /// Each type expands to placement states ([`Self::placement_states_for`]).
+    /// Construction Sector is a **meta** type when any direct build is present.
+    /// Hire stays on the military atom arm.
     ///
-    /// // TODO(buildability): before offering a type, require (1) unlock tech /
-    /// // PM `unlocking_technologies` researched, and (2) some owned state with
-    /// // a free slot / potential (arable / capped resources / shared farm-mine
-    /// // plantation caps). Not loaded yet—`arable_land` exists but unused.
+    /// No type-level IO dominance prune: cost/benefit axes omit state markets,
+    /// slots, and unlocks, so “strictly better type” is not sound.
+    ///
+    /// // TODO(buildability): before offering a state, require unlock tech and a
+    /// // free slot / potential.
     /// //
-    /// // TODO(anytime-ub): non-dominated width may stay large; later PR can
-    /// // compute a greedy feasible path as incumbent `U` and prune search with
-    /// // `g + h >= U` without replacing dominance here.
+    /// // TODO(anytime-ub): width may stay large; later PR can compute a greedy
+    /// // feasible path as incumbent `U` and prune with `g + h >= U`.
     fn building_candidates(
         &self,
         state: &PlanningState,
         atoms: &[Atom],
         config: SimConfig,
-    ) -> Vec<String> {
+    ) -> Vec<(String, u32)> {
         let cap = config.max_added_levels_per_type;
-        let default_cost = f64::from(config.default_construction_cost);
-        let mut candidates = BTreeSet::new();
+        let mut types = BTreeSet::new();
 
         for atom in atoms {
             let Atom::GoodPrice { good, rel, .. } = atom else {
@@ -350,17 +371,7 @@ impl EconomyContext {
             let Some(good_idx) = self.defs.index_of(good) else {
                 continue;
             };
-            let mut scored = Vec::new();
             for (building_id, building_type) in &self.defs.buildings {
-                if state
-                    .building_level_deltas
-                    .get(building_id)
-                    .copied()
-                    .unwrap_or(0)
-                    >= u32::from(cap)
-                {
-                    continue;
-                }
                 let (inputs, outputs) = default_building_io_per_level(&self.defs, building_type);
                 let produces = outputs[good_idx];
                 let consumes = inputs[good_idx];
@@ -372,13 +383,8 @@ impl EconomyContext {
                 if benefit <= ORDER_EPS || !benefit.is_finite() {
                     continue;
                 }
-                scored.push(CandidateMetrics {
-                    id: building_id.clone(),
-                    benefit,
-                    cost: construction_cost_for_type(building_type, default_cost),
-                });
+                types.insert(building_id.clone());
             }
-            candidates.extend(prune_dominated_candidates(scored));
         }
 
         if atoms.iter().any(|atom| {
@@ -390,17 +396,7 @@ impl EconomyContext {
                 }
             )
         }) {
-            let mut scored = Vec::new();
             for (building_id, building_type) in &self.defs.buildings {
-                if state
-                    .building_level_deltas
-                    .get(building_id)
-                    .copied()
-                    .unwrap_or(0)
-                    >= u32::from(cap)
-                {
-                    continue;
-                }
                 let (_, outputs) = default_building_io_per_level(&self.defs, building_type);
                 let benefit = outputs
                     .iter_indexed()
@@ -417,24 +413,28 @@ impl EconomyContext {
                 if benefit <= ORDER_EPS || !benefit.is_finite() {
                     continue;
                 }
-                scored.push(CandidateMetrics {
-                    id: building_id.clone(),
-                    benefit,
-                    cost: construction_cost_for_type(building_type, default_cost),
-                });
+                types.insert(building_id.clone());
             }
-            candidates.extend(prune_dominated_candidates(scored));
         }
 
-        self.add_military_building_candidates(state, atoms, &mut candidates, cap);
+        self.add_military_building_candidates(state, atoms, &mut types, cap);
         if atoms
             .iter()
             .any(|atom| matches!(atom, Atom::ArmyPower { .. } | Atom::NavyPower { .. }))
         {
-            self.add_mil_input_producer_candidates(state, &mut candidates, cap);
+            self.add_mil_input_producer_candidates(state, &mut types, cap);
         }
-        maybe_add_construction_sector_candidate(state, &mut candidates, cap);
-        candidates.into_iter().collect()
+        maybe_add_construction_sector_candidate(state, &mut types, cap);
+
+        let mut out = BTreeSet::new();
+        for building in types {
+            for state_id in self.placement_states_for(state, &building) {
+                if Self::levels_added_in_state(state, &building, state_id) < u32::from(cap) {
+                    out.insert((building.clone(), state_id));
+                }
+            }
+        }
+        out.into_iter().collect()
     }
 
     /// Barracks / shipyards / naval admin when open PP atoms need more levels.
@@ -467,14 +467,7 @@ impl EconomyContext {
                         .max(1.0);
                     let levels_needed = (needed / per).ceil().max(1.0) as u32;
                     let have = mil_levels(state, is_barracks_building);
-                    if have < levels_needed.min(u32::from(cap))
-                        && state
-                            .building_level_deltas
-                            .get(BUILDING_BARRACKS)
-                            .copied()
-                            .unwrap_or(0)
-                            < u32::from(cap)
-                    {
+                    if have < levels_needed.min(u32::from(cap)) {
                         candidates.insert(BUILDING_BARRACKS.to_string());
                     }
                 }
@@ -497,24 +490,10 @@ impl EconomyContext {
                     let ships_needed = levels_needed.min(u32::from(cap));
                     let shipyard = mil_levels(state, is_shipyard_building);
                     let admin = mil_levels(state, is_naval_admin_building);
-                    if shipyard < ships_needed
-                        && state
-                            .building_level_deltas
-                            .get(BUILDING_SHIPYARD)
-                            .copied()
-                            .unwrap_or(0)
-                            < u32::from(cap)
-                    {
+                    if shipyard < ships_needed {
                         candidates.insert(BUILDING_SHIPYARD.to_string());
                     }
-                    if admin < ships_needed
-                        && state
-                            .building_level_deltas
-                            .get(BUILDING_NAVAL_ADMIN)
-                            .copied()
-                            .unwrap_or(0)
-                            < u32::from(cap)
-                    {
+                    if admin < ships_needed {
                         candidates.insert(BUILDING_NAVAL_ADMIN.to_string());
                     }
                 }
@@ -527,7 +506,7 @@ impl EconomyContext {
         &self,
         state: &PlanningState,
         candidates: &mut BTreeSet<String>,
-        cap: u16,
+        _cap: u16,
     ) {
         let mil_types: Vec<&str> = self
             .defs
@@ -565,15 +544,6 @@ impl EconomyContext {
             return;
         }
         for (building_id, building_type) in &self.defs.buildings {
-            if state
-                .building_level_deltas
-                .get(building_id)
-                .copied()
-                .unwrap_or(0)
-                >= u32::from(cap)
-            {
-                continue;
-            }
             let (_, outputs) = default_building_io_per_level(&self.defs, building_type);
             if expensive_inputs.iter().any(|idx| outputs[*idx] > ORDER_EPS) {
                 candidates.insert(building_id.clone());
@@ -581,7 +551,7 @@ impl EconomyContext {
         }
     }
 
-    fn modeled_gdp(&self, state: &PlanningState, prices: &PricesResult) -> f64 {
+    fn modeled_gdp(&self, state: &PlanningState, outcome: &SolveOutcome) -> f64 {
         let Some(country_id) = self
             .base_world
             .countries
@@ -599,8 +569,8 @@ impl EconomyContext {
                 (world_state.country == Some(country_id)).then_some(world_state.id)
             })
             .collect();
-        prices
-            .buildings
+        outcome
+            .building_revenues
             .iter()
             .filter(|building| {
                 building
@@ -662,24 +632,22 @@ impl EconomyContext {
             let Some(building_type) = self.defs.buildings.get(&building.building) else {
                 continue;
             };
-            let slot_count = building.production_methods.len().max(1);
+            // One Vic3 PM group == one slot. Prefer def group count; fall back to
+            // the save's active method list when groups are missing.
+            let slot_count = building_type
+                .production_method_groups
+                .len()
+                .max(building.production_methods.len())
+                .max(1);
             for slot in 0..slot_count {
                 let current = building.production_methods.get(slot).cloned();
-                let mut alternatives = BTreeSet::new();
-                for group_id in &building_type.production_method_groups {
-                    let Some(group) = self.defs.production_method_groups.get(group_id) else {
-                        continue;
-                    };
-                    alternatives.extend(group.iter().cloned());
-                }
-                if alternatives.is_empty() {
-                    alternatives.extend(building.production_methods.iter().cloned());
-                    for other in &world.buildings {
-                        if other.building == building.building {
-                            alternatives.extend(other.production_methods.iter().cloned());
-                        }
-                    }
-                }
+                let alternatives = pm_alternatives_for_slot(
+                    &self.defs,
+                    building_type,
+                    building,
+                    &world.buildings,
+                    slot,
+                );
                 for candidate in alternatives {
                     if current.as_ref() == Some(&candidate) {
                         continue;
@@ -693,10 +661,17 @@ impl EconomyContext {
                     } else {
                         building.production_methods.clone()
                     };
-                    if slot >= methods.len() {
-                        methods.push(candidate);
-                    } else {
-                        methods[slot] = candidate;
+                    // Pad to slot so a missing trailing group can still be set.
+                    while methods.len() <= slot {
+                        methods.push(String::new());
+                    }
+                    methods[slot] = candidate;
+                    // Drop empty pads if we never filled them from a real current.
+                    while methods.last().is_some_and(|m| m.is_empty()) {
+                        methods.pop();
+                    }
+                    if !production_methods_legal_for_building(&self.defs, building_type, &methods) {
+                        continue;
                     }
                     if !seen.insert((building.id, methods.clone())) {
                         continue;
@@ -727,6 +702,70 @@ impl EconomyContext {
             )
             .is_empty()
     }
+}
+
+/// PMs allowed in `slot` for this building type (one Vic3 PM group per slot).
+fn pm_alternatives_for_slot(
+    defs: &GameDefs,
+    building_type: &BuildingType,
+    building: &WorldBuilding,
+    peers: &[WorldBuilding],
+    slot: usize,
+) -> BTreeSet<String> {
+    let mut alternatives = BTreeSet::new();
+    if let Some(group_id) = building_type.production_method_groups.get(slot) {
+        if let Some(group) = defs.production_method_groups.get(group_id) {
+            alternatives.extend(group.iter().cloned());
+        }
+    }
+    if !alternatives.is_empty() {
+        return alternatives;
+    }
+    // Defs missing group membership: only peer methods already in this slot index.
+    if let Some(current) = building.production_methods.get(slot) {
+        alternatives.insert(current.clone());
+    }
+    for other in peers {
+        if other.building == building.building {
+            if let Some(pm) = other.production_methods.get(slot) {
+                alternatives.insert(pm.clone());
+            }
+        }
+    }
+    alternatives
+}
+
+/// True when each method belongs to the matching `production_method_groups` slot.
+///
+/// Rejects cross-group swaps (e.g. the same workshop PM in two slots). When the
+/// building type has no groups loaded, only rejects empty method ids.
+fn production_methods_legal_for_building(
+    defs: &GameDefs,
+    building_type: &BuildingType,
+    methods: &[String],
+) -> bool {
+    if methods.is_empty() || methods.iter().any(|m| m.is_empty()) {
+        return false;
+    }
+    let groups = &building_type.production_method_groups;
+    if groups.is_empty() {
+        return true;
+    }
+    if methods.len() > groups.len() {
+        return false;
+    }
+    for (slot, pm_id) in methods.iter().enumerate() {
+        let Some(group_id) = groups.get(slot) else {
+            return false;
+        };
+        let Some(group) = defs.production_method_groups.get(group_id) else {
+            return false;
+        };
+        if !group.iter().any(|id| id == pm_id) {
+            return false;
+        }
+    }
+    true
 }
 
 fn pm_affects_open_atoms(defs: &GameDefs, pm_id: &str, atoms: &[Atom], wants_gdp: bool) -> bool {
@@ -844,7 +883,11 @@ pub enum Event {
     /// The technology currently in the queue completes.
     TechCompleted { tech: String },
     /// One level of the queued building type completes.
-    BuildingCompleted { building: String },
+    /// A building level completed in a placement state.
+    BuildingCompleted {
+        building: String,
+        state_id: Option<u32>,
+    },
     /// The queued interest declaration completes.
     InterestDeclared { kind: InterestKind, id: String },
     /// Hire-to-full completes for a military building type.
@@ -866,12 +909,13 @@ pub enum Action {
     QueueTech { tech: String },
     /// Put one goal-relevant building level in the construction queue.
     ///
-    /// Sets `remaining` from defs `required_construction` when present;
-    /// otherwise [`SimConfig::default_construction_cost`]. Allowed while other
-    /// jobs are in flight until parallel slots from capacity ÷ allocation cap
-    /// are full. Construction Sector levels are offered as a capacity lever
-    /// when other build candidates already exist for open economy/military atoms.
-    QueueBuildingLevel { building: String },
+    /// `state_id` is the Vic3 placement state. Sets `remaining` from defs
+    /// `required_construction` when present; otherwise
+    /// [`SimConfig::default_construction_cost`]. Allowed while other jobs are
+    /// in flight until parallel slots from capacity ÷ allocation cap are full.
+    /// Construction Sector levels are offered as a capacity lever when other
+    /// build candidates already exist for open economy/military atoms.
+    QueueBuildingLevel { building: String, state_id: u32 },
     /// Queue a goal-relevant interest declaration.
     QueueInterest { kind: InterestKind, id: String },
     /// Queue hiring a military building type up to full employment.
@@ -943,14 +987,6 @@ fn interest_queued(kind: InterestKind, id: &str) -> QueuedInterest {
     match kind {
         InterestKind::State => QueuedInterest::State(id.to_string()),
         InterestKind::Region => QueuedInterest::Region(id.to_string()),
-    }
-}
-
-fn interest_matches(queued: &QueuedInterest, kind: InterestKind, id: &str) -> bool {
-    match (queued, kind) {
-        (QueuedInterest::State(queued_id), InterestKind::State) => queued_id == id,
-        (QueuedInterest::Region(queued_id), InterestKind::Region) => queued_id == id,
-        _ => false,
     }
 }
 
@@ -1120,11 +1156,11 @@ fn successors_for_atoms_with_economy(
     }
 
     if let Some(economy) = economy {
-        for building in economy.building_candidates(state, open_atoms, config) {
+        for (building, state_id) in economy.building_candidates(state, open_atoms, config) {
             push_decision(
                 &mut result,
                 state,
-                Action::QueueBuildingLevel { building },
+                Action::QueueBuildingLevel { building, state_id },
                 Some(economy),
                 config,
             );
@@ -1148,12 +1184,18 @@ fn successors_for_atoms_with_economy(
         }
     }
 
-    // Earliest goal-relevant wait among independent tracks.
+    // Earliest wait among independent tracks.
+    //
+    // Construction already waits for whatever is in flight. Research / law /
+    // interest must do the same when open atoms still need that track: an
+    // unrelated save queue (e.g. researching `canneries` while the goal needs
+    // `nitroglycerin`) would otherwise block `QueueTech` and emit no wait →
+    // false [`crate::plan::PlanError::Unreachable`].
     let mut wait_candidates: Vec<(u16, Event)> = Vec::new();
-    if let Some(tech) = state.queued_tech.as_ref().filter(|queued| {
+    if let Some(tech) = state.queued_tech.as_ref().filter(|_| {
         open_atoms
             .iter()
-            .any(|atom| atom.is_has_tech(queued.as_str()))
+            .any(|atom| matches!(atom, Atom::HasTech(id) if !state.has_tech(id)))
     }) {
         let days = state
             .tech_days_left
@@ -1161,13 +1203,16 @@ fn successors_for_atoms_with_economy(
         wait_candidates.push((days, Event::TechCompleted { tech: tech.clone() }));
     }
     if let (Some(_), Some(_)) = (state.queued_building.as_ref(), economy) {
-        if let Some((days, building)) = construction_wait_target(state, config) {
-            wait_candidates.push((days, Event::BuildingCompleted { building }));
+        if let Some((days, building, state_id)) = construction_wait_target(state, config) {
+            wait_candidates.push((days, Event::BuildingCompleted { building, state_id }));
         }
     }
-    if let Some(queued) = state.queued_interest.as_ref().filter(|queued| {
+    if let Some(queued) = state.queued_interest.as_ref().filter(|_| {
         open_atoms.iter().any(|atom| match atom {
-            Atom::InterestIn { kind, id } => interest_matches(queued, *kind, id),
+            Atom::InterestIn { kind, id } => match kind {
+                InterestKind::State => !state.has_interest_state(id),
+                InterestKind::Region => !state.has_interest_region(id),
+            },
             _ => false,
         })
     }) {
@@ -1199,10 +1244,10 @@ fn successors_for_atoms_with_economy(
             },
         ));
     }
-    if let Some(law) = state.queued_law.as_ref().filter(|queued| {
+    if let Some(law) = state.queued_law.as_ref().filter(|_| {
         open_atoms
             .iter()
-            .any(|atom| atom.is_has_law(queued.as_str()))
+            .any(|atom| matches!(atom, Atom::HasLaw(id) if !state.has_law(id)))
     }) {
         let days = state.law_days_left.unwrap_or(config.law_days);
         wait_candidates.push((days, Event::LawEnacted { law: law.clone() }));
@@ -1393,13 +1438,16 @@ pub fn apply_action_with_economy(
             next.queued_tech = Some(tech.clone());
             next.tech_days_left = Some(research_days_for_tech(tech, config, economy));
         }
-        Action::QueueBuildingLevel { building } => {
+        Action::QueueBuildingLevel { building, state_id } => {
             let economy = economy?;
             if building.is_empty() || construction_queue_full(&next, config) {
                 return None;
             }
+            if !economy.owned_state_ids(&next.country).contains(state_id) {
+                return None;
+            }
             let remaining = construction_work_points_for_enqueue(building, economy, config);
-            next.push_construction(building.clone(), remaining);
+            next.push_construction(building.clone(), *state_id, remaining);
         }
         Action::QueueInterest { kind, id } => {
             if id.is_empty() || next.interest_busy() {
@@ -1534,25 +1582,40 @@ fn apply_wait_for_event(
             next.tech_days_left = None;
             next.techs.insert(tech.clone());
         }
-        Event::BuildingCompleted { building } => {
+        Event::BuildingCompleted { building, state_id } => {
             let economy = economy?;
-            if !next
-                .constructions
-                .iter()
-                .any(|row| row.building == *building)
-            {
+            if !next.constructions.iter().any(|row| {
+                row.building == *building
+                    && state_id
+                        .map(|want| row.state_id == Some(want) || row.state_id.is_none())
+                        .unwrap_or(true)
+            }) {
                 return None;
             }
-            if days == 0 && !construction_work_complete(next, building) {
+            if days == 0 && !construction_work_complete(next, building, *state_id) {
                 return None;
             }
             next.tick_parallel_tracks(days, &construction_points_per_day_per_job(next, config));
             next.date = next.date.add_days(i32::from(days));
-            next.complete_construction(building);
-            *next
-                .building_level_deltas
-                .entry(building.clone())
-                .or_default() += 1;
+            next.complete_construction(building, *state_id);
+            if let Some(sid) = *state_id {
+                *next
+                    .building_level_deltas
+                    .entry((building.clone(), sid))
+                    .or_default() += 1;
+            } else if let Some(sid) = economy
+                .owned_state_ids(&next.country)
+                .iter()
+                .next()
+                .copied()
+            {
+                // Save rows without placement: attribute to an owned state so
+                // apply_planning_to_world still moves levels.
+                *next
+                    .building_level_deltas
+                    .entry((building.clone(), sid))
+                    .or_default() += 1;
+            }
             if is_military_planning_building(building) {
                 next.push_mil_building_level(building);
             }
@@ -1621,13 +1684,13 @@ fn apply_wait_for_event(
 }
 
 fn refresh_prices(state: &mut PlanningState, economy: &EconomyContext) {
-    let prices = solve(
+    let outcome = equilibrate(
         &economy.apply_planning_to_world(state),
         &economy.defs,
         economy.solve_opts.clone(),
     );
-    state.gdp = economy.modeled_gdp(state, &prices);
-    state.good_prices = prices
+    state.gdp = economy.modeled_gdp(state, &outcome);
+    state.good_prices = outcome
         .goods
         .into_iter()
         .map(|good| (good.id, good.price))
@@ -1648,7 +1711,7 @@ mod tests {
     use proptest::prelude::*;
     use std::collections::BTreeMap;
     use vic3_defs::{Good, GoodIdx, GoodsVec};
-    use vic3_prices::{WorldBuilding, WorldCountry, WorldState};
+    use vic3_prices::{solve, WorldBuilding, WorldCountry, WorldState};
 
     #[test]
     fn version_is_semver() {
@@ -1827,6 +1890,46 @@ mod tests {
     }
 
     #[test]
+    fn unrelated_inflight_research_can_wait_to_free_track() {
+        // Save often has research_queue on a tech that is not the goal leaf.
+        // Waiting must still be offered so A* can clear the track then queue
+        // goal techs (otherwise false Unreachable).
+        let goal = compile("research(tech=nitroglycerin)").unwrap();
+        let start = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            queued_tech: Some("canneries".into()),
+            tech_days_left: Some(40),
+            ..PlanningParts::default()
+        });
+        let edges = successors(
+            &start,
+            &goal,
+            SimConfig {
+                research_days: 100,
+                ..SimConfig::default()
+            },
+        );
+        assert!(
+            edges.iter().any(|edge| {
+                matches!(
+                    &edge.action,
+                    Action::WaitForEvent {
+                        event: Event::TechCompleted { tech },
+                        days: 40,
+                    } if tech == "canneries"
+                )
+            }),
+            "expected wait for in-flight canneries among {edges:?}"
+        );
+        assert!(
+            edges
+                .iter()
+                .all(|edge| { !matches!(&edge.action, Action::QueueTech { .. }) }),
+            "must not enqueue while research busy: {edges:?}"
+        );
+    }
+
+    #[test]
     fn with_tech_defs_only_eligible_prereq_leaf_is_queued() {
         use vic3_defs::Technology;
 
@@ -1976,7 +2079,7 @@ mod tests {
             gdp_decisions.iter().any(|edge| {
                 matches!(
                     &edge.action,
-                    Action::QueueBuildingLevel { building } if building == "building_logging_camp"
+                    Action::QueueBuildingLevel { building, state_id: _ } if building == "building_logging_camp"
                 )
             }),
             "gdp goal should queue logging camp; got {gdp_decisions:?}"
@@ -1985,7 +2088,7 @@ mod tests {
             gdp_decisions.iter().any(|edge| {
                 matches!(
                     &edge.action,
-                    Action::QueueBuildingLevel { building }
+                    Action::QueueBuildingLevel { building, state_id: _ }
                         if building == BUILDING_CONSTRUCTION_SECTOR
                 )
             }),
@@ -1998,7 +2101,7 @@ mod tests {
             .find(|edge| {
                 matches!(
                     &edge.action,
-                    Action::QueueBuildingLevel { building } if building == "building_logging_camp"
+                    Action::QueueBuildingLevel { building, state_id: _ } if building == "building_logging_camp"
                 )
             })
             .expect("good_price goal should queue logging camp");
@@ -2034,7 +2137,7 @@ mod tests {
             waits[0]
                 .state
                 .building_level_deltas
-                .get("building_logging_camp"),
+                .get(&("building_logging_camp".into(), 1)),
             Some(&1)
         );
 
@@ -2050,7 +2153,7 @@ mod tests {
                 .find(|edge| {
                     matches!(
                         &edge.action,
-                        Action::QueueBuildingLevel { building }
+                        Action::QueueBuildingLevel { building, state_id: _ }
                             if building == "building_logging_camp"
                     )
                 })
@@ -2069,7 +2172,7 @@ mod tests {
                 .all(|edge| {
                     !matches!(
                         &edge.action,
-                        Action::QueueBuildingLevel { building }
+                        Action::QueueBuildingLevel { building, state_id: _ }
                             if building == "building_logging_camp"
                     )
                 }),
@@ -2516,6 +2619,7 @@ mod tests {
             &state,
             &Action::QueueBuildingLevel {
                 building: "building_logging_camp".into(),
+                state_id: 1,
             },
             Some(&economy),
             config,
@@ -2996,6 +3100,7 @@ mod tests {
             &state,
             &Action::QueueBuildingLevel {
                 building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                state_id: 1,
             },
             Some(&economy),
             config,
@@ -3006,6 +3111,7 @@ mod tests {
             &Action::WaitForEvent {
                 event: Event::BuildingCompleted {
                     building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                    state_id: Some(1),
                 },
                 days: 10,
             },
@@ -3014,7 +3120,8 @@ mod tests {
         )
         .expect("complete CS");
         assert_eq!(
-            done.building_level_deltas.get(BUILDING_CONSTRUCTION_SECTOR),
+            done.building_level_deltas
+                .get(&(BUILDING_CONSTRUCTION_SECTOR.into(), 1)),
             Some(&1)
         );
         // base 1 + 5 per CS level
@@ -3100,7 +3207,7 @@ mod tests {
             edges.iter().any(|edge| {
                 matches!(
                     &edge.action,
-                    Action::QueueBuildingLevel { building }
+                    Action::QueueBuildingLevel { building, state_id: _ }
                         if building == BUILDING_CONSTRUCTION_SECTOR
                 )
             }),
@@ -3184,7 +3291,7 @@ mod tests {
             edges.iter().any(|edge| {
                 matches!(
                     &edge.action,
-                    Action::QueueBuildingLevel { building } if building == "building_logging_camp"
+                    Action::QueueBuildingLevel { building, state_id: _ } if building == "building_logging_camp"
                 )
             }),
             "first-of-type logging camp must be a candidate: {edges:?}"
@@ -3194,6 +3301,7 @@ mod tests {
             &state,
             &Action::QueueBuildingLevel {
                 building: "building_logging_camp".into(),
+                state_id: 1,
             },
             Some(&economy),
             config,
@@ -3204,6 +3312,7 @@ mod tests {
             &Action::WaitForEvent {
                 event: Event::BuildingCompleted {
                     building: "building_logging_camp".into(),
+                    state_id: Some(1),
                 },
                 days: construction_wait_days(&queued, config).expect("wait"),
             },
@@ -3214,7 +3323,7 @@ mod tests {
         assert_eq!(
             completed
                 .building_level_deltas
-                .get("building_logging_camp")
+                .get(&("building_logging_camp".into(), 1))
                 .copied(),
             Some(1)
         );
@@ -3226,7 +3335,7 @@ mod tests {
     }
 
     #[test]
-    fn dominated_building_candidate_is_pruned() {
+    fn building_candidates_enqueue_by_state_no_dominance_prune() {
         use vic3_defs::{BuildingType, ProductionMethod};
 
         let wood = GoodIdx::from_usize(0);
@@ -3270,7 +3379,38 @@ mod tests {
                 },
             );
         }
-        let economy = EconomyContext::new(World::default(), defs, SolveOpts::default());
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![
+                WorldState {
+                    id: 10,
+                    country: Some(1),
+                    ..WorldState::default()
+                },
+                WorldState {
+                    id: 20,
+                    country: Some(1),
+                    ..WorldState::default()
+                },
+            ],
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(10),
+                building: "building_good_mill".into(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: vec!["pm_building_good_mill".into()],
+                saved_inputs: Vec::new(),
+                saved_outputs: vec![(wood, 10.0)],
+            }],
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
         let state = PlanningState::from_parts(PlanningParts {
             country: "GER".into(),
             good_prices: vec![("wood".into(), 40.0)],
@@ -3285,21 +3425,31 @@ mod tests {
         let queued: BTreeSet<_> = edges
             .iter()
             .filter_map(|edge| match &edge.action {
-                Action::QueueBuildingLevel { building } => Some(building.as_str()),
+                Action::QueueBuildingLevel { building, state_id } => {
+                    Some((building.as_str(), *state_id))
+                }
                 _ => None,
             })
             .collect();
         assert!(
-            queued.contains("building_good_mill"),
-            "non-dominated mill must remain: {queued:?}"
+            queued.contains(&("building_good_mill", 10)),
+            "existing mill expands in its state: {queued:?}"
         );
         assert!(
-            !queued.contains("building_expensive_mill"),
-            "same IO, higher cost must be dominated: {queued:?}"
+            !queued
+                .iter()
+                .any(|(b, s)| *b == "building_good_mill" && *s == 20),
+            "do not greenfield good_mill in other states while one exists: {queued:?}"
         );
         assert!(
-            !queued.contains("building_weak_mill"),
-            "same cost, less IO must be dominated: {queued:?}"
+            queued.contains(&("building_expensive_mill", 10))
+                && queued.contains(&("building_expensive_mill", 20)),
+            "no dominance prune — expensive mill offered in owned states: {queued:?}"
+        );
+        assert!(
+            queued.contains(&("building_weak_mill", 10))
+                && queued.contains(&("building_weak_mill", 20)),
+            "no dominance prune — weak mill offered in owned states: {queued:?}"
         );
     }
 
@@ -3311,6 +3461,11 @@ mod tests {
                 id: 1,
                 tag: "GER".into(),
                 ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                ..WorldState::default()
             }],
             ..World::default()
         };
@@ -3329,7 +3484,7 @@ mod tests {
             edges.iter().any(|edge| {
                 matches!(
                     &edge.action,
-                    Action::QueueBuildingLevel { building } if building == BUILDING_BARRACKS
+                    Action::QueueBuildingLevel { building, state_id: _ } if building == BUILDING_BARRACKS
                 )
             }),
             "military construction must not be blocked by research: {edges:?}"
@@ -3338,6 +3493,7 @@ mod tests {
             &start,
             &Action::QueueBuildingLevel {
                 building: BUILDING_BARRACKS.into(),
+                state_id: 1,
             },
             Some(&economy),
             SimConfig::default(),

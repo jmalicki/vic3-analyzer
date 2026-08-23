@@ -509,6 +509,25 @@ impl World {
         next
     }
 
+    /// Clone this world and add `extra_levels` to buildings of `building` type in `state_id`.
+    ///
+    /// Matching rows use [`WorldBuilding::state`] `Some(state_id)`. No match is a
+    /// no-op clone (callers that need greenfield insert a row themselves).
+    pub fn with_extra_levels_in_state(
+        &self,
+        building: &str,
+        state_id: u32,
+        extra_levels: u32,
+    ) -> Self {
+        let mut next = self.clone();
+        for b in &mut next.buildings {
+            if b.building == building && b.state == Some(state_id) {
+                b.add_extra_levels(extra_levels);
+            }
+        }
+        next
+    }
+
     /// Clone this world and add `extra_levels` to the building with `building_id`.
     ///
     /// Unknown id is a no-op clone. Scaling matches [`Self::with_extra_levels`].
