@@ -420,6 +420,7 @@ function App({ wasmApi }: Props) {
       selectView('prices')
     } catch (reason) {
       setDesktopSaveName(undefined)
+      clearAnalysisUi()
       setError(reason instanceof Error ? reason.message : String(reason))
       throw reason
     } finally {
