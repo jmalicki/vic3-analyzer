@@ -23,6 +23,9 @@ export const config = {
                 appBinaryPath: binary,
                 driverProvider: 'embedded',
                 waitForEmbeddedServerTimeout: 120_000,
+                // Surface app stderr when the process dies before port 4445 is up
+                // (common on headless Linux WebKit).
+                captureBackendLogs: true,
             },
         ],
     ],
@@ -31,6 +34,10 @@ export const config = {
         browserName: 'tauri',
         'tauri:options': {
             application: binary,
+        },
+        // Prefer X11 under xvfb-run on Linux CI.
+        'wdio:xvfbOptions': {
+            xvfbArgs: ['-screen', '0', '1920x1080x24'],
         },
     }],
     baseUrl: 'tauri://localhost',
