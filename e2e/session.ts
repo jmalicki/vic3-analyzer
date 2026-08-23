@@ -53,28 +53,9 @@ export async function openWorkspaceTab(label: string): Promise<void> {
 
 /** Wait until analysis is priced (campaign HUD + at least one goods row). */
 export async function waitForAnalysisReady(): Promise<void> {
-  // Desktop Load shows "Loading …" on Saves; wait that out before switching
-  // tabs so we do not interrupt use_save.
-  if (isTauriE2e()) {
-    await browser.waitUntil(
-      async () => {
-        const busy = await $('*=Loading ')
-        if (await busy.isExisting()) {
-          const text = await busy.getText()
-          if (text.includes('Loading') && text.includes('…')) return false
-        }
-        const status = await $('#saves-status').getText().catch(() => '')
-        return String(status).includes('Loaded ') || !(await busy.isExisting())
-      },
-      {
-        timeout: ANALYSIS_TIMEOUT,
-        timeoutMsg: 'Desktop Load never finished (still Loading…)',
-      },
-    )
-  }
-
   // Goods links only mount on the Prices list view — switch there first so
   // mid-suite save reloads (e.g. Buildings → load balanced) still converge.
+  // Desktop Load already calls selectView('prices') when use_save finishes.
   const nav = await $('nav[aria-label="Analysis tools"]')
   if (await nav.isExisting()) {
     const prices = await nav.$('button*=Prices')
@@ -181,11 +162,21 @@ export async function loadTauriSave(saveKey: SaveKey): Promise<void> {
   )
   await $(`tr*=${stub}`).$('button*=Load').click()
 
+  // use_save switches to Prices before DesktopCatalog can paint "Loaded …" on
+  // #saves-status (that node unmounts). Wait for the chip / goods instead.
   await browser.waitUntil(
-    async () => (await $('#saves-status').getText()).includes(`Loaded ${stub}`),
+    async () => {
+      const chip = await $('[aria-label="Loaded save"]')
+      if (await chip.isExisting()) {
+        const text = await chip.getText()
+        if (text.includes(stub)) return true
+      }
+      const links = await $$('a.good-link')
+      return links.length > 0
+    },
     {
       timeout: ANALYSIS_TIMEOUT,
-      timeoutMsg: `Saves status never showed Loaded ${stub}`,
+      timeoutMsg: `Desktop never showed Loaded save chip / goods after Load ${stub}`,
     },
   )
   await waitForAnalysisReady()
