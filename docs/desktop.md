@@ -9,7 +9,8 @@ The compiled binary can run as either the **Desktop GUI** (default) or the backg
 ## Launching the App
 
 ```bash
-# Launch the desktop application
+# Embed the web UI (relative asset base), then launch the desktop application
+npm run build:desktop --prefix web
 cargo run -p vic3-analyzer
 
 # Launch as a background AI assistant (MCP server)
@@ -18,6 +19,10 @@ cargo run -p vic3-analyzer -- mcp
 # Headless CI ready check
 ./scripts/mcp-smoke.sh
 ```
+
+`cargo run` loads the embedded `web/dist` (no Vite). Rebuild with
+`build:desktop` after UI changes. GitHub Pages builds keep using plain
+`npm run build` (`base: /vic3-analyzer/`).
 
 *(For Linux prerequisites such as WebKitGTK 4.1, refer to the [Tauri prerequisites guide](https://v2.tauri.app/start/prerequisites/)).*
 

@@ -38,6 +38,7 @@ import { Modal } from './Modal'
 import { PLAN_TEMPLATES, planTemplate } from './planTemplates'
 import { PopsPane } from './PopsPane'
 import { PriceExplorer } from './PriceExplorer'
+import { QueryPane } from './QueryPane'
 import { StatesPane } from './StatesPane'
 import { ProgressBar } from './ProgressBar'
 import {
@@ -65,6 +66,7 @@ import type {
   WorldDelta,
 } from './types'
 import type { WasmApi } from './wasm'
+import { formatAnalysisEngineLoadError } from './wasm'
 import { loadWasmApi } from './wasmClient'
 import {
   hashForView,
@@ -396,10 +398,11 @@ function App({ wasmApi }: Props) {
         setApi(loaded)
       })
       .catch((reason: unknown) => {
+        // loadWasm already formats known failures; keep a single prefix if something else rejects.
         setError(
-          reason instanceof Error
-            ? `Could not load the analysis engine. ${reason.message}`
-            : 'Could not load the analysis engine.',
+          reason instanceof Error && reason.message.startsWith('Could not load the analysis engine')
+            ? reason.message
+            : formatAnalysisEngineLoadError(reason),
         )
       })
   }, [wasmApi])
@@ -1443,6 +1446,8 @@ function App({ wasmApi }: Props) {
           <ModelInfo />
         </section>
       )}
+
+      {activeView === 'query' && <QueryPane />}
 
       {activeView === 'what-if' && result && (
         <>

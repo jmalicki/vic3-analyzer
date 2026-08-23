@@ -109,6 +109,12 @@ pub fn detection_hints() -> Vec<String> {
     crate::session::detection_hints()
 }
 
+/// Read the raw bytes of a save file at the given absolute path.
+#[tauri::command]
+pub fn read_save_bytes(location: String) -> Result<Vec<u8>, String> {
+    std::fs::read(&location).map_err(|e| e.to_string())
+}
+
 /// Bind analysis + SQL session by filename stub.
 ///
 /// # Arguments

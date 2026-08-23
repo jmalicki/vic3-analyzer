@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Modal } from './Modal'
 
 export type GoalKind = 'research' | 'gdp' | 'good-price' | 'declare-war' | 'colonize' | 'advanced'
 
@@ -16,6 +17,7 @@ function cleanId(value: string): string {
 
 export function GoalBuilder({ goods, value, onChange, idPrefix, initialKind = 'research' }: Props) {
   const [kind, setKind] = useState<GoalKind>(initialKind)
+  const [showDslHelp, setShowDslHelp] = useState(false)
   const [technology, setTechnology] = useState('nitroglycerin')
   const [gdp, setGdp] = useState(100_000_000)
   const [good, setGood] = useState(goods[0] ?? 'grain')
@@ -163,15 +165,43 @@ export function GoalBuilder({ goods, value, onChange, idPrefix, initialKind = 'r
         </label>
       )}
       {kind === 'advanced' && (
-        <label>
-          Goal DSL
-          <textarea
-            aria-label={`${idPrefix} advanced goal`}
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            rows={3}
-          />
-        </label>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <label>
+            Goal DSL
+            <textarea
+              aria-label={`${idPrefix} advanced goal`}
+              value={value}
+              onChange={(event) => onChange(event.target.value)}
+              rows={3}
+            />
+          </label>
+          <button type="button" onClick={() => setShowDslHelp(true)} style={{ alignSelf: 'flex-start' }}>View DSL Reference</button>
+        </div>
+      )}
+
+      {showDslHelp && (
+        <Modal title="Goal DSL Reference" onClose={() => setShowDslHelp(false)}>
+          <div style={{ padding: '1rem', maxHeight: '60vh', overflowY: 'auto' }}>
+            <p>Goals are boolean expressions over your country's state. You can use <code>&&</code> (AND), <code>||</code> (OR), and <code>not</code>.</p>
+            <h4>Atomic Predicates</h4>
+            <ul>
+              <li><code>has_tech(id)</code>: E.g. <code>has_tech(nitroglycerin)</code></li>
+              <li><code>has_law(id)</code>: E.g. <code>has_law(law_homesteading)</code></li>
+              <li><code>good_price(id) &lt;= num</code>: E.g. <code>good_price(ammunition) &lt;= 40</code></li>
+              <li><code>army_power_projection &gt;= num</code></li>
+              <li><code>navy_power_projection &gt;= num</code></li>
+              <li><code>weekly_balance &gt;= num</code></li>
+              <li><code>solvent</code>: True when credit_headroom &gt; 0</li>
+              <li><code>interest_in(state=id)</code></li>
+            </ul>
+            <h4>Compound Goals</h4>
+            <ul>
+              <li><code>declare-war(state=id)</code>: Expands to interest, army PP, munitions price, and solvent.</li>
+              <li><code>colonize(region=id)</code>: Expands to tech, laws, interest, army/navy PP, and solvent.</li>
+              <li><code>gdp &gt;= num</code>: Evaluates solved building output value.</li>
+            </ul>
+          </div>
+        </Modal>
       )}
 
       <output className="goal-preview">Goal: {builtGoal}</output>

@@ -53,7 +53,7 @@ DOCS_SCREENSHOTS_OUT=/tmp/docs-shots npm run docs:screenshots:compare
 | Script | How |
 | --- | --- |
 | **web** | `vite preview` of `web/dist`, seeds fixture defs into IndexedDB, uploads the plaintext save fixture, walks hash/nav routes, writes `web-*.png` |
-| **desktop:mock** | Serves `crates/vic3-analyzer/ui/index.html` with `window.__TAURI__.core.invoke` mocked from `fixtures/desktop-mock-data.json` — **CI layout drift** only |
+| **desktop:mock** | Serves `web/dist` with `window.__TAURI__.core.invoke` mocked from `fixtures/desktop-mock-data.json` — **CI layout drift** only (Query pane needs the Tauri mock) |
 | **desktop:tauri** | Real companion on **macOS** via `@wdio/tauri-service` + `screencapture -l` (native window chrome). Prefer this when committing `desktop-*.png` |
 
 Viewport (web + mock): **1280×800 @ 2×** `deviceScaleFactor`. Tauri shots use the live window size from `tauri.conf.json` (1200×820).

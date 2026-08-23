@@ -53,6 +53,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: v0.12.1
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -67,17 +71,44 @@ jobs:
             libssl-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            webkit2gtk-driver
+            webkit2gtk-driver \
+            xvfb \
+            dbus-x11
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - name: Install E2E Deps
         working-directory: e2e
         run: npm install
-      - name: Build Tauri App (Debug)
+      - name: Build desktop web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build:desktop
+      - name: Build Tauri App (Debug, WebDriver)
         working-directory: crates/vic3-analyzer
-        run: cargo build
+        env:
+          # Same pattern as scripts/docs-screenshots/desktop-tauri/prepare.mjs
+          TAURI_CONFIG: '{"app":{"security":{"capabilities":["webdriver"]}}}'
+        run: |
+          node -e "require('fs').writeFileSync('capabilities/webdriver.json', JSON.stringify({identifier:'webdriver',description:'Companion UI + embedded WebDriver (E2E only).',windows:['main'],permissions:['core:default','allow-companion','wdio-webdriver:default']}, null, 2))"
+          cargo build -p vic3-analyzer --features webdriver
+          node -e "try { require('fs').unlinkSync('capabilities/webdriver.json') } catch (_) {}"
+      - name: Run WebdriverIO Tauri Tests (Linux / xvfb)
+        if: runner.os == 'Linux'
+        working-directory: e2e
+        env:
+          GDK_BACKEND: x11
+          WEBKIT_DISABLE_COMPOSITING_MODE: '1'
+          WEBKIT_DISABLE_DMABUF_RENDERER: '1'
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        # Wrap the whole WDIO process so the spawned Tauri/WebKit child inherits a
+        # real X display. Auto-xvfb inside WDIO alone was not enough (app exit 101).
+        run: xvfb-run -a dbus-run-session -- npm run test:tauri
       - name: Run WebdriverIO Tauri Tests
+        if: runner.os != 'Linux'
         working-directory: e2e
         run: npm run test:tauri

@@ -53,6 +53,7 @@ pub fn run() {
             commands::list_saves,
             commands::get_dashboard,
             commands::detection_hints,
+            commands::read_save_bytes,
             commands::use_save,
             commands::loaded_prices,
             commands::loaded_alerts,

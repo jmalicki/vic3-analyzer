@@ -710,7 +710,7 @@ describe('prices UI', () => {
     render(<App />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      /Could not load the analysis engine.*Failed to construct/,
+      /Could not load the analysis engine: could not build a URL.*Failed to construct/,
     )
 
     await user.click(screen.getByRole('button', { name: /Build definitions from game files/ }))
