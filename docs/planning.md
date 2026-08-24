@@ -40,6 +40,8 @@ Transitions between states consist of **zero-day decisions** and **event-wait ed
 - `QueueTech`: Selects a tech that unlocks prerequisites for open goal atoms.
 - `QueueBuildingLevel`: Adds a level of a building type in a specific state (barracks, shipyards, or economic buildings).
 - `SwitchPm`: Swaps production methods to boost GDP or relieve a specific goods shortage.
+  **Off by default** (`SimConfig::allow_pm_changes` / `PlanOpts::allow_pm_changes` /
+  CLI `--allow-pm-changes`). Zero-day PM edges explode branching; enable only when needed.
 - `QueueLaw`: Begins a law passage checkpoint.
 - `QueueInterest`: Declares a strategic interest in a target region.
 - `AdjustTax`: Increments or decrements the tax level to meet weekly budget balance goals.
@@ -77,7 +79,11 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
   - **Navy:** `building_shipyards` and `building_naval_administration` followed by crew hiring (`navy_crew_days`).
 
 ### 3. Production Method Switching
-- When an economy context is present, the planner evaluates candidate PM switches on relevant industries, applies the override, and triggers an immediate price re-solve.
+- **Opt-in** via `allow_pm_changes` (`SimConfig` / `PlanOpts` / CLI `--allow-pm-changes` /
+  Plan timeline checkbox). Off by default to keep A* branching finite.
+- When enabled and an economy context is present, the planner evaluates candidate PM
+  switches on relevant industries, applies the override, and triggers an immediate
+  price re-solve (capped by `max_pm_candidates` / `max_pm_overrides`).
 
 ### 4. Construction capacity (compact model)
 - **Capacity** `R` starts from `base_construction_capacity` and rises by `construction_per_cs_level` per Construction Sector level (projected at load; refreshed when a CS level completes on the plan branch).

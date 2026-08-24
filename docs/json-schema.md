@@ -99,6 +99,11 @@ Preview mutation applied to a cloned world (extra levels, then production method
     "goal": { "type": "string", "description": "DSL string, see docs/dsl.md" },
     "max_days": { "type": "integer", "minimum": 0 },
     "label": { "type": "string" },
+    "allow_pm_changes": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, planning may emit SwitchPm edges (off by default)"
+    },
     "parent_id": { "type": "string", "format": "uuid" }
   }
 }

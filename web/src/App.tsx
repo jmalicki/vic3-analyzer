@@ -292,6 +292,7 @@ function App({ wasmApi }: Props) {
   }>()
   const [goal, setGoal] = useState('research(tech=nitroglycerin)')
   const [label, setLabel] = useState('')
+  const [allowPmChanges, setAllowPmChanges] = useState(false)
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [whatIfOpts, setWhatIfOpts] = useState<Record<string, unknown>>({
     building: '',
@@ -890,7 +891,12 @@ function App({ wasmApi }: Props) {
     setError(undefined)
     void Promise.all([bytes(saveFile), bytes(tokensFile)])
       .then(async ([saveBytes, tokenBytes]) => {
-        const opts = { goal, max_days: 3650, label: label || null }
+        const opts = {
+          goal,
+          max_days: 3650,
+          label: label || null,
+          allow_pm_changes: allowPmChanges,
+        }
         const json = await api.loaded_plan(JSON.stringify(opts))
         const nextResult = JSON.parse(json) as PlanResult
         setPlanResult(nextResult)
@@ -1498,6 +1504,15 @@ function App({ wasmApi }: Props) {
                 onChange={(event) => setLabel(event.target.value)}
                 placeholder="e.g. Rush explosives"
               />
+            </label>
+            <label className="settings-check">
+              <input
+                type="checkbox"
+                aria-label="Allow production method changes"
+                checked={allowPmChanges}
+                onChange={(event) => setAllowPmChanges(event.target.checked)}
+              />
+              Allow production method changes
             </label>
             <button
               disabled={

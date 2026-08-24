@@ -56,9 +56,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save, SavePatch};
 use vic3_planning::Atom;
-use vic3_planning::PlanOpts;
 use vic3_planning::PlanningState;
-use vic3_planning::{EconomyContext, SimConfig};
+use vic3_planning::{EconomyContext, PlanOpts};
 use vic3_prices::{
     alerts as diagnose_alerts, optimize_pms, preview as solve_preview, solve,
     what_if as solve_what_if, OptimizePmsOpts, PricesResult, SolveOpts, WhatIfOpts, World,
@@ -629,7 +628,7 @@ pub fn loaded_plan_json(plan_opts_json: &str) -> Result<String, ApiError> {
         let result = vic3_planning::plan_with_economy(
             state,
             goal,
-            SimConfig::default(),
+            plan_opts.sim_config(),
             economy,
             plan_opts.max_days,
             loaded.prices.residual,
@@ -756,7 +755,8 @@ pub fn what_if_json(
 
 /// Find a shortest goal-relevant plan ([`vic3_planning::PlanResult`] JSON). One-shot.
 ///
-/// `plan_opts_json` is [`PlanOpts`] (`goal`, `max_days`, optional `label`).
+/// `plan_opts_json` is [`PlanOpts`] (`goal`, `max_days`, optional `label` /
+/// `allow_pm_changes`).
 ///
 /// # Errors
 ///
@@ -782,7 +782,7 @@ pub fn plan_json(
     let result = vic3_planning::plan_with_economy(
         state,
         goal,
-        SimConfig::default(),
+        plan_opts.sim_config(),
         economy,
         plan_opts.max_days,
         prices.residual,

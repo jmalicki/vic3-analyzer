@@ -49,8 +49,7 @@ use vic3_defs::GameDefs;
 use vic3_load::{empty_tokens, export_save, load_path_world, load_tokens_path, SavePatch};
 use vic3_planning::Atom;
 use vic3_planning::PlanningState;
-use vic3_planning::{compare, AnalysisRecord, PlanOpts, PlanResult};
-use vic3_planning::{EconomyContext, SimConfig};
+use vic3_planning::{compare, AnalysisRecord, EconomyContext, PlanOpts, PlanResult};
 use vic3_prices::{
     alerts, optimize_pms, preview, solve, what_if, AlertsResult, OptimizeAxis as PriceOptimizeAxis,
     OptimizeResult, PricesResult, SolveOpts, WhatIfOpts, World, WorldDelta,
@@ -313,6 +312,9 @@ struct PlanCli {
     /// Reject plans longer than this many days.
     #[arg(long, default_value_t = 3650)]
     max_days: u32,
+    /// Allow zero-day production-method SwitchPm edges (off by default).
+    #[arg(long, default_value_t = false)]
+    allow_pm_changes: bool,
     /// Print PlanResult JSON.
     #[arg(long)]
     json: bool,
@@ -498,20 +500,21 @@ fn run_plan(cmd: PlanCli) -> Result<()> {
     let state = PlanningState::from_world_with_prices(&world, &country, &prices)?;
     let goal = vic3_planning::parse(&cmd.goal)?;
     let economy = EconomyContext::new(world, defs, solve_opts);
+    let opts = PlanOpts {
+        goal: cmd.goal.clone(),
+        max_days: cmd.max_days,
+        label: cmd.label.clone(),
+        allow_pm_changes: cmd.allow_pm_changes,
+    };
     let result = vic3_planning::plan_with_economy(
         state,
         goal,
-        SimConfig::default(),
+        opts.sim_config(),
         economy,
         cmd.max_days,
         prices.residual,
         prices.limitations,
     )?;
-    let opts = PlanOpts {
-        goal: cmd.goal,
-        max_days: cmd.max_days,
-        label: cmd.label.clone(),
-    };
     let record = AnalysisRecord {
         id: uuid::Uuid::new_v4().to_string(),
         created_at: Utc::now().to_rfc3339(),

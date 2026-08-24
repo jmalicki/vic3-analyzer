@@ -424,6 +424,7 @@ describe('prices UI', () => {
           goal: 'gdp >= 100000000',
           max_days: 3650,
           label: 'GDP 100 million',
+          allow_pm_changes: false,
         }),
       ),
     )

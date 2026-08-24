@@ -64,12 +64,19 @@ cargo run -p vic3-cli -- gaps \
 
 ### 5. Timeline Planning: `plan`
 Finds an optimal action sequence (tech, laws, constructions) to achieve a goal.
+Production-method `SwitchPm` edges are off by default; pass `--allow-pm-changes` to enable.
 
 ```bash
 cargo run -p vic3-cli -- plan \
   --save campaign.v3 \
   --goal "research(tech=nitroglycerin)" \
   --label "rush explosives"
+
+# Opt in to zero-day PM switches (higher branching):
+cargo run -p vic3-cli -- plan \
+  --save campaign.v3 \
+  --goal "gdp >= 100000000" \
+  --allow-pm-changes
 ```
 
 ### 6. PM Optimization: `optimize-pms`
