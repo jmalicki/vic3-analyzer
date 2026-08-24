@@ -6,15 +6,17 @@
 //! re-inserted via a 0-cost self-edge whose heuristic matches the next
 //! child's \(f - g = \mathrm{edge} + h\).
 //!
-//! Beam policy (locked for v1): fixed width [`DEFAULT_PEA_BEAM`] (16), not
-//! ties-only. Dominance pruning is intentionally out of scope.
+//! Beam width is the constant [`DEFAULT_PEA_BEAM`] (not stored on the cursor).
+//! Expanding identity is `(domain, next)` only — the ranked list is `Rc<[…]>`
+//! so [`SearchNode`] clones are refcount bumps, and is not hashed. Dominance
+//! pruning is intentionally out of scope.
 
 use super::pathfinding::SearchNode;
 use super::Vic3Node;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-/// Default fixed beam width for PEA* partial expansion.
+/// Fixed beam width for PEA* partial expansion (advance `next` by this many).
 ///
 /// Chosen from a no-refit GDP proxy on Prussia 1836 (~50 build-level
 /// candidates; top 8–16 captured the high-value head). Not a proven optimum.
@@ -38,11 +40,13 @@ pub struct PeaNode {
 #[derive(Clone, Debug)]
 enum PeaInner {
     Ready(Vic3Node),
+    /// Resume handle on parent `domain`: emit `ranked[next..]` in chunks of
+    /// [`DEFAULT_PEA_BEAM`]. Single logical owner of the list; `Rc` only makes
+    /// pathfinding's required [`Clone`] cheap.
     Expanding {
         domain: Vic3Node,
-        ranked: Rc<Vec<RankedSucc>>,
+        ranked: Rc<[RankedSucc]>,
         next: usize,
-        beam: usize,
     },
 }
 
@@ -59,13 +63,6 @@ impl PeaNode {
         match &self.inner {
             PeaInner::Ready(n) => n,
             PeaInner::Expanding { domain, .. } => domain,
-        }
-    }
-
-    fn beam_width(&self) -> usize {
-        match &self.inner {
-            PeaInner::Ready(_) => DEFAULT_PEA_BEAM,
-            PeaInner::Expanding { beam, .. } => *beam,
         }
     }
 
@@ -93,12 +90,8 @@ impl PeaNode {
         ranked
     }
 
-    fn emit_beam(
-        ranked: &Rc<Vec<RankedSucc>>,
-        domain: &Vic3Node,
-        next: usize,
-        beam: usize,
-    ) -> Vec<(Self, u32)> {
+    fn emit_beam(ranked: &Rc<[RankedSucc]>, domain: &Vic3Node, next: usize) -> Vec<(Self, u32)> {
+        let beam = DEFAULT_PEA_BEAM.max(1);
         let end = next.saturating_add(beam).min(ranked.len());
         let mut out = Vec::with_capacity(end.saturating_sub(next).saturating_add(1));
         for succ in &ranked[next..end] {
@@ -113,7 +106,6 @@ impl PeaNode {
                         domain: domain.clone(),
                         ranked: Rc::clone(ranked),
                         next: end,
-                        beam,
                     },
                 },
                 0,
@@ -166,10 +158,9 @@ impl SearchNode for PeaNode {
     type Cost = u32;
 
     fn successors(&self) -> Vec<(Self, Self::Cost)> {
-        let beam = self.beam_width().max(1);
         match &self.inner {
             PeaInner::Ready(domain) => {
-                let ranked = Rc::new(Self::rank_successors(domain));
+                let ranked: Rc<[RankedSucc]> = Self::rank_successors(domain).into();
                 super::astar_trace::on_expand("pea-ready", || {
                     let (fp_dups, fp_uniques) = domain.fingerprint_dup_stats();
                     format!(
@@ -178,7 +169,7 @@ impl SearchNode for PeaNode {
                         domain.state().gdp,
                         domain.heuristic(),
                         ranked.len(),
-                        beam,
+                        DEFAULT_PEA_BEAM,
                         fp_dups,
                         fp_uniques,
                     )
@@ -186,13 +177,12 @@ impl SearchNode for PeaNode {
                 if ranked.is_empty() {
                     return Vec::new();
                 }
-                Self::emit_beam(&ranked, domain, 0, beam)
+                Self::emit_beam(&ranked, domain, 0)
             }
             PeaInner::Expanding {
                 domain,
                 ranked,
                 next,
-                beam,
             } => {
                 domain.note_pea_resume();
                 super::astar_trace::on_expand("pea-resume", || {
@@ -203,13 +193,13 @@ impl SearchNode for PeaNode {
                         domain.state().gdp,
                         next,
                         ranked.len(),
-                        beam,
+                        DEFAULT_PEA_BEAM,
                         ranked.len().saturating_sub(*next),
                         fp_dups,
                         fp_uniques,
                     )
                 });
-                Self::emit_beam(ranked, domain, *next, *beam)
+                Self::emit_beam(ranked, domain, *next)
             }
         }
     }
