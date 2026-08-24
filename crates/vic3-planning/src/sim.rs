@@ -963,11 +963,10 @@ pub struct SimConfig {
     pub max_pm_candidates: u16,
     /// National construction capacity with zero Construction Sector levels.
     ///
-    /// Combined with [`Self::construction_per_cs_level`] by
-    /// [`crate::construction::capacity_from_sectors`].
+    /// Positive CS levels add throughput only via defs
+    /// `country_construction_add` on the building's required production methods
+    /// ([`crate::construction::national_construction_points_per_day`]).
     pub base_construction_capacity: u16,
-    /// Capacity added per Construction Sector level.
-    pub construction_per_cs_level: u16,
     /// Optional override for per-job construction points/day from the pool.
     ///
     /// When [`None`] (default), the planner derives the cap from max weekly
@@ -999,7 +998,6 @@ impl Default for SimConfig {
             max_pm_overrides: 4,
             max_pm_candidates: 4,
             base_construction_capacity: 1,
-            construction_per_cs_level: 5,
             // None → derive from max weekly construction progress / 7.
             max_construction_allocation: None,
             default_construction_cost: 180,
@@ -3325,7 +3323,7 @@ mod tests {
 
     #[test]
     fn completing_construction_sector_raises_capacity() {
-        use vic3_defs::BuildingType;
+        use vic3_defs::{BuildingType, ProductionMethod};
 
         let mut defs = GameDefs {
             goods_order: vec!["wood".into()],
@@ -3347,8 +3345,20 @@ mod tests {
                 id: BUILDING_CONSTRUCTION_SECTOR.into(),
                 group: None,
                 city_type: None,
-                production_method_groups: Vec::new(),
+                production_method_groups: vec!["pmg_base_building_construction_sector".into()],
                 required_construction: Some(10.0),
+            },
+        );
+        defs.production_method_groups.insert(
+            "pmg_base_building_construction_sector".into(),
+            vec!["pm_iron_frame_buildings".into()],
+        );
+        defs.production_methods.insert(
+            "pm_iron_frame_buildings".into(),
+            ProductionMethod {
+                id: "pm_iron_frame_buildings".into(),
+                country_construction_add: Some(5.0),
+                ..ProductionMethod::default()
             },
         );
         let world = World {
@@ -3379,7 +3389,7 @@ mod tests {
                     building: BUILDING_CONSTRUCTION_SECTOR.into(),
                     level: 0.0,
                     staffing: 0.0,
-                    production_methods: Vec::new(),
+                    production_methods: vec!["pm_iron_frame_buildings".into()],
                     saved_inputs: Vec::new(),
                     saved_outputs: Vec::new(),
                 },
@@ -3390,7 +3400,6 @@ mod tests {
         let economy = EconomyContext::new(world, defs, SolveOpts::default());
         let config = SimConfig {
             base_construction_capacity: 1,
-            construction_per_cs_level: 5,
             default_construction_cost: 10,
             ..SimConfig::default()
         };

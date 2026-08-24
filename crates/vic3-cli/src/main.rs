@@ -472,7 +472,7 @@ fn run_gaps(cmd: GapsCli) -> Result<()> {
     let country_tag = world
         .player_country_tag()
         .context("save has no playable country")?;
-    let state = PlanningState::from_world_with_prices(&world, country_tag, &prices)?;
+    let state = PlanningState::from_world_with_prices(&world, country_tag, &prices, &defs)?;
     let goal = vic3_planning::parse(&cmd.goal)?;
     let mut limitations = prices.limitations;
     if goal.has_army_atom() {
@@ -497,7 +497,7 @@ fn run_plan(cmd: PlanCli) -> Result<()> {
         .context("save has no playable country")?
         .to_string();
     let date = world.game_date.map(|date| date.game_fmt().to_string());
-    let state = PlanningState::from_world_with_prices(&world, &country, &prices)?;
+    let state = PlanningState::from_world_with_prices(&world, &country, &prices, &defs)?;
     let goal = vic3_planning::parse(&cmd.goal)?;
     let economy = EconomyContext::new(world, defs, solve_opts);
     let opts = PlanOpts {

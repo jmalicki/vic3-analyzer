@@ -15,15 +15,18 @@
 //!
 //! # Role
 //!
-//! Victoria 3 allocates a national construction pool across queued building
+//! Victoria 3 allocates a **national** construction pool across queued building
 //! levels, then splits that pool between **government** and **private** queues
 //! via economic-system laws (`country_private_construction_allocation_mult`).
+//! There is **no** geographic-state share of the national pool in the game model
+//! we care about — only national throughput and the government/private split.
 //! This module is the planner's **compact** version of that idea:
 //!
-//! - Throughput comes from Construction Sector levels × CS PM
-//!   `country_construction_add` (fallback: [`SimConfig::construction_per_cs_level`]).
+//! - Throughput comes from Construction Sector levels × **required** CS PM
+//!   `country_construction_add` (from defs). Missing/invalid CS PMs are errors,
+//!   not silent iron-frame-shaped guesses.
 //! - Only the **government** share feeds planner jobs; private queue rows are
-//!   ignored for allocation / parallel slots (not a geo-state split).
+//!   ignored for allocation / parallel slots.
 //! - Each active government job is capped at max weekly construction progress
 //!   ÷ 7 (base 10/week from game static modifiers + owned tech adds), unless
 //!   [`SimConfig::max_construction_allocation`] overrides. Leftover government
@@ -37,7 +40,6 @@
 //!
 //! # Limitations / approximations
 //!
-//! - No geo-state share of the national pool (sim queues often omit `state_id`).
 //! - Government vs private uses a static economic-law → private-mult table
 //!   (vanilla `01_economic_system.txt`); other modifiers that change private
 //!   allocation are ignored.
@@ -74,15 +76,24 @@ pub const BUILDING_CONSTRUCTION_SECTOR: &str = "building_construction_sector";
 /// load-time projection matches a default sim config.
 pub const LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY: f64 = 1.0;
 
-/// Extra national throughput (points/day) per Construction Sector level at load
-/// when CS PMs are unknown (iron-frame-shaped fallback).
-///
-/// Kept in sync with [`SimConfig::default`]'s `construction_per_cs_level`.
-pub const LOAD_CONSTRUCTION_POINTS_PER_DAY_PER_SECTOR_LEVEL: f64 = 5.0;
-
 /// Vanilla base `country_max_weekly_construction_progress_add` from
 /// `00_code_static_modifiers.txt`.
 pub const BASE_MAX_WEEKLY_CONSTRUCTION_PROGRESS: f64 = 10.0;
+
+/// Construction Sector building lacks a defs PM that yields
+/// `country_construction_add`.
+///
+/// CS throughput never invents iron-frame-shaped defaults: production methods
+/// on the building must resolve against defs.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "construction sector building {building_id} has no production method with \
+     country_construction_add (methods={methods:?}); CS PMs are required"
+)]
+pub struct MissingConstructionSectorPm {
+    pub building_id: u32,
+    pub methods: Vec<String>,
+}
 
 /// Heuristic / wait ETA mode for construction timing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -100,28 +111,62 @@ pub enum ConstructionEtaMode {
     NextFinish,
 }
 
-/// Convert Construction Sector levels into national throughput (**points/day**).
+/// Convert Construction Sector buildings into national throughput (**points/day**).
 ///
-/// Uses the load-time defaults
-/// ([`LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY`],
-/// [`LOAD_CONSTRUCTION_POINTS_PER_DAY_PER_SECTOR_LEVEL`]). Non-finite or
-/// non-positive results fall back to the base throughput.
-///
-/// # Examples
-///
-/// ```
-/// use vic3_planning::construction::construction_points_per_day_from_sector_levels;
-/// assert!((construction_points_per_day_from_sector_levels(0.0) - 1.0).abs() < 1e-9);
-/// assert!((construction_points_per_day_from_sector_levels(2.0) - 11.0).abs() < 1e-9); // 1 + 5*2
-/// ```
-pub fn construction_points_per_day_from_sector_levels(sector_levels: f64) -> f64 {
-    let points_per_day = LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY
-        + LOAD_CONSTRUCTION_POINTS_PER_DAY_PER_SECTOR_LEVEL * sector_levels.max(0.0);
-    if points_per_day.is_finite() && points_per_day > 0.0 {
-        points_per_day
-    } else {
-        LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY
+/// Sums `level × country_construction_add` for owned CS buildings. Each positive
+/// level **requires** a production method in `defs` with finite
+/// `country_construction_add ≥ 0`. Zero CS levels →
+/// [`LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY`] only (before government share).
+fn national_points_per_day_from_cs_buildings<'a>(
+    buildings: impl IntoIterator<Item = &'a vic3_prices::WorldBuilding>,
+    defs: &GameDefs,
+    base: f64,
+) -> Result<f64, MissingConstructionSectorPm> {
+    let mut from_buildings = 0.0;
+    for building in buildings {
+        let level = building.level.max(0.0);
+        if level <= 0.0 {
+            continue;
+        }
+        let add = construction_add_for_cs_building(building, defs)?;
+        from_buildings += add * level;
     }
+    let points_per_day = base + from_buildings;
+    if points_per_day.is_finite() && points_per_day > 0.0 {
+        Ok(points_per_day)
+    } else {
+        Ok(base.max(LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY))
+    }
+}
+
+/// Resolve `country_construction_add` for one Construction Sector building.
+///
+/// Walks [`vic3_prices::WorldBuilding::production_methods`] (required, must be
+/// valid against defs). First PM that grants a finite non-negative add wins.
+pub fn construction_add_for_cs_building(
+    building: &vic3_prices::WorldBuilding,
+    defs: &GameDefs,
+) -> Result<f64, MissingConstructionSectorPm> {
+    for pm_id in &building.production_methods {
+        if let Some(add) = defs
+            .production_methods
+            .get(pm_id)
+            .and_then(|pm| pm.country_construction_add)
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            return Ok(add);
+        }
+    }
+    Err(MissingConstructionSectorPm {
+        building_id: building.id,
+        methods: building.production_methods.clone(),
+    })
+}
+
+fn expect_construction_add(building: &vic3_prices::WorldBuilding, defs: &GameDefs) -> f64 {
+    construction_add_for_cs_building(building, defs).unwrap_or_else(|err| {
+        panic!("{err}; fix the save/fixture so Construction Sector PMs resolve in defs")
+    })
 }
 
 /// Government share of national construction (1 − private allocation mult).
@@ -155,23 +200,7 @@ fn private_construction_allocation_mult(law_key: &str) -> Option<f64> {
     })
 }
 
-/// Project **government** construction throughput (**points/day**) from a save.
-///
-/// Sums CS levels, applies the load-time per-level fallback, then scales by
-/// [`government_construction_share_from_laws`].
-pub fn construction_points_per_day_from_save(save: &Save, country_id: u32) -> f64 {
-    let national =
-        construction_points_per_day_from_sector_levels(cs_levels_from_save(save, country_id));
-    let share = government_construction_share_from_laws(save.active_laws(country_id));
-    let govt = national * share;
-    if govt.is_finite() && govt > 0.0 {
-        govt
-    } else {
-        LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY
-    }
-}
-
-fn cs_levels_from_save(save: &Save, country_id: u32) -> f64 {
+fn owned_state_ids_from_save(save: &Save, country_id: u32) -> BTreeSet<u32> {
     let mut owned_states: BTreeSet<u32> = save
         .states
         .iter_present()
@@ -182,45 +211,94 @@ fn cs_levels_from_save(save: &Save, country_id: u32) -> f64 {
             owned_states.extend(country.states.iter().copied());
         }
     }
-    save.building_manager()
-        .iter_present()
-        .filter_map(|(_, building)| {
-            let state = building.state?;
-            if !owned_states.contains(&state) {
-                return None;
-            }
-            if building.building != BUILDING_CONSTRUCTION_SECTOR {
-                return None;
-            }
-            Some(f64::from(building.level.max(0)))
-        })
-        .sum()
+    owned_states
+}
+
+/// Project **government** construction throughput (**points/day**) from a save.
+///
+/// Owned Construction Sector buildings must list production methods that resolve
+/// in `defs` to `country_construction_add`. Then scales by
+/// [`government_construction_share_from_laws`].
+pub fn construction_points_per_day_from_save(
+    save: &Save,
+    country_id: u32,
+    defs: &GameDefs,
+) -> Result<f64, MissingConstructionSectorPm> {
+    let owned_states = owned_state_ids_from_save(save, country_id);
+    let mut from_buildings = 0.0;
+    for (id, building) in save.building_manager().iter_present() {
+        let Some(state_id) = building.state else {
+            continue;
+        };
+        if !owned_states.contains(&state_id) {
+            continue;
+        }
+        if building.building != BUILDING_CONSTRUCTION_SECTOR {
+            continue;
+        }
+        let level = f64::from(building.level.max(0));
+        if level <= 0.0 {
+            continue;
+        }
+        let methods = building.active_production_methods();
+        let world_building = vic3_prices::WorldBuilding {
+            id,
+            state: building.state,
+            building: building.building.clone(),
+            level,
+            staffing: building.staffing.max(0.0),
+            production_methods: methods,
+            saved_inputs: Vec::new(),
+            saved_outputs: Vec::new(),
+        };
+        from_buildings += construction_add_for_cs_building(&world_building, defs)? * level;
+    }
+    let national = LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY + from_buildings;
+    let share = government_construction_share_from_laws(save.active_laws(country_id));
+    let govt = national * share;
+    if govt.is_finite() && govt > 0.0 {
+        Ok(govt)
+    } else {
+        Ok(LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY)
+    }
 }
 
 /// Project **government** construction throughput (**points/day**) from a [`World`].
 ///
-/// Same formula as [`construction_points_per_day_from_save`] without law rows on
-/// the compact world — uses full national throughput (share `1.0`). Prefer
-/// [`construction_points_per_day_from_sectors`] when laws are on the planning
-/// state.
-pub fn construction_points_per_day_from_world(world: &World, country_id: u32) -> f64 {
+/// Same PM requirements as [`construction_points_per_day_from_save`]. Applies
+/// government share from the country's laws on `world`.
+pub fn construction_points_per_day_from_world(
+    world: &World,
+    country_id: u32,
+    defs: &GameDefs,
+) -> Result<f64, MissingConstructionSectorPm> {
     let owned_states: BTreeSet<u32> = world
         .states
         .iter()
         .filter_map(|state| (state.country == Some(country_id)).then_some(state.id))
         .collect();
-    let levels: f64 = world
-        .buildings
+    let cs = world.buildings.iter().filter(|building| {
+        building.building == BUILDING_CONSTRUCTION_SECTOR
+            && building
+                .state
+                .is_some_and(|state_id| owned_states.contains(&state_id))
+    });
+    let national =
+        national_points_per_day_from_cs_buildings(cs, defs, LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY)?;
+    let laws = world
+        .countries
         .iter()
-        .filter(|building| {
-            building.building == BUILDING_CONSTRUCTION_SECTOR
-                && building
-                    .state
-                    .is_some_and(|state_id| owned_states.contains(&state_id))
-        })
-        .map(|building| building.level.max(0.0))
-        .sum();
-    construction_points_per_day_from_sector_levels(levels)
+        .find(|c| c.id == country_id)
+        .map(|c| c.laws.iter().map(String::as_str))
+        .into_iter()
+        .flatten();
+    let share = government_construction_share_from_laws(laws);
+    let govt = national * share;
+    if govt.is_finite() && govt > 0.0 {
+        Ok(govt)
+    } else {
+        Ok(LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY)
+    }
 }
 
 /// Whether open goal atoms imply the planner may need to construct buildings.
@@ -269,13 +347,18 @@ pub fn construction_sector_levels(state: &PlanningState, economy: Option<&Econom
     )
 }
 
-/// National (pre-share) construction throughput from CS levels / PMs and config.
+/// National (pre-share) construction throughput from CS levels / **required** PMs.
+///
+/// When `economy` is present, every positive-level Construction Sector building
+/// must resolve `country_construction_add` in defs (see
+/// [`construction_add_for_cs_building`]). Without economy, only the base
+/// capacity is returned — callers that raised CS levels via deltas must supply
+/// an [`EconomyContext`] so PMs can be read from the projected world.
 pub fn national_construction_points_per_day(
     state: &PlanningState,
     economy: Option<&EconomyContext>,
     config: SimConfig,
 ) -> f64 {
-    let fallback_per_level = f64::from(config.construction_per_cs_level);
     let base = f64::from(config.base_construction_capacity);
     let points_per_day = if let Some(economy) = economy {
         let world = economy.apply_planning_to_world(state);
@@ -289,53 +372,24 @@ pub fn national_construction_points_per_day(
             if level <= 0.0 {
                 continue;
             }
-            let add = construction_add_for_cs_building(building, &economy.defs, fallback_per_level);
+            let add = expect_construction_add(building, &economy.defs);
             from_buildings += add * level;
         }
-        if from_buildings > 0.0 || construction_sector_levels(state, Some(economy)) > 0.0 {
-            base + from_buildings
-        } else {
-            base + fallback_per_level * construction_sector_levels(state, Some(economy))
-        }
+        base + from_buildings
     } else {
-        base + fallback_per_level * construction_sector_levels(state, None)
+        let levels = construction_sector_levels(state, None);
+        assert!(
+            levels <= 0.0,
+            "EconomyContext required to resolve Construction Sector production methods \
+             (CS levels={levels}); PMs are not optional"
+        );
+        base
     };
     if points_per_day.is_finite() && points_per_day > 0.0 {
         points_per_day
     } else {
         f64::from(config.base_construction_capacity.max(1))
     }
-}
-
-fn construction_add_for_cs_building(
-    building: &vic3_prices::WorldBuilding,
-    defs: &GameDefs,
-    fallback: f64,
-) -> f64 {
-    for pm_id in &building.production_methods {
-        if let Some(add) = defs
-            .production_methods
-            .get(pm_id)
-            .and_then(|pm| pm.country_construction_add)
-            .filter(|v| v.is_finite() && *v >= 0.0)
-        {
-            return add;
-        }
-        if let Some(add) = known_cs_pm_construction_add(pm_id) {
-            return add;
-        }
-    }
-    fallback
-}
-
-fn known_cs_pm_construction_add(pm_id: &str) -> Option<f64> {
-    Some(match pm_id {
-        "pm_wooden_buildings" => 2.0,
-        "pm_iron_frame_buildings" => 5.0,
-        "pm_steel_frame_buildings" => 10.0,
-        "pm_arc_welded_buildings" => 15.0,
-        _ => return None,
-    })
 }
 
 /// Government construction throughput (**points/day**) from CS levels and laws.
@@ -684,12 +738,6 @@ mod tests {
     use vic3_prices::{SolveOpts, WorldBuilding, WorldCountry, WorldState};
 
     #[test]
-    fn points_per_day_from_sector_levels_matches_load_defaults() {
-        assert!((construction_points_per_day_from_sector_levels(0.0) - 1.0).abs() < 1e-9);
-        assert!((construction_points_per_day_from_sector_levels(1.0) - 6.0).abs() < 1e-9);
-    }
-
-    #[test]
     fn government_share_from_economic_laws() {
         assert!(
             (government_construction_share_from_laws(["law_laissez_faire"]) - 0.25).abs() < 1e-9
@@ -703,6 +751,31 @@ mod tests {
         assert!(
             (government_construction_share_from_laws(["law_census_voting"]) - 1.0).abs() < 1e-9
         );
+    }
+
+    #[test]
+    fn cs_building_requires_country_construction_add_pm() {
+        let mut defs = GameDefs::default();
+        defs.production_methods.insert(
+            "pm_not_construction".into(),
+            ProductionMethod {
+                id: "pm_not_construction".into(),
+                ..ProductionMethod::default()
+            },
+        );
+        let building = WorldBuilding {
+            id: 7,
+            state: Some(1),
+            building: BUILDING_CONSTRUCTION_SECTOR.into(),
+            level: 1.0,
+            staffing: 1.0,
+            production_methods: vec!["pm_not_construction".into()],
+            saved_inputs: Vec::new(),
+            saved_outputs: Vec::new(),
+        };
+        let err = construction_add_for_cs_building(&building, &defs).unwrap_err();
+        assert_eq!(err.building_id, 7);
+        assert_eq!(err.methods, ["pm_not_construction"]);
     }
 
     #[test]
@@ -940,7 +1013,6 @@ mod tests {
         let economy = EconomyContext::new(world, defs, SolveOpts::default());
         let config = SimConfig {
             base_construction_capacity: 1,
-            construction_per_cs_level: 5,
             ..SimConfig::default()
         };
         let mut state = PlanningState::from_parts(PlanningParts {

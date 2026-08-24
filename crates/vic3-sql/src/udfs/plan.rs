@@ -64,6 +64,7 @@ impl TableFunctionImpl for PlanTvf {
             &self.binding.world,
             country,
             &self.binding.prices,
+            &self.binding.defs,
         )
         .map_err(|e| datafusion::common::DataFusionError::Execution(format!("plan state: {e}")))?;
         let economy = EconomyContext::new(

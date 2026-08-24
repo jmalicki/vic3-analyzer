@@ -268,6 +268,12 @@ pub struct WorldBuilding {
     /// Staffed levels. Frozen except that what-if does not touch it.
     pub staffing: f64,
     /// Active production methods, one per PM group; a building runs them all.
+    ///
+    /// **Required and must be valid** against game defs for any mechanic that
+    /// reads them (goods IO, Construction Sector `country_construction_add`,
+    /// etc.). Empty or unknown ids are not a silent “use defaults” path for CS
+    /// throughput. Open design question: keep string script ids, or index into
+    /// a bidirectional name↔id map for denser planning/world nodes?
     pub production_methods: Vec<String>,
     /// Absolute saved input volumes, resolved once against `goods_order`.
     pub saved_inputs: Vec<(GoodIdx, f64)>,

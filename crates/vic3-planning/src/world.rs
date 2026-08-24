@@ -34,6 +34,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
+use vic3_defs::GameDefs;
 use vic3_prices::{PricesResult, World, WorldCountry};
 
 use crate::construction::{
@@ -61,6 +62,10 @@ pub enum WorldError {
     /// No live country whose `definition` / tag matches the requested tag.
     #[error("country tag `{0}` not found in save")]
     UnknownCountry(String),
+    /// Construction Sector building lacks a required defs PM with
+    /// `country_construction_add`.
+    #[error(transparent)]
+    ConstructionPm(#[from] crate::construction::MissingConstructionSectorPm),
 }
 
 /// Game start used when a save has no `meta_data.game_date`.
@@ -185,6 +190,11 @@ pub struct PlanningParts {
     /// Country infamy when present on the save.
     pub infamy: Option<f64>,
     /// Building-id → production methods overridden on this branch.
+    ///
+    /// **Required and must be valid** when used: each id must resolve against
+    /// game defs (same contract as [`vic3_prices::WorldBuilding::production_methods`]).
+    /// Open design question: string script ids vs indices into a bidirectional
+    /// name↔id map (not remapped in this crate yet).
     pub pm_overrides: BTreeMap<u32, Vec<String>>,
     /// Tax level offset from the saved baseline (`0` at load).
     pub tax_level: i8,
@@ -314,16 +324,21 @@ pub struct PlanningState {
     /// Country infamy when present (`None` when missing); not yet a DSL atom.
     pub infamy: Option<f64>,
     /// Per-building PM overrides on this branch (empty at load).
+    ///
+    /// **Required and must be valid** when non-empty: each method id must resolve
+    /// against game defs. Same string-id vs bidirectional index-map design
+    /// question as [`vic3_prices::WorldBuilding::production_methods`].
     pub pm_overrides: BTreeMap<u32, Vec<String>>,
     /// Tax offset from saved baseline (`0` at load; sim `AdjustTax`).
     pub tax_level: i8,
     /// National **government** construction throughput in **construction points per day**.
     ///
-    /// Derived from Construction Sector levels × CS PM output, scaled by the
-    /// government share of national construction (economic laws). Private queue
-    /// rows do not draw from this pool. Used with queue `remaining` (points) so
-    /// ETA is `ceil(remaining / points_per_day)` when a government job is fed
-    /// (or less under the per-job allocation cap).
+    /// Derived from Construction Sector levels × **required** CS PM
+    /// `country_construction_add` (defs), scaled by the government share of the
+    /// national pool (economic laws). There is no geo-state allocation of that
+    /// pool. Private queue rows do not draw from this throughput. Used with
+    /// queue `remaining` (points) so ETA is `ceil(remaining / points_per_day)`
+    /// when a government job is fed (or less under the per-job allocation cap).
     pub construction_points_per_day: f64,
     /// Remaining days on [`Self::queued_tech`] (model timer).
     pub tech_days_left: Option<u16>,
@@ -806,10 +821,14 @@ impl PlanningState {
     /// and credit. Active laws and infamy come from country / law manager rows.
     /// Missing metrics remain `None`. GDP defaults to `0` here; use
     /// [`Self::from_save_with_prices`] for modeled GDP.
+    ///
+    /// `defs` is required so Construction Sector throughput can resolve
+    /// `country_construction_add` from building PMs (no silent per-level guess).
     pub fn from_save(
         save: &Save,
         country_tag: &str,
         prices: impl IntoPriceMap,
+        defs: &GameDefs,
     ) -> Result<Self, WorldError> {
         let (country_id, country) = save
             .countries()
@@ -896,7 +915,9 @@ impl PlanningState {
             infamy: country.infamy.filter(|value| value.is_finite()),
             pm_overrides: BTreeMap::new(),
             tax_level: 0,
-            construction_points_per_day: construction_points_per_day_from_save(save, country_id),
+            construction_points_per_day: construction_points_per_day_from_save(
+                save, country_id, defs,
+            )?,
             tech_days_left: None,
             interest_days_left: None,
             hire_days_left: None,
@@ -912,6 +933,7 @@ impl PlanningState {
         save: &Save,
         country_tag: &str,
         prices: &PricesResult,
+        defs: &GameDefs,
     ) -> Result<Self, WorldError> {
         let (country_id, country) = save
             .countries()
@@ -925,7 +947,7 @@ impl PlanningState {
         if owned_states.is_empty() {
             owned_states.extend(country.states.iter().copied());
         }
-        let mut state = Self::from_save(save, country_tag, prices)?;
+        let mut state = Self::from_save(save, country_tag, prices, defs)?;
         state.gdp = prices
             .buildings
             .iter()
@@ -947,10 +969,13 @@ impl PlanningState {
     /// [`WorldCountry`]. Population-weighted wealth uses pops in states owned
     /// by this country. Solvency and budget lines come from [`WorldCountry`].
     /// GDP defaults to `0`; use [`Self::from_world_with_prices`] for modeled GDP.
+    ///
+    /// `defs` resolves Construction Sector `country_construction_add` PMs.
     pub fn from_world(
         world: &World,
         country_tag: &str,
         prices: impl IntoPriceMap,
+        defs: &GameDefs,
     ) -> Result<Self, WorldError> {
         let country = world
             .country_by_tag(country_tag)
@@ -991,7 +1016,9 @@ impl PlanningState {
             infamy: country.infamy,
             pm_overrides: BTreeMap::new(),
             tax_level: 0,
-            construction_points_per_day: construction_points_per_day_from_world(world, country.id),
+            construction_points_per_day: construction_points_per_day_from_world(
+                world, country.id, defs,
+            )?,
             tech_days_left: None,
             interest_days_left: None,
             hire_days_left: None,
@@ -1007,12 +1034,13 @@ impl PlanningState {
         world: &World,
         country_tag: &str,
         prices: &PricesResult,
+        defs: &GameDefs,
     ) -> Result<Self, WorldError> {
         let country = world
             .country_by_tag(country_tag)
             .ok_or_else(|| WorldError::UnknownCountry(country_tag.to_string()))?;
         let owned_states = owned_state_ids(world, country);
-        let mut state = Self::from_world(world, country_tag, prices)?;
+        let mut state = Self::from_world(world, country_tag, prices, defs)?;
         state.gdp = prices
             .buildings
             .iter()
@@ -1215,7 +1243,8 @@ mod tests {
     #[test]
     fn from_save_uses_prices_result_and_treasury() {
         let save = ger_save(10_000.0);
-        let state = PlanningState::from_save(&save, "GER", ammo_prices(40.0)).unwrap();
+        let state = PlanningState::from_save(&save, "GER", ammo_prices(40.0), &GameDefs::default())
+            .unwrap();
         assert_eq!(state.country, "GER");
         assert_eq!(state.date, Vic3Date::from_ymdh(1850, 6, 1, 0));
         assert_eq!(state.treasury, 10_000.0);
@@ -1271,7 +1300,8 @@ mod tests {
             }),
         );
 
-        let state = PlanningState::from_save(&save, "GER", BTreeMap::new()).unwrap();
+        let state =
+            PlanningState::from_save(&save, "GER", BTreeMap::new(), &GameDefs::default()).unwrap();
         assert!(state.has_tech("railways"));
         assert!(state.has_tech("nitroglycerin"));
         assert!(state.has_tech("urban_planning"));
@@ -1287,7 +1317,9 @@ mod tests {
         );
 
         let world = World::from_save(&save, &vic3_defs::GameDefs::default());
-        let from_world = PlanningState::from_world(&world, "GER", BTreeMap::new()).unwrap();
+        let from_world =
+            PlanningState::from_world(&world, "GER", BTreeMap::new(), &GameDefs::default())
+                .unwrap();
         assert_eq!(from_world.techs, state.techs);
         assert_eq!(from_world.queued_tech, state.queued_tech);
         assert_eq!(from_world.queued_building, state.queued_building);
@@ -1299,7 +1331,8 @@ mod tests {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../vic3-load/tests/fixtures/plaintext.txt");
         let save = vic3_load::load_path(&path, vic3_load::empty_tokens()).expect("fixture");
-        let state = PlanningState::from_save(&save, "GER", BTreeMap::new()).unwrap();
+        let state =
+            PlanningState::from_save(&save, "GER", BTreeMap::new(), &GameDefs::default()).unwrap();
         assert!(state.has_tech("urban_planning"));
         assert!(state.has_tech("railways"));
         assert!(!state.has_tech("mechanized_farming"));
@@ -1310,7 +1343,9 @@ mod tests {
         assert_eq!(state.infamy, Some(12.5));
 
         let world = World::from_save(&save, &vic3_defs::GameDefs::default());
-        let from_world = PlanningState::from_world(&world, "GER", BTreeMap::new()).unwrap();
+        let from_world =
+            PlanningState::from_world(&world, "GER", BTreeMap::new(), &GameDefs::default())
+                .unwrap();
         assert_eq!(from_world, state);
         assert_eq!(world.countries[0].infamy, Some(12.5));
     }
@@ -1327,7 +1362,9 @@ mod tests {
                 ..Budget::default()
             },
         );
-        let indebted_state = PlanningState::from_save(&indebted, "GER", BTreeMap::new()).unwrap();
+        let indebted_state =
+            PlanningState::from_save(&indebted, "GER", BTreeMap::new(), &GameDefs::default())
+                .unwrap();
         assert!(indebted_state.solvent);
         assert_eq!(indebted_state.credit_headroom, Some(800.0));
 
@@ -1340,7 +1377,9 @@ mod tests {
                 ..Budget::default()
             },
         );
-        let exhausted_state = PlanningState::from_save(&exhausted, "GER", BTreeMap::new()).unwrap();
+        let exhausted_state =
+            PlanningState::from_save(&exhausted, "GER", BTreeMap::new(), &GameDefs::default())
+                .unwrap();
         assert!(!exhausted_state.solvent);
         assert_eq!(exhausted_state.credit_headroom, Some(0.0));
 
@@ -1351,7 +1390,9 @@ mod tests {
                 ..Budget::default()
             },
         );
-        let unknown_state = PlanningState::from_save(&unknown, "GER", BTreeMap::new()).unwrap();
+        let unknown_state =
+            PlanningState::from_save(&unknown, "GER", BTreeMap::new(), &GameDefs::default())
+                .unwrap();
         assert!(!unknown_state.solvent);
         assert_eq!(unknown_state.credit_headroom, None);
     }
@@ -1408,7 +1449,8 @@ mod tests {
             }),
         );
 
-        let state = PlanningState::from_save(&save, "GER", BTreeMap::new()).unwrap();
+        let state =
+            PlanningState::from_save(&save, "GER", BTreeMap::new(), &GameDefs::default()).unwrap();
         assert_eq!(state.population_weighted_wealth, Some(17.5));
     }
 
@@ -1447,7 +1489,9 @@ mod tests {
         };
         prices.buildings = vec![building(1, 10, 125.0), building(2, 20, 900.0)];
 
-        let state = PlanningState::from_save_with_prices(&save, "GER", &prices).unwrap();
+        let state =
+            PlanningState::from_save_with_prices(&save, "GER", &prices, &GameDefs::default())
+                .unwrap();
         assert_eq!(state.gdp, 125.0);
     }
 
@@ -1456,7 +1500,7 @@ mod tests {
         let save = ger_save(-50.0);
         let mut prices = BTreeMap::new();
         prices.insert("grain".into(), 20.0);
-        let state = PlanningState::from_save(&save, "GER", prices).unwrap();
+        let state = PlanningState::from_save(&save, "GER", prices, &GameDefs::default()).unwrap();
         assert!(state.solvent);
         assert_eq!(state.treasury, -50.0);
         assert_eq!(state.credit_headroom, Some(500.0));
@@ -1467,7 +1511,8 @@ mod tests {
     #[test]
     fn from_save_unknown_tag() {
         let save = ger_save(1.0);
-        let err = PlanningState::from_save(&save, "FRA", BTreeMap::new()).unwrap_err();
+        let err = PlanningState::from_save(&save, "FRA", BTreeMap::new(), &GameDefs::default())
+            .unwrap_err();
         assert_eq!(err, WorldError::UnknownCountry("FRA".into()));
     }
 
@@ -1475,8 +1520,12 @@ mod tests {
     fn from_world_matches_from_save_budget_and_date() {
         let save = ger_save(10_000.0);
         let world = World::from_save(&save, &vic3_defs::GameDefs::default());
-        let from_save = PlanningState::from_save(&save, "GER", ammo_prices(40.0)).unwrap();
-        let from_world = PlanningState::from_world(&world, "GER", ammo_prices(40.0)).unwrap();
+        let from_save =
+            PlanningState::from_save(&save, "GER", ammo_prices(40.0), &GameDefs::default())
+                .unwrap();
+        let from_world =
+            PlanningState::from_world(&world, "GER", ammo_prices(40.0), &GameDefs::default())
+                .unwrap();
         assert_eq!(from_save, from_world);
         assert_eq!(world.player_country_tag(), Some("GER"));
         assert_eq!(world.game_date, Some(Vic3Date::from_ymdh(1850, 6, 1, 0)));
@@ -1535,7 +1584,8 @@ mod tests {
         );
 
         let world = World::from_save(&save, &vic3_defs::GameDefs::default());
-        let state = PlanningState::from_world(&world, "GER", BTreeMap::new()).unwrap();
+        let state = PlanningState::from_world(&world, "GER", BTreeMap::new(), &GameDefs::default())
+            .unwrap();
         assert_eq!(state.population_weighted_wealth, Some(17.5));
     }
 
@@ -1575,7 +1625,9 @@ mod tests {
         prices.buildings = vec![building(1, 10, 125.0), building(2, 20, 900.0)];
 
         let world = World::from_save(&save, &vic3_defs::GameDefs::default());
-        let state = PlanningState::from_world_with_prices(&world, "GER", &prices).unwrap();
+        let state =
+            PlanningState::from_world_with_prices(&world, "GER", &prices, &GameDefs::default())
+                .unwrap();
         assert_eq!(state.gdp, 125.0);
     }
 
@@ -1583,7 +1635,8 @@ mod tests {
     fn from_world_unknown_tag() {
         let save = ger_save(1.0);
         let world = World::from_save(&save, &vic3_defs::GameDefs::default());
-        let err = PlanningState::from_world(&world, "FRA", BTreeMap::new()).unwrap_err();
+        let err = PlanningState::from_world(&world, "FRA", BTreeMap::new(), &GameDefs::default())
+            .unwrap_err();
         assert_eq!(err, WorldError::UnknownCountry("FRA".into()));
     }
 
@@ -1695,7 +1748,8 @@ mod tests {
             }),
         );
 
-        let state = PlanningState::from_save(&save, "GER", BTreeMap::new()).unwrap();
+        let state =
+            PlanningState::from_save(&save, "GER", BTreeMap::new(), &GameDefs::default()).unwrap();
         assert_eq!(state.army_power_projection, Some(210.0));
         assert!(state.has_interest_state("alsace"));
         assert!(!state.has_interest_region("alsace"));
@@ -1704,7 +1758,9 @@ mod tests {
         assert!(!state.has_interest_state("region_western_europe"));
 
         let world = World::from_save(&save, &vic3_defs::GameDefs::default());
-        let from_world = PlanningState::from_world(&world, "GER", BTreeMap::new()).unwrap();
+        let from_world =
+            PlanningState::from_world(&world, "GER", BTreeMap::new(), &GameDefs::default())
+                .unwrap();
         assert_eq!(from_world.army_power_projection, Some(210.0));
         assert!(from_world.has_interest_state("alsace"));
         assert!(from_world.has_interest_region("region_western_europe"));
@@ -1713,14 +1769,17 @@ mod tests {
     #[test]
     fn from_save_army_power_unknown_not_silent_zero() {
         let save = ger_save(10_000.0);
-        let state = PlanningState::from_save(&save, "GER", BTreeMap::new()).unwrap();
+        let state =
+            PlanningState::from_save(&save, "GER", BTreeMap::new(), &GameDefs::default()).unwrap();
         assert_eq!(state.army_power_projection, None);
         assert_eq!(
             state.army_power_unknown_limitation(),
             Some(ARMY_POWER_PROJECTION_UNKNOWN)
         );
         let world = World::from_save(&save, &vic3_defs::GameDefs::default());
-        let from_world = PlanningState::from_world(&world, "GER", BTreeMap::new()).unwrap();
+        let from_world =
+            PlanningState::from_world(&world, "GER", BTreeMap::new(), &GameDefs::default())
+                .unwrap();
         assert_eq!(from_world.army_power_projection, None);
         assert_eq!(
             from_world.army_power_unknown_limitation(),

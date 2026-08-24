@@ -513,7 +513,7 @@ mod tests {
         let country = world.player_country_tag().expect("player tag").to_string();
         let prices = solve(&world, &defs, SolveOpts::default());
         let state =
-            PlanningState::from_world_with_prices(&world, &country, &prices).expect("state");
+            PlanningState::from_world_with_prices(&world, &country, &prices, &defs).expect("state");
         let current_gdp = state.gdp;
         let target = (current_gdp * 1.005).max(current_gdp + 500.0);
         let goal_src = format!("gdp >= {target}");
