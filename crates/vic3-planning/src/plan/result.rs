@@ -25,10 +25,26 @@ pub struct PlanOpts {
     /// Archive / UI label; ignored by SQL `plan()` row shape.
     #[serde(default)]
     pub label: Option<String>,
+    /// When true, planning may emit [`crate::sim::Action::SwitchPm`] edges.
+    ///
+    /// Defaults to false (serde + Rust): PM switches are zero-day and combinatorial.
+    /// Silent opt-in for API/CLI; no planner UI checkbox.
+    #[serde(default)]
+    pub allow_pm_changes: bool,
 }
 
 const fn default_max_days() -> u32 {
     3650
+}
+
+impl PlanOpts {
+    /// [`SimConfig`] for this request (`allow_pm_changes` and model defaults).
+    pub fn sim_config(&self) -> SimConfig {
+        SimConfig {
+            allow_pm_changes: self.allow_pm_changes,
+            ..SimConfig::default()
+        }
+    }
 }
 
 /// One simulator action on the selected shortest path.

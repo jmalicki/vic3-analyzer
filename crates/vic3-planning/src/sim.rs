@@ -810,6 +810,9 @@ impl EconomyContext {
         atoms: &[Atom],
         config: SimConfig,
     ) -> bool {
+        if !config.allow_pm_changes {
+            return false;
+        }
         !self
             .pm_switch_candidates(
                 state,
@@ -945,9 +948,18 @@ pub struct SimConfig {
     pub tax_balance_per_step: i32,
     /// Absolute tax-level offset cap from the saved baseline.
     pub max_tax_steps: u8,
+    /// When false (default), successors never emit [`Action::SwitchPm`].
+    ///
+    /// PM switches are zero-day and explode the search branching factor; keep
+    /// them opt-in via [`crate::plan::PlanOpts::allow_pm_changes`] / CLI.
+    pub allow_pm_changes: bool,
     /// Max distinct building PM overrides on one planning branch.
+    ///
+    /// Ignored when [`Self::allow_pm_changes`] is false.
     pub max_pm_overrides: u16,
     /// Max SwitchPm decision edges emitted in one expansion.
+    ///
+    /// Ignored when [`Self::allow_pm_changes`] is false.
     pub max_pm_candidates: u16,
     /// National construction capacity with zero Construction Sector levels.
     ///
@@ -982,6 +994,7 @@ impl Default for SimConfig {
             law_days: 180,
             tax_balance_per_step: 50,
             max_tax_steps: 3,
+            allow_pm_changes: false,
             max_pm_overrides: 4,
             max_pm_candidates: 4,
             // High default keeps one active job at full capacity; lower it in
@@ -990,6 +1003,17 @@ impl Default for SimConfig {
             construction_per_cs_level: 5,
             max_construction_allocation: 1000,
             default_construction_cost: 180,
+        }
+    }
+}
+
+impl SimConfig {
+    /// Caps used when emitting SwitchPm edges (`(0, _)` when disabled).
+    pub const fn pm_branch_caps(self) -> (u16, u16) {
+        if self.allow_pm_changes {
+            (self.max_pm_candidates, self.max_pm_overrides)
+        } else {
+            (0, self.max_pm_overrides)
         }
     }
 }
@@ -1282,12 +1306,10 @@ fn successors_for_atoms_with_economy(
                 config,
             );
         }
-        for (building_id, methods) in economy.pm_switch_candidates(
-            state,
-            open_atoms,
-            config.max_pm_candidates,
-            config.max_pm_overrides,
-        ) {
+        let (max_pm_candidates, max_pm_overrides) = config.pm_branch_caps();
+        for (building_id, methods) in
+            economy.pm_switch_candidates(state, open_atoms, max_pm_candidates, max_pm_overrides)
+        {
             push_decision(
                 &mut result,
                 state,
@@ -2569,8 +2591,25 @@ mod tests {
         let economy = EconomyContext::new(world, defs, solve_opts);
         let config = SimConfig {
             max_added_levels_per_type: 0,
+            allow_pm_changes: true,
             ..SimConfig::default()
         };
+
+        let disabled = successors_with_economy(
+            &state,
+            &goal,
+            SimConfig {
+                max_added_levels_per_type: 0,
+                ..SimConfig::default()
+            },
+            &economy,
+        );
+        assert!(
+            disabled
+                .iter()
+                .all(|edge| !matches!(edge.action, Action::SwitchPm { .. })),
+            "SwitchPm must be off by default, got {disabled:?}"
+        );
 
         let decisions = successors_with_economy(&state, &goal, config, &economy);
         assert!(
