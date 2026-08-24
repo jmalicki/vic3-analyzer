@@ -54,6 +54,7 @@
 //! See [`docs/planning.md`](../../../docs/planning.md).
 
 use std::collections::BTreeSet;
+use std::num::NonZeroUsize;
 
 use vic3_defs::GameDefs;
 use vic3_load::{Save, WorldSnapshot};
@@ -75,6 +76,41 @@ pub const BUILDING_CONSTRUCTION_SECTOR: &str = "building_construction_sector";
 /// Kept in sync with [`SimConfig::default`]'s `base_construction_capacity` so
 /// load-time projection matches a default sim config.
 pub const LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY: f64 = 1.0;
+
+/// Parallel government construction feed slots — always ≥ 1.
+///
+/// Encodes the invariant that the planner can always feed at least one job
+/// (base capacity / zero-throughput floor). Prefer this over raw `usize` so
+/// call sites cannot forget the minimum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ConstructionSlots(NonZeroUsize);
+
+impl ConstructionSlots {
+    /// Single feed slot (base / fallback).
+    pub const ONE: Self = Self(NonZeroUsize::MIN);
+
+    /// From a count; zero or underflow → [`Self::ONE`].
+    pub fn new(n: usize) -> Self {
+        NonZeroUsize::new(n).map(Self).unwrap_or(Self::ONE)
+    }
+
+    /// Slot count as `usize` (≥ 1).
+    pub const fn get(self) -> usize {
+        self.0.get()
+    }
+}
+
+impl From<ConstructionSlots> for usize {
+    fn from(slots: ConstructionSlots) -> Self {
+        slots.get()
+    }
+}
+
+impl std::fmt::Display for ConstructionSlots {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 /// Vanilla base `country_max_weekly_construction_progress_add` from
 /// `00_code_static_modifiers.txt`.
@@ -475,22 +511,22 @@ pub fn allocation_cap_points_per_day(
 
 /// How many government construction jobs may receive points under current throughput.
 ///
-/// `max(1, floor(points_per_day / allocation_cap_points_per_day))`. A zero or
-/// non-finite national throughput still yields one slot so a lone job can
-/// progress.
+/// `max(1, floor(points_per_day / allocation_cap_points_per_day))` as
+/// [`ConstructionSlots`]. A zero or non-finite national throughput still yields
+/// [`ConstructionSlots::ONE`] so a lone job can progress.
 pub fn max_parallel_construction_jobs(
     construction_points_per_day: f64,
     max_points_per_day_per_job: f64,
-) -> usize {
+) -> ConstructionSlots {
     let cap = if max_points_per_day_per_job.is_finite() && max_points_per_day_per_job > 0.0 {
         max_points_per_day_per_job
     } else {
         1.0
     };
     if !construction_points_per_day.is_finite() || construction_points_per_day <= 0.0 {
-        return 1;
+        return ConstructionSlots::ONE;
     }
-    ((construction_points_per_day / cap).floor() as usize).max(1)
+    ConstructionSlots::new((construction_points_per_day / cap).floor() as usize)
 }
 
 fn government_job_count(state: &PlanningState) -> usize {
@@ -509,7 +545,7 @@ fn government_job_count(state: &PlanningState) -> usize {
 pub fn construction_queue_full(state: &PlanningState, config: SimConfig) -> bool {
     let cap = allocation_cap_points_per_day(state, config, None);
     let max = max_parallel_construction_jobs(state.construction_points_per_day, cap);
-    government_job_count(state) >= max
+    government_job_count(state) >= max.get()
 }
 
 /// Per-job construction throughput (**points/day**) from the government pool.
@@ -529,7 +565,7 @@ pub fn construction_points_per_day_per_job(state: &PlanningState, config: SimCon
         0.0
     };
     let default_cap = allocation_cap_points_per_day(state, config, None);
-    let max_jobs = max_parallel_construction_jobs(government, default_cap);
+    let max_jobs = max_parallel_construction_jobs(government, default_cap).get();
     let mut out = vec![0.0; state.constructions.len()];
     let mut fed = 0usize;
     for (idx, job) in state.constructions.iter().enumerate() {
@@ -834,7 +870,15 @@ mod tests {
             max_construction_allocation: Some(5),
             ..SimConfig::default()
         };
-        assert_eq!(max_parallel_construction_jobs(10.0, 5.0), 2);
+        assert_eq!(max_parallel_construction_jobs(10.0, 5.0).get(), 2);
+        assert_eq!(
+            max_parallel_construction_jobs(0.0, 5.0),
+            ConstructionSlots::ONE
+        );
+        assert_eq!(
+            max_parallel_construction_jobs(f64::NAN, 5.0),
+            ConstructionSlots::ONE
+        );
         let feeds = construction_points_per_day_per_job(&state, config);
         assert_eq!(feeds, vec![5.0, 5.0]);
         assert_eq!(construction_wait_days(&state, config), Some(10));

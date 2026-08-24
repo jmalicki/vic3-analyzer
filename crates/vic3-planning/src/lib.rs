@@ -33,8 +33,9 @@ pub use construction::{
     government_construction_share_from_laws, max_parallel_construction_jobs,
     max_weekly_construction_progress, national_construction_points_per_day,
     sync_construction_points_per_day, unused_government_construction_points_per_day,
-    ConstructionEtaMode, MissingConstructionSectorPm, BASE_MAX_WEEKLY_CONSTRUCTION_PROGRESS,
-    BUILDING_CONSTRUCTION_SECTOR, LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY,
+    ConstructionEtaMode, ConstructionSlots, MissingConstructionSectorPm,
+    BASE_MAX_WEEKLY_CONSTRUCTION_PROGRESS, BUILDING_CONSTRUCTION_SECTOR,
+    LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY,
 };
 pub use goals::{
     compile, evaluate, gaps, gaps_with_defs, parse, Atom, Goal, GoalError, InterestKind, Rel,
