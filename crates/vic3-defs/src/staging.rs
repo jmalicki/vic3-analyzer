@@ -74,6 +74,7 @@ pub(crate) struct StagingPm {
     pub employment: BTreeMap<String, f64>,
     pub education_access: bool,
     pub qualifications_boost: bool,
+    pub country_construction_add: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -182,6 +183,7 @@ impl StagingDefs {
                     employment: pm.employment.into_iter().collect(),
                     education_access: pm.education_access,
                     qualifications_boost: pm.qualifications_boost,
+                    country_construction_add: pm.country_construction_add,
                 },
             );
         }

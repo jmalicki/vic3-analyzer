@@ -5,7 +5,7 @@
 //! | Quantity | Unit | Where |
 //! | --- | --- | --- |
 //! | Construction work | **construction points** (opaque game work units) | queue `remaining`, defs `required_construction`, [`SimConfig::default_construction_cost`] |
-//! | National throughput | **construction points / day** | [`PlanningState::construction_points_per_day`] |
+//! | Government throughput | **construction points / day** | [`PlanningState::construction_points_per_day`] |
 //! | Per-job feed | **construction points / day** | [`construction_points_per_day_per_job`] |
 //! | Duration | **calendar days** | [`construction_wait_days`] ≈ `ceil(points / points_per_day)` |
 //!
@@ -16,18 +16,34 @@
 //! # Role
 //!
 //! Victoria 3 allocates a national construction pool across queued building
-//! levels. This module is the planner's **compact** version of that idea:
+//! levels, then splits that pool between **government** and **private** queues
+//! via economic-system laws (`country_private_construction_allocation_mult`).
+//! This module is the planner's **compact** version of that idea:
 //!
-//! - Throughput comes from Construction Sector levels (plus a small base).
-//! - Each active job is capped at [`crate::sim::SimConfig::max_construction_allocation`]
-//!   points per day; leftover throughput fills later queue entries.
-//! - Wait edges advance to the soonest completion under that split.
+//! - Throughput comes from Construction Sector levels × CS PM
+//!   `country_construction_add` (fallback: [`SimConfig::construction_per_cs_level`]).
+//! - Only the **government** share feeds planner jobs; private queue rows are
+//!   ignored for allocation / parallel slots (not a geo-state split).
+//! - Each active government job is capped at max weekly construction progress
+//!   ÷ 7 (base 10/week from game static modifiers + owned tech adds), unless
+//!   [`SimConfig::max_construction_allocation`] overrides. Leftover government
+//!   throughput fills later government queue entries.
+//! - Wait edges advance to the soonest **fed** government completion.
+//! - Heuristic ETA ([`construction_eta_days`]) defaults to time until a free
+//!   government feed slot / usable capacity; explicit next-finish mode is for
+//!   wait-with-spare-slots semantics.
 //! - Construction Sector itself can appear as a means-to-an-end candidate so
 //!   A* may invest in capacity before later goal-relevant builds.
 //!
-//! # Limitations
+//! # Limitations / approximations
 //!
-//! - No per-state share of the national pool (sim queues often omit `state_id`).
+//! - No geo-state share of the national pool (sim queues often omit `state_id`).
+//! - Government vs private uses a static economic-law → private-mult table
+//!   (vanilla `01_economic_system.txt`); other modifiers that change private
+//!   allocation are ignored.
+//! - Per-job cap ignores building-group `construction_efficiency_*` and company
+//!   bonuses beyond the tech table for `country_max_weekly_construction_progress_add`.
+//! - CS throughput assumes full staffing (`workforce_scaled` as level-scaled).
 //! - No construction-goods buy orders in the price solver and no treasury drain
 //!   for those goods.
 //! - No full Paradox script-value cost tables beyond loaded
@@ -37,12 +53,13 @@
 
 use std::collections::BTreeSet;
 
+use vic3_defs::GameDefs;
 use vic3_load::{Save, WorldSnapshot};
 use vic3_prices::World;
 
 use crate::goals::{Atom, Rel};
 use crate::sim::{EconomyContext, SimConfig};
-use crate::world::PlanningState;
+use crate::world::{ConstructionQueueKind, PlanningState};
 
 /// Government Construction Sector building type id.
 ///
@@ -57,10 +74,31 @@ pub const BUILDING_CONSTRUCTION_SECTOR: &str = "building_construction_sector";
 /// load-time projection matches a default sim config.
 pub const LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY: f64 = 1.0;
 
-/// Extra national throughput (points/day) per Construction Sector level at load.
+/// Extra national throughput (points/day) per Construction Sector level at load
+/// when CS PMs are unknown (iron-frame-shaped fallback).
 ///
 /// Kept in sync with [`SimConfig::default`]'s `construction_per_cs_level`.
 pub const LOAD_CONSTRUCTION_POINTS_PER_DAY_PER_SECTOR_LEVEL: f64 = 5.0;
+
+/// Vanilla base `country_max_weekly_construction_progress_add` from
+/// `00_code_static_modifiers.txt`.
+pub const BASE_MAX_WEEKLY_CONSTRUCTION_PROGRESS: f64 = 10.0;
+
+/// Heuristic / wait ETA mode for construction timing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ConstructionEtaMode {
+    /// Time until government feed capacity / a free parallel slot is available.
+    ///
+    /// When government slots are full, this is the soonest fed completion (slot
+    /// frees). When spare slots exist, this is one default-cost level at the
+    /// leftover government feed rate — not “next finish”, so open GDP atoms are
+    /// not pinned to a sticky 1-day next-completion bound.
+    CapacityOrSlot,
+    /// Soonest actively-fed government construction completion.
+    ///
+    /// Use when an explicit wait advances with spare slots still open.
+    NextFinish,
+}
 
 /// Convert Construction Sector levels into national throughput (**points/day**).
 ///
@@ -86,11 +124,54 @@ pub fn construction_points_per_day_from_sector_levels(sector_levels: f64) -> f64
     }
 }
 
-/// Project national construction throughput (**points/day**) from a save.
+/// Government share of national construction (1 − private allocation mult).
 ///
-/// Sums [`BUILDING_CONSTRUCTION_SECTOR`] levels in states owned by `country_id`,
-/// then applies [`construction_points_per_day_from_sector_levels`].
+/// Looks up vanilla economic-system laws on `laws`. Unknown / missing economic
+/// law → `1.0` (all government) so tests without laws keep full throughput.
+pub fn government_construction_share_from_laws<'a>(laws: impl IntoIterator<Item = &'a str>) -> f64 {
+    let mut private = None;
+    for law in laws {
+        let key = crate::world::law_key(law);
+        if let Some(mult) = private_construction_allocation_mult(&key) {
+            private = Some(mult);
+            break;
+        }
+    }
+    match private {
+        Some(p) if p.is_finite() => (1.0 - p).clamp(0.0, 1.0),
+        _ => 1.0,
+    }
+}
+
+fn private_construction_allocation_mult(law_key: &str) -> Option<f64> {
+    // From game `common/laws/01_economic_system.txt`.
+    Some(match law_key {
+        "traditionalism" => 0.25,
+        "interventionism" | "agrarianism" | "industry_banned" | "extraction_economy" => 0.5,
+        "laissez_faire" => 0.75,
+        "cooperative_ownership" => 0.35,
+        "command_economy" => 0.1,
+        _ => return None,
+    })
+}
+
+/// Project **government** construction throughput (**points/day**) from a save.
+///
+/// Sums CS levels, applies the load-time per-level fallback, then scales by
+/// [`government_construction_share_from_laws`].
 pub fn construction_points_per_day_from_save(save: &Save, country_id: u32) -> f64 {
+    let national =
+        construction_points_per_day_from_sector_levels(cs_levels_from_save(save, country_id));
+    let share = government_construction_share_from_laws(save.active_laws(country_id));
+    let govt = national * share;
+    if govt.is_finite() && govt > 0.0 {
+        govt
+    } else {
+        LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY
+    }
+}
+
+fn cs_levels_from_save(save: &Save, country_id: u32) -> f64 {
     let mut owned_states: BTreeSet<u32> = save
         .states
         .iter_present()
@@ -101,8 +182,7 @@ pub fn construction_points_per_day_from_save(save: &Save, country_id: u32) -> f6
             owned_states.extend(country.states.iter().copied());
         }
     }
-    let levels: f64 = save
-        .building_manager()
+    save.building_manager()
         .iter_present()
         .filter_map(|(_, building)| {
             let state = building.state?;
@@ -114,14 +194,15 @@ pub fn construction_points_per_day_from_save(save: &Save, country_id: u32) -> f6
             }
             Some(f64::from(building.level.max(0)))
         })
-        .sum();
-    construction_points_per_day_from_sector_levels(levels)
+        .sum()
 }
 
-/// Project national construction throughput (**points/day**) from a [`World`].
+/// Project **government** construction throughput (**points/day**) from a [`World`].
 ///
-/// Same formula as [`construction_points_per_day_from_save`], using compact
-/// world buildings owned by `country_id`.
+/// Same formula as [`construction_points_per_day_from_save`] without law rows on
+/// the compact world — uses full national throughput (share `1.0`). Prefer
+/// [`construction_points_per_day_from_sectors`] when laws are on the planning
+/// state.
 pub fn construction_points_per_day_from_world(world: &World, country_id: u32) -> f64 {
     let owned_states: BTreeSet<u32> = world
         .states
@@ -188,21 +269,90 @@ pub fn construction_sector_levels(state: &PlanningState, economy: Option<&Econom
     )
 }
 
-/// National construction throughput (**points/day**) from CS levels and config.
+/// National (pre-share) construction throughput from CS levels / PMs and config.
+pub fn national_construction_points_per_day(
+    state: &PlanningState,
+    economy: Option<&EconomyContext>,
+    config: SimConfig,
+) -> f64 {
+    let fallback_per_level = f64::from(config.construction_per_cs_level);
+    let base = f64::from(config.base_construction_capacity);
+    let points_per_day = if let Some(economy) = economy {
+        let world = economy.apply_planning_to_world(state);
+        let mut from_buildings = 0.0;
+        for building in world
+            .buildings
+            .iter()
+            .filter(|b| b.building == BUILDING_CONSTRUCTION_SECTOR)
+        {
+            let level = building.level.max(0.0);
+            if level <= 0.0 {
+                continue;
+            }
+            let add = construction_add_for_cs_building(building, &economy.defs, fallback_per_level);
+            from_buildings += add * level;
+        }
+        if from_buildings > 0.0 || construction_sector_levels(state, Some(economy)) > 0.0 {
+            base + from_buildings
+        } else {
+            base + fallback_per_level * construction_sector_levels(state, Some(economy))
+        }
+    } else {
+        base + fallback_per_level * construction_sector_levels(state, None)
+    };
+    if points_per_day.is_finite() && points_per_day > 0.0 {
+        points_per_day
+    } else {
+        f64::from(config.base_construction_capacity.max(1))
+    }
+}
+
+fn construction_add_for_cs_building(
+    building: &vic3_prices::WorldBuilding,
+    defs: &GameDefs,
+    fallback: f64,
+) -> f64 {
+    for pm_id in &building.production_methods {
+        if let Some(add) = defs
+            .production_methods
+            .get(pm_id)
+            .and_then(|pm| pm.country_construction_add)
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            return add;
+        }
+        if let Some(add) = known_cs_pm_construction_add(pm_id) {
+            return add;
+        }
+    }
+    fallback
+}
+
+fn known_cs_pm_construction_add(pm_id: &str) -> Option<f64> {
+    Some(match pm_id {
+        "pm_wooden_buildings" => 2.0,
+        "pm_iron_frame_buildings" => 5.0,
+        "pm_steel_frame_buildings" => 10.0,
+        "pm_arc_welded_buildings" => 15.0,
+        _ => return None,
+    })
+}
+
+/// Government construction throughput (**points/day**) from CS levels and laws.
 ///
-/// `points/day = base_construction_capacity + construction_per_cs_level * levels`.
-/// Non-finite or non-positive results fall back to at least one point of base
-/// throughput so progress never stalls.
+/// `government = national × government_share(laws)`. Non-finite or non-positive
+/// results fall back to at least one point of base throughput so progress never
+/// stalls.
 pub fn construction_points_per_day_from_sectors(
     state: &PlanningState,
     economy: Option<&EconomyContext>,
     config: SimConfig,
 ) -> f64 {
-    let levels = construction_sector_levels(state, economy);
-    let points_per_day = f64::from(config.base_construction_capacity)
-        + f64::from(config.construction_per_cs_level) * levels;
-    if points_per_day.is_finite() && points_per_day > 0.0 {
-        points_per_day
+    let national = national_construction_points_per_day(state, economy, config);
+    let share = government_construction_share_from_laws(state.laws.iter().map(String::as_str));
+    let govt = national * share;
+    if govt.is_finite() && govt > 0.0 {
+        govt
     } else {
         f64::from(config.base_construction_capacity.max(1))
     }
@@ -212,7 +362,7 @@ pub fn construction_points_per_day_from_sectors(
 ///
 /// Call after a Construction Sector level completes so subsequent waits use the
 /// higher throughput. Uses [`construction_points_per_day_from_sectors`] with the
-/// live economy world.
+/// live economy world (government share applied).
 pub fn sync_construction_points_per_day(
     state: &mut PlanningState,
     economy: &EconomyContext,
@@ -222,62 +372,140 @@ pub fn sync_construction_points_per_day(
         construction_points_per_day_from_sectors(state, Some(economy), config);
 }
 
-/// How many construction jobs may receive points under current throughput.
+/// Max weekly construction progress (points/week) from base + owned techs.
+///
+/// Approximation table from vanilla society techs; company / other modifiers
+/// are omitted. Convert to a daily per-job cap with `/ 7`.
+pub fn max_weekly_construction_progress(state: &PlanningState) -> f64 {
+    let mut weekly = BASE_MAX_WEEKLY_CONSTRUCTION_PROGRESS;
+    for tech in &state.techs {
+        weekly += max_weekly_progress_add_for_tech(tech);
+    }
+    if weekly.is_finite() && weekly > 0.0 {
+        weekly
+    } else {
+        BASE_MAX_WEEKLY_CONSTRUCTION_PROGRESS
+    }
+}
+
+fn max_weekly_progress_add_for_tech(tech: &str) -> f64 {
+    match tech {
+        "urbanization" => 10.0,
+        "urban_planning" | "modern_sewerage" | "steel_frame_buildings" | "elevator" => 5.0,
+        _ => 0.0,
+    }
+}
+
+/// Per-job allocation cap in **points/day**.
+///
+/// Prefer [`SimConfig::max_construction_allocation`] when set (tests / escape
+/// hatch). Otherwise `max_weekly_construction_progress(state) / 7`.
+///
+/// `building` is reserved for future building-group construction-efficiency
+/// scaling; currently unused (efficiency approx = 1).
+pub fn allocation_cap_points_per_day(
+    state: &PlanningState,
+    config: SimConfig,
+    _building: Option<&str>,
+) -> f64 {
+    if let Some(override_cap) = config.max_construction_allocation {
+        return f64::from(override_cap.max(1));
+    }
+    let daily = max_weekly_construction_progress(state) / 7.0;
+    if daily.is_finite() && daily > 0.0 {
+        daily
+    } else {
+        BASE_MAX_WEEKLY_CONSTRUCTION_PROGRESS / 7.0
+    }
+}
+
+/// How many government construction jobs may receive points under current throughput.
 ///
 /// `max(1, floor(points_per_day / allocation_cap_points_per_day))`. A zero or
 /// non-finite national throughput still yields one slot so a lone job can
 /// progress.
 pub fn max_parallel_construction_jobs(
     construction_points_per_day: f64,
-    max_points_per_day_per_job: u16,
+    max_points_per_day_per_job: f64,
 ) -> usize {
-    let cap = f64::from(max_points_per_day_per_job.max(1));
+    let cap = if max_points_per_day_per_job.is_finite() && max_points_per_day_per_job > 0.0 {
+        max_points_per_day_per_job
+    } else {
+        1.0
+    };
     if !construction_points_per_day.is_finite() || construction_points_per_day <= 0.0 {
         return 1;
     }
     ((construction_points_per_day / cap).floor() as usize).max(1)
 }
 
-/// True when compact parallel construction slots are full.
-///
-/// [`crate::sim::Action::QueueBuildingLevel`] is rejected while this holds so
-/// the search does not enqueue deeper than throughput can actively feed.
-pub fn construction_queue_full(state: &PlanningState, config: SimConfig) -> bool {
-    let max = max_parallel_construction_jobs(
-        state.construction_points_per_day,
-        config.max_construction_allocation,
-    );
-    state.constructions.len() >= max
+fn government_job_count(state: &PlanningState) -> usize {
+    state
+        .constructions
+        .iter()
+        .filter(|job| job.queue == ConstructionQueueKind::Government)
+        .count()
 }
 
-/// Per-job construction throughput (**points/day**) from the national pool.
+/// True when compact parallel **government** construction slots are full.
 ///
-/// Walks [`PlanningState::constructions`] in order. Each of the first
-/// [`max_parallel_construction_jobs`] entries receives
-/// `min(allocation_cap, remaining_pool)` until the pool is exhausted. Later
-/// entries get `0.0` (queued but idle).
+/// [`crate::sim::Action::QueueBuildingLevel`] is rejected while this holds so
+/// the search does not enqueue deeper than government throughput can actively
+/// feed. Private queue rows do not consume government slots.
+pub fn construction_queue_full(state: &PlanningState, config: SimConfig) -> bool {
+    let cap = allocation_cap_points_per_day(state, config, None);
+    let max = max_parallel_construction_jobs(state.construction_points_per_day, cap);
+    government_job_count(state) >= max
+}
+
+/// Per-job construction throughput (**points/day**) from the government pool.
+///
+/// Walks [`PlanningState::constructions`] in order. Private rows get `0.0`.
+/// Each of the first [`max_parallel_construction_jobs`] **government** entries
+/// receives `min(allocation_cap, remaining_pool)` until the pool is exhausted.
+/// Later government entries get `0.0` (queued but idle).
 ///
 /// The returned slice length always matches `state.constructions.len()` so it
 /// can be passed to [`PlanningState::tick_parallel_tracks`].
 pub fn construction_points_per_day_per_job(state: &PlanningState, config: SimConfig) -> Vec<f64> {
-    let national = state.construction_points_per_day;
-    let alloc_cap = f64::from(config.max_construction_allocation.max(1));
-    let max_jobs = max_parallel_construction_jobs(national, config.max_construction_allocation);
-    let mut remaining = if national.is_finite() && national > 0.0 {
-        national
+    let government = state.construction_points_per_day;
+    let mut remaining = if government.is_finite() && government > 0.0 {
+        government
     } else {
         0.0
     };
+    let default_cap = allocation_cap_points_per_day(state, config, None);
+    let max_jobs = max_parallel_construction_jobs(government, default_cap);
     let mut out = vec![0.0; state.constructions.len()];
-    for points_per_day in out.iter_mut().take(max_jobs) {
-        if remaining <= 0.0 {
+    let mut fed = 0usize;
+    for (idx, job) in state.constructions.iter().enumerate() {
+        if job.queue != ConstructionQueueKind::Government {
+            continue;
+        }
+        if fed >= max_jobs || remaining <= 0.0 {
             break;
         }
-        let take = alloc_cap.min(remaining);
-        *points_per_day = take;
+        let cap = allocation_cap_points_per_day(state, config, Some(job.building.as_str()));
+        let take = cap.min(remaining);
+        out[idx] = take;
         remaining -= take;
+        fed += 1;
     }
     out
+}
+
+/// Leftover government points/day after feeding active jobs (for capacity ETA).
+pub fn unused_government_construction_points_per_day(
+    state: &PlanningState,
+    config: SimConfig,
+) -> f64 {
+    let feeds = construction_points_per_day_per_job(state, config);
+    let used: f64 = feeds.iter().copied().sum();
+    let pool = state.construction_points_per_day;
+    if !pool.is_finite() || pool <= 0.0 {
+        return 0.0;
+    }
+    (pool - used).max(0.0)
 }
 
 /// Days, building id, and placement state for the soonest active construction completion.
@@ -329,6 +557,53 @@ pub fn construction_wait_target(
 /// Thin wrapper over [`construction_wait_target`] that drops building / state.
 pub fn construction_wait_days(state: &PlanningState, config: SimConfig) -> Option<u16> {
     construction_wait_target(state, config).map(|(days, _, _)| days)
+}
+
+/// Construction ETA used by the A* heuristic (and tests).
+///
+/// See [`ConstructionEtaMode`] for capacity-vs-next-finish semantics. The old
+/// blanket `.max(1)` is not applied when the bound is a multi-day capacity
+/// estimate; a zero-day pending completion still reports `0` so a 0-day
+/// `BuildingCompleted` edge stays consistent.
+pub fn construction_eta_days(
+    state: &PlanningState,
+    config: SimConfig,
+    mode: ConstructionEtaMode,
+) -> u32 {
+    let fallback = u32::from(config.construction_days.max(1));
+    match mode {
+        ConstructionEtaMode::NextFinish => construction_wait_days(state, config)
+            .map(u32::from)
+            .unwrap_or(fallback),
+        ConstructionEtaMode::CapacityOrSlot => {
+            if construction_queue_full(state, config) {
+                // Slot-bound: wait until a fed government job finishes.
+                return construction_wait_days(state, config)
+                    .map(u32::from)
+                    .unwrap_or(fallback)
+                    .max(1);
+            }
+            // Spare government slot / leftover feed: lower-bound by one level
+            // at the unused (or full) government rate — not next-finish.
+            let rate = {
+                let unused = unused_government_construction_points_per_day(state, config);
+                if unused > 0.0 {
+                    unused.min(allocation_cap_points_per_day(state, config, None))
+                } else if state.construction_points_per_day.is_finite()
+                    && state.construction_points_per_day > 0.0
+                {
+                    allocation_cap_points_per_day(state, config, None)
+                        .min(state.construction_points_per_day)
+                } else {
+                    0.0
+                }
+            };
+            let work = f64::from(config.default_construction_cost);
+            crate::tracks::days_for_work(work, rate)
+                .unwrap_or(fallback)
+                .max(1)
+        }
+    }
 }
 
 /// True when `building` (+ optional state) has a queue row with non-positive finite `remaining`.
@@ -405,13 +680,29 @@ mod tests {
     use crate::sim::SimConfig;
     use crate::world::{ConstructionQueueKind, PlanningConstruction, PlanningParts, PlanningState};
     use std::collections::BTreeMap;
-    use vic3_defs::{BuildingType, GameDefs, GoodsVec};
+    use vic3_defs::{BuildingType, GameDefs, GoodsVec, ProductionMethod};
     use vic3_prices::{SolveOpts, WorldBuilding, WorldCountry, WorldState};
 
     #[test]
     fn points_per_day_from_sector_levels_matches_load_defaults() {
         assert!((construction_points_per_day_from_sector_levels(0.0) - 1.0).abs() < 1e-9);
         assert!((construction_points_per_day_from_sector_levels(1.0) - 6.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn government_share_from_economic_laws() {
+        assert!(
+            (government_construction_share_from_laws(["law_laissez_faire"]) - 0.25).abs() < 1e-9
+        );
+        assert!(
+            (government_construction_share_from_laws(["law_command_economy"]) - 0.9).abs() < 1e-9
+        );
+        assert!(
+            (government_construction_share_from_laws(["law_traditionalism"]) - 0.75).abs() < 1e-9
+        );
+        assert!(
+            (government_construction_share_from_laws(["law_census_voting"]) - 1.0).abs() < 1e-9
+        );
     }
 
     #[test]
@@ -435,7 +726,10 @@ mod tests {
             construction_points_per_day: 20.0,
             ..PlanningParts::default()
         });
-        let config = SimConfig::default();
+        let config = SimConfig {
+            max_construction_allocation: Some(1000),
+            ..SimConfig::default()
+        };
         assert_eq!(construction_wait_days(&slow, config), Some(20));
         assert_eq!(construction_wait_days(&fast, config), Some(5));
     }
@@ -464,13 +758,126 @@ mod tests {
             ..PlanningParts::default()
         });
         let config = SimConfig {
-            max_construction_allocation: 5,
+            max_construction_allocation: Some(5),
             ..SimConfig::default()
         };
-        assert_eq!(max_parallel_construction_jobs(10.0, 5), 2);
+        assert_eq!(max_parallel_construction_jobs(10.0, 5.0), 2);
         let feeds = construction_points_per_day_per_job(&state, config);
         assert_eq!(feeds, vec![5.0, 5.0]);
         assert_eq!(construction_wait_days(&state, config), Some(10));
+    }
+
+    #[test]
+    fn private_jobs_do_not_consume_government_pool() {
+        let state = PlanningState::from_parts(PlanningParts {
+            constructions: vec![
+                PlanningConstruction {
+                    order_id: 1,
+                    queue: ConstructionQueueKind::Private,
+                    state_id: None,
+                    building: "building_private".into(),
+                    remaining: Some(50.0),
+                },
+                PlanningConstruction {
+                    order_id: 2,
+                    queue: ConstructionQueueKind::Government,
+                    state_id: None,
+                    building: "building_govt".into(),
+                    remaining: Some(50.0),
+                },
+            ],
+            construction_points_per_day: 10.0,
+            ..PlanningParts::default()
+        });
+        let config = SimConfig {
+            max_construction_allocation: Some(10),
+            ..SimConfig::default()
+        };
+        let feeds = construction_points_per_day_per_job(&state, config);
+        assert_eq!(feeds, vec![0.0, 10.0]);
+        // One government job with pool 10 / cap 10 → slots full of government work only.
+        assert!(construction_queue_full(&state, config));
+        let roomy = PlanningState::from_parts(PlanningParts {
+            constructions: state.constructions.clone(),
+            construction_points_per_day: 20.0,
+            ..PlanningParts::default()
+        });
+        assert!(!construction_queue_full(&roomy, config));
+        assert_eq!(
+            construction_points_per_day_per_job(&roomy, config),
+            vec![0.0, 10.0]
+        );
+    }
+
+    #[test]
+    fn derived_alloc_cap_uses_weekly_progress_over_seven() {
+        let state = PlanningState::default();
+        let config = SimConfig::default();
+        let cap = allocation_cap_points_per_day(&state, config, None);
+        assert!((cap - BASE_MAX_WEEKLY_CONSTRUCTION_PROGRESS / 7.0).abs() < 1e-9);
+        let with_tech = PlanningState::from_parts(PlanningParts {
+            techs: ["urbanization".into()].into_iter().collect(),
+            ..PlanningParts::default()
+        });
+        let cap_tech = allocation_cap_points_per_day(&with_tech, config, None);
+        assert!((cap_tech - 20.0 / 7.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn capacity_eta_uses_one_level_when_slots_free() {
+        let state = PlanningState::from_parts(PlanningParts {
+            construction_points_per_day: 10.0,
+            ..PlanningParts::default()
+        });
+        let config = SimConfig {
+            max_construction_allocation: Some(5),
+            default_construction_cost: 50,
+            ..SimConfig::default()
+        };
+        // Spare slots, empty queue: ceil(50 / min(5,10)) = 10.
+        assert_eq!(
+            construction_eta_days(&state, config, ConstructionEtaMode::CapacityOrSlot),
+            10
+        );
+    }
+
+    #[test]
+    fn capacity_eta_uses_next_finish_when_slots_full() {
+        let state = PlanningState::from_parts(PlanningParts {
+            constructions: vec![
+                PlanningConstruction {
+                    order_id: 1,
+                    queue: ConstructionQueueKind::Government,
+                    state_id: None,
+                    building: "building_a".into(),
+                    remaining: Some(20.0),
+                },
+                PlanningConstruction {
+                    order_id: 2,
+                    queue: ConstructionQueueKind::Government,
+                    state_id: None,
+                    building: "building_b".into(),
+                    remaining: Some(100.0),
+                },
+            ],
+            construction_points_per_day: 10.0,
+            ..PlanningParts::default()
+        });
+        let config = SimConfig {
+            max_construction_allocation: Some(5),
+            default_construction_cost: 180,
+            ..SimConfig::default()
+        };
+        assert!(construction_queue_full(&state, config));
+        // Next finish: 20/5 = 4 days (not default_cost/rate).
+        assert_eq!(
+            construction_eta_days(&state, config, ConstructionEtaMode::CapacityOrSlot),
+            4
+        );
+        assert_eq!(
+            construction_eta_days(&state, config, ConstructionEtaMode::NextFinish),
+            4
+        );
     }
 
     #[test]
@@ -486,7 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_points_per_day_after_cs_level() {
+    fn sync_points_per_day_after_cs_level_applies_government_share() {
         let mut defs = GameDefs::default();
         defs.buildings.insert(
             BUILDING_CONSTRUCTION_SECTOR.into(),
@@ -496,6 +903,14 @@ mod tests {
                 city_type: None,
                 production_method_groups: Vec::new(),
                 required_construction: Some(10.0),
+            },
+        );
+        defs.production_methods.insert(
+            "pm_iron_frame_buildings".into(),
+            ProductionMethod {
+                id: "pm_iron_frame_buildings".into(),
+                country_construction_add: Some(5.0),
+                ..ProductionMethod::default()
             },
         );
         let world = World {
@@ -515,7 +930,7 @@ mod tests {
                 building: BUILDING_CONSTRUCTION_SECTOR.into(),
                 level: 0.0,
                 staffing: 0.0,
-                production_methods: Vec::new(),
+                production_methods: vec!["pm_iron_frame_buildings".into()],
                 saved_inputs: Vec::new(),
                 saved_outputs: Vec::new(),
             }],
@@ -532,10 +947,12 @@ mod tests {
             country: "GER".into(),
             construction_points_per_day: 1.0,
             building_level_deltas: BTreeMap::from([((BUILDING_CONSTRUCTION_SECTOR.into(), 1), 1)]),
+            // laissez-faire → 25% government
+            laws: ["law_laissez_faire".into()].into_iter().collect(),
             ..PlanningParts::default()
         });
         sync_construction_points_per_day(&mut state, &economy, config);
-        // apply_planning_to_world applies +1 level → CS level 1 → 1 + 5*1 = 6 points/day
-        assert!((state.construction_points_per_day - 6.0).abs() < 1e-9);
+        // CS level 1 → national 1 + 5 = 6; government 25% → 1.5
+        assert!((state.construction_points_per_day - 1.5).abs() < 1e-9);
     }
 }

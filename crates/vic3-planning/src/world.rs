@@ -22,7 +22,7 @@
 //! | army / navy / interest | country cache + formations; PP `None` when IR omits | `None` / empty |
 //! | `building_level_deltas`, `pm_overrides`, `tax_level` | empty / `0` | sim branches |
 //! | `queued_interest`, `queued_hire`, `queued_law`, `mil_buildings` | empty / `None` | sim in-flight queues |
-//! | `construction_points_per_day` | Construction Sector levels → points/day (base 1 + 5/level) | sim / tests |
+//! | `construction_points_per_day` | Government construction points/day (CS × govt share) | sim / tests |
 //! | `tech_days_left` / `interest_days_left` / `hire_days_left` / `law_days_left` | `None` at load | set on queue / decremented by [`PlanningState::tick_parallel_tracks`] |
 //!
 //! Missing principal/credit leaves `solvent` false (no treasury-sign guess).
@@ -317,12 +317,13 @@ pub struct PlanningState {
     pub pm_overrides: BTreeMap<u32, Vec<String>>,
     /// Tax offset from saved baseline (`0` at load; sim `AdjustTax`).
     pub tax_level: i8,
-    /// National construction throughput in **construction points per day**.
+    /// National **government** construction throughput in **construction points per day**.
     ///
-    /// Derived from Construction Sector levels (see [`crate::construction`]).
-    /// Used with queue `remaining` (points) so ETA is
-    /// `ceil(remaining / construction_points_per_day)` when a job gets the
-    /// full pool (or less under the per-job allocation cap).
+    /// Derived from Construction Sector levels × CS PM output, scaled by the
+    /// government share of national construction (economic laws). Private queue
+    /// rows do not draw from this pool. Used with queue `remaining` (points) so
+    /// ETA is `ceil(remaining / points_per_day)` when a government job is fed
+    /// (or less under the per-job allocation cap).
     pub construction_points_per_day: f64,
     /// Remaining days on [`Self::queued_tech`] (model timer).
     pub tech_days_left: Option<u16>,

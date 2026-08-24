@@ -1056,6 +1056,7 @@ fn parse_production_methods_bytes(path: &Path, bytes: &[u8]) -> Result<Vec<Stagi
         let mut employment = BTreeMap::new();
         let mut education_access = false;
         let mut qualifications_boost = false;
+        let mut country_construction_add = None;
         let mut texture = None;
         if let Ok(obj) = value.read_object() {
             for (field, _op, field_value) in obj.fields() {
@@ -1073,6 +1074,7 @@ fn parse_production_methods_bytes(path: &Path, bytes: &[u8]) -> Result<Vec<Stagi
                 &mut employment,
                 &mut education_access,
                 &mut qualifications_boost,
+                &mut country_construction_add,
             );
         }
         out.push(StagingPm {
@@ -1083,6 +1085,7 @@ fn parse_production_methods_bytes(path: &Path, bytes: &[u8]) -> Result<Vec<Stagi
             employment,
             education_access,
             qualifications_boost,
+            country_construction_add,
         });
     }
     Ok(out)
@@ -1095,6 +1098,7 @@ fn collect_pm_modifiers<E: Encoding + Clone>(
     employment: &mut BTreeMap<String, f64>,
     education_access: &mut bool,
     qualifications_boost: &mut bool,
+    country_construction_add: &mut Option<f64>,
 ) {
     for (key, _op, value) in obj.fields() {
         let name = key.read_str();
@@ -1115,6 +1119,14 @@ fn collect_pm_modifiers<E: Encoding + Clone>(
             }
             continue;
         }
+        if name.as_ref() == "country_construction_add" {
+            if let Some(num) = value.read_scalar().ok().and_then(|s| s.to_f64().ok()) {
+                if num.is_finite() {
+                    *country_construction_add = Some(country_construction_add.unwrap_or(0.0) + num);
+                }
+            }
+            continue;
+        }
         let lower = name.to_ascii_lowercase();
         if lower.contains("education_access") {
             *education_access = true;
@@ -1130,6 +1142,7 @@ fn collect_pm_modifiers<E: Encoding + Clone>(
                 employment,
                 education_access,
                 qualifications_boost,
+                country_construction_add,
             );
         }
     }

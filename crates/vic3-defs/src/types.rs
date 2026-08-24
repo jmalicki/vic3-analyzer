@@ -241,6 +241,12 @@ pub struct ProductionMethod {
     /// True when any modifier name contains `qualifications`.
     #[serde(default)]
     pub qualifications_boost: bool,
+    /// `country_construction_add` from workforce-scaled country modifiers (CS PMs).
+    ///
+    /// Construction points per fully-staffed level per day for Construction
+    /// Sector methods. [`None`] when the PM does not grant construction.
+    #[serde(default)]
+    pub country_construction_add: Option<f64>,
 }
 
 /// A technology definition (`common/technology/technologies`).

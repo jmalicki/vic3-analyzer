@@ -968,12 +968,13 @@ pub struct SimConfig {
     pub base_construction_capacity: u16,
     /// Capacity added per Construction Sector level.
     pub construction_per_cs_level: u16,
-    /// Max construction points/day any single job may receive from the pool.
+    /// Optional override for per-job construction points/day from the pool.
     ///
-    /// With capacity `C` and this cap `A`, up to `floor(C / A)` jobs progress in
-    /// parallel ([`crate::construction::max_parallel_jobs`]). A high default
-    /// keeps one job at full capacity until config lowers the cap.
-    pub max_construction_allocation: u16,
+    /// When [`None`] (default), the planner derives the cap from max weekly
+    /// construction progress ÷ 7 (game static base + owned tech adds). Set
+    /// [`Some`] in tests or as an escape hatch. With government throughput `G`
+    /// and cap `A`, up to `floor(G / A)` government jobs progress in parallel.
+    pub max_construction_allocation: Option<u16>,
     /// Work points for a new level when defs omit `required_construction`.
     ///
     /// Also used by [`crate::construction::ensure_construction_work_points`] for
@@ -997,11 +998,10 @@ impl Default for SimConfig {
             allow_pm_changes: false,
             max_pm_overrides: 4,
             max_pm_candidates: 4,
-            // High default keeps one active job at full capacity; lower it in
-            // tests/config to enable parallel allocation across jobs.
             base_construction_capacity: 1,
             construction_per_cs_level: 5,
-            max_construction_allocation: 1000,
+            // None → derive from max weekly construction progress / 7.
+            max_construction_allocation: None,
             default_construction_cost: 180,
         }
     }
@@ -2822,7 +2822,15 @@ mod tests {
             rel: Rel::Le,
             value: 0.0,
         });
-        let waits = successors_with_economy(&state, &goal, SimConfig::default(), &economy);
+        let waits = successors_with_economy(
+            &state,
+            &goal,
+            SimConfig {
+                max_construction_allocation: Some(1000),
+                ..SimConfig::default()
+            },
+            &economy,
+        );
         assert_eq!(waits.len(), 1);
         // ceil(25/10) = 3
         assert_eq!(waits[0].days, 3);
@@ -2897,6 +2905,7 @@ mod tests {
         let config = SimConfig {
             // Large fallback so a wrong path would not accidentally match ceil(25/10).
             construction_days: 180,
+            max_construction_allocation: Some(1000),
             ..SimConfig::default()
         };
         let queued = apply_action_with_economy(
@@ -3005,7 +3014,15 @@ mod tests {
             rel: Rel::Le,
             value: 0.0,
         });
-        let waits = successors_with_economy(&state, &goal, SimConfig::default(), &economy);
+        let waits = successors_with_economy(
+            &state,
+            &goal,
+            SimConfig {
+                max_construction_allocation: Some(1000),
+                ..SimConfig::default()
+            },
+            &economy,
+        );
         assert_eq!(waits.len(), 1);
         // ceil(25/10) = 3; def cost 999 must not win
         assert_eq!(waits[0].days, 3);
@@ -3199,7 +3216,10 @@ mod tests {
             good_prices: vec![("wood".into(), 30.0)],
             ..PlanningParts::default()
         });
-        let config = SimConfig::default();
+        let config = SimConfig {
+            max_construction_allocation: Some(1000),
+            ..SimConfig::default()
+        };
         let slow_days = construction_wait_days(&slow, config).unwrap();
         let fast_days = construction_wait_days(&fast, config).unwrap();
         assert_eq!(slow_days, 20); // ceil(100/5)
@@ -3252,7 +3272,7 @@ mod tests {
         };
         let economy = EconomyContext::new(world, defs, SolveOpts::default());
         let config = SimConfig {
-            max_construction_allocation: 5,
+            max_construction_allocation: Some(5),
             ..SimConfig::default()
         };
         // Capacity 10 / alloc 5 → two parallel slots.
@@ -3279,7 +3299,7 @@ mod tests {
             good_prices: vec![("wood".into(), 30.0)],
             ..PlanningParts::default()
         });
-        assert_eq!(max_parallel_construction_jobs(10.0, 5), 2);
+        assert_eq!(max_parallel_construction_jobs(10.0, 5.0), 2);
         // Each job gets 5/day → ceil(50/5)=10 days to first completion.
         assert_eq!(construction_wait_days(&state, config), Some(10));
         let goal = Goal::Atom(Atom::GoodPrice {
