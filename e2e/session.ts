@@ -107,11 +107,13 @@ export async function waitForAnalysisReady(): Promise<void> {
 export async function loadWebSave(saveKey: SaveKey): Promise<void> {
   const defsInput = await $('input[aria-label="Definitions file"]')
   await expect(defsInput).toBeExisting()
+  // Chromium BiDi sometimes drops the first file-input change; set twice.
+  await defsInput.setValue(mockGameDefsPostcard)
   await defsInput.setValue(mockGameDefsPostcard)
   await browser.waitUntil(
     async () => {
-      const text = await $('small*=Using your file').getText().catch(() => '')
-      return String(text).includes('mock_game.defs.postcard') || String(text).includes('Using your file')
+      const body = await $('body').getText().catch(() => '')
+      return body.includes('Using your file') && body.includes('mock_game.defs')
     },
     { timeout: 30_000, timeoutMsg: 'Definitions file never applied' },
   )
@@ -190,22 +192,32 @@ export async function loadTauriSave(saveKey: SaveKey): Promise<void> {
   // goods links from a previous save must not satisfy the wait.
   const previousChip = await $('[aria-label="Loaded save"]')
   const previousText = (await previousChip.isExisting()) ? await previousChip.getText() : ''
-  await browser.waitUntil(
-    async () => {
-      const chip = await $('[aria-label="Loaded save"]')
-      if (await chip.isExisting()) {
-        const text = await chip.getText()
-        if (text.includes(stub)) return true
-        // A different save is still displayed — keep waiting.
-        return false
-      }
-      return previousText === '' && (await $$('a.good-link')).length > 0
-    },
-    {
-      timeout: ANALYSIS_TIMEOUT,
-      timeoutMsg: `Desktop never showed Loaded save chip / goods after Load ${stub}`,
-    },
-  )
+  try {
+    await browser.waitUntil(
+      async () => {
+        const chip = await $('[aria-label="Loaded save"]')
+        if (await chip.isExisting()) {
+          const text = await chip.getText()
+          if (text.includes(stub)) return true
+          // A different save is still displayed — keep waiting.
+          return false
+        }
+        return previousText === '' && (await $$('a.good-link')).length > 0
+      },
+      {
+        timeout: ANALYSIS_TIMEOUT,
+        timeoutMsg: `Desktop never showed Loaded save chip / goods after Load ${stub}`,
+      },
+    )
+  } catch (err) {
+    const chip = await $('[aria-label="Loaded save"]').getText().catch(() => '')
+    const alert = await $('[role="alert"]').getText().catch(() => '')
+    const status = await $('#saves-status').getText().catch(() => '')
+    throw new Error(
+      `${err instanceof Error ? err.message : String(err)}` +
+        ` (chip=${JSON.stringify(chip)}; alert=${JSON.stringify(alert)}; status=${JSON.stringify(status)})`,
+    )
+  }
   await waitForAnalysisReady()
 }
 

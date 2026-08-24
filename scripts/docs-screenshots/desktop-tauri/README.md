@@ -28,5 +28,5 @@ That script:
 
 ## Notes
 
-- `tauri-plugin-wdio-webdriver` and `tauri-plugin-wdio` (plus frontend `@wdio/tauri-plugin`) are optional (`webdriver` feature / desktop embed) and only initialized for these builds — do not ship that feature to players.
+- `tauri-plugin-wdio-webdriver` and `tauri-plugin-wdio` are optional (`webdriver` feature) and only initialized for these builds — do not ship that feature to players. Desktop `--mode desktop` snapshots `window.__wdio_original_core__` (not the full `@wdio/tauri-plugin` invoke Proxy) so WDIO focus recovery can call `get_window_states`.
 - If capture fails with a blank/permission error, enable **Screen Recording** for your terminal in System Settings → Privacy & Security.
