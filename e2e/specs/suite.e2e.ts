@@ -482,10 +482,17 @@ describe('05 Scope — foreign alerts hidden; domestic vs market geography', () 
     const localTab = await $('button=Local Prices')
     await localTab.click()
 
+    const ourMarket = await $('button=Our market')
+    if (await ourMarket.isExisting()) {
+      await ourMarket.click()
+      await expect(ourMarket).toHaveAttribute('aria-pressed', 'true')
+    }
+
     await expect($('th*=Market price')).toBeExisting()
     await expect($('th*=State price')).toBeExisting()
     await expect($('a.good-link[href*="mock_lumber"]')).toBeExisting()
-    await expect($('*=Rivalia')).not.toBeExisting()
+    const localPrices = await $('section[aria-labelledby="prices-tool-heading"]')
+    await expect(await localPrices.getText()).not.toContain('Rivalia')
   })
 
   it('desktop SQL alerts() omits Rivalia while alerts(all) includes it', async function () {

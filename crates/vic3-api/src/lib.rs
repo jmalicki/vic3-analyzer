@@ -1775,6 +1775,7 @@ mod tests {
     fn live_load_analysis_session() {
         use std::time::Instant;
 
+        let _session = session_lock();
         let save = std::fs::read(std::env::var("VIC3_SAVE").expect("VIC3_SAVE")).expect("save");
         let tokens = std::env::var("VIC3_TOKENS")
             .ok()

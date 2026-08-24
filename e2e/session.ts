@@ -166,6 +166,7 @@ export async function configureTauriPaths(): Promise<void> {
   await expect($('#settings-status')).toHaveText(expect.stringContaining('Saved'))
   await expect($('#cfg-game')).toHaveValue(expect.stringContaining('mock_game'))
   await expect($('#cfg-saves')).toHaveValue(expect.stringContaining('e2e_saves'))
+  await expect($('#cfg-defs')).toHaveValue(expect.stringContaining('mock_game.defs.postcard'))
 }
 
 export async function loadTauriSave(saveKey: SaveKey): Promise<void> {
@@ -185,16 +186,20 @@ export async function loadTauriSave(saveKey: SaveKey): Promise<void> {
   await $(`tr*=${stub}`).$('button*=Load').click()
 
   // use_save switches to Prices before DesktopCatalog can paint "Loaded …" on
-  // #saves-status (that node unmounts). Wait for the chip / goods instead.
+  // #saves-status (that node unmounts). Wait for the chip for *this* stub —
+  // goods links from a previous save must not satisfy the wait.
+  const previousChip = await $('[aria-label="Loaded save"]')
+  const previousText = (await previousChip.isExisting()) ? await previousChip.getText() : ''
   await browser.waitUntil(
     async () => {
       const chip = await $('[aria-label="Loaded save"]')
       if (await chip.isExisting()) {
         const text = await chip.getText()
         if (text.includes(stub)) return true
+        // A different save is still displayed — keep waiting.
+        return false
       }
-      const links = await $$('a.good-link')
-      return links.length > 0
+      return previousText === '' && (await $$('a.good-link')).length > 0
     },
     {
       timeout: ANALYSIS_TIMEOUT,

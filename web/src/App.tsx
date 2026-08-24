@@ -1140,7 +1140,8 @@ function App({ wasmApi }: Props) {
                 accept=".postcard,application/octet-stream"
                 className="visually-hidden"
                 onChange={(event) => {
-                  const file = event.target.files?.[0]
+                  const file = event.currentTarget.files?.[0]
+                  event.currentTarget.value = ''
                   if (file) applyDefsFile(file)
                 }}
               />
