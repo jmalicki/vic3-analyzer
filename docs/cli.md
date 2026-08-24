@@ -148,6 +148,16 @@ cargo run -p vic3-cli -- mcp serve
 
 ---
 
+## CPU Profiling
+
+For release-speed binaries with debug info (symbols + frame pointers) suitable for sampling profilers such as [samply](https://github.com/mstange/samply):
+
+```bash
+RUSTFLAGS='-C force-frame-pointers=yes' cargo build --profile profiling -p vic3-cli
+```
+
+---
+
 ## Machine-Readable Output (`--json`)
 
 Passing `--json` to any command (e.g. `prices`, `plan`, `mcp status`) outputs clean, unformatted NDJSON/JSON stdout suitable for piping to `jq` or integrating into custom scripts. Errors and diagnostic progress are emitted to `stderr`.

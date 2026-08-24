@@ -48,3 +48,8 @@ rust-advanced-heaps = { git = "https://github.com/jmalicki/rust-advanced-heaps",
 
 [workspace.lints.rust]
 unexpected_cfgs = "warn"
+
+[profile.profiling]
+inherits = "release"
+debug = 2
+strip = "none"
