@@ -28,5 +28,5 @@ That script:
 
 ## Notes
 
-- `tauri-plugin-wdio-webdriver` is optional (`webdriver` feature) and only initialized for these builds — do not ship that feature to players.
+- `tauri-plugin-wdio-webdriver` and `tauri-plugin-wdio` (plus frontend `@wdio/tauri-plugin`) are optional (`webdriver` feature / desktop embed) and only initialized for these builds — do not ship that feature to players.
 - If capture fails with a blank/permission error, enable **Screen Recording** for your terminal in System Settings → Privacy & Security.

@@ -68,7 +68,9 @@ pub fn run() {
     // Docs / WDIO only — never enable the `webdriver` feature in player release builds.
     #[cfg(feature = "webdriver")]
     {
-        builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+        builder = builder
+            .plugin(tauri_plugin_wdio_webdriver::init())
+            .plugin(tauri_plugin_wdio::init());
     }
 
     builder
