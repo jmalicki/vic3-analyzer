@@ -56,6 +56,7 @@ pub fn run() {
             commands::read_save_bytes,
             commands::use_save,
             commands::loaded_prices,
+            commands::loaded_defs_icons,
             commands::loaded_alerts,
             commands::loaded_gaps,
             commands::sql_query,

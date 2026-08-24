@@ -239,7 +239,6 @@ export function StatesPane({
                         countryId={row.state.country_id}
                         playerCountryId={playerCountryId}
                         countries={countries}
-                        showPlayer
                       />
                       {row.name}
                     </a>

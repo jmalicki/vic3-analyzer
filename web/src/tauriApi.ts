@@ -29,7 +29,8 @@ export function createTauriApi(): WasmApi {
     prices_schema: () => "{}",
     build_defs_blob: async () => { throw new Error('Not supported in Tauri API') },
     defs_summary: async () => "{}", // Handled by config in Tauri
-    defs_icons: async () => "{}", // Handled natively or not at all in Tauri mode for now
+    // Blob arg ignored: desktop session already owns the defs postcard path.
+    defs_icons: async () => await invokeTauri<string>('loaded_defs_icons'),
     parse_save: async () => "{}", // Tauri uses use_save
     load_analysis: async () => "{}", // Tauri uses use_save
     clear_analysis: async () => {},

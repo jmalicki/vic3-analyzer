@@ -188,6 +188,8 @@ impl SqlEngine {
             kind: meta_entry.kind.as_str().to_string(),
             in_game_date: loaded.in_game_date,
             country: loaded.country,
+            country_id: loaded.country_id,
+            market_id: loaded.market_id,
             loaded: true,
         })
     }

@@ -12,6 +12,14 @@ workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# Skip wasm-pack's auto-download of binaryen — GitHub release tarballs flake in CI
+# (docs-screenshots). Local/CI builds still produce a valid module without wasm-opt.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = false
+
 [dependencies]
 schemars.workspace = true
 serde_json.workspace = true
