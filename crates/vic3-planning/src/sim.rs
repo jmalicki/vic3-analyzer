@@ -3297,7 +3297,7 @@ mod tests {
             good_prices: vec![("wood".into(), 30.0)],
             ..PlanningParts::default()
         });
-        assert_eq!(max_parallel_construction_jobs(10.0, 5.0), 2);
+        assert_eq!(max_parallel_construction_jobs(10.0, 5.0).get(), 2);
         // Each job gets 5/day → ceil(50/5)=10 days to first completion.
         assert_eq!(construction_wait_days(&state, config), Some(10));
         let goal = Goal::Atom(Atom::GoodPrice {
