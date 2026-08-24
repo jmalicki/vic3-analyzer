@@ -79,9 +79,12 @@ pub const LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY: f64 = 1.0;
 
 /// Parallel government construction feed slots — always ≥ 1.
 ///
-/// Encodes the invariant that the planner can always feed at least one job
-/// (base capacity / zero-throughput floor). Prefer this over raw `usize` so
-/// call sites cannot forget the minimum.
+/// Encodes the queue-admissibility floor: at least one government job may be
+/// enqueued (base capacity / zero-throughput slot count). Prefer this over raw
+/// `usize` so call sites cannot forget the minimum.
+///
+/// **Note:** a slot count of one does not by itself feed work — when national
+/// `construction_points_per_day` is ≤ 0, allocation still emits 0 points/day.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConstructionSlots(NonZeroUsize);
 
@@ -513,7 +516,9 @@ pub fn allocation_cap_points_per_day(
 ///
 /// `max(1, floor(points_per_day / allocation_cap_points_per_day))` as
 /// [`ConstructionSlots`]. A zero or non-finite national throughput still yields
-/// [`ConstructionSlots::ONE`] so a lone job can progress.
+/// [`ConstructionSlots::ONE`] so one government job remains **admissible to
+/// enqueue**; allocation may still feed 0 points/day until throughput is
+/// positive (see [`construction_points_per_day_per_job`]).
 pub fn max_parallel_construction_jobs(
     construction_points_per_day: f64,
     max_points_per_day_per_job: f64,
