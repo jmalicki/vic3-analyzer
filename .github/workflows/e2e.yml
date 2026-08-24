@@ -94,7 +94,7 @@ jobs:
           # Same pattern as scripts/docs-screenshots/desktop-tauri/prepare.mjs
           TAURI_CONFIG: '{"app":{"security":{"capabilities":["webdriver"]}}}'
         run: |
-          node -e "require('fs').writeFileSync('capabilities/webdriver.json', JSON.stringify({identifier:'webdriver',description:'Companion UI + embedded WebDriver (E2E only).',windows:['main'],permissions:['core:default','allow-companion','wdio-webdriver:default']}, null, 2))"
+          node -e "require('fs').writeFileSync('capabilities/webdriver.json', JSON.stringify({identifier:'webdriver',description:'Companion UI + embedded WebDriver (E2E only).',windows:['main'],permissions:['core:default','allow-companion','wdio-webdriver:default','wdio:default']}, null, 2))"
           cargo build -p vic3-analyzer --features webdriver
           node -e "try { require('fs').unlinkSync('capabilities/webdriver.json') } catch (_) {}"
       - name: Run WebdriverIO Tauri Tests (Linux / xvfb)

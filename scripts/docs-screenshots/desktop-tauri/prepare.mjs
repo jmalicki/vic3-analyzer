@@ -59,7 +59,12 @@ export function prepareAndBuild() {
         identifier: 'webdriver',
         description: 'Companion UI + embedded WebDriver (docs screenshots only).',
         windows: ['main'],
-        permissions: ['core:default', 'allow-companion', 'wdio-webdriver:default'],
+        permissions: [
+          'core:default',
+          'allow-companion',
+          'wdio-webdriver:default',
+          'wdio:default',
+        ],
       },
       null,
       2,
