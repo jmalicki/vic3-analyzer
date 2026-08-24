@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Victoria 3 Analyzer",
+        "title": "Victoria 3 Analyzer & Planner",
         "width": 1200,
         "height": 820,
         "resizable": true
