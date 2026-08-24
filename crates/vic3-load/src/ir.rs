@@ -477,6 +477,11 @@ pub struct Building {
     pub production_method: Option<String>,
     /// Active production methods, one per PM group. This is the shape a real
     /// save uses; a building runs every listed method at once.
+    ///
+    /// For Construction Sector rows these ids are **required** and must resolve
+    /// in defs to a PM with `country_construction_add` (see planning
+    /// construction throughput). String script ids vs a bidirectional index map
+    /// remains an open design question upstream of this IR.
     #[serde(default, deserialize_with = "flex_str_vec")]
     pub production_methods: Vec<String>,
     /// Saved input volumes when present. Keys are good script ids (fixtures) or

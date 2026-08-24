@@ -80,8 +80,8 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
 - When an economy context is present, the planner evaluates candidate PM switches on relevant industries, applies the override, and triggers an immediate price re-solve.
 
 ### 4. Construction capacity (compact model)
-- **Capacity** starts from `base_construction_capacity` and rises by Construction Sector levels × CS PM `country_construction_add` (fallback `construction_per_cs_level` when the PM is unknown). Load-time projection uses the iron-frame-shaped fallback (base 1 + 5/level).
-- **Government share:** planner throughput is the **government** fraction of national construction (`1 − country_private_construction_allocation_mult` from economic-system laws). Private queue rows do not consume government feed slots. This is **not** a geo-state allocation split.
+- **Capacity** starts from `base_construction_capacity` and rises by Construction Sector levels × **required** CS PM `country_construction_add` from defs. Missing or invalid CS production methods are errors (no iron-frame-shaped per-level guess). Load and sync paths pass defs so PMs resolve the same way.
+- **National pool only:** Victoria 3 does not allocate construction by geographic state. The planner models national throughput split into **government** vs **private** (`1 − country_private_construction_allocation_mult` from economic-system laws). Private queue rows do not consume government feed slots.
 - **Cost** per queued level uses save `remaining`, else defs `required_construction`, else `default_construction_cost`.
 - **Allocation cap** defaults to max weekly construction progress ÷ 7 (vanilla base 10/week + owned tech adds such as urbanization). `SimConfig::max_construction_allocation = Some(n)` overrides for tests. Leftover government capacity fills later government queue entries, so enough capacity yields parallel builds. Wait edges advance to the soonest **fed** government completion.
 - **Heuristic ETA** (`construction_eta_days`): default = time until a free government feed slot / usable leftover capacity (one default-cost level at that rate when slots are open); when slots are full = next fed finish. Explicit next-finish mode remains available for wait-with-spare-slots semantics. Open GDP / price atoms no longer clamp every bound through a blanket `.max(1)` on next-completion alone.
@@ -91,6 +91,7 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
   - **Meta:** Construction Sector when any other build candidate already exists (capacity lever, not IO), also placed by state.
   - **Deferred:** free slots / potentials and building unlock techs (`TODO(buildability)`); A* incumbent upper bound via greedy feasible path (`TODO(anytime-ub)`).
 - Approximations: full staffing assumed for CS output; building-group `construction_efficiency_*` and most non-tech weekly-progress modifiers ignored; economic-law private mult table is vanilla-only. Still not full Paradox construction-goods demand or script cost tables beyond loaded `required_construction`.
+- **PM identity:** world/planning buildings store production methods as string script ids that **must** resolve in defs. Whether to replace those with indices into a bidirectional name↔id map remains an open design question.
 
 ---
 

@@ -595,7 +595,12 @@ pub fn loaded_gaps_json(goal: &str) -> Result<String, ApiError> {
     let goal = vic3_planning::parse(goal)?;
     with_loaded_analysis(|loaded| {
         let country = country_tag(&loaded.world)?;
-        let state = PlanningState::from_world_with_prices(&loaded.world, country, &loaded.prices)?;
+        let state = PlanningState::from_world_with_prices(
+            &loaded.world,
+            country,
+            &loaded.prices,
+            &loaded.defs,
+        )?;
         let mut limitations = loaded.prices.limitations.clone();
         if goal.has_army_atom() {
             state.push_army_power_limitation(&mut limitations);
@@ -620,7 +625,12 @@ pub fn loaded_plan_json(plan_opts_json: &str) -> Result<String, ApiError> {
     let goal = vic3_planning::parse(&plan_opts.goal)?;
     with_loaded_analysis(|loaded| {
         let country = country_tag(&loaded.world)?;
-        let state = PlanningState::from_world_with_prices(&loaded.world, country, &loaded.prices)?;
+        let state = PlanningState::from_world_with_prices(
+            &loaded.world,
+            country,
+            &loaded.prices,
+            &loaded.defs,
+        )?;
         let economy = EconomyContext::new(
             loaded.world.clone(),
             loaded.defs.clone(),
@@ -777,7 +787,7 @@ pub fn plan_json(
     let prices = solve(&world, &defs, solve_opts.clone());
     let country = country_tag(&world)?;
     drop(save);
-    let state = PlanningState::from_world_with_prices(&world, country, &prices)?;
+    let state = PlanningState::from_world_with_prices(&world, country, &prices, &defs)?;
     let goal = vic3_planning::parse(&plan_opts.goal)?;
     let economy = EconomyContext::new(world, defs, solve_opts.clone());
     let result = vic3_planning::plan_with_economy(
@@ -811,7 +821,7 @@ pub fn gaps_json(
     let prices = solve(&world, &defs, opts);
     let country = country_tag(&world)?;
     drop(save);
-    let state = PlanningState::from_world_with_prices(&world, country, &prices)?;
+    let state = PlanningState::from_world_with_prices(&world, country, &prices, &defs)?;
     let goal = vic3_planning::parse(goal)?;
     let mut limitations = prices.limitations;
     if goal.has_army_atom() {

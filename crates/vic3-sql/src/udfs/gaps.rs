@@ -50,6 +50,7 @@ impl TableFunctionImpl for GapsTvf {
             &self.binding.world,
             country,
             &self.binding.prices,
+            &self.binding.defs,
         )
         .map_err(|e| datafusion::common::DataFusionError::Execution(format!("gaps state: {e}")))?;
 

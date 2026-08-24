@@ -245,6 +245,9 @@ pub struct ProductionMethod {
     ///
     /// Construction points per fully-staffed level per day for Construction
     /// Sector methods. [`None`] when the PM does not grant construction.
+    /// Construction Sector buildings with positive levels **must** list a PM
+    /// whose defs entry sets this to a finite non-negative value — planners do
+    /// not invent per-level defaults when it is missing.
     #[serde(default)]
     pub country_construction_add: Option<f64>,
 }
