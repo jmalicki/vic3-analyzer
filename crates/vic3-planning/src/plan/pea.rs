@@ -84,6 +84,7 @@ impl PeaNode {
                 }
             })
             .collect();
+        domain.note_pea_ready(ranked.len());
         ranked.sort_by(|a, b| {
             a.f_minus_g
                 .cmp(&b.f_minus_g)
@@ -103,7 +104,9 @@ impl PeaNode {
         for succ in &ranked[next..end] {
             out.push((Self::ready(succ.node.clone()), succ.edge));
         }
-        if end < ranked.len() {
+        let deferred = end < ranked.len();
+        domain.note_beam_emit(end.saturating_sub(next), deferred);
+        if deferred {
             out.push((
                 Self {
                     inner: PeaInner::Expanding {
@@ -168,13 +171,16 @@ impl SearchNode for PeaNode {
             PeaInner::Ready(domain) => {
                 let ranked = Rc::new(Self::rank_successors(domain));
                 super::astar_trace::on_expand("pea-ready", || {
+                    let (fp_dups, fp_uniques) = domain.fingerprint_dup_stats();
                     format!(
-                        "fp={:016x} gdp={:.0} h={} ranked={} beam={}",
+                        "fp={:016x} gdp={:.0} h={} ranked={} beam={} fp_dups={} fp_uniques={}",
                         domain.fingerprint(),
                         domain.state().gdp,
                         domain.heuristic(),
                         ranked.len(),
-                        beam
+                        beam,
+                        fp_dups,
+                        fp_uniques,
                     )
                 });
                 if ranked.is_empty() {
@@ -188,14 +194,19 @@ impl SearchNode for PeaNode {
                 next,
                 beam,
             } => {
+                domain.note_pea_resume();
                 super::astar_trace::on_expand("pea-resume", || {
+                    let (fp_dups, fp_uniques) = domain.fingerprint_dup_stats();
                     format!(
-                        "fp={:016x} gdp={:.0} next={}/{} beam={}",
+                        "fp={:016x} gdp={:.0} next={}/{} beam={} deferred_left={} fp_dups={} fp_uniques={}",
                         domain.fingerprint(),
                         domain.state().gdp,
                         next,
                         ranked.len(),
-                        beam
+                        beam,
+                        ranked.len().saturating_sub(*next),
+                        fp_dups,
+                        fp_uniques,
                     )
                 });
                 Self::emit_beam(ranked, domain, *next, *beam)

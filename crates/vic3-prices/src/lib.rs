@@ -57,6 +57,7 @@ mod optimize;
 mod qualification_advice;
 mod report;
 mod result;
+mod shop_cache;
 mod solve;
 mod world;
 
@@ -83,7 +84,8 @@ pub use result::{
     ProductionMethodDelta, ProfessionCount, SolveOpts, SolveOutcome, SolveStatus, StateGood,
     StateInfo, StateNeed, StatePop, StateQualification, SubsidizeDelta, WhatIfOpts, WorldDelta,
 };
-pub use solve::{equilibrate, solve, what_if};
+pub use shop_cache::{BuildingIo, ShopCache, StateShop};
+pub use solve::{equilibrate, equilibrate_cached, solve, what_if};
 pub use world::{
     reconstruct_non_pop_orders, ConstructionQueueKind, Intern, World, WorldBuilding,
     WorldConstruction, WorldCountry, WorldPop, WorldState, WorldStatePop, WorldStateTrade,

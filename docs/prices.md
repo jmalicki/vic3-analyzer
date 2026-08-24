@@ -108,4 +108,4 @@ Every analytical result carries structured limitation strings:
 
 ## Related design notes
 
-- [`prices-shop-cache.md`](prices-shop-cache.md) — proposed incremental shop/settle cache for planning re-solves (not implemented).
+- [`prices-shop-cache.md`](prices-shop-cache.md) — incremental `ShopCache` for planning re-solves (baseline + patch → `equilibrate_cached`).

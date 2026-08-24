@@ -245,7 +245,10 @@ impl Default for PlanningParts {
 /// Compact world node for DSL eval, sim successors, and A* intern keys.
 ///
 /// Fields cover every atom `crate::goals` can read, plus queue / delta slots
-/// `crate::sim` needs for waits and re-solves. Hash/eq use `f64::to_bits` (I8).
+/// `crate::sim` needs for waits and re-solves. Hash/eq use `f64::to_bits` (I8)
+/// for discrete floats that are part of identity. **`good_prices` and `gdp` are
+/// omitted** from Hash/Eq by default (derived solve outputs); set
+/// `VIC3_PLAN_FP_INCLUDE_PRICES=1` to restore the old include-for-A/B traces.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningState {
     pub date: Vic3Date,
@@ -342,7 +345,9 @@ impl PartialEq for PlanningState {
         self.date == other.date
             && self.country == other.country
             && self.techs == other.techs
-            && f64_map_eq(&self.good_prices, &other.good_prices)
+            && (!hash_includes_derived_prices()
+                || (f64_map_eq(&self.good_prices, &other.good_prices)
+                    && f64_bits_eq(self.gdp, other.gdp)))
             && self.solvent == other.solvent
             && f64_bits_eq(self.treasury, other.treasury)
             && f64_option_bits_eq(self.army_power_projection, other.army_power_projection)
@@ -352,7 +357,6 @@ impl PartialEq for PlanningState {
             && self.interest_states == other.interest_states
             && self.interest_regions == other.interest_regions
             && self.queued_tech == other.queued_tech
-            && f64_bits_eq(self.gdp, other.gdp)
             && f64_option_bits_eq(self.weekly_balance, other.weekly_balance)
             && f64_option_bits_eq(
                 self.population_weighted_wealth,
@@ -390,10 +394,13 @@ impl Hash for PlanningState {
         self.date.hash(state);
         self.country.hash(state);
         self.techs.hash(state);
-        self.good_prices.len().hash(state);
-        for (k, v) in &self.good_prices {
-            k.hash(state);
-            v.to_bits().hash(state);
+        if hash_includes_derived_prices() {
+            self.good_prices.len().hash(state);
+            for (k, v) in &self.good_prices {
+                k.hash(state);
+                v.to_bits().hash(state);
+            }
+            self.gdp.to_bits().hash(state);
         }
         self.solvent.hash(state);
         self.treasury.to_bits().hash(state);
@@ -404,7 +411,6 @@ impl Hash for PlanningState {
         self.interest_states.hash(state);
         self.interest_regions.hash(state);
         self.queued_tech.hash(state);
-        self.gdp.to_bits().hash(state);
         hash_f64_option(self.weekly_balance, state);
         hash_f64_option(self.population_weighted_wealth, state);
         hash_f64_option(self.debt_principal, state);
@@ -431,6 +437,21 @@ impl Hash for PlanningState {
         self.hire_days_left.hash(state);
         self.law_days_left.hash(state);
     }
+}
+
+/// When true, `good_prices` / `gdp` participate in Hash/Eq (legacy A* identity).
+///
+/// Default false (omit derived solve floats). Set `VIC3_PLAN_FP_INCLUDE_PRICES=1`
+/// for before/after duplicate-rate traces against the old fingerprint.
+fn hash_includes_derived_prices() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| match std::env::var("VIC3_PLAN_FP_INCLUDE_PRICES") {
+        Ok(v) => {
+            let t = v.trim();
+            !(t.is_empty() || t == "0" || t.eq_ignore_ascii_case("false"))
+        }
+        Err(_) => false,
+    })
 }
 
 fn f64_bits_eq(a: f64, b: f64) -> bool {
@@ -1597,6 +1618,26 @@ mod tests {
         other.treasury = 5.0;
         assert_ne!(a, other);
         assert_ne!(a.fingerprint(), other.fingerprint());
+    }
+
+    #[test]
+    fn fingerprint_ignores_good_prices_and_gdp_by_default() {
+        let a = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            building_level_deltas: [(("building_rye_farm".into(), 1), 1)].into_iter().collect(),
+            good_prices: vec![("grain".into(), 20.0)],
+            gdp: 1.0e6,
+            ..PlanningParts::default()
+        });
+        let mut b = a.clone();
+        b.good_prices.insert("grain".into(), 99.0);
+        b.gdp = 2.0e6;
+        assert_eq!(
+            a.fingerprint(),
+            b.fingerprint(),
+            "derived prices/gdp must not split A* identity"
+        );
+        assert_eq!(a, b);
     }
 
     use proptest::prelude::*;

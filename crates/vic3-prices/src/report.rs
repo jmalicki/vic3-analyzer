@@ -786,6 +786,15 @@ fn priced_flows(
 }
 
 /// Per-building revenue at solved local prices (planning GDP; no full I/O rows).
+///
+/// World-based twin of [`building_revenues_from_cache`]. Kept for cold-path /
+/// parity callers that still hold a [`World`].
+///
+/// * `world` — building list and states.
+/// * `defs` — good index lookup for `goods` prices.
+/// * `goods` — solved market good prices.
+/// * `snapshot` — optional per-state local prices from settle; falls back to market.
+#[allow(dead_code)]
 pub fn building_revenues(
     world: &World,
     defs: &GameDefs,
@@ -814,6 +823,46 @@ pub fn building_revenues(
                 .sum::<f64>();
             crate::result::BuildingRevenue {
                 state_id: building.state,
+                revenue,
+            }
+        })
+        .collect()
+}
+
+/// Same as [`building_revenues`] but reads IO from a [`crate::ShopCache`] (no World).
+///
+/// * `cache` — patched or baseline shops with `buildings` IO rows.
+/// * `defs` — good index lookup.
+/// * `goods` — solved market prices.
+/// * `snapshot` — optional local prices by state.
+pub fn building_revenues_from_cache(
+    cache: &crate::ShopCache,
+    defs: &GameDefs,
+    goods: &[GoodPrice],
+    snapshot: Option<&ShopSnapshot>,
+) -> Vec<crate::result::BuildingRevenue> {
+    let mut prices = GoodsVec::zeros(defs.goods_order.len());
+    for good in goods {
+        if let Some(idx) = defs.index_of(&good.id) {
+            prices[idx] = good.price;
+        }
+    }
+    cache
+        .buildings
+        .iter()
+        .map(|building| {
+            let local = building
+                .state_id
+                .and_then(|state| snapshot.and_then(|snap| snap.local_by_state.get(&state)))
+                .unwrap_or(&prices);
+            let revenue = building
+                .outputs
+                .iter_indexed()
+                .filter(|(_, quantity)| quantity.abs() > crate::ORDER_EPS)
+                .map(|(good, quantity)| local[good] * quantity)
+                .sum::<f64>();
+            crate::result::BuildingRevenue {
+                state_id: building.state_id,
                 revenue,
             }
         })

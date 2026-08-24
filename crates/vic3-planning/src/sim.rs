@@ -59,8 +59,11 @@ use crate::military::{
 use crate::world::{PlanningState, QueuedInterest};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use vic3_defs::{BuildingType, GameDefs};
-use vic3_prices::{equilibrate, SolveOpts, SolveOutcome, World, WorldBuilding, ORDER_EPS};
+use vic3_prices::{
+    equilibrate_cached, ShopCache, SolveOpts, SolveOutcome, World, WorldBuilding, ORDER_EPS,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MilitaryBranch {
@@ -229,30 +232,48 @@ fn push_mil_hire_decisions(args: &mut MilitaryPpDecisionArgs<'_>, branch: Milita
 
 /// Immutable price-solver inputs shared by all nodes in one search.
 ///
+/// Built once per search and shared (cheap `Clone` via [`Arc`] on shops).
+/// Search only applies transitions; shop patching + NLS live inside apply.
+///
 /// [`Self::defs`] also supplies building `required_construction` when the sim
 /// enqueues a new level (`QueueBuildingLevel`); in-flight save `remaining`
 /// still wins for ETA.
+///
+/// **Baseline shops** (`shop_cache`) are derived from [`Self::base_world`] at
+/// construction. They are **not** part of A* identity — only planning deltas on
+/// the node are.
 #[derive(Debug, Clone)]
 pub struct EconomyContext {
     pub base_world: World,
     pub defs: GameDefs,
     pub solve_opts: SolveOpts,
+    /// Frozen settle inputs for the unmodified base world (shared).
+    pub shop_cache: Arc<ShopCache>,
 }
 
 impl EconomyContext {
     /// Build an economy context from a base world, defs, and solver options.
+    ///
+    /// * `base_world` — save world; moved in (unique owner until shared via this context).
+    /// * `defs` — game definitions for IO recipes and construction costs.
+    /// * `solve_opts` — NLS iteration / warm-start options.
+    ///
+    /// Builds baseline [`ShopCache`] once via [`ShopCache::from_world`].
     pub fn new(base_world: World, defs: GameDefs, solve_opts: SolveOpts) -> Self {
+        let shop_cache = Arc::new(ShopCache::from_world(&base_world, &defs));
         Self {
             base_world,
             defs,
             solve_opts,
+            shop_cache,
         }
     }
 
     /// Apply this planning branch onto a clone of [`Self::base_world`].
     ///
     /// Applies [`PlanningState::building_level_deltas`] and PM overrides. Used for
-    /// construction capacity and price re-solves.
+    /// placement / construction capacity. Price refresh uses [`Self::shops_for_planning`]
+    /// instead (patch baseline shops).
     ///
     /// Types present only via deltas (first-of-type / greenfield) get a
     /// planner-added fully-staffed [`WorldBuilding`] in the delta's `state_id`
@@ -285,6 +306,94 @@ impl EconomyContext {
             }
         }
         world
+    }
+
+    /// Materialize shops for this branch: clone baseline, replay deltas as IO patches.
+    ///
+    /// * `state` — planning node whose `building_level_deltas` / `pm_overrides` apply.
+    ///
+    /// Throwaway result for one price solve inside apply. Invariant: should match
+    /// `ShopCache::from_world(&self.apply_planning_to_world(state))` (parity test).
+    pub(crate) fn shops_for_planning(&self, state: &PlanningState) -> ShopCache {
+        let mut cache = (*self.shop_cache).clone();
+        let n = self.defs.goods_order.len();
+        let zeros = vic3_defs::GoodsVec::zeros(n);
+
+        // 1) Extra levels: patch each matching base building (or synthetic greenfield).
+        for ((building, state_id), levels) in &state.building_level_deltas {
+            if *levels == 0 {
+                continue;
+            }
+            let mut found = false;
+            for row in &self.base_world.buildings {
+                if row.building == *building && row.state == Some(*state_id) {
+                    found = true;
+                    let (old_i, old_o) = row.goods_io(&self.defs);
+                    let mut bumped = row.clone();
+                    bumped.add_extra_levels(*levels);
+                    let (new_i, new_o) = bumped.goods_io(&self.defs);
+                    cache.patch_building_io(
+                        &self.defs,
+                        Some(*state_id),
+                        &old_i,
+                        &old_o,
+                        &new_i,
+                        &new_o,
+                    );
+                    cache.set_building_io(row.id, Some(*state_id), new_i, new_o);
+                }
+            }
+            if !found {
+                if let Some(syn) = synthetic_world_building(
+                    &self.defs,
+                    &self.base_world,
+                    building,
+                    *state_id,
+                    *levels,
+                ) {
+                    let (new_i, new_o) = syn.goods_io(&self.defs);
+                    cache.patch_building_io(
+                        &self.defs,
+                        Some(*state_id),
+                        &zeros,
+                        &zeros,
+                        &new_i,
+                        &new_o,
+                    );
+                    cache.set_building_io(syn.id, Some(*state_id), new_i, new_o);
+                }
+            }
+        }
+
+        // 2) PM overrides: patch from post-level IO with old methods → new methods.
+        for (building_id, methods) in &state.pm_overrides {
+            let Some(base_row) = self
+                .base_world
+                .buildings
+                .iter()
+                .find(|b| b.id == *building_id)
+            else {
+                continue;
+            };
+            let mut before = base_row.clone();
+            if let Some(sid) = before.state {
+                if let Some(levels) = state
+                    .building_level_deltas
+                    .get(&(before.building.clone(), sid))
+                {
+                    if *levels > 0 {
+                        before.add_extra_levels(*levels);
+                    }
+                }
+            }
+            let (old_i, old_o) = before.goods_io(&self.defs);
+            let after = before.with_methods(methods.clone());
+            let (new_i, new_o) = after.goods_io(&self.defs);
+            cache.patch_building_io(&self.defs, before.state, &old_i, &old_o, &new_i, &new_o);
+            cache.set_building_io(*building_id, before.state, new_i, new_o);
+        }
+
+        cache
     }
 
     fn owned_state_ids(&self, country: &str) -> BTreeSet<u32> {
@@ -1507,11 +1616,13 @@ pub fn apply_action_with_economy(
             if next.pm_overrides.get(building_id) == Some(methods) {
                 return None;
             }
-            let mut world = economy.apply_planning_to_world(&next);
-            let building = world.buildings.iter_mut().find(|b| b.id == *building_id)?;
-            *building = building.with_methods(methods.clone());
+            // Must exist on the projected branch (base or after earlier deltas).
+            let world = economy.apply_planning_to_world(&next);
+            if !world.buildings.iter().any(|b| b.id == *building_id) {
+                return None;
+            }
             next.pm_overrides.insert(*building_id, methods.clone());
-            refresh_prices_on_world(&mut next, economy, &world);
+            refresh_prices(&mut next, economy);
         }
         Action::AdjustTax {
             delta,
@@ -1690,13 +1801,13 @@ fn apply_wait_for_event(
     Some(())
 }
 
+/// Write solved prices/GDP onto `state` after an economy-relevant transition.
+///
+/// Search calls apply only; this runs inside apply. Bookkeeping: baseline shops
+/// → patch from deltas → NLS → node fields.
 fn refresh_prices(state: &mut PlanningState, economy: &EconomyContext) {
-    let world = economy.apply_planning_to_world(state);
-    refresh_prices_on_world(state, economy, &world);
-}
-
-fn refresh_prices_on_world(state: &mut PlanningState, economy: &EconomyContext, world: &World) {
-    let outcome = equilibrate(world, &economy.defs, economy.solve_opts.clone());
+    let cache = economy.shops_for_planning(state);
+    let outcome = equilibrate_cached(&cache, &economy.defs, economy.solve_opts.clone());
     state.gdp = economy.modeled_gdp(state, &outcome);
     state.good_prices = outcome
         .goods
@@ -2482,6 +2593,132 @@ mod tests {
             switched_edge.state.pm_overrides.get(&1).map(Vec::as_slice),
             Some(["pm_high".to_string()].as_slice())
         );
+    }
+
+    #[test]
+    fn shops_for_planning_matches_from_world_projection() {
+        use vic3_defs::{BuildingType, ProductionMethod};
+        use vic3_prices::equilibrate;
+
+        let wood = GoodIdx::from_usize(0);
+        let mut defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        defs.buildings.insert(
+            "building_logging_camp".into(),
+            BuildingType {
+                id: "building_logging_camp".into(),
+                group: None,
+                city_type: None,
+                production_method_groups: vec!["pmg_logging".into()],
+                required_construction: Some(30.0),
+            },
+        );
+        defs.production_method_groups.insert(
+            "pmg_logging".into(),
+            vec!["pm_sawmills".into(), "pm_high".into()],
+        );
+        defs.production_methods.insert(
+            "pm_sawmills".into(),
+            ProductionMethod {
+                id: "pm_sawmills".into(),
+                outputs: vec![(wood, 10.0)],
+                ..Default::default()
+            },
+        );
+        defs.production_methods.insert(
+            "pm_high".into(),
+            ProductionMethod {
+                id: "pm_high".into(),
+                outputs: vec![(wood, 25.0)],
+                ..Default::default()
+            },
+        );
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                infrastructure: Some(10.0),
+                infrastructure_usage: Some(0.0),
+                ..WorldState::default()
+            }],
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(1),
+                building: "building_logging_camp".into(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: vec!["pm_sawmills".into()],
+                saved_inputs: Vec::new(),
+                saved_outputs: Vec::new(),
+            }],
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let mut state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            ..PlanningParts::default()
+        });
+        state
+            .building_level_deltas
+            .insert(("building_logging_camp".into(), 1), 1);
+        state.pm_overrides.insert(1, vec!["pm_high".into()]);
+
+        let patched = economy.shops_for_planning(&state);
+        let projected = economy.apply_planning_to_world(&state);
+        let rebuilt = ShopCache::from_world(&projected, &economy.defs);
+
+        for (good, qty) in patched.frozen_sell.iter_indexed() {
+            assert!(
+                (qty - rebuilt.frozen_sell[good]).abs() < 1e-9,
+                "market sell mismatch good {good:?}"
+            );
+        }
+        for (good, qty) in patched.frozen_buy.iter_indexed() {
+            assert!(
+                (qty - rebuilt.frozen_buy[good]).abs() < 1e-9,
+                "market buy mismatch good {good:?}"
+            );
+        }
+        let shop = patched.shops.iter().find(|s| s.id == 1).unwrap();
+        let rebuilt_shop = rebuilt.shops.iter().find(|s| s.id == 1).unwrap();
+        for (good, qty) in shop.frozen_sell.iter_indexed() {
+            assert!(
+                (qty - rebuilt_shop.frozen_sell[good]).abs() < 1e-9,
+                "state sell mismatch good {good:?}"
+            );
+        }
+
+        let from_patch = equilibrate_cached(&patched, &economy.defs, SolveOpts::default());
+        let from_world = equilibrate(&projected, &economy.defs, SolveOpts::default());
+        assert_eq!(from_patch.goods.len(), from_world.goods.len());
+        for (a, b) in from_patch.goods.iter().zip(from_world.goods.iter()) {
+            assert_eq!(a.id, b.id);
+            assert!(
+                (a.price - b.price).abs() < 1e-9,
+                "price mismatch for {}: {} vs {}",
+                a.id,
+                a.price,
+                b.price
+            );
+        }
     }
 
     #[test]
