@@ -2,12 +2,12 @@
 //!
 //! # Cheap intern key
 //!
-//! [`Vic3Node`] Eq/Hash inspect only the precomputed `u64` fingerprint of
-//! [`PlanningState`]. The projected state and immutable search inputs
-//! (goal, [`SimConfig`], optional [`EconomyContext`]) ride behind [`Rc`]s and
-//! are never deeply compared by the pathfinder. Prefer [`Rc`] while search is
-//! single-threaded; switch to [`std::sync::Arc`] when nodes must be
-//! `Send + Sync`.
+//! [`Vic3Node`] `Hash` uses the precomputed `u64` fingerprint only (cheap
+//! intern buckets). `Eq` is `Rc::ptr_eq` first, then fingerprint + full
+//! [`PlanningState`] when pointers differ — so reconstructs still merge and
+//! fingerprint collisions cannot. Goal / config / economy ride behind [`Rc`]s
+//! and are not part of identity. Prefer [`Rc`] while search is single-threaded;
+//! switch to [`std::sync::Arc`] when nodes must be `Send + Sync`.
 //!
 //! # Heuristic DAG
 //!
@@ -28,8 +28,103 @@ use super::pathfinding::SearchNode;
 use crate::goals::{evaluate, Atom, Goal};
 use crate::sim::{EconomyContext, SimConfig, Successor};
 use crate::world::PlanningState;
+use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+
+#[derive(Debug, Default)]
+struct FingerprintDupStats {
+    seen: RefCell<HashSet<u64>>,
+    dups: Cell<u64>,
+}
+
+impl FingerprintDupStats {
+    fn note(&self, fingerprint: u64) {
+        if !self.seen.borrow_mut().insert(fingerprint) {
+            self.dups.set(self.dups.get().saturating_add(1));
+        }
+    }
+
+    fn snapshot(&self) -> (u64, u64) {
+        let uniques = self.seen.borrow().len() as u64;
+        (self.dups.get(), uniques)
+    }
+}
+
+/// Search counters maintained in Vic3 because A* does not expose them.
+///
+/// Includes domain-fingerprint reconvergence (`fp_*`) and PEA* expand/frontier
+/// proxies (`ranked_*`, `beam_*`). The pathfinder's true open/closed set sizes
+/// are unavailable (`rust-advanced-heaps` keeps them private).
+#[derive(Debug, Default)]
+struct SearchTraceStats {
+    /// Seen domain fingerprints + duplicate creation count.
+    fp: FingerprintDupStats,
+    pea_ready_expands: Cell<u64>,
+    pea_resume_expands: Cell<u64>,
+    /// Sum / max of PEA ranked-successor list lengths at ready expands.
+    ranked_sum: Cell<u64>,
+    ranked_max: Cell<u64>,
+    /// Successors actually emitted into the beam (not deferred).
+    beam_emitted: Cell<u64>,
+    /// Times an Expanding cursor was re-queued (deferred frontier).
+    beam_deferred: Cell<u64>,
+}
+
+impl SearchTraceStats {
+    fn note_fp(&self, fingerprint: u64) {
+        self.fp.note(fingerprint);
+    }
+
+    fn note_pea_ready(&self, ranked_len: usize) {
+        self.pea_ready_expands
+            .set(self.pea_ready_expands.get().saturating_add(1));
+        let n = ranked_len as u64;
+        self.ranked_sum.set(self.ranked_sum.get().saturating_add(n));
+        let max = self.ranked_max.get();
+        if n > max {
+            self.ranked_max.set(n);
+        }
+    }
+
+    fn note_pea_resume(&self) {
+        self.pea_resume_expands
+            .set(self.pea_resume_expands.get().saturating_add(1));
+    }
+
+    fn note_beam_emit(&self, emitted: usize, deferred: bool) {
+        self.beam_emitted
+            .set(self.beam_emitted.get().saturating_add(emitted as u64));
+        if deferred {
+            self.beam_deferred
+                .set(self.beam_deferred.get().saturating_add(1));
+        }
+    }
+
+    fn summary_line(&self) -> String {
+        let (fp_dups, fp_uniques) = self.fp.snapshot();
+        let fp_emitted = fp_dups.saturating_add(fp_uniques);
+        let ready = self.pea_ready_expands.get();
+        let resume = self.pea_resume_expands.get();
+        let ranked_sum = self.ranked_sum.get();
+        let ranked_avg = if ready > 0 {
+            ranked_sum as f64 / ready as f64
+        } else {
+            0.0
+        };
+        format!(
+            "fp_dups={fp_dups} fp_uniques={fp_uniques} fp_emitted={fp_emitted} \
+             pea_ready={ready} pea_resume={resume} \
+             ranked_max={} ranked_avg={ranked_avg:.1} ranked_sum={ranked_sum} \
+             beam_emitted={} beam_deferred={} \
+             (A* open/closed sizes not available from pathfinder)",
+            self.ranked_max.get(),
+            self.beam_emitted.get(),
+            self.beam_deferred.get(),
+        )
+    }
+}
 
 /// Immutable inputs shared by every node in one planning search.
 #[derive(Debug)]
@@ -37,6 +132,8 @@ struct SearchContext {
     goal: Goal,
     config: SimConfig,
     economy: Option<Rc<EconomyContext>>,
+    /// Vic3-side search counters — see [`SearchTraceStats`].
+    trace: SearchTraceStats,
 }
 
 /// Compact key and state handle for Vic3 planning.
@@ -60,6 +157,7 @@ impl Vic3Node {
                 goal,
                 config,
                 economy: None,
+                trace: SearchTraceStats::default(),
             }),
         )
     }
@@ -77,16 +175,41 @@ impl Vic3Node {
                 goal,
                 config,
                 economy: Some(Rc::new(economy)),
+                trace: SearchTraceStats::default(),
             }),
         )
     }
 
     fn with_context(state: PlanningState, context: Rc<SearchContext>) -> Self {
+        let fingerprint = state.fingerprint();
+        context.trace.note_fp(fingerprint);
         Self {
-            fingerprint: state.fingerprint(),
+            fingerprint,
             state: Rc::new(state),
             context,
         }
+    }
+
+    /// `(dups, uniques)` of domain fingerprints created in this search.
+    pub(crate) fn fingerprint_dup_stats(&self) -> (u64, u64) {
+        self.context.trace.fp.snapshot()
+    }
+
+    /// Full Vic3-side search summary (fp + PEA frontier proxies).
+    pub(crate) fn search_trace_summary(&self) -> String {
+        self.context.trace.summary_line()
+    }
+
+    pub(crate) fn note_pea_ready(&self, ranked_len: usize) {
+        self.context.trace.note_pea_ready(ranked_len);
+    }
+
+    pub(crate) fn note_pea_resume(&self) {
+        self.context.trace.note_pea_resume();
+    }
+
+    pub(crate) fn note_beam_emit(&self, emitted: usize, deferred: bool) {
+        self.context.trace.note_beam_emit(emitted, deferred);
     }
 
     /// New domain node sharing this node's search context (PEA* child construction).
@@ -129,7 +252,11 @@ impl Vic3Node {
 
 impl PartialEq for Vic3Node {
     fn eq(&self, other: &Self) -> bool {
-        self.fingerprint == other.fingerprint
+        // Same allocation → equal. Distinct Rcs may still be the same IR
+        // (reconstructs); Hash is fingerprint-only, so Eq verifies full state
+        // when pointers differ (also covers u64 fingerprint collisions).
+        Rc::ptr_eq(&self.state, &other.state)
+            || (self.fingerprint == other.fingerprint && *self.state == *other.state)
     }
 }
 

@@ -310,11 +310,16 @@ fn plan_from_root(
     let (pea_path, day_cost) = shortest_path::<_, PairingHeap<_, _>>(&PeaNode::ready(root))
         .ok_or(PlanError::Unreachable)?;
     if super::astar_trace::enabled() {
+        let summary = pea_path
+            .first()
+            .map(|n| n.domain().search_trace_summary())
+            .unwrap_or_else(|| "(no path nodes)".into());
         eprintln!(
-            "[astar] plan done expands={} day_cost={} path_len={}",
+            "[astar] plan done expands={} day_cost={} path_len={} | {}",
             super::astar_trace::expands(),
             day_cost,
-            pea_path.len()
+            pea_path.len(),
+            summary,
         );
     }
     if day_cost > max_days {
