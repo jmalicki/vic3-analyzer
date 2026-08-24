@@ -469,11 +469,11 @@ fn single_tech_research_eta(
 }
 
 fn construction_eta_days(state: &PlanningState, config: SimConfig) -> u32 {
-    let fallback = u32::from(config.construction_days.max(1));
-    crate::construction::construction_wait_days(state, config)
-        .map(u32::from)
-        .unwrap_or(fallback)
-        .max(1)
+    crate::construction::construction_eta_days(
+        state,
+        config,
+        crate::construction::ConstructionEtaMode::CapacityOrSlot,
+    )
 }
 
 impl SearchNode for Vic3Node {
@@ -760,18 +760,21 @@ mod tests {
             PlanningState::from_parts(PlanningParts {
                 country: "GER".into(),
                 good_prices: vec![("wood".into(), 40.0)],
+                construction_points_per_day: 1.0,
                 ..PlanningParts::default()
             }),
             compile("good_price(wood) <= 20").unwrap(),
             SimConfig {
-                construction_days: 33,
+                // Capacity/slot ETA: one default-cost level at government rate.
+                default_construction_cost: 33,
+                max_construction_allocation: Some(1000),
                 ..SimConfig::default()
             },
         );
         assert_eq!(
             start.heuristic(),
             33,
-            "without economy PM candidates, open price uses construction days"
+            "without economy PM candidates, open price uses capacity ETA (one level)"
         );
     }
 

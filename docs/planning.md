@@ -24,7 +24,7 @@ A `PlanningState` is a compact, deterministic projection of the save file and th
 | `population_weighted_wealth` | Pop-weighted average wealth across owned states |
 | `army_power_projection`, `navy_power_projection` | Projected military and naval strength from combat formations and staffing |
 | `building_level_deltas`, `pm_overrides`, `tax_level` | Sim-only mutations along the branch (`(building_type, state_id)` level adds, PM overrides, tax offset) |
-| `construction_rate` | National construction capacity (base + Construction Sector levels) |
+| `construction_rate` / `construction_points_per_day` | **Government** construction points/day (CS output × government share from economic laws) |
 
 **Invariants:**
 - **Deterministic State Hashing (I8):** Identical planning states produce identical hashes; applying an action is strictly deterministic.
@@ -80,15 +80,17 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
 - When an economy context is present, the planner evaluates candidate PM switches on relevant industries, applies the override, and triggers an immediate price re-solve.
 
 ### 4. Construction capacity (compact model)
-- **Capacity** `R` starts from `base_construction_capacity` and rises by `construction_per_cs_level` per Construction Sector level (projected at load; refreshed when a CS level completes on the plan branch).
+- **Capacity** starts from `base_construction_capacity` and rises by Construction Sector levels × CS PM `country_construction_add` (fallback `construction_per_cs_level` when the PM is unknown). Load-time projection uses the iron-frame-shaped fallback (base 1 + 5/level).
+- **Government share:** planner throughput is the **government** fraction of national construction (`1 − country_private_construction_allocation_mult` from economic-system laws). Private queue rows do not consume government feed slots. This is **not** a geo-state allocation split.
 - **Cost** per queued level uses save `remaining`, else defs `required_construction`, else `default_construction_cost`.
-- **Allocation cap** `max_construction_allocation` limits points/day per job; leftover capacity fills later queue entries, so enough capacity yields parallel builds. Wait edges advance to the soonest completion under that split.
+- **Allocation cap** defaults to max weekly construction progress ÷ 7 (vanilla base 10/week + owned tech adds such as urbanization). `SimConfig::max_construction_allocation = Some(n)` overrides for tests. Leftover government capacity fills later government queue entries, so enough capacity yields parallel builds. Wait edges advance to the soonest **fed** government completion.
+- **Heuristic ETA** (`construction_eta_days`): default = time until a free government feed slot / usable leftover capacity (one default-cost level at that rate when slots are open); when slots are full = next fed finish. Explicit next-finish mode remains available for wait-with-spare-slots semantics. Open GDP / price atoms no longer clamp every bound through a blanket `.max(1)` on next-completion alone.
 - **Building candidates** are `(building_type, state_id)` for `QueueBuildingLevel` (Vic3 placement):
   - **Direct:** defs building types whose default PM IO helps open `good_price` / raising `gdp`, plus barracks/shipyards/naval admin when PP needs levels (hire stays on the military atom arm). Each type expands to states that already have that building, or every owned state for first-of-type / greenfield. Completion bumps levels in that state (synthetic row when absent) so prices move.
   - **No type-level dominance prune:** modeled benefit/cost axes omit slots, local markets, and unlocks, so “strictly better type” is not sound.
   - **Meta:** Construction Sector when any other build candidate already exists (capacity lever, not IO), also placed by state.
   - **Deferred:** free slots / potentials and building unlock techs (`TODO(buildability)`); A* incumbent upper bound via greedy feasible path (`TODO(anytime-ub)`).
-- This is still a compact model — not full Paradox construction-goods demand or script cost tables beyond loaded `required_construction`.
+- Approximations: full staffing assumed for CS output; building-group `construction_efficiency_*` and most non-tech weekly-progress modifiers ignored; economic-law private mult table is vanilla-only. Still not full Paradox construction-goods demand or script cost tables beyond loaded `required_construction`.
 
 ---
 
