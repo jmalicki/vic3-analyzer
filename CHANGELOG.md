@@ -5,6 +5,16 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### 🌟 Added / Changed
+- **Planning `ConstructionSlots`:** `max_parallel_construction_jobs` now returns
+  `ConstructionSlots` (`NonZeroUsize` newtype, always ≥ 1) instead of `usize`.
+  Call sites need `.get()` (or `Into<usize>`) for a raw count. **Breaking** for
+  external `vic3-planning` consumers of that API.
+
+---
+
 ## [0.7.0] - 2026-08-22
 
 ### 🌟 Added / Changed
