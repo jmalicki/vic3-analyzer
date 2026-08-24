@@ -13,7 +13,7 @@
 
 use super::pathfinding::SearchNode;
 use super::Vic3Node;
-use std::hash::{Hash, Hasher};
+use derivative::Derivative;
 use std::rc::Rc;
 
 /// Fixed beam width for PEA* partial expansion (advance `next` by this many).
@@ -32,12 +32,17 @@ struct RankedSucc {
 
 /// PEA* search node: domain [`Vic3Node`] or an expansion cursor over ranked
 /// successors of that domain state.
-#[derive(Clone, Debug)]
+///
+/// Identity is [`PeaInner`]'s Hash/Eq (Ready node, or Expanding domain+next);
+/// the ranked successor list is ignored.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PeaNode {
     inner: PeaInner,
 }
 
-#[derive(Clone, Debug)]
+/// Expanding identity is `(domain, next)` only — `ranked` is ignored for Hash/Eq.
+#[derive(Clone, Debug, Derivative)]
+#[derivative(PartialEq, Eq, Hash)]
 enum PeaInner {
     Ready(Vic3Node),
     /// Resume handle on parent `domain`: emit `ranked[next..]` in chunks of
@@ -45,6 +50,7 @@ enum PeaInner {
     /// pathfinding's required [`Clone`] cheap.
     Expanding {
         domain: Vic3Node,
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
         ranked: Rc<[RankedSucc]>,
         next: usize,
     },
@@ -112,45 +118,6 @@ impl PeaNode {
             ));
         }
         out
-    }
-}
-
-impl PartialEq for PeaNode {
-    fn eq(&self, other: &Self) -> bool {
-        match (&self.inner, &other.inner) {
-            (PeaInner::Ready(a), PeaInner::Ready(b)) => a == b,
-            (
-                PeaInner::Expanding {
-                    domain: a,
-                    next: na,
-                    ..
-                },
-                PeaInner::Expanding {
-                    domain: b,
-                    next: nb,
-                    ..
-                },
-            ) => a == b && na == nb,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for PeaNode {}
-
-impl Hash for PeaNode {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match &self.inner {
-            PeaInner::Ready(n) => {
-                0u8.hash(state);
-                n.hash(state);
-            }
-            PeaInner::Expanding { domain, next, .. } => {
-                1u8.hash(state);
-                domain.hash(state);
-                next.hash(state);
-            }
-        }
     }
 }
 

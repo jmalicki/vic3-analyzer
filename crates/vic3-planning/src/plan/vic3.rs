@@ -2,12 +2,14 @@
 //!
 //! # Cheap intern key
 //!
-//! [`Vic3Node`] `Hash` uses the precomputed `u64` fingerprint only (cheap
-//! intern buckets). `Eq` is `Rc::ptr_eq` first, then fingerprint + full
-//! [`PlanningState`] when pointers differ — so reconstructs still merge and
-//! fingerprint collisions cannot. Goal / config / economy ride behind [`Rc`]s
-//! and are not part of identity. Prefer [`Rc`] while search is single-threaded;
-//! switch to [`std::sync::Arc`] when nodes must be `Send + Sync`.
+//! [`Vic3Node`] splits into [`Vic3Identity`] (Hash/Eq) and [`Vic3Cache`]
+//! (shared search context / trace, excluded from identity). `Hash` uses the
+//! precomputed `u64` fingerprint only (cheap intern buckets). `Eq` is
+//! `Rc::ptr_eq` first, then fingerprint + full [`PlanningState`] when pointers
+//! differ — so reconstructs still merge and fingerprint collisions cannot.
+//! Goal / config / economy ride behind [`Rc`]s in the cache and are not part
+//! of identity. Prefer [`Rc`] while search is single-threaded; switch to
+//! [`std::sync::Arc`] when nodes must be `Send + Sync`.
 //!
 //! # Heuristic DAG
 //!
@@ -139,13 +141,56 @@ struct SearchContext {
 /// Compact key and state handle for Vic3 planning.
 ///
 /// Nodes created by one search all share the same goal and simulator config.
-/// The `fingerprint` is the complete intern-map identity; `state` and `context`
-/// remain available for simulation without becoming fat hash-map key bodies.
+/// Hash/Eq forward to [`Vic3Identity`]; [`Vic3Cache`] (context/trace) stays
+/// out of the closed-set key.
 #[derive(Clone, Debug)]
 pub struct Vic3Node {
+    identity: Vic3Identity,
+    cache: Vic3Cache,
+}
+
+/// Domain identity for the pathfinder intern map.
+///
+/// `Hash` is fingerprint-only; `Eq` uses pointer equality or fingerprint +
+/// full [`PlanningState`] (see module docs).
+#[derive(Clone, Debug)]
+struct Vic3Identity {
     fingerprint: u64,
     state: Rc<PlanningState>,
+}
+
+/// Per-search shared inputs excluded from Hash/Eq (goal, config, economy, trace).
+#[derive(Clone, Debug)]
+struct Vic3Cache {
     context: Rc<SearchContext>,
+}
+
+impl Vic3Identity {
+    fn new(state: PlanningState) -> Self {
+        let fingerprint = state.fingerprint();
+        Self {
+            fingerprint,
+            state: Rc::new(state),
+        }
+    }
+}
+
+impl PartialEq for Vic3Identity {
+    fn eq(&self, other: &Self) -> bool {
+        // Same allocation → equal. Distinct Rcs may still be the same IR
+        // (reconstructs); Hash is fingerprint-only, so Eq verifies full state
+        // when pointers differ (also covers u64 fingerprint collisions).
+        Rc::ptr_eq(&self.state, &other.state)
+            || (self.fingerprint == other.fingerprint && *self.state == *other.state)
+    }
+}
+
+impl Eq for Vic3Identity {}
+
+impl Hash for Vic3Identity {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.fingerprint.hash(state);
+    }
 }
 
 impl Vic3Node {
@@ -181,82 +226,81 @@ impl Vic3Node {
     }
 
     fn with_context(state: PlanningState, context: Rc<SearchContext>) -> Self {
-        let fingerprint = state.fingerprint();
-        context.trace.note_fp(fingerprint);
+        let identity = Vic3Identity::new(state);
+        context.trace.note_fp(identity.fingerprint);
         Self {
-            fingerprint,
-            state: Rc::new(state),
-            context,
+            identity,
+            cache: Vic3Cache { context },
         }
     }
 
     /// `(dups, uniques)` of domain fingerprints created in this search.
     pub(crate) fn fingerprint_dup_stats(&self) -> (u64, u64) {
-        self.context.trace.fp.snapshot()
+        self.cache.context.trace.fp.snapshot()
     }
 
     /// Full Vic3-side search summary (fp + PEA frontier proxies).
     pub(crate) fn search_trace_summary(&self) -> String {
-        self.context.trace.summary_line()
+        self.cache.context.trace.summary_line()
     }
 
     pub(crate) fn note_pea_ready(&self, ranked_len: usize) {
-        self.context.trace.note_pea_ready(ranked_len);
+        self.cache.context.trace.note_pea_ready(ranked_len);
     }
 
     pub(crate) fn note_pea_resume(&self) {
-        self.context.trace.note_pea_resume();
+        self.cache.context.trace.note_pea_resume();
     }
 
     pub(crate) fn note_beam_emit(&self, emitted: usize, deferred: bool) {
-        self.context.trace.note_beam_emit(emitted, deferred);
+        self.cache.context.trace.note_beam_emit(emitted, deferred);
     }
 
     /// New domain node sharing this node's search context (PEA* child construction).
     pub(crate) fn with_shared_context(state: PlanningState, template: &Self) -> Self {
-        Self::with_context(state, Rc::clone(&template.context))
+        Self::with_context(state, Rc::clone(&template.cache.context))
     }
 
     /// Compact identity used by the pathfinder's intern map.
     pub fn fingerprint(&self) -> u64 {
-        self.fingerprint
+        self.identity.fingerprint
     }
 
     /// Projected world state represented by this node.
     pub fn state(&self) -> &PlanningState {
-        &self.state
+        &self.identity.state
     }
 
     /// Compiled goal shared by this search.
     pub fn goal(&self) -> &Goal {
-        &self.context.goal
+        &self.cache.context.goal
     }
 
     /// Simulator timing configuration shared by this search.
     pub fn config(&self) -> SimConfig {
-        self.context.config
+        self.cache.context.config
     }
 
     pub(crate) fn sim_successors(&self) -> Vec<Successor> {
-        match self.context.economy.as_deref() {
+        match self.cache.context.economy.as_deref() {
             Some(economy) => crate::sim::successors_with_economy(
-                &self.state,
-                &self.context.goal,
-                self.context.config,
+                &self.identity.state,
+                &self.cache.context.goal,
+                self.cache.context.config,
                 economy,
             ),
-            None => crate::sim::successors(&self.state, &self.context.goal, self.context.config),
+            None => crate::sim::successors(
+                &self.identity.state,
+                &self.cache.context.goal,
+                self.cache.context.config,
+            ),
         }
     }
 }
 
 impl PartialEq for Vic3Node {
     fn eq(&self, other: &Self) -> bool {
-        // Same allocation → equal. Distinct Rcs may still be the same IR
-        // (reconstructs); Hash is fingerprint-only, so Eq verifies full state
-        // when pointers differ (also covers u64 fingerprint collisions).
-        Rc::ptr_eq(&self.state, &other.state)
-            || (self.fingerprint == other.fingerprint && *self.state == *other.state)
+        self.identity == other.identity
     }
 }
 
@@ -264,7 +308,7 @@ impl Eq for Vic3Node {}
 
 impl Hash for Vic3Node {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.fingerprint.hash(state);
+        self.identity.hash(state);
     }
 }
 
@@ -465,7 +509,7 @@ impl SearchNode for Vic3Node {
             .into_iter()
             .map(|successor| {
                 (
-                    Self::with_context(successor.state, Rc::clone(&self.context)),
+                    Self::with_context(successor.state, Rc::clone(&self.cache.context)),
                     u32::from(successor.days),
                 )
             })
@@ -473,7 +517,7 @@ impl SearchNode for Vic3Node {
     }
 
     fn is_goal(&self) -> bool {
-        let ok = evaluate(&self.context.goal, &self.state);
+        let ok = evaluate(&self.cache.context.goal, &self.identity.state);
         if ok {
             super::astar_trace::on_goal("vic3", || {
                 format!(
@@ -492,10 +536,10 @@ impl SearchNode for Vic3Node {
     /// zero for atoms without a proven timing model.
     fn heuristic(&self) -> Self::Cost {
         goal_timing_lower_bound(
-            &self.context.goal,
-            &self.state,
-            self.context.config,
-            self.context.economy.as_deref(),
+            &self.cache.context.goal,
+            &self.identity.state,
+            self.cache.context.config,
+            self.cache.context.economy.as_deref(),
         )
     }
 }
