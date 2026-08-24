@@ -24,7 +24,7 @@
 //!
 //! | Table | Exact `=` | Exact range |
 //! | --- | --- | --- |
-//! | `states` | `state_id`, `region_id`, `region_name`, `owner_tag` | — |
+//! | `states` | `state_id`, `region_id`, `region_name`, `state_name`, `owner_tag` | — |
 //! | `goods` | `good`, `good_name` | — (hash / order index) |
 //! | `goods_by_state` | `state_id`, `good` | — |
 //! | `buildings` | `building_id`, `state_id`, `type_id` | — |

@@ -71,6 +71,7 @@ pub use consumption::consumption;
 pub use formula::{
     effective_mapi, local_price, market_access, market_ratio, price, BASE_MAPI, ORDER_EPS,
 };
+pub use label::{pretty_id, script_label};
 pub use optimize::{
     optimize_pms, OptimizeAxis, OptimizeChange, OptimizeDelta, OptimizePmsOpts,
     OptimizePricesSummary, OptimizeResult, MAX_PM_TRIALS, PM_SEARCH_HEURISTIC,

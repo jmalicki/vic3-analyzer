@@ -1,7 +1,7 @@
 //! Compact post-`use_save` campaign summary for MCP tool `campaign_brief`.
 //!
 //! Reads [`SessionBinding`] directly (no SQL round-trip): domestic goods
-//! shortages, region×good hotspots, and a player-scoped alert-kind histogram
+//! shortages, state×good hotspots, and a player-scoped alert-kind histogram
 //! matching zero-arg `alerts()` filtering.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,7 +25,7 @@ pub(crate) fn campaign_brief_json(session: &ActiveSessionInfo, binding: &Session
         .iter()
         .map(|s| {
             let name = s
-                .region_name
+                .state_name
                 .clone()
                 .or_else(|| s.region_id.clone())
                 .unwrap_or_else(|| format!("state {}", s.id));
@@ -76,8 +76,8 @@ pub(crate) fn campaign_brief_json(session: &ActiveSessionInfo, binding: &Session
             "good": good,
             "shortage": shortage,
         })).collect::<Vec<_>>(),
-        "hotspots": hotspots.iter().map(|(region_name, good, shortage)| json!({
-            "region_name": region_name,
+        "hotspots": hotspots.iter().map(|(state_name, good, shortage)| json!({
+            "state_name": state_name,
             "good": good,
             "shortage": shortage,
         })).collect::<Vec<_>>(),

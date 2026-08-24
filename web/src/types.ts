@@ -10,7 +10,7 @@ export interface GoodPrice {
 export interface StateInfo {
   id: number
   region_id?: string
-  region_name?: string
+  state_name?: string
   country_id?: number
   market_id?: number
   arable_land?: number
@@ -145,6 +145,7 @@ export interface CountryInfo {
   id: number
   tag: string
   name?: string
+  adjective?: string
   flag_coa?: string
   flag_data_url?: string
 }

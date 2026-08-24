@@ -176,6 +176,9 @@ pub struct CountryInfo {
     pub id: u32,
     pub tag: String,
     pub name: Option<String>,
+    /// Localized demonym from `{TAG}_ADJ` (e.g. Prussian for PRU).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adjective: Option<String>,
     /// Selected coat-of-arms id when a current flag could be determined.
     pub flag_coa: Option<String>,
     /// PNG data URL for the selected flag, when the defs blob rendered it.
@@ -186,7 +189,8 @@ pub struct CountryInfo {
 pub struct StateInfo {
     pub id: u32,
     pub region_id: Option<String>,
-    pub region_name: Option<String>,
+    /// Display label for this owned slice (bare region, or demonym-prefixed when minority).
+    pub state_name: Option<String>,
     pub country_id: Option<u32>,
     pub market_id: Option<u32>,
     pub arable_land: Option<f64>,

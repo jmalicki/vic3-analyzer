@@ -90,7 +90,7 @@ function stateIdsForAlert(
 }
 
 function stateLabel(state?: StateInfo, stateId?: number): string {
-  if (state?.region_name) return state.region_name
+  if (state?.state_name) return state.state_name
   const region = state?.region_id
   if (region) {
     return region

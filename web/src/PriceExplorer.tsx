@@ -888,7 +888,7 @@ function StateInformation({
 }) {
   return (
     <dl className="state-information">
-      <div><dt>Region</dt><dd>{state?.region_name || displayId(state?.region_id || '—')}</dd></div>
+      <div><dt>Region</dt><dd>{displayId(state?.region_id || '—')}</dd></div>
       <div><dt>Region id</dt><dd>{state?.region_id || '—'}</dd></div>
       <div><dt>Country</dt><dd>{owner?.name || owner?.tag || '—'}</dd></div>
       <div><dt>Market id</dt><dd>{state?.market_id ?? '—'}</dd></div>
@@ -950,7 +950,7 @@ export function StatePage({
   const qualifications = stateQualifications.filter((row) => row.state_id === stateId)
   const needs = stateNeeds.filter((row) => row.state_id === stateId)
   const localGoods = stateGoods.filter((row) => row.state_id === stateId)
-  const name = state?.region_name || displayId(state?.region_id || `State ${stateId}`)
+  const name = state?.state_name || displayId(state?.region_id || `State ${stateId}`)
   const owner = countries.find((country) => country.id === state?.country_id)
   const tabs: Array<{ id: StateTab; label: string }> = [
     { id: 'overview', label: 'Overview' },
@@ -1099,7 +1099,7 @@ export function BuildingPage({
   const state = states.find((row) => row.id === building?.state_id)
   const type = buildingTypes.find((row) => row.id === building?.type_id)
   const name = type?.name || displayId(building?.type_id || `Building ${buildingId}`)
-  const stateName = state?.region_name || displayId(state?.region_id || (state ? `State ${state.id}` : 'State'))
+  const stateName = state?.state_name || displayId(state?.region_id || (state ? `State ${state.id}` : 'State'))
   const employment = building && building.level > 0
     ? Math.max(0, Math.min(1, building.staffing / building.level))
     : 0

@@ -34,6 +34,7 @@ pub fn states_schema() -> SchemaRef {
         Field::new("state_id", DataType::UInt32, false),
         Field::new("region_id", DataType::Utf8, true),
         Field::new("region_name", DataType::Utf8, true),
+        Field::new("state_name", DataType::Utf8, true),
         Field::new("owner_tag", DataType::Utf8, true),
         Field::new("market_id", DataType::UInt32, true),
         Field::new("infrastructure", DataType::Float64, true),
