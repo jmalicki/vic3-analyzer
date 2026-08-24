@@ -506,6 +506,7 @@ pub fn loaded_constructions_json() -> Result<String, ApiError> {
         let player = played_country(&loaded.save).map(|(id, _)| id);
         Ok(serde_json::to_string(&constructions_snapshot(
             &loaded.world,
+            &loaded.prices,
             &loaded.defs,
             player,
         ))?)
@@ -1008,7 +1009,7 @@ struct ConstructionSnap {
     queue: &'static str,
     country_id: Option<u32>,
     state_id: Option<u32>,
-    /// Localized state region label when known.
+    /// Localized state display label when known (demonym-prefixed for minority splits).
     state_name: Option<String>,
     building: String,
     building_name: Option<String>,
@@ -1017,6 +1018,7 @@ struct ConstructionSnap {
 
 fn constructions_snapshot(
     world: &vic3_prices::World,
+    prices: &vic3_prices::PricesResult,
     defs: &vic3_defs::GameDefs,
     player: Option<u32>,
 ) -> ConstructionsSnapshot {
@@ -1030,6 +1032,14 @@ fn constructions_snapshot(
     };
     let state_name = |state_id: Option<u32>| -> Option<String> {
         let id = state_id?;
+        if let Some(name) = prices
+            .states
+            .iter()
+            .find(|s| s.id == id)
+            .and_then(|s| s.state_name.clone())
+        {
+            return Some(name);
+        }
         let state = world.states.iter().find(|s| s.id == id)?;
         state.region.clone().map(|region| {
             defs.labels
@@ -1353,7 +1363,7 @@ mod tests {
         let v: Value = serde_json::from_str(&json).expect("summary json");
         assert_eq!(v["blob_version"], vic3_defs::BLOB_VERSION);
         assert_eq!(v["goods"], 3);
-        assert_eq!(v["labels"], 8);
+        assert_eq!(v["labels"], 9);
         assert_eq!(v["icons"], 2);
         assert!(v["price_range"].as_f64().is_some_and(|range| range > 0.0));
     }

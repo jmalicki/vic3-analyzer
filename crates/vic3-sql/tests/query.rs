@@ -246,7 +246,7 @@ async fn join_example_from_docs() {
     // Exact docs example shape (`docs/sql.md`); fixture may have zero shortages.
     let batches = eng
         .query(
-            "SELECT s.region_name, g.good, g.shortage, g.price \
+            "SELECT s.state_name, g.good, g.shortage, g.price \
              FROM states s \
              JOIN goods_by_state g USING (state_id) \
              WHERE g.shortage > 0 \
@@ -336,6 +336,25 @@ async fn region_name_non_null_when_region_id_set() {
         .expect("count")
         .value(0);
     assert_eq!(count, 0, "region_name must fall back when region_id is set");
+}
+
+#[tokio::test]
+async fn state_name_non_null_when_region_id_set() {
+    let eng = engine().await;
+    let batches = eng
+        .query(
+            "SELECT count(*) AS n FROM states \
+             WHERE region_id IS NOT NULL AND state_name IS NULL",
+        )
+        .await
+        .expect("null state_name");
+    let count = batches[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::Int64Array>()
+        .expect("count")
+        .value(0);
+    assert_eq!(count, 0, "state_name must be set when region_id is set");
 }
 
 #[tokio::test]

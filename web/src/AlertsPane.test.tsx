@@ -18,8 +18,8 @@ const rye: BuildingEconomics = {
   short_inputs: [],
 }
 
-const alpaca = { id: 1, region_id: 'STATE_ALPACA', region_name: 'Alpaca' }
-const zebra = { id: 2, region_id: 'STATE_ZEBRA', region_name: 'Zebra' }
+const alpaca = { id: 1, region_id: 'STATE_ALPACA', state_name: 'Alpaca' }
+const zebra = { id: 2, region_id: 'STATE_ZEBRA', state_name: 'Zebra' }
 
 const result: AlertsResult = {
   alerts: [

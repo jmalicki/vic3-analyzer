@@ -269,13 +269,13 @@ fn detail_rows(
             })
         })
         .collect();
-    let states = world
+    let mut states: Vec<StateInfo> = world
         .states
         .iter()
         .map(|state| StateInfo {
             id: state.id,
             region_id: state.region.clone(),
-            region_name: state
+            state_name: state
                 .region
                 .as_ref()
                 .map(|id| crate::label::script_label(defs, id)),
@@ -286,6 +286,12 @@ fn detail_rows(
             infrastructure_usage: state.infrastructure_usage,
         })
         .collect();
+    let tags_by_country: HashMap<u32, &str> = world
+        .countries
+        .iter()
+        .map(|c| (c.id, c.tag.as_str()))
+        .collect();
+    crate::label::apply_split_state_demonyms(&mut states, &tags_by_country, defs);
     let tables = EmitTables::from_world(world, defs);
     let compact_pops =
         collapsed_state_pops(world, &prices, &base_prices, &units, &need_units, snapshot);
@@ -729,6 +735,7 @@ fn country_rows(world: &World, defs: &GameDefs) -> Vec<CountryInfo> {
                 id: country.id,
                 tag: country.tag.clone(),
                 name: defs.labels.get(&country.tag).cloned(),
+                adjective: crate::label::country_adjective(defs, &country.tag),
                 flag_coa,
                 flag_data_url,
             }

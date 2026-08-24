@@ -14,12 +14,12 @@ const result: PricesResult = {
     {
       id: 1,
       region_id: 'STATE_ALPACA',
-      region_name: 'Alpaca',
+      state_name: 'Alpaca',
       country_id: 10,
       market_id: 1,
     },
-    { id: 2, region_id: 'STATE_ZEBRA', region_name: 'Zebra', country_id: 10, market_id: 2 },
-    { id: 3, region_id: 'STATE_BADGER', region_name: 'Badger', country_id: 20, market_id: 1 },
+    { id: 2, region_id: 'STATE_ZEBRA', state_name: 'Zebra', country_id: 10, market_id: 2 },
+    { id: 3, region_id: 'STATE_BADGER', state_name: 'Badger', country_id: 20, market_id: 1 },
   ],
   buildings: [
     {

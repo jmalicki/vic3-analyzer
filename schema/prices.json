@@ -160,6 +160,13 @@
     },
     "CountryInfo": {
       "properties": {
+        "adjective": {
+          "description": "Localized demonym from `{TAG}_ADJ` (e.g. Prussian for PRU).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "flag_coa": {
           "description": "Selected coat-of-arms id when a current flag could be determined.",
           "type": [
@@ -494,7 +501,8 @@
             "null"
           ]
         },
-        "region_name": {
+        "state_name": {
+          "description": "Display label for this owned slice (bare region, or demonym-prefixed when minority).",
           "type": [
             "string",
             "null"

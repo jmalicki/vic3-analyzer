@@ -254,7 +254,7 @@ impl Vic3McpServer {
 
     /// Compact campaign summary for the bound save (shortages + alert kinds).
     #[tool(
-        description = "After use_save: compact JSON brief (session, player_tag, top domestic goods shortages, region×good hotspots, player-scoped alert kind histogram). Requires a bound save."
+        description = "After use_save: compact JSON brief (session, player_tag, top domestic goods shortages, state×good hotspots, player-scoped alert kind histogram). Requires a bound save."
     )]
     async fn campaign_brief(
         &self,
@@ -310,7 +310,7 @@ impl Vic3McpServer {
              1. Call use_save with selector latest_autosave (or latest).\n\
              2. Call campaign_brief for session meta, top domestic shortages, hotspots, and alert kinds.\n\
              3. If you need more detail, query e.g.\n\
-             SELECT s.region_name, g.good, g.shortage, g.price\n\
+             SELECT s.state_name, g.good, g.shortage, g.price\n\
              FROM states s JOIN goods_by_state g USING (state_id)\n\
              WHERE g.shortage > 0\n\
              ORDER BY g.shortage DESC LIMIT 20.\n\

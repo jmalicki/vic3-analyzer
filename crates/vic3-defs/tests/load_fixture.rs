@@ -278,6 +278,10 @@ fn fixture_coa_flag_and_country_label() {
     let defs = load_fixture();
     assert!(defs.flags.contains_key("TST"), "solid CoA should render");
     assert_eq!(defs.labels.get("TST").map(String::as_str), Some("Testopia"));
+    assert_eq!(
+        defs.labels.get("TST_ADJ").map(String::as_str),
+        Some("Testopian")
+    );
     let selected = vic3_defs::select_flag_coa(&defs.flag_defs, &defs.flags, "TST", &[]);
     assert_eq!(selected.as_deref(), Some("TST"));
 }

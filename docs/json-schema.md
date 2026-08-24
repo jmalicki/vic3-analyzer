@@ -129,7 +129,7 @@ Preview mutation applied to a cloned world (extra levels, then production method
     },
     "countries": {
       "type": "array",
-      "description": "Save countries with tag, localized name, and optional current-flag CoA / PNG data URL.",
+      "description": "Save countries with tag, localized name, demonym, and optional current-flag CoA / PNG data URL.",
       "items": {
         "type": "object",
         "required": ["id", "tag"],
@@ -137,12 +137,13 @@ Preview mutation applied to a cloned world (extra levels, then production method
           "id": { "type": "integer" },
           "tag": { "type": "string" },
           "name": { "type": ["string", "null"] },
+          "adjective": { "type": ["string", "null"], "description": "Localized demonym from {TAG}_ADJ (e.g. Prussian for PRU)." },
           "flag_coa": { "type": ["string", "null"] },
           "flag_data_url": { "type": ["string", "null"] }
         }
       }
     },
-    "states": { "type": "array", "description": "Parsed save state identity, owner/market links, arable land, and infrastructure." },
+    "states": { "type": "array", "description": "Parsed save state identity (`region_id`, demonym-aware `state_name`), owner/market links, arable land, and infrastructure." },
     "state_goods": {
       "type": "array",
       "description": "State-attributed buy/sell orders with the shared synthetic market price."

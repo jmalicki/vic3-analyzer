@@ -38,7 +38,7 @@ const result: PricesResult = {
     {
       id: 1,
       region_id: 'STATE_ALPACA',
-      region_name: 'Alpaca',
+      state_name: 'Alpaca',
       market_id: 1,
       arable_land: 10,
       infrastructure: 22,
