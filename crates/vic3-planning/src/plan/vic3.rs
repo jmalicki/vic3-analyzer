@@ -296,6 +296,21 @@ impl Vic3Node {
             ),
         }
     }
+
+    /// Apply one action against this domain node (PEA* emit path).
+    pub(crate) fn apply_action(&self, action: &crate::sim::Action) -> Option<PlanningState> {
+        match self.cache.context.economy.as_deref() {
+            Some(economy) => crate::sim::apply_action_with_economy(
+                &self.identity.state,
+                action,
+                Some(economy),
+                self.cache.context.config,
+            ),
+            None => {
+                crate::sim::apply_action(&self.identity.state, action, self.cache.context.config)
+            }
+        }
+    }
 }
 
 impl PartialEq for Vic3Node {

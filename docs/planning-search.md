@@ -8,25 +8,27 @@ uses `SearchNode` / `shortest_path` from `rust-advanced-heaps`.
 
 ---
 
-## Implemented: PEA* adapter (fixed beam)
+## Implemented: PEA* adapter (country-wide top‑K)
 
 Production `plan` / `plan_with_economy` wrap [`Vic3Node`] in [`PeaNode`]
 (`crates/vic3-planning/src/plan/pea.rs`):
 
-- Rank domain successors by \(f - g = \mathrm{edge} + h(\mathrm{child})\).
-- Emit a **fixed beam** of [`DEFAULT_PEA_BEAM`] (**16**) children.
-- Re-insert the parent as an `Expanding` cursor (0-cost self-edge) whose
-  heuristic equals the next child's \(f - g\), so the closed-set loop can defer
-  the surplus without a heaps-crate change.
-- Path reconstruction drops cursor nodes and keeps domain fingerprint changes.
+- Build one **national** candidate bag from domain successors (all placements /
+  actions for that parent), scored by \(f - g = \mathrm{edge} + h(\mathrm{child})\).
+- Choose top [`DEFAULT_PEA_BEAM`] (**16**) with `select_nth` (sort only that
+  prefix); defer the rest in one `Expanding` cursor (`Rc<[Candidate]>`).
+- **Apply child only on emit** — bag rows store `action` / `days` / score /
+  deps, not a live [`Vic3Node`].
+- Cursor heuristic is the best deferred \(f - g\) (boundary after `select_nth`).
+- ShopCache stays unranked (score/apply substrate only).
 
 **Beam policy (locked for v1):** fixed width 16 (not ties-only). Motivated by a
 no-refit GDP / profit-per-level proxy on Prussia 1836 (~50 build-level
 candidates; top 8–16 held the high-value head). Not a proven optimum — tune
 with real planner histograms later.
 
-This **defers OPEN insertion**; it still materializes the full successor `Vec`
-once per domain expand.
+This **defers OPEN insertion** per parent expand. It is **not** a shared slot
+budget across the whole A* frontier (that would need heaps-crate changes).
 
 ---
 
