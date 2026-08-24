@@ -1363,7 +1363,7 @@ mod tests {
         let v: Value = serde_json::from_str(&json).expect("summary json");
         assert_eq!(v["blob_version"], vic3_defs::BLOB_VERSION);
         assert_eq!(v["goods"], 3);
-        assert_eq!(v["labels"], 8);
+        assert_eq!(v["labels"], 9);
         assert_eq!(v["icons"], 2);
         assert!(v["price_range"].as_f64().is_some_and(|range| range > 0.0));
     }
