@@ -28,5 +28,5 @@ That script:
 
 ## Notes
 
-- `tauri-plugin-wdio-webdriver` and `tauri-plugin-wdio` (plus frontend `@wdio/tauri-plugin`) are optional (`webdriver` feature / desktop embed) and only initialized for these builds — do not ship that feature to players. Desktop `--mode desktop` loads the guest plugin; e2e also exposes `__vic3_wdio_diag__` / `__vic3_desktop_save_trace__` to prove whether invoke interception breaks `use_save`. Set `VITE_WDIO_STRIP_INVOKE_INTERCEPT=1` only for a controlled bisect that restores the pre-wrap invoke after plugin init.
+- `tauri-plugin-wdio-webdriver` and `tauri-plugin-wdio` (plus frontend `@wdio/tauri-plugin`) are optional (`webdriver` feature / desktop embed) and only initialized for these builds — do not ship that feature to players.
 - If capture fails with a blank/permission error, enable **Screen Recording** for your terminal in System Settings → Privacy & Security.

@@ -7,7 +7,8 @@ export const repoRoot = join(here, '..')
 
 export const mockGameDir = join(repoRoot, 'tests', 'fixtures', 'mock_game')
 export const e2eSavesDir = join(repoRoot, 'tests', 'fixtures', 'e2e_saves')
-export const mockGameDefsPostcard = join(e2eSavesDir, 'mock_game.defs.postcard')
+/** Shared with `vic3-defs` blob guard (`BLOB_VERSION` postcard next to mock_game/). */
+export const mockGameDefsPostcard = join(repoRoot, 'tests', 'fixtures', 'mock_game.defs.postcard')
 
 /** Catalog / upload basenames (copied from *.txt in prepareE2eSaves). */
 export const SAVES = {

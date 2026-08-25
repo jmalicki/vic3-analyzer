@@ -8,4 +8,7 @@ Materialized as `*.v3` at test start (`prepareE2eSaves`) because `*.v3` is gitig
 | `mock_balanced.v3` | `mock_balanced.txt` | `mock_lumber`, Mock Lumber Camp; **no** Mock Tool Workshop |
 | `mock_two_countries.v3` | `mock_two_countries.txt` | Player `MOCK`/`Home` + foreign `RIVAL`/`Rivalia` (other market) — scope / alert tests |
 
-Defs: `mock_game/` tree (Tauri `game_dir`) and `mock_game.defs.postcard` (web Definitions file upload).
+Defs: `../mock_game/` tree (Tauri `game_dir`) and [`../mock_game.defs.postcard`](../mock_game.defs.postcard)
+(web Definitions upload / Tauri `#cfg-defs`). Regenerate with
+`cargo run -q -p vic3-defs --bin emit_fixture_blob -- tests/fixtures/mock_game.defs.postcard tests/fixtures/mock_game`
+when `GameDefs` postcard layout / `BLOB_VERSION` changes.

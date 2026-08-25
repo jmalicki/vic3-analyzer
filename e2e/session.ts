@@ -171,106 +171,6 @@ export async function configureTauriPaths(): Promise<void> {
   await expect($('#cfg-defs')).toHaveValue(expect.stringContaining('mock_game.defs.postcard'))
 }
 
-type Vic3WdioDiag = {
-  nativeInvokeCaptured: boolean
-  invokeIsAccessor: boolean
-  mocksKeys: string[]
-  interceptorFlag: boolean
-  strippedInterception: boolean
-  probeCurrent: (cmd: string, args?: Record<string, unknown>) => Promise<WdioInvokeProbe>
-  probeNative: (cmd: string, args?: Record<string, unknown>) => Promise<WdioInvokeProbe>
-}
-
-type WdioInvokeProbe = {
-  ok: boolean
-  ms: number
-  resultType?: string
-  error?: string
-}
-
-type WdioLoadDiag = {
-  meta?: {
-    nativeInvokeCaptured: boolean
-    invokeIsAccessor: boolean
-    mocksKeys: string[]
-    interceptorFlag: boolean
-    strippedInterception: boolean
-  }
-  listSavesCurrent?: WdioInvokeProbe
-  listSavesNative?: WdioInvokeProbe
-  useSaveCurrent?: WdioInvokeProbe
-  useSaveNative?: WdioInvokeProbe
-  saveTrace?: unknown
-  resolvedLocation?: string
-}
-
-/** Snapshot guest WDIO / invoke state; optionally try use_save via current + native paths. */
-async function collectTauriLoadDiag(
-  stub: string,
-  opts: { tryUseSave: boolean },
-): Promise<WdioLoadDiag> {
-  return browser.execute(
-    async (stubName, tryUseSave) => {
-      const w = window as Window & {
-        __vic3_wdio_diag__?: Vic3WdioDiag
-        __vic3_desktop_save_trace__?: {
-          phase?: string
-          location?: string
-          error?: string
-        }
-        __vic3_native_invoke__?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
-        __TAURI__?: { core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } }
-      }
-      const diag = w.__vic3_wdio_diag__
-      const meta = diag
-        ? {
-            nativeInvokeCaptured: diag.nativeInvokeCaptured,
-            invokeIsAccessor: diag.invokeIsAccessor,
-            mocksKeys: diag.mocksKeys,
-            interceptorFlag: diag.interceptorFlag,
-            strippedInterception: diag.strippedInterception,
-          }
-        : undefined
-      const out: WdioLoadDiag = {
-        meta,
-        saveTrace: w.__vic3_desktop_save_trace__,
-      }
-      if (!diag) return out
-      out.listSavesCurrent = await diag.probeCurrent('list_saves')
-      out.listSavesNative = await diag.probeNative('list_saves')
-
-      const phase = w.__vic3_desktop_save_trace__?.phase
-      // Avoid re-entering use_save if the UI path already reported an error or is mid-flight
-      // (phase === 'start' means still awaiting — a second invoke can hang the probe).
-      if (phase === 'use_save_ok') {
-        out.useSaveCurrent = await diag.probeCurrent('loaded_prices')
-        out.useSaveNative = await diag.probeNative('loaded_prices')
-        return out
-      }
-      const shouldProbeUseSave =
-        tryUseSave && phase !== 'error' && phase !== 'start' && phase !== 'loaded_prices_ok'
-      if (!shouldProbeUseSave) return out
-
-      let location = w.__vic3_desktop_save_trace__?.location
-      try {
-        const rows = (await (w.__TAURI__?.core?.invoke?.('list_saves') as Promise<
-          { name: string; location: string }[]
-        >)) ?? []
-        location = rows.find((r) => r.name === stubName)?.location ?? location
-      } catch {
-        /* keep trace location */
-      }
-      out.resolvedLocation = location
-      const args = { name: stubName, location: location ?? 'local' }
-      out.useSaveCurrent = await diag.probeCurrent('use_save', args)
-      out.useSaveNative = await diag.probeNative('use_save', args)
-      return out
-    },
-    stub,
-    opts.tryUseSave,
-  )
-}
-
 export async function loadTauriSave(saveKey: SaveKey): Promise<void> {
   // Catalog stubs strip the .v3 suffix (normalize_stub).
   const fileName = SAVES[saveKey]
@@ -285,19 +185,7 @@ export async function loadTauriSave(saveKey: SaveKey): Promise<void> {
       timeoutMsg: `Catalog never listed stub ${stub} (from ${fileName})`,
     },
   )
-
-  const preDiag = await collectTauriLoadDiag(stub, { tryUseSave: false })
-
   await $(`tr*=${stub}`).$('button*=Load').click()
-
-  // Sample UI immediately — prior red runs never showed chip "Loading…", which
-  // distinguishes hang vs fast-fail vs click not reaching React.
-  await browser.pause(150)
-  const earlyUi = {
-    chip: await $('[aria-label="Loaded save"]').getText().catch(() => ''),
-    alert: await $('[role="alert"]').getText().catch(() => ''),
-    loadBtn: await $(`tr*=${stub}`).$('button').getText().catch(() => ''),
-  }
 
   // use_save switches to Prices before DesktopCatalog can paint "Loaded …" on
   // #saves-status (that node unmounts). Wait for the chip for *this* stub —
@@ -325,14 +213,9 @@ export async function loadTauriSave(saveKey: SaveKey): Promise<void> {
     const chip = await $('[aria-label="Loaded save"]').getText().catch(() => '')
     const alert = await $('[role="alert"]').getText().catch(() => '')
     const status = await $('#saves-status').getText().catch(() => '')
-    const postDiag = await collectTauriLoadDiag(stub, { tryUseSave: true }).catch((probeErr) => ({
-      probeError: probeErr instanceof Error ? probeErr.message : String(probeErr),
-    }))
     throw new Error(
       `${err instanceof Error ? err.message : String(err)}` +
-        ` (chip=${JSON.stringify(chip)}; alert=${JSON.stringify(alert)}; status=${JSON.stringify(status)};` +
-        ` earlyUi=${JSON.stringify(earlyUi)}; preDiag=${JSON.stringify(preDiag)};` +
-        ` postDiag=${JSON.stringify(postDiag)})`,
+        ` (chip=${JSON.stringify(chip)}; alert=${JSON.stringify(alert)}; status=${JSON.stringify(status)})`,
     )
   }
   await waitForAnalysisReady()
