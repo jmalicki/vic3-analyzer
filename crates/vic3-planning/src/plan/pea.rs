@@ -504,7 +504,6 @@ mod tests {
     #[test]
     #[ignore = "set VIC3_SAVE and VIC3_DEFS for live Prussia GDP spot-check"]
     fn spotcheck_live_save_gdp_pea_vs_full_astar() {
-        use crate::sim::EconomyContext;
         use std::time::Instant;
         use vic3_load::{empty_tokens, load_path_world, load_tokens_path};
         use vic3_prices::{solve, SolveOpts, World};
