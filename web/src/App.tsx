@@ -59,7 +59,7 @@ import type {
   MilitarySnapshot,
   ConstructionsSnapshot,
   DefsSummary,
-  GapAtom,
+  GapSimpleSubgoal,
   GapsResult,
   PlanAction,
   PlanResult,
@@ -902,7 +902,7 @@ function App({ wasmApi }: Props) {
       .finally(() => setBusy(false))
   }
 
-  const formatGap = (atom: GapAtom) => (typeof atom === 'string' ? atom : JSON.stringify(atom))
+  const formatGap = (atom: GapSimpleSubgoal) => (typeof atom === 'string' ? atom : JSON.stringify(atom))
 
   const groupedRecords = useMemo(() => {
     const groups = new Map<string, AnalysisRecord[]>()
@@ -1549,7 +1549,7 @@ function App({ wasmApi }: Props) {
             <strong>Satisfied: {gapsResult.satisfied ? 'Yes' : 'No'}</strong>
           </div>
           {gapsResult.gaps.length === 0 ? (
-            <p>No unsatisfied atoms.</p>
+            <p>No unsatisfied simple subgoals.</p>
           ) : (
             <ul className="gap-list">
               {gapsResult.gaps.map((atom, index) => (
@@ -1724,8 +1724,8 @@ function App({ wasmApi }: Props) {
               <h3>Gap changes</h3>
               <ul>
                 {comparison.gaps.map((change, index) => (
-                  <li key={`${formatGap(change.atom)}-${index}`}>
-                    {formatGap(change.atom)} · {change.status.replaceAll('_', ' ')}
+                  <li key={`${formatGap(change.simple_subgoal)}-${index}`}>
+                    {formatGap(change.simple_subgoal)} · {change.status.replaceAll('_', ' ')}
                   </li>
                 ))}
               </ul>

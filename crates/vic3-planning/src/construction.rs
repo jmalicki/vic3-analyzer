@@ -60,7 +60,7 @@ use vic3_defs::GameDefs;
 use vic3_load::{Save, WorldSnapshot};
 use vic3_prices::World;
 
-use crate::goals::{Atom, Rel};
+use crate::goals::{Rel, SimpleSubgoal};
 use crate::sim::{EconomyContext, SimConfig};
 use crate::world::{ConstructionQueueKind, PlanningState};
 
@@ -345,17 +345,17 @@ pub fn construction_points_per_day_from_world(
 /// Useful for docs / future gates. Construction Sector means-to-an-end now keys
 /// off a non-empty candidate set (after direct/mil adds) rather than this alone.
 #[allow(dead_code)] // kept for callers / future buildability filters
-pub fn atoms_need_construction(atoms: &[Atom]) -> bool {
+pub fn simple_subgoals_need_construction(atoms: &[SimpleSubgoal]) -> bool {
     atoms.iter().any(|atom| {
         matches!(
             atom,
-            Atom::GoodPrice { .. }
-                | Atom::Gdp {
+            SimpleSubgoal::GoodPrice { .. }
+                | SimpleSubgoal::Gdp {
                     rel: Rel::Ge | Rel::Gt | Rel::Eq,
                     ..
                 }
-                | Atom::ArmyPower { .. }
-                | Atom::NavyPower { .. }
+                | SimpleSubgoal::ArmyPower { .. }
+                | SimpleSubgoal::NavyPower { .. }
         )
     })
 }

@@ -481,7 +481,7 @@ ORDER BY step;
 
 ### `gaps(goal TEXT)`
 
-One row per goal atom for readiness (mirrors gaps CLI/UI).
+One row per simple subgoal for readiness (mirrors gaps CLI/UI).
 
 | Column | Notes |
 | --- | --- |

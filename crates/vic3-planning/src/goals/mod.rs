@@ -3,7 +3,7 @@
 //! # Pipeline
 //!
 //! 1. [`compile`] / [`parse`] — chumsky grammar ([`docs/dsl.md`](../../../docs/dsl.md))
-//! 2. Sugar expands to [`Atom`] trees (`declare-war`, `research`, `gdp`)
+//! 2. Sugar expands to [`SimpleSubgoal`] trees (`declare-war`, `research`, `gdp`)
 //! 3. [`evaluate`] / [`gaps`] — read [`crate::world::PlanningState`] only
 //!
 //! This module does **not** search. Timelines live in `crate::plan`; successors in
@@ -15,12 +15,12 @@
 //! | --- | --- |
 //! | `declare-war(state=…)` or `region=` | interest ∧ army ≥ [`DECLARE_WAR_ARMY_THRESHOLD`] ∧ munitions ≤ [`DECLARE_WAR_MUNITIONS_PRICE_CEILING`] ∧ solvent (I-declare-war) |
 //! | `colonize(state=…)` or `region=` | colonization tech ∧ colonial law ∨ ∧ quinine ∧ interest ∧ army ≥ [`COLONIZE_ARMY_THRESHOLD`] ∧ navy ≥ [`COLONIZE_NAVY_THRESHOLD`] ∧ solvent (I-colonize) |
-//! | `research(tech=…)` / `has_tech(…)` | [`Atom::HasTech`] |
-//! | `gdp rel n` | [`Atom::Gdp`] on modeled GDP |
+//! | `research(tech=…)` / `has_tech(…)` | [`SimpleSubgoal::HasTech`] |
+//! | `gdp rel n` | [`SimpleSubgoal::Gdp`] on modeled GDP |
 //!
 //! Optional `tag=` / `wargoal=` on `declare-war` parse but are ignored.
 //!
-//! # Consumers (same atoms)
+//! # Consumers (same simple subgoals)
 //!
 //! - Web UI presets (`web/src/planTemplates.ts`) emit ordinary DSL strings
 //! - SQL TVFs `plan(goal)` / `gaps(goal)` compile the same string against the
@@ -116,7 +116,7 @@ impl Rel {
     }
 }
 
-/// Where [`Atom::InterestIn`] points.
+/// Where [`SimpleSubgoal::InterestIn`] points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum InterestKind {
     State,
@@ -126,29 +126,30 @@ pub enum InterestKind {
 /// Cleared / failing / unknown for SQL `gaps()` and agent-facing honesty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AtomStatus {
+pub enum SimpleSubgoalStatus {
     Cleared,
     Failing,
     /// Metric missing from save IR — not a measured shortfall.
     Unknown,
 }
 
-impl AtomStatus {
+impl SimpleSubgoalStatus {
     pub fn as_str(self) -> &'static str {
         match self {
-            AtomStatus::Cleared => "cleared",
-            AtomStatus::Failing => "failing",
-            AtomStatus::Unknown => "unknown",
+            SimpleSubgoalStatus::Cleared => "cleared",
+            SimpleSubgoalStatus::Failing => "failing",
+            SimpleSubgoalStatus::Unknown => "unknown",
         }
     }
 }
 
-/// Compiled leaf predicate over [`PlanningState`].
+/// **Simple subgoal** — a goal node with no further goal children in the
+/// compiled tree (may be refined by future sugar).
 ///
 /// Gaps list these; sim successors branch only on open ones; SQL `gaps()`
 /// formats them as `predicate` / `status` / `detail` rows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum Atom {
+pub enum SimpleSubgoal {
     HasTech(String),
     HasLaw(String),
     GoodPrice { good: String, rel: Rel, value: f64 },
@@ -163,130 +164,131 @@ pub enum Atom {
     CreditHeadroom { rel: Rel, value: f64 },
 }
 
-impl Atom {
+impl SimpleSubgoal {
     pub fn is_interest(&self) -> bool {
-        matches!(self, Atom::InterestIn { .. })
+        matches!(self, SimpleSubgoal::InterestIn { .. })
     }
 
     pub fn is_army(&self) -> bool {
-        matches!(self, Atom::ArmyPower { .. })
+        matches!(self, SimpleSubgoal::ArmyPower { .. })
     }
 
     pub fn is_navy(&self) -> bool {
-        matches!(self, Atom::NavyPower { .. })
+        matches!(self, SimpleSubgoal::NavyPower { .. })
     }
 
     pub fn is_munitions_price(&self) -> bool {
-        matches!(self, Atom::GoodPrice { good, .. } if good == MUNITIONS_GOOD)
+        matches!(self, SimpleSubgoal::GoodPrice { good, .. } if good == MUNITIONS_GOOD)
     }
 
     pub fn is_solvent(&self) -> bool {
-        matches!(self, Atom::Solvent)
+        matches!(self, SimpleSubgoal::Solvent)
     }
 
     pub fn is_has_tech(&self, tech: &str) -> bool {
-        matches!(self, Atom::HasTech(t) if t == tech)
+        matches!(self, SimpleSubgoal::HasTech(t) if t == tech)
     }
 
     pub fn is_has_law(&self, law: &str) -> bool {
-        matches!(self, Atom::HasLaw(id) if crate::world::law_key(id) == crate::world::law_key(law))
+        matches!(self, SimpleSubgoal::HasLaw(id) if crate::world::law_key(id) == crate::world::law_key(law))
     }
 
     /// Whether the atom holds. Unknown metrics (including missing army PP) are false.
     pub fn eval(&self, state: &PlanningState) -> bool {
-        matches!(self.status(state), AtomStatus::Cleared)
+        matches!(self.status(state), SimpleSubgoalStatus::Cleared)
     }
 
     /// Cleared / failing / unknown — used by SQL `gaps()` so missing PP is not “failing”.
-    pub fn status(&self, state: &PlanningState) -> AtomStatus {
+    pub fn status(&self, state: &PlanningState) -> SimpleSubgoalStatus {
         match self {
-            Atom::HasTech(tech) => {
+            SimpleSubgoal::HasTech(tech) => {
                 if state.has_tech(tech) {
-                    AtomStatus::Cleared
+                    SimpleSubgoalStatus::Cleared
                 } else {
-                    AtomStatus::Failing
+                    SimpleSubgoalStatus::Failing
                 }
             }
-            Atom::HasLaw(law) => {
+            SimpleSubgoal::HasLaw(law) => {
                 if state.has_law(law) {
-                    AtomStatus::Cleared
+                    SimpleSubgoalStatus::Cleared
                 } else {
-                    AtomStatus::Failing
+                    SimpleSubgoalStatus::Failing
                 }
             }
-            Atom::GoodPrice { good, rel, value } => match state.price(good) {
-                Some(p) if rel.holds(p, *value) => AtomStatus::Cleared,
-                Some(_) => AtomStatus::Failing,
-                None => AtomStatus::Unknown,
+            SimpleSubgoal::GoodPrice { good, rel, value } => match state.price(good) {
+                Some(p) if rel.holds(p, *value) => SimpleSubgoalStatus::Cleared,
+                Some(_) => SimpleSubgoalStatus::Failing,
+                None => SimpleSubgoalStatus::Unknown,
             },
-            Atom::ArmyPower { rel, value } => match state.army_power_projection {
+            SimpleSubgoal::ArmyPower { rel, value } => match state.army_power_projection {
                 Some(power) if rel.holds(power, *value) && state.army_buildings_fully_staffed() => {
-                    AtomStatus::Cleared
+                    SimpleSubgoalStatus::Cleared
                 }
-                Some(_) => AtomStatus::Failing,
-                None => AtomStatus::Unknown,
+                Some(_) => SimpleSubgoalStatus::Failing,
+                None => SimpleSubgoalStatus::Unknown,
             },
-            Atom::NavyPower { rel, value } => match state.navy_power_projection {
+            SimpleSubgoal::NavyPower { rel, value } => match state.navy_power_projection {
                 Some(power) if rel.holds(power, *value) && state.navy_buildings_fully_staffed() => {
-                    AtomStatus::Cleared
+                    SimpleSubgoalStatus::Cleared
                 }
-                Some(_) => AtomStatus::Failing,
-                None => AtomStatus::Unknown,
+                Some(_) => SimpleSubgoalStatus::Failing,
+                None => SimpleSubgoalStatus::Unknown,
             },
-            Atom::Solvent => {
+            SimpleSubgoal::Solvent => {
                 if state.solvent {
-                    AtomStatus::Cleared
+                    SimpleSubgoalStatus::Cleared
                 } else {
-                    AtomStatus::Failing
+                    SimpleSubgoalStatus::Failing
                 }
             }
-            Atom::InterestIn {
+            SimpleSubgoal::InterestIn {
                 kind: InterestKind::State,
                 id,
             } => {
                 if state.has_interest_state(id) {
-                    AtomStatus::Cleared
+                    SimpleSubgoalStatus::Cleared
                 } else {
-                    AtomStatus::Failing
+                    SimpleSubgoalStatus::Failing
                 }
             }
-            Atom::InterestIn {
+            SimpleSubgoal::InterestIn {
                 kind: InterestKind::Region,
                 id,
             } => {
                 if state.has_interest_region(id) {
-                    AtomStatus::Cleared
+                    SimpleSubgoalStatus::Cleared
                 } else {
-                    AtomStatus::Failing
+                    SimpleSubgoalStatus::Failing
                 }
             }
-            Atom::Gdp { rel, value } => {
+            SimpleSubgoal::Gdp { rel, value } => {
                 if rel.holds(state.gdp, *value) {
-                    AtomStatus::Cleared
+                    SimpleSubgoalStatus::Cleared
                 } else {
-                    AtomStatus::Failing
+                    SimpleSubgoalStatus::Failing
                 }
             }
-            Atom::WeeklyBalance { rel, value } => match state.weekly_balance {
-                Some(balance) if rel.holds(balance, *value) => AtomStatus::Cleared,
-                Some(_) => AtomStatus::Failing,
-                None => AtomStatus::Unknown,
+            SimpleSubgoal::WeeklyBalance { rel, value } => match state.weekly_balance {
+                Some(balance) if rel.holds(balance, *value) => SimpleSubgoalStatus::Cleared,
+                Some(_) => SimpleSubgoalStatus::Failing,
+                None => SimpleSubgoalStatus::Unknown,
             },
-            Atom::PopulationWeightedWealth { rel, value } => match state.population_weighted_wealth
-            {
-                Some(wealth) if rel.holds(wealth, *value) => AtomStatus::Cleared,
-                Some(_) => AtomStatus::Failing,
-                None => AtomStatus::Unknown,
+            SimpleSubgoal::PopulationWeightedWealth { rel, value } => {
+                match state.population_weighted_wealth {
+                    Some(wealth) if rel.holds(wealth, *value) => SimpleSubgoalStatus::Cleared,
+                    Some(_) => SimpleSubgoalStatus::Failing,
+                    None => SimpleSubgoalStatus::Unknown,
+                }
+            }
+            SimpleSubgoal::DebtPrincipal { rel, value } => match state.debt_principal {
+                Some(principal) if rel.holds(principal, *value) => SimpleSubgoalStatus::Cleared,
+                Some(_) => SimpleSubgoalStatus::Failing,
+                None => SimpleSubgoalStatus::Unknown,
             },
-            Atom::DebtPrincipal { rel, value } => match state.debt_principal {
-                Some(principal) if rel.holds(principal, *value) => AtomStatus::Cleared,
-                Some(_) => AtomStatus::Failing,
-                None => AtomStatus::Unknown,
-            },
-            Atom::CreditHeadroom { rel, value } => match state.credit_headroom {
-                Some(headroom) if rel.holds(headroom, *value) => AtomStatus::Cleared,
-                Some(_) => AtomStatus::Failing,
-                None => AtomStatus::Unknown,
+            SimpleSubgoal::CreditHeadroom { rel, value } => match state.credit_headroom {
+                Some(headroom) if rel.holds(headroom, *value) => SimpleSubgoalStatus::Cleared,
+                Some(_) => SimpleSubgoalStatus::Failing,
+                None => SimpleSubgoalStatus::Unknown,
             },
         }
     }
@@ -298,7 +300,7 @@ pub enum Goal {
     And(Vec<Goal>),
     Or(Vec<Goal>),
     Not(Box<Goal>),
-    Atom(Atom),
+    Simple(SimpleSubgoal),
 }
 
 impl Goal {
@@ -318,43 +320,45 @@ impl Goal {
         }
     }
 
-    /// Flattened atoms (including under `not`).
-    pub fn atoms(&self) -> Vec<&Atom> {
+    /// Flattened **simple subgoal**s (including under `not`).
+    pub fn simple_subgoals(&self) -> Vec<&SimpleSubgoal> {
         let mut out = Vec::new();
-        self.collect_atoms(&mut out);
+        self.collect_simple_subgoals(&mut out);
         out
     }
 
-    fn collect_atoms<'a>(&'a self, out: &mut Vec<&'a Atom>) {
+    fn collect_simple_subgoals<'a>(&'a self, out: &mut Vec<&'a SimpleSubgoal>) {
         match self {
             Goal::And(xs) | Goal::Or(xs) => {
                 for x in xs {
-                    x.collect_atoms(out);
+                    x.collect_simple_subgoals(out);
                 }
             }
-            Goal::Not(inner) => inner.collect_atoms(out),
-            Goal::Atom(atom) => out.push(atom),
+            Goal::Not(inner) => inner.collect_simple_subgoals(out),
+            Goal::Simple(atom) => out.push(atom),
         }
     }
 
-    pub fn has_interest_atom(&self) -> bool {
-        self.atoms().iter().any(|a| a.is_interest())
+    pub fn has_interest_simple_subgoal(&self) -> bool {
+        self.simple_subgoals().iter().any(|a| a.is_interest())
     }
 
-    pub fn has_army_atom(&self) -> bool {
-        self.atoms().iter().any(|a| a.is_army())
+    pub fn has_army_simple_subgoal(&self) -> bool {
+        self.simple_subgoals().iter().any(|a| a.is_army())
     }
 
-    pub fn has_navy_atom(&self) -> bool {
-        self.atoms().iter().any(|a| a.is_navy())
+    pub fn has_navy_simple_subgoal(&self) -> bool {
+        self.simple_subgoals().iter().any(|a| a.is_navy())
     }
 
-    pub fn has_munitions_price_atom(&self) -> bool {
-        self.atoms().iter().any(|a| a.is_munitions_price())
+    pub fn has_munitions_price_simple_subgoal(&self) -> bool {
+        self.simple_subgoals()
+            .iter()
+            .any(|a| a.is_munitions_price())
     }
 
-    pub fn has_solvent_atom(&self) -> bool {
-        self.atoms().iter().any(|a| a.is_solvent())
+    pub fn has_solvent_simple_subgoal(&self) -> bool {
+        self.simple_subgoals().iter().any(|a| a.is_solvent())
     }
 }
 
@@ -371,7 +375,7 @@ pub fn evaluate(goal: &Goal, state: &PlanningState) -> bool {
         Goal::And(xs) => xs.iter().all(|g| evaluate(g, state)),
         Goal::Or(xs) => xs.iter().any(|g| evaluate(g, state)),
         Goal::Not(inner) => !evaluate(inner, state),
-        Goal::Atom(atom) => atom.eval(state),
+        Goal::Simple(atom) => atom.eval(state),
     }
 }
 
@@ -382,20 +386,24 @@ pub fn evaluate(goal: &Goal, state: &PlanningState) -> bool {
 ///
 /// Tech gaps are leaf-only here. Prefer [`gaps_with_defs`] when
 /// [`vic3_defs::GameDefs`] technologies are loaded so missing ancestors appear.
-pub fn gaps(goal: &Goal, state: &PlanningState) -> Vec<Atom> {
+pub fn gaps(goal: &Goal, state: &PlanningState) -> Vec<SimpleSubgoal> {
     let mut out = Vec::new();
     collect_gaps(goal, state, &mut out);
     out
 }
 
-/// Like [`gaps`], then expand each open [`Atom::HasTech`] through prerequisite
+/// Like [`gaps`], then expand each open [`SimpleSubgoal::HasTech`] through prerequisite
 /// closure using `defs` (DSL string / compiled goal stay leaf-shaped).
-pub fn gaps_with_defs(goal: &Goal, state: &PlanningState, defs: &vic3_defs::GameDefs) -> Vec<Atom> {
+pub fn gaps_with_defs(
+    goal: &Goal,
+    state: &PlanningState,
+    defs: &vic3_defs::GameDefs,
+) -> Vec<SimpleSubgoal> {
     let open = gaps(goal, state);
     crate::tech::expand_tech_gap_atoms(&open, state, defs)
 }
 
-fn collect_gaps(goal: &Goal, state: &PlanningState, out: &mut Vec<Atom>) {
+fn collect_gaps(goal: &Goal, state: &PlanningState, out: &mut Vec<SimpleSubgoal>) {
     if evaluate(goal, state) {
         return;
     }
@@ -408,11 +416,11 @@ fn collect_gaps(goal: &Goal, state: &PlanningState, out: &mut Vec<Atom>) {
         Goal::Not(inner) => {
             flatten_atoms(inner, out);
         }
-        Goal::Atom(atom) => out.push(atom.clone()),
+        Goal::Simple(atom) => out.push(atom.clone()),
     }
 }
 
-fn flatten_atoms(goal: &Goal, out: &mut Vec<Atom>) {
+fn flatten_atoms(goal: &Goal, out: &mut Vec<SimpleSubgoal>) {
     match goal {
         Goal::And(xs) | Goal::Or(xs) => {
             for x in xs {
@@ -420,7 +428,7 @@ fn flatten_atoms(goal: &Goal, out: &mut Vec<Atom>) {
             }
         }
         Goal::Not(inner) => flatten_atoms(inner, out),
-        Goal::Atom(atom) => out.push(atom.clone()),
+        Goal::Simple(atom) => out.push(atom.clone()),
     }
 }
 
@@ -443,32 +451,32 @@ mod tests {
     #[test]
     fn golden_declare_war_includes_interest_army_munitions_price_solvent() {
         let goal = parse("declare-war(tag=FRA, wargoal=conquer_state, state=alsace)").unwrap();
-        assert!(goal.has_interest_atom(), "interest");
-        assert!(goal.has_army_atom(), "army");
-        assert!(goal.has_munitions_price_atom(), "munitions-price");
-        assert!(goal.has_solvent_atom(), "solvent");
+        assert!(goal.has_interest_simple_subgoal(), "interest");
+        assert!(goal.has_army_simple_subgoal(), "army");
+        assert!(goal.has_munitions_price_simple_subgoal(), "munitions-price");
+        assert!(goal.has_solvent_simple_subgoal(), "solvent");
         let interest = goal
-            .atoms()
+            .simple_subgoals()
             .into_iter()
             .find(|a| a.is_interest())
             .expect("interest atom");
         assert_eq!(
             interest,
-            &Atom::InterestIn {
+            &SimpleSubgoal::InterestIn {
                 kind: InterestKind::State,
                 id: "alsace".into(),
             }
         );
-        assert!(goal.atoms().iter().any(|a| matches!(
+        assert!(goal.simple_subgoals().iter().any(|a| matches!(
             a,
-            Atom::ArmyPower {
+            SimpleSubgoal::ArmyPower {
                 rel: Rel::Ge,
                 value,
             } if *value == DECLARE_WAR_ARMY_THRESHOLD
         )));
-        assert!(goal.atoms().iter().any(|a| matches!(
+        assert!(goal.simple_subgoals().iter().any(|a| matches!(
             a,
-            Atom::GoodPrice {
+            SimpleSubgoal::GoodPrice {
                 good,
                 rel: Rel::Le,
                 value,
@@ -479,30 +487,33 @@ mod tests {
     #[test]
     fn golden_colonize_includes_tech_law_quinine_interest_army_navy_solvent() {
         let goal = parse("colonize(region=region_congo)").unwrap();
-        assert!(goal.has_interest_atom(), "interest");
-        assert!(goal.has_army_atom(), "army");
-        assert!(goal.has_navy_atom(), "navy");
-        assert!(goal.has_solvent_atom(), "solvent");
-        assert!(goal.atoms().iter().any(|a| a.is_has_tech(COLONIZE_TECH)));
+        assert!(goal.has_interest_simple_subgoal(), "interest");
+        assert!(goal.has_army_simple_subgoal(), "army");
+        assert!(goal.has_navy_simple_subgoal(), "navy");
+        assert!(goal.has_solvent_simple_subgoal(), "solvent");
         assert!(goal
-            .atoms()
+            .simple_subgoals()
+            .iter()
+            .any(|a| a.is_has_tech(COLONIZE_TECH)));
+        assert!(goal
+            .simple_subgoals()
             .iter()
             .any(|a| a.is_has_tech(COLONIZE_QUININE_TECH)));
         assert!(goal
-            .atoms()
+            .simple_subgoals()
             .iter()
             .any(|a| a.is_has_law(LAW_COLONIAL_RESETTLEMENT)
                 || a.is_has_law(LAW_COLONIAL_EXPLOITATION)));
-        assert!(goal.atoms().iter().any(|a| matches!(
+        assert!(goal.simple_subgoals().iter().any(|a| matches!(
             a,
-            Atom::NavyPower {
+            SimpleSubgoal::NavyPower {
                 rel: Rel::Ge,
                 value,
             } if *value == COLONIZE_NAVY_THRESHOLD
         )));
         assert!(matches!(
-            goal.atoms().iter().find(|a| a.is_interest()),
-            Some(Atom::InterestIn {
+            goal.simple_subgoals().iter().find(|a| a.is_interest()),
+            Some(SimpleSubgoal::InterestIn {
                 kind: InterestKind::Region,
                 id,
             }) if id == "region_congo"
@@ -517,19 +528,19 @@ mod tests {
     #[test]
     fn golden_research_is_has_tech() {
         let goal = parse("research(tech=nitroglycerin)").unwrap();
-        assert_eq!(goal.atoms().len(), 1);
-        assert!(goal.atoms()[0].is_has_tech("nitroglycerin"));
-        assert!(matches!(goal, Goal::Atom(Atom::HasTech(t)) if t == "nitroglycerin"));
+        assert_eq!(goal.simple_subgoals().len(), 1);
+        assert!(goal.simple_subgoals()[0].is_has_tech("nitroglycerin"));
+        assert!(matches!(goal, Goal::Simple(SimpleSubgoal::HasTech(t)) if t == "nitroglycerin"));
     }
 
     #[test]
     fn golden_good_price_and_solvent() {
         let goal = parse("good_price(ammunition) <= 40 && solvent").unwrap();
-        let atoms = goal.atoms();
+        let atoms = goal.simple_subgoals();
         assert_eq!(atoms.len(), 2, "{goal:?}");
         assert!(atoms.iter().any(|a| matches!(
             a,
-            Atom::GoodPrice {
+            SimpleSubgoal::GoodPrice {
                 good,
                 rel: Rel::Le,
                 value,
@@ -541,43 +552,43 @@ mod tests {
     #[test]
     fn research_and_numeric_metrics_compile() {
         let tech = parse("has_tech(nitroglycerin)").unwrap();
-        assert!(matches!(tech, Goal::Atom(Atom::HasTech(t)) if t == "nitroglycerin"));
+        assert!(matches!(tech, Goal::Simple(SimpleSubgoal::HasTech(t)) if t == "nitroglycerin"));
         assert!(matches!(
             parse("has_law(law_autocracy)").unwrap(),
-            Goal::Atom(Atom::HasLaw(law)) if law == "law_autocracy"
+            Goal::Simple(SimpleSubgoal::HasLaw(law)) if law == "law_autocracy"
         ));
         let gdp = parse("gdp >= 50e6").unwrap();
         assert!(matches!(
             gdp,
-            Goal::Atom(Atom::Gdp {
+            Goal::Simple(SimpleSubgoal::Gdp {
                 rel: Rel::Ge,
                 value,
             }) if value == 50e6
         ));
         assert!(matches!(
             parse("weekly_balance >= 100").unwrap(),
-            Goal::Atom(Atom::WeeklyBalance {
+            Goal::Simple(SimpleSubgoal::WeeklyBalance {
                 rel: Rel::Ge,
                 value: 100.0,
             })
         ));
         assert!(matches!(
             parse("population_weighted_wealth >= 20").unwrap(),
-            Goal::Atom(Atom::PopulationWeightedWealth {
+            Goal::Simple(SimpleSubgoal::PopulationWeightedWealth {
                 rel: Rel::Ge,
                 value: 20.0,
             })
         ));
         assert!(matches!(
             parse("credit_headroom > 0").unwrap(),
-            Goal::Atom(Atom::CreditHeadroom {
+            Goal::Simple(SimpleSubgoal::CreditHeadroom {
                 rel: Rel::Gt,
                 value: 0.0,
             })
         ));
         assert!(matches!(
             parse("debt_principal <= 200").unwrap(),
-            Goal::Atom(Atom::DebtPrincipal {
+            Goal::Simple(SimpleSubgoal::DebtPrincipal {
                 rel: Rel::Le,
                 value: 200.0,
             })
@@ -634,10 +645,10 @@ mod tests {
         let war = parse("declare-war(tag=FRA, wargoal=conquer_state, state=alsace)").unwrap();
         assert!(!evaluate(&war, &state));
         let g = gaps(&war, &state);
-        assert!(g.iter().any(Atom::is_interest));
-        assert!(g.iter().any(Atom::is_army));
-        assert!(g.iter().any(Atom::is_munitions_price));
-        assert!(g.iter().any(Atom::is_solvent));
+        assert!(g.iter().any(SimpleSubgoal::is_interest));
+        assert!(g.iter().any(SimpleSubgoal::is_army));
+        assert!(g.iter().any(SimpleSubgoal::is_munitions_price));
+        assert!(g.iter().any(SimpleSubgoal::is_solvent));
         assert_eq!(g.len(), 4);
 
         let research = parse("research(tech=nitroglycerin)").unwrap();
@@ -703,15 +714,15 @@ mod tests {
         let atom = parse("army_power_projection >= 100").unwrap();
         assert!(matches!(
             atom,
-            Goal::Atom(Atom::ArmyPower {
+            Goal::Simple(SimpleSubgoal::ArmyPower {
                 rel: Rel::Ge,
                 value: 100.0
             })
         ));
-        let Goal::Atom(army) = &atom else {
+        let Goal::Simple(army) = &atom else {
             panic!("expected army atom");
         };
-        assert_eq!(army.status(&unknown), AtomStatus::Unknown);
+        assert_eq!(army.status(&unknown), SimpleSubgoalStatus::Unknown);
         assert!(!army.eval(&unknown));
 
         let known_zero = PlanningState::from_parts(PlanningParts {
@@ -719,14 +730,14 @@ mod tests {
             army_power_projection: Some(0.0),
             ..PlanningParts::default()
         });
-        assert_eq!(army.status(&known_zero), AtomStatus::Failing);
+        assert_eq!(army.status(&known_zero), SimpleSubgoalStatus::Failing);
 
         let ready = PlanningState::from_parts(PlanningParts {
             country: "GER".into(),
             army_power_projection: Some(150.0),
             ..PlanningParts::default()
         });
-        assert_eq!(army.status(&ready), AtomStatus::Cleared);
+        assert_eq!(army.status(&ready), SimpleSubgoalStatus::Cleared);
     }
 
     #[test]
@@ -790,13 +801,13 @@ mod tests {
                 "declare-war(tag={tag}, wargoal={wargoal}, state={state})"
             );
             let goal = parse(&src).expect("declare-war parses");
-            prop_assert!(goal.has_interest_atom(), "interest missing in {src}");
-            prop_assert!(goal.has_army_atom(), "army missing in {src}");
+            prop_assert!(goal.has_interest_simple_subgoal(), "interest missing in {src}");
+            prop_assert!(goal.has_army_simple_subgoal(), "army missing in {src}");
             prop_assert!(
-                goal.has_munitions_price_atom(),
+                goal.has_munitions_price_simple_subgoal(),
                 "munitions-price missing in {src}"
             );
-            prop_assert!(goal.has_solvent_atom(), "solvent missing in {src}");
+            prop_assert!(goal.has_solvent_simple_subgoal(), "solvent missing in {src}");
         }
 
         /// I-colonize: tech, colonial law, quinine, interest, army, navy, solvent.
@@ -806,16 +817,16 @@ mod tests {
         ) {
             let src = format!("colonize(region={region})");
             let goal = parse(&src).expect("colonize parses");
-            prop_assert!(goal.has_interest_atom(), "interest missing in {src}");
-            prop_assert!(goal.has_army_atom(), "army missing in {src}");
-            prop_assert!(goal.has_navy_atom(), "navy missing in {src}");
-            prop_assert!(goal.has_solvent_atom(), "solvent missing in {src}");
+            prop_assert!(goal.has_interest_simple_subgoal(), "interest missing in {src}");
+            prop_assert!(goal.has_army_simple_subgoal(), "army missing in {src}");
+            prop_assert!(goal.has_navy_simple_subgoal(), "navy missing in {src}");
+            prop_assert!(goal.has_solvent_simple_subgoal(), "solvent missing in {src}");
             prop_assert!(
-                goal.atoms().iter().any(|a| a.is_has_tech(COLONIZE_TECH)),
+                goal.simple_subgoals().iter().any(|a| a.is_has_tech(COLONIZE_TECH)),
                 "colonization tech missing in {src}"
             );
             prop_assert!(
-                goal.atoms().iter().any(|a| a.is_has_tech(COLONIZE_QUININE_TECH)),
+                goal.simple_subgoals().iter().any(|a| a.is_has_tech(COLONIZE_QUININE_TECH)),
                 "quinine missing in {src}"
             );
         }

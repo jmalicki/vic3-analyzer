@@ -8,7 +8,7 @@ use std::collections::{BTreeSet, VecDeque};
 
 use vic3_defs::GameDefs;
 
-use crate::goals::Atom;
+use crate::goals::SimpleSubgoal;
 use crate::world::PlanningState;
 
 /// Missing techs that must be researched to own `leaf`, including `leaf`.
@@ -64,12 +64,16 @@ pub fn tech_prereqs_satisfied(tech: &str, state: &PlanningState, defs: Option<&G
 /// Non-tech atoms are preserved. Duplicate tech ids collapse. Without a
 /// useful graph (empty technologies map), returns `atoms` unchanged aside
 /// from dropping already-owned techs.
-pub fn expand_tech_gap_atoms(atoms: &[Atom], state: &PlanningState, defs: &GameDefs) -> Vec<Atom> {
+pub fn expand_tech_gap_atoms(
+    atoms: &[SimpleSubgoal],
+    state: &PlanningState,
+    defs: &GameDefs,
+) -> Vec<SimpleSubgoal> {
     if defs.technologies.is_empty() {
         return atoms
             .iter()
             .filter(|atom| match atom {
-                Atom::HasTech(tech) => !state.has_tech(tech),
+                SimpleSubgoal::HasTech(tech) => !state.has_tech(tech),
                 _ => true,
             })
             .cloned()
@@ -79,10 +83,10 @@ pub fn expand_tech_gap_atoms(atoms: &[Atom], state: &PlanningState, defs: &GameD
     let mut seen_techs = BTreeSet::new();
     for atom in atoms {
         match atom {
-            Atom::HasTech(tech) => {
+            SimpleSubgoal::HasTech(tech) => {
                 for id in missing_tech_closure(tech, state, defs) {
                     if seen_techs.insert(id.clone()) {
-                        out.push(Atom::HasTech(id));
+                        out.push(SimpleSubgoal::HasTech(id));
                     }
                 }
             }

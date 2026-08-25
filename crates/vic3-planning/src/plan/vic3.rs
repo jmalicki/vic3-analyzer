@@ -27,7 +27,7 @@
 //! a substitute for search.
 
 use super::pathfinding::SearchNode;
-use crate::goals::{evaluate, Atom, Goal};
+use crate::goals::{evaluate, Goal, SimpleSubgoal};
 use crate::sim::{EconomyContext, SimConfig, Successor};
 use crate::world::PlanningState;
 use std::cell::{Cell, RefCell};
@@ -377,15 +377,17 @@ fn goal_timing_lower_bound(
             .min()
             .unwrap_or(0),
         Goal::Not(_) => 0,
-        Goal::Atom(Atom::HasTech(tech)) => research_eta_for_leaf(tech, state, config, economy),
-        Goal::Atom(Atom::HasLaw(law)) => {
+        Goal::Simple(SimpleSubgoal::HasTech(tech)) => {
+            research_eta_for_leaf(tech, state, config, economy)
+        }
+        Goal::Simple(SimpleSubgoal::HasLaw(law)) => {
             if state.has_law(law) {
                 0
             } else {
                 law_days
             }
         }
-        Goal::Atom(Atom::InterestIn { kind, id }) => {
+        Goal::Simple(SimpleSubgoal::InterestIn { kind, id }) => {
             let held = match kind {
                 crate::goals::InterestKind::State => state.has_interest_state(id),
                 crate::goals::InterestKind::Region => state.has_interest_region(id),
@@ -396,7 +398,7 @@ fn goal_timing_lower_bound(
                 interest_days
             }
         }
-        Goal::Atom(atom @ Atom::ArmyPower { rel, value }) => {
+        Goal::Simple(atom @ SimpleSubgoal::ArmyPower { rel, value }) => {
             if atom.eval(state) {
                 0
             } else if !state.army_buildings_fully_staffed() {
@@ -409,7 +411,7 @@ fn goal_timing_lower_bound(
                 0
             }
         }
-        Goal::Atom(atom @ Atom::NavyPower { rel, value }) => {
+        Goal::Simple(atom @ SimpleSubgoal::NavyPower { rel, value }) => {
             if atom.eval(state) {
                 0
             } else if !state.navy_buildings_fully_staffed() {
@@ -422,7 +424,7 @@ fn goal_timing_lower_bound(
                 0
             }
         }
-        Goal::Atom(atom @ (Atom::GoodPrice { .. } | Atom::Gdp { .. })) => {
+        Goal::Simple(atom @ (SimpleSubgoal::GoodPrice { .. } | SimpleSubgoal::Gdp { .. })) => {
             if atom.eval(state)
                 || economy.is_some_and(|economy| {
                     economy.has_pm_switch_path(state, std::slice::from_ref(atom), config)
@@ -433,7 +435,7 @@ fn goal_timing_lower_bound(
                 construction_days
             }
         }
-        Goal::Atom(_) => 0,
+        Goal::Simple(_) => 0,
     }
 }
 

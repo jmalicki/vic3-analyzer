@@ -38,10 +38,10 @@ pub use construction::{
     LOAD_BASE_CONSTRUCTION_POINTS_PER_DAY,
 };
 pub use goals::{
-    compile, evaluate, gaps, gaps_with_defs, parse, Atom, Goal, GoalError, InterestKind, Rel,
-    COLONIZE_ARMY_THRESHOLD, COLONIZE_NAVY_THRESHOLD, COLONIZE_QUININE_TECH, COLONIZE_TECH,
-    DECLARE_WAR_ARMY_THRESHOLD, DECLARE_WAR_MUNITIONS_PRICE_CEILING, LAW_COLONIAL_EXPLOITATION,
-    LAW_COLONIAL_RESETTLEMENT,
+    compile, evaluate, gaps, gaps_with_defs, parse, Goal, GoalError, InterestKind, Rel,
+    SimpleSubgoal, COLONIZE_ARMY_THRESHOLD, COLONIZE_NAVY_THRESHOLD, COLONIZE_QUININE_TECH,
+    COLONIZE_TECH, DECLARE_WAR_ARMY_THRESHOLD, DECLARE_WAR_MUNITIONS_PRICE_CEILING,
+    LAW_COLONIAL_EXPLOITATION, LAW_COLONIAL_RESETTLEMENT,
 };
 pub use military::{
     army_buildings_fully_staffed, army_pp_from_buildings, is_barracks_building,

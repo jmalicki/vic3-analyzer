@@ -35,7 +35,7 @@
 //! | [`shortage`] | `shortage_analysis(good)` |
 //! | [`staffing`] | `building_staffing(state_id)` |
 //! | [`plan`] | `plan(...)` → A\* steps |
-//! | [`gaps`] | `gaps(goal)` → atom status |
+//! | [`gaps`] | `gaps(goal)` → simple-subgoal status |
 //! | [`args`] | Literal extractors for diagnostics TVFs |
 
 pub mod alerts;

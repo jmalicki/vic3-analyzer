@@ -232,11 +232,11 @@ export interface SavePatch {
   extra_levels?: Array<{ building_id: number; extra_levels: number }>
 }
 
-export type GapAtom = string | Record<string, unknown>
+export type GapSimpleSubgoal = string | Record<string, unknown>
 
 export interface GapsResult {
   satisfied: boolean
-  gaps: GapAtom[]
+  gaps: GapSimpleSubgoal[]
   limitations: string[]
 }
 
@@ -461,7 +461,7 @@ export interface PriceDelta {
 }
 
 export interface GapDiff {
-  atom: GapAtom
+  simple_subgoal: GapSimpleSubgoal
   status: 'still_failing' | 'cleared' | 'newly_failing'
 }
 
