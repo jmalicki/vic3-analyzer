@@ -40,6 +40,8 @@ pub use rust_advanced_heaps::pathfinding;
 pub mod timed;
 pub use timed::{TimedEdge, TimedGraph, TimedNode};
 
+mod progress_h;
+
 mod vic3;
 pub use vic3::Vic3Node;
 
