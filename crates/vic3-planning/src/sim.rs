@@ -45,8 +45,8 @@
 //! See [`docs/planning.md`](../../../docs/planning.md).
 
 use crate::construction::{
-    construction_points_per_day_per_job, construction_queue_full, construction_wait_target,
-    construction_work_complete, construction_work_points_for_enqueue,
+    construction_points_per_day_per_job, construction_queue_full, construction_wait_days,
+    construction_wait_target, construction_work_complete, construction_work_points_for_enqueue,
     ensure_construction_work_points, maybe_add_construction_sector_candidate,
     sync_construction_points_per_day, BUILDING_CONSTRUCTION_SECTOR,
 };
@@ -1681,6 +1681,59 @@ pub fn apply_action_with_economy(
         }
     }
     Some(next)
+}
+
+/// Build a planning world where `action`'s economics have landed, without mutating
+/// the search node's enqueue-only child state.
+///
+/// # Inputs
+///
+/// - `state` — starting planning state (typically the parent / pre-action node).
+/// - `action` — the action whose completed economics should be projected.
+/// - `economy` — optional price-solver context; required for
+///   [`Action::QueueBuildingLevel`] (enqueue + complete need owned states and
+///   construction defs) and for any path that refreshes prices/GDP.
+/// - `config` — sim timing (construction rates, defaults).
+///
+/// # What “completed” means
+///
+/// - [`Action::QueueBuildingLevel`]: apply the enqueue, then advance through
+///   [`Event::BuildingCompleted`] for that job alone using
+///   [`construction_wait_days`]. Level deltas, construction-point sync, and
+///   price/GDP refresh match a finished build. Shorter intervening waits on
+///   other tracks are not modeled.
+/// - Other actions: identical to [`apply_action_with_economy`] (already
+///   instant / no separate completion phase in this sim).
+///
+/// Returns `None` when enqueue or the completion wait cannot apply.
+#[allow(dead_code)] // score/emit callers land in a later PR
+pub(crate) fn speculative_completed_state(
+    state: &PlanningState,
+    action: &Action,
+    economy: Option<&EconomyContext>,
+    config: SimConfig,
+) -> Option<PlanningState> {
+    match action {
+        Action::QueueBuildingLevel { building, state_id } => {
+            let economy = economy?;
+            let queued = apply_action_with_economy(state, action, Some(economy), config)?;
+            let wait_days = construction_wait_days(&queued, config)?;
+            apply_action_with_economy(
+                &queued,
+                &Action::WaitForEvent {
+                    event: Event::BuildingCompleted {
+                        building: building.clone(),
+                        state_id: Some(*state_id),
+                    },
+                    days: wait_days,
+                },
+                Some(economy),
+                config,
+            )
+        }
+        Action::SwitchPm { .. } => apply_action_with_economy(state, action, economy, config),
+        _ => apply_action_with_economy(state, action, economy, config),
+    }
 }
 
 /// Seed missing track timers from `config` so parallel ticks advance save-loaded queues.
@@ -3456,6 +3509,66 @@ mod tests {
         );
         // base 1 + 5 per CS level
         assert!((done.construction_points_per_day - 6.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn speculative_completed_state_finishes_cs_and_raises_points() {
+        use crate::test_support::{ger_planning_state, logging_and_cs_economy, GerStateOpts};
+
+        let mini = logging_and_cs_economy();
+        let state = ger_planning_state(GerStateOpts {
+            construction_points_per_day: 1.0,
+            wood_price: 30.0,
+            ..GerStateOpts::default()
+        });
+        let done = speculative_completed_state(
+            &state,
+            &Action::QueueBuildingLevel {
+                building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                state_id: mini.state_id,
+            },
+            Some(&mini.economy),
+            mini.config,
+        )
+        .expect("speculative complete CS");
+        assert_eq!(
+            done.building_level_deltas
+                .get(&(BUILDING_CONSTRUCTION_SECTOR.into(), mini.state_id)),
+            Some(&1)
+        );
+        // base 1 + 5 per CS level
+        assert!((done.construction_points_per_day - 6.0).abs() < 1e-9);
+        assert!(done.gdp.is_finite());
+    }
+
+    #[test]
+    fn speculative_completed_state_finishes_logging_and_refreshes_gdp() {
+        use crate::test_support::{ger_planning_state, logging_and_cs_economy, GerStateOpts};
+
+        let mini = logging_and_cs_economy();
+        let state = ger_planning_state(GerStateOpts {
+            gdp: 1.0,
+            construction_points_per_day: 1.0,
+            wood_price: 20.0,
+            ..GerStateOpts::default()
+        });
+        let done = speculative_completed_state(
+            &state,
+            &Action::QueueBuildingLevel {
+                building: "building_logging_camp".into(),
+                state_id: mini.state_id,
+            },
+            Some(&mini.economy),
+            mini.config,
+        )
+        .expect("speculative complete logging");
+        assert_eq!(
+            done.building_level_deltas
+                .get(&("building_logging_camp".into(), mini.state_id)),
+            Some(&1)
+        );
+        assert!(done.gdp.is_finite());
+        assert_ne!(done.gdp, state.gdp);
     }
 
     #[test]
