@@ -4,6 +4,13 @@ This document details the state representation, graph transition operators, admi
 
 The planner evaluates goal predicates and discovers time-optimal action sequences (e.g. tech sequencing, law checkpoints, military barracks expansion, production method upgrades, and debt amortization).
 
+### Terminology
+
+A **simple subgoal** is a compiled goal node with no further goal children in the
+current tree (`Goal::Simple` / `SimpleSubgoal` in Rust). Compound goals
+(AND / OR / NOT) refine into **simple subgoal**s; future sugar may refine them
+further — the name means “simple in this compile,” not forever irreducible.
+
 ---
 
 ## PlanningState Projection
@@ -37,7 +44,7 @@ A `PlanningState` is a compact, deterministic projection of the save file and th
 Transitions between states consist of **zero-day decisions** and **event-wait edges**:
 
 ### 1. Decision Edges (0 Days)
-- `QueueTech`: Selects a tech that unlocks prerequisites for open goal atoms.
+- `QueueTech`: Selects a tech that unlocks prerequisites for open simple subgoals.
 - `QueueBuildingLevel`: Adds a level of a building type in a specific state (barracks, shipyards, or economic buildings).
 - `SwitchPm`: Swaps production methods to boost GDP or relieve a specific goods shortage.
 - `QueueLaw`: Begins a law passage checkpoint.
@@ -46,7 +53,7 @@ Transitions between states consist of **zero-day decisions** and **event-wait ed
 
 ### 2. Event-Wait Edges (Advances Date)
 - Advances the game clock to the earliest completion event: tech research finished, building construction complete, military training staffed, law enacted, interest established, or weekly payday debt reduction.
-- **Invariant I6:** Event-wait edges strictly advance the game date ($\Delta t > 0$). No wait edge is generated if no action is in flight and solvency is not an open goal atom.
+- **Invariant I6:** Event-wait edges strictly advance the game date ($\Delta t > 0$). No wait edge is generated if no action is in flight and solvency is not an open simple subgoal.
 
 ---
 
@@ -56,7 +63,7 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
 
 - **Partial expansion:** domain successors are ranked by \(f-g\); only a fixed beam (16) is inserted per expand, with the parent re-queued via an expansion cursor.
 - **Admissible Heuristic $h$:** Estimates remaining calendar days by relaxing the remaining goal conjuncts into a dependency DAG:
-  - Open tech, interest, military training, and law atoms contribute their minimum model durations.
+  - Open tech, interest, military training, and law simple subgoals contribute their minimum model durations.
   - Conjunctions (`AND`) take the maximum bound of parallelizable tracks.
   - Disjunctions (`OR`) take the minimum bound across alternatives.
   - Solvency, tax adjustments, and zero-day PM switches contribute zero days where immediate transitions exist.
@@ -67,7 +74,7 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
 ## Non-Tech Action Models
 
 ### 1. Compact Payday Model (Fiscal Goals)
-- When `solvent`, `credit_headroom`, or `debt_principal` is an open goal atom, successors emit weekly payday waits (7 days).
+- When `solvent`, `credit_headroom`, or `debt_principal` is an open simple subgoal, successors emit weekly payday waits (7 days).
 - Surplus weekly balance pays down principal before accumulating cash; deficits draw down treasury before borrowing.
 - Tax adjustments shift the weekly balance sample by discrete increments (`tax_balance_per_step`).
 
@@ -86,7 +93,7 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
 - **Allocation cap** defaults to max weekly construction progress ÷ 7 (vanilla base 10/week + owned tech adds such as urbanization). `SimConfig::max_construction_allocation = Some(n)` overrides for tests. Leftover government capacity fills later government queue entries, so enough capacity yields parallel builds. Wait edges advance to the soonest **fed** government completion.
 - **Heuristic ETA** (`construction_eta_days`): default = time until a free government feed slot / usable leftover capacity (one default-cost level at that rate when slots are open); when slots are full = next fed finish. Explicit next-finish mode remains available for wait-with-spare-slots semantics. Open GDP / price atoms no longer clamp every bound through a blanket `.max(1)` on next-completion alone.
 - **Building candidates** are `(building_type, state_id)` for `QueueBuildingLevel` (Vic3 placement):
-  - **Direct:** defs building types whose default PM IO helps open `good_price` / raising `gdp`, plus barracks/shipyards/naval admin when PP needs levels (hire stays on the military atom arm). Each type expands to states that already have that building, or every owned state for first-of-type / greenfield. Completion bumps levels in that state (synthetic row when absent) so prices move.
+  - **Direct:** defs building types whose default PM IO helps open `good_price` / raising `gdp`, plus barracks/shipyards/naval admin when PP needs levels (hire stays on the military simple-subgoal arm). Each type expands to states that already have that building, or every owned state for first-of-type / greenfield. Completion bumps levels in that state (synthetic row when absent) so prices move.
   - **No type-level dominance prune:** modeled benefit/cost axes omit slots, local markets, and unlocks, so “strictly better type” is not sound.
   - **Meta:** Construction Sector when any other build candidate already exists (capacity lever, not IO), also placed by state.
   - **Deferred:** free slots / potentials and building unlock techs (`TODO(buildability)`); A* incumbent upper bound via greedy feasible path (`TODO(anytime-ub)`).
@@ -102,7 +109,7 @@ The planning architecture cleanly separates generic search mechanisms from Victo
 ```mermaid
 flowchart TD
     Core["Core Planning Layer<br/>(Goal DSL Algebra, Solvers, Resource Tracks, Backlog ETA)"]
-    Host["Victoria 3 Domain Layer<br/>(Atoms, Sugar Compilations, Military Formations, PM Edges)"]
+    Host["Victoria 3 Domain Layer<br/>(Simple Subgoals, Sugar Compilations, Military Formations, PM Edges)"]
     Peripherals["Optional Peripherals<br/>(Embedded Query TVFs, MCP Adapters, Web Facades)"]
 
     Core --> Host

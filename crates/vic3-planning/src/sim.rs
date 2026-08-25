@@ -3,7 +3,7 @@
 //! # Why goal-relevant only
 //!
 //! Enumerating the whole game is intractable. [`successors`] / [`successors_for_atoms`]
-//! open only edges that can close currently failing [`crate::goals::Atom`]s (plus
+//! open only edges that can close currently failing [`crate::goals::SimpleSubgoal`]s (plus
 //! building / PM candidates when an [`EconomyContext`] is present). Idle
 //! atoms with no model action emit nothing.
 //!
@@ -50,7 +50,7 @@ use crate::construction::{
     ensure_construction_work_points, maybe_add_construction_sector_candidate,
     sync_construction_points_per_day, BUILDING_CONSTRUCTION_SECTOR,
 };
-use crate::goals::{gaps, Atom, Goal, InterestKind, Rel};
+use crate::goals::{gaps, Goal, InterestKind, Rel, SimpleSubgoal};
 use crate::military::{
     is_barracks_building, is_military_planning_building, is_naval_admin_building,
     is_shipyard_building, UnitCombatStats, BUILDING_BARRACKS, BUILDING_NAVAL_ADMIN,
@@ -474,14 +474,14 @@ impl EconomyContext {
     fn building_candidates(
         &self,
         state: &PlanningState,
-        atoms: &[Atom],
+        atoms: &[SimpleSubgoal],
         config: SimConfig,
     ) -> Vec<(String, u32)> {
         let cap = config.max_added_levels_per_type;
         let mut types = BTreeSet::new();
 
         for atom in atoms {
-            let Atom::GoodPrice { good, rel, .. } = atom else {
+            let SimpleSubgoal::GoodPrice { good, rel, .. } = atom else {
                 continue;
             };
             let Some(good_idx) = self.defs.index_of(good) else {
@@ -506,7 +506,7 @@ impl EconomyContext {
         if atoms.iter().any(|atom| {
             matches!(
                 atom,
-                Atom::Gdp {
+                SimpleSubgoal::Gdp {
                     rel: Rel::Ge | Rel::Gt | Rel::Eq,
                     ..
                 }
@@ -534,10 +534,12 @@ impl EconomyContext {
         }
 
         self.add_military_building_candidates(state, atoms, &mut types, cap);
-        if atoms
-            .iter()
-            .any(|atom| matches!(atom, Atom::ArmyPower { .. } | Atom::NavyPower { .. }))
-        {
+        if atoms.iter().any(|atom| {
+            matches!(
+                atom,
+                SimpleSubgoal::ArmyPower { .. } | SimpleSubgoal::NavyPower { .. }
+            )
+        }) {
             self.add_mil_input_producer_candidates(state, &mut types, cap);
         }
         maybe_add_construction_sector_candidate(state, &mut types, cap);
@@ -561,13 +563,13 @@ impl EconomyContext {
     fn add_military_building_candidates(
         &self,
         state: &PlanningState,
-        atoms: &[Atom],
+        atoms: &[SimpleSubgoal],
         candidates: &mut BTreeSet<String>,
         cap: u16,
     ) {
         for atom in atoms {
             match atom {
-                Atom::ArmyPower { rel, value } => {
+                SimpleSubgoal::ArmyPower { rel, value } => {
                     if !state.army_buildings_fully_staffed() {
                         continue;
                     }
@@ -588,7 +590,7 @@ impl EconomyContext {
                         candidates.insert(BUILDING_BARRACKS.to_string());
                     }
                 }
-                Atom::NavyPower { rel, value } => {
+                SimpleSubgoal::NavyPower { rel, value } => {
                     if !state.navy_buildings_fully_staffed() {
                         continue;
                     }
@@ -702,7 +704,7 @@ impl EconomyContext {
     fn pm_switch_candidates(
         &self,
         state: &PlanningState,
-        atoms: &[Atom],
+        atoms: &[SimpleSubgoal],
         max_candidates: u16,
         max_overrides: u16,
     ) -> Vec<(u32, Vec<String>)> {
@@ -711,11 +713,11 @@ impl EconomyContext {
         }
         let wants_price = atoms
             .iter()
-            .any(|atom| matches!(atom, Atom::GoodPrice { .. }));
+            .any(|atom| matches!(atom, SimpleSubgoal::GoodPrice { .. }));
         let wants_gdp = atoms.iter().any(|atom| {
             matches!(
                 atom,
-                Atom::Gdp {
+                SimpleSubgoal::Gdp {
                     rel: Rel::Ge | Rel::Gt | Rel::Eq,
                     ..
                 }
@@ -807,7 +809,7 @@ impl EconomyContext {
     pub fn has_pm_switch_path(
         &self,
         state: &PlanningState,
-        atoms: &[Atom],
+        atoms: &[SimpleSubgoal],
         config: SimConfig,
     ) -> bool {
         if !config.allow_pm_changes {
@@ -888,7 +890,12 @@ fn production_methods_legal_for_building(
     true
 }
 
-fn pm_affects_open_atoms(defs: &GameDefs, pm_id: &str, atoms: &[Atom], wants_gdp: bool) -> bool {
+fn pm_affects_open_atoms(
+    defs: &GameDefs,
+    pm_id: &str,
+    atoms: &[SimpleSubgoal],
+    wants_gdp: bool,
+) -> bool {
     let Some(pm) = defs.production_methods.get(pm_id) else {
         return wants_gdp;
     };
@@ -896,7 +903,7 @@ fn pm_affects_open_atoms(defs: &GameDefs, pm_id: &str, atoms: &[Atom], wants_gdp
         return true;
     }
     for atom in atoms {
-        let Atom::GoodPrice { good, rel, .. } = atom else {
+        let SimpleSubgoal::GoodPrice { good, rel, .. } = atom else {
             continue;
         };
         let Some(good_idx) = defs.index_of(good) else {
@@ -1116,7 +1123,7 @@ pub fn successors_with_economy(
 /// Idle states without an open solvency path emit no wait (I6).
 pub fn successors_for_atoms(
     state: &PlanningState,
-    open_atoms: &[Atom],
+    open_atoms: &[SimpleSubgoal],
     config: SimConfig,
 ) -> Vec<Successor> {
     successors_for_atoms_with_economy(state, open_atoms, config, None)
@@ -1184,7 +1191,7 @@ fn push_wait(
 
 fn successors_for_atoms_with_economy(
     state: &PlanningState,
-    open_atoms: &[Atom],
+    open_atoms: &[SimpleSubgoal],
     config: SimConfig,
     economy: Option<&EconomyContext>,
 ) -> Vec<Successor> {
@@ -1197,7 +1204,7 @@ fn successors_for_atoms_with_economy(
 
     for atom in open_atoms {
         match atom {
-            Atom::HasTech(tech) => {
+            SimpleSubgoal::HasTech(tech) => {
                 if state.research_busy()
                     || state.has_tech(tech)
                     || !seen_techs.insert(tech.clone())
@@ -1213,7 +1220,7 @@ fn successors_for_atoms_with_economy(
                     config,
                 );
             }
-            Atom::HasLaw(law) => {
+            SimpleSubgoal::HasLaw(law) => {
                 if state.law_busy()
                     || state.has_law(law)
                     || !seen_laws.insert(crate::world::law_key(law))
@@ -1228,7 +1235,7 @@ fn successors_for_atoms_with_economy(
                     config,
                 );
             }
-            Atom::InterestIn { kind, id } => {
+            SimpleSubgoal::InterestIn { kind, id } => {
                 let key = (*kind, id.clone());
                 if state.interest_busy() || atom.eval(state) || !seen_interest.insert(key) {
                     continue;
@@ -1244,7 +1251,7 @@ fn successors_for_atoms_with_economy(
                     config,
                 );
             }
-            Atom::ArmyPower { rel, value } => {
+            SimpleSubgoal::ArmyPower { rel, value } => {
                 push_military_pp_decisions(
                     &mut MilitaryPpDecisionArgs {
                         result: &mut result,
@@ -1258,7 +1265,7 @@ fn successors_for_atoms_with_economy(
                     *value,
                 );
             }
-            Atom::NavyPower { rel, value } => {
+            SimpleSubgoal::NavyPower { rel, value } => {
                 push_military_pp_decisions(
                     &mut MilitaryPpDecisionArgs {
                         result: &mut result,
@@ -1272,7 +1279,7 @@ fn successors_for_atoms_with_economy(
                     *value,
                 );
             }
-            Atom::WeeklyBalance { .. } => {
+            SimpleSubgoal::WeeklyBalance { .. } => {
                 for delta in tax_deltas_toward(state, atom, config) {
                     if !seen_tax_deltas.insert(delta) {
                         continue;
@@ -1332,7 +1339,7 @@ fn successors_for_atoms_with_economy(
     if let Some(tech) = state.queued_tech.as_ref().filter(|_| {
         open_atoms
             .iter()
-            .any(|atom| matches!(atom, Atom::HasTech(id) if !state.has_tech(id)))
+            .any(|atom| matches!(atom, SimpleSubgoal::HasTech(id) if !state.has_tech(id)))
     }) {
         let days = state
             .tech_days_left
@@ -1346,7 +1353,7 @@ fn successors_for_atoms_with_economy(
     }
     if let Some(queued) = state.queued_interest.as_ref().filter(|_| {
         open_atoms.iter().any(|atom| match atom {
-            Atom::InterestIn { kind, id } => match kind {
+            SimpleSubgoal::InterestIn { kind, id } => match kind {
                 InterestKind::State => !state.has_interest_state(id),
                 InterestKind::Region => !state.has_interest_region(id),
             },
@@ -1362,7 +1369,10 @@ fn successors_for_atoms_with_economy(
     }
     if let Some(building) = state.queued_hire.as_ref().filter(|queued| {
         open_atoms.iter().any(|atom| {
-            matches!(atom, Atom::ArmyPower { .. } | Atom::NavyPower { .. }) && !atom.eval(state)
+            matches!(
+                atom,
+                SimpleSubgoal::ArmyPower { .. } | SimpleSubgoal::NavyPower { .. }
+            ) && !atom.eval(state)
         }) && state
             .mil_buildings
             .iter()
@@ -1384,7 +1394,7 @@ fn successors_for_atoms_with_economy(
     if let Some(law) = state.queued_law.as_ref().filter(|_| {
         open_atoms
             .iter()
-            .any(|atom| matches!(atom, Atom::HasLaw(id) if !state.has_law(id)))
+            .any(|atom| matches!(atom, SimpleSubgoal::HasLaw(id) if !state.has_law(id)))
     }) {
         let days = state.law_days_left.unwrap_or(config.law_days);
         wait_candidates.push((days, Event::LawEnacted { law: law.clone() }));
@@ -1412,8 +1422,8 @@ fn research_days_for_tech(tech: &str, config: SimConfig, economy: Option<&Econom
     config.research_days.max(1)
 }
 
-fn tax_deltas_toward(state: &PlanningState, atom: &Atom, config: SimConfig) -> Vec<i8> {
-    let Atom::WeeklyBalance { rel, value } = atom else {
+fn tax_deltas_toward(state: &PlanningState, atom: &SimpleSubgoal, config: SimConfig) -> Vec<i8> {
+    let SimpleSubgoal::WeeklyBalance { rel, value } = atom else {
         return Vec::new();
     };
     let Some(balance) = state.weekly_balance.filter(|v| v.is_finite()) else {
@@ -1448,10 +1458,12 @@ fn tax_deltas_toward(state: &PlanningState, atom: &Atom, config: SimConfig) -> V
     out
 }
 
-fn is_solvency_atom(atom: &Atom) -> bool {
+fn is_solvency_simple_subgoal(atom: &SimpleSubgoal) -> bool {
     matches!(
         atom,
-        Atom::Solvent | Atom::CreditHeadroom { .. } | Atom::DebtPrincipal { .. }
+        SimpleSubgoal::Solvent
+            | SimpleSubgoal::CreditHeadroom { .. }
+            | SimpleSubgoal::DebtPrincipal { .. }
     )
 }
 
@@ -1498,10 +1510,10 @@ fn apply_payday_effects(state: &mut PlanningState) {
         .unwrap_or(false);
 }
 
-fn fiscal_slack(atom: &Atom, state: &PlanningState) -> Option<f64> {
+fn fiscal_slack(atom: &SimpleSubgoal, state: &PlanningState) -> Option<f64> {
     match atom {
-        Atom::Solvent => Some(if state.solvent { 0.0 } else { 1.0 }),
-        Atom::CreditHeadroom { rel, value } => {
+        SimpleSubgoal::Solvent => Some(if state.solvent { 0.0 } else { 1.0 }),
+        SimpleSubgoal::CreditHeadroom { rel, value } => {
             let headroom = state.credit_headroom?;
             if rel.holds(headroom, *value) {
                 Some(0.0)
@@ -1509,7 +1521,7 @@ fn fiscal_slack(atom: &Atom, state: &PlanningState) -> Option<f64> {
                 Some((headroom - *value).abs())
             }
         }
-        Atom::DebtPrincipal { rel, value } => {
+        SimpleSubgoal::DebtPrincipal { rel, value } => {
             let principal = state.debt_principal?;
             if rel.holds(principal, *value) {
                 Some(0.0)
@@ -1523,8 +1535,8 @@ fn fiscal_slack(atom: &Atom, state: &PlanningState) -> Option<f64> {
 
 /// Emit payday only when a solvency-related open atom can move closer after one
 /// tick. Prevents idle wait loops when the frozen balance cannot help.
-fn payday_can_help(state: &PlanningState, open_atoms: &[Atom]) -> bool {
-    if !open_atoms.iter().any(is_solvency_atom) {
+fn payday_can_help(state: &PlanningState, open_atoms: &[SimpleSubgoal]) -> bool {
+    if !open_atoms.iter().any(is_solvency_simple_subgoal) {
         return false;
     }
     let mut next = state.clone();
@@ -2190,7 +2202,7 @@ mod tests {
         let next_gdp = bumped.buildings[0].revenue;
         assert!(next_gdp > initial_gdp);
         let target = (initial_price + next_price) / 2.0;
-        let goal = Goal::Atom(Atom::GoodPrice {
+        let goal = Goal::Simple(SimpleSubgoal::GoodPrice {
             good: "wood".into(),
             rel: Rel::Le,
             value: target,
@@ -2209,7 +2221,7 @@ mod tests {
             ..SimConfig::default()
         };
 
-        let gdp_goal = Goal::Atom(Atom::Gdp {
+        let gdp_goal = Goal::Simple(SimpleSubgoal::Gdp {
             rel: Rel::Ge,
             value: (initial_gdp + next_gdp) / 2.0,
         });
@@ -2280,7 +2292,7 @@ mod tests {
             Some(&1)
         );
 
-        let unreachable_gdp = Goal::Atom(Atom::Gdp {
+        let unreachable_gdp = Goal::Simple(SimpleSubgoal::Gdp {
             rel: Rel::Ge,
             value: f64::MAX,
         });
@@ -2429,7 +2441,7 @@ mod tests {
 
         let wealth_only = successors_for_atoms(
             &insolvent,
-            &[Atom::PopulationWeightedWealth {
+            &[SimpleSubgoal::PopulationWeightedWealth {
                 rel: Rel::Ge,
                 value: 20.0,
             }],
@@ -2575,7 +2587,7 @@ mod tests {
         let next_price = switched.goods[0].price;
         assert!(next_price < initial_price);
         let target = (initial_price + next_price) / 2.0;
-        let goal = Goal::Atom(Atom::GoodPrice {
+        let goal = Goal::Simple(SimpleSubgoal::GoodPrice {
             good: "wood".into(),
             rel: Rel::Le,
             value: target,
@@ -2815,7 +2827,7 @@ mod tests {
             good_prices: vec![("wood".into(), 30.0)],
             ..PlanningParts::default()
         });
-        let goal = Goal::Atom(Atom::GoodPrice {
+        let goal = Goal::Simple(SimpleSubgoal::GoodPrice {
             good: "wood".into(),
             rel: Rel::Le,
             value: 0.0,
@@ -2920,7 +2932,7 @@ mod tests {
             queued.constructions.first().and_then(|row| row.remaining),
             Some(25.0)
         );
-        let goal = Goal::Atom(Atom::GoodPrice {
+        let goal = Goal::Simple(SimpleSubgoal::GoodPrice {
             good: "wood".into(),
             rel: Rel::Le,
             value: 0.0,
@@ -3007,7 +3019,7 @@ mod tests {
             good_prices: vec![("wood".into(), 30.0)],
             ..PlanningParts::default()
         });
-        let goal = Goal::Atom(Atom::GoodPrice {
+        let goal = Goal::Simple(SimpleSubgoal::GoodPrice {
             good: "wood".into(),
             rel: Rel::Le,
             value: 0.0,
@@ -3099,8 +3111,8 @@ mod tests {
         });
         let start_date = state.date;
         let goal = Goal::And(vec![
-            Goal::Atom(Atom::HasTech("nitroglycerin".into())),
-            Goal::Atom(Atom::GoodPrice {
+            Goal::Simple(SimpleSubgoal::HasTech("nitroglycerin".into())),
+            Goal::Simple(SimpleSubgoal::GoodPrice {
                 good: "wood".into(),
                 rel: Rel::Le,
                 value: 0.0,
@@ -3186,7 +3198,7 @@ mod tests {
             ..World::default()
         };
         let economy = EconomyContext::new(world, defs, SolveOpts::default());
-        let goal = Goal::Atom(Atom::GoodPrice {
+        let goal = Goal::Simple(SimpleSubgoal::GoodPrice {
             good: "wood".into(),
             rel: Rel::Le,
             value: 0.0,
@@ -3300,7 +3312,7 @@ mod tests {
         assert_eq!(max_parallel_construction_jobs(10.0, 5.0).get(), 2);
         // Each job gets 5/day → ceil(50/5)=10 days to first completion.
         assert_eq!(construction_wait_days(&state, config), Some(10));
-        let goal = Goal::Atom(Atom::GoodPrice {
+        let goal = Goal::Simple(SimpleSubgoal::GoodPrice {
             good: "wood".into(),
             rel: Rel::Le,
             value: 0.0,
@@ -3511,7 +3523,7 @@ mod tests {
             good_prices: vec![("wood".into(), 20.0)],
             ..PlanningParts::default()
         });
-        let goal = Goal::Atom(Atom::Gdp {
+        let goal = Goal::Simple(SimpleSubgoal::Gdp {
             rel: Rel::Ge,
             value: 1.0e12,
         });
@@ -3590,7 +3602,7 @@ mod tests {
             gdp: 0.0,
             ..PlanningParts::default()
         });
-        let goal = Goal::Atom(Atom::GoodPrice {
+        let goal = Goal::Simple(SimpleSubgoal::GoodPrice {
             good: "wood".into(),
             rel: Rel::Le,
             value: 10.0,
@@ -3729,7 +3741,7 @@ mod tests {
             good_prices: vec![("wood".into(), 40.0)],
             ..PlanningParts::default()
         });
-        let goal = Goal::Atom(Atom::GoodPrice {
+        let goal = Goal::Simple(SimpleSubgoal::GoodPrice {
             good: "wood".into(),
             rel: Rel::Le,
             value: 1.0,
@@ -3947,7 +3959,7 @@ mod tests {
                 prop_assert_eq!(wait_count, 0);
             }
 
-            let idle_atoms = [Atom::Solvent];
+            let idle_atoms = [SimpleSubgoal::Solvent];
             let idle_edges = successors_for_atoms(
                 &state_at(day_offset),
                 &idle_atoms,

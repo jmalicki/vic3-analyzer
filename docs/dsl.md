@@ -8,7 +8,10 @@ These expressions power the **Goal Gaps** evaluator (which checks unsatisfied re
 
 ## Grammar
 
-Goals are parsed into boolean abstract syntax trees (AND, OR, NOT) over atomic predicates:
+Goals are parsed into boolean abstract syntax trees (AND, OR, NOT). After
+compile, each predicate becomes a **simple subgoal** (`SimpleSubgoal`); the
+grammar nonterminal `atom` below is only the parser production (predicate or
+parenthesized goal), not the Rust type name.
 
 ```text
 goal        := or
@@ -25,7 +28,7 @@ arg         := ident "=" value
 value       := ident | number | string
 ```
 
-### Atomic Predicates
+### Predicates (compile to simple subgoals)
 
 | Predicate | Example | Description |
 | --- | --- | --- |

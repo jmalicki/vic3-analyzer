@@ -1,8 +1,8 @@
-//! `gaps(goal)` → one row per goal atom with cleared / failing / unknown status.
+//! `gaps(goal)` → one row per simple subgoal with cleared / failing / unknown status.
 //!
 //! `goal` must be a non-null string literal. `status` is `cleared` \| `failing` \|
 //! `unknown` (metric missing from save IR — not a measured shortfall).
-//! `detail` is the atom JSON.
+//! `detail` is the simple-subgoal JSON.
 
 use std::sync::Arc;
 
@@ -15,7 +15,7 @@ use datafusion::datasource::{TableProvider, TableType};
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
 use vic3_planning::PlanningState;
-use vic3_planning::{Atom, InterestKind, Rel};
+use vic3_planning::{InterestKind, Rel, SimpleSubgoal};
 
 use crate::binding::SessionBinding;
 use crate::exec::memory_exec;
@@ -63,14 +63,14 @@ impl TableFunctionImpl for GapsTvf {
 }
 
 fn gaps_batch(goal: &vic3_planning::Goal, state: &PlanningState) -> DfResult<RecordBatch> {
-    let atoms = goal.atoms();
+    let atoms = goal.simple_subgoals();
     let schema = gaps_schema();
     let mut predicate = StringBuilder::with_capacity(atoms.len(), atoms.len() * 24);
     let mut status = StringBuilder::with_capacity(atoms.len(), atoms.len() * 8);
     let mut detail = StringBuilder::with_capacity(atoms.len(), atoms.len() * 32);
 
     for atom in atoms {
-        predicate.append_value(format_atom(atom));
+        predicate.append_value(format_simple_subgoal(atom));
         status.append_value(atom.status(state).as_str());
         detail.append_value(serde_json::to_string(atom).unwrap_or_else(|_| "{}".into()));
     }
@@ -86,39 +86,39 @@ fn gaps_batch(goal: &vic3_planning::Goal, state: &PlanningState) -> DfResult<Rec
     .map_err(Into::into)
 }
 
-fn format_atom(atom: &Atom) -> String {
+fn format_simple_subgoal(atom: &SimpleSubgoal) -> String {
     match atom {
-        Atom::HasTech(tech) => format!("has_tech({tech})"),
-        Atom::HasLaw(law) => format!("has_law({law})"),
-        Atom::GoodPrice { good, rel, value } => {
+        SimpleSubgoal::HasTech(tech) => format!("has_tech({tech})"),
+        SimpleSubgoal::HasLaw(law) => format!("has_law({law})"),
+        SimpleSubgoal::GoodPrice { good, rel, value } => {
             format!("good_price({good}) {} {value}", rel_str(*rel))
         }
-        Atom::ArmyPower { rel, value } => {
+        SimpleSubgoal::ArmyPower { rel, value } => {
             format!("army_power_projection {} {value}", rel_str(*rel))
         }
-        Atom::NavyPower { rel, value } => {
+        SimpleSubgoal::NavyPower { rel, value } => {
             format!("navy_power_projection {} {value}", rel_str(*rel))
         }
-        Atom::Solvent => "solvent".into(),
-        Atom::InterestIn {
+        SimpleSubgoal::Solvent => "solvent".into(),
+        SimpleSubgoal::InterestIn {
             kind: InterestKind::State,
             id,
         } => format!("interest_in(state={id})"),
-        Atom::InterestIn {
+        SimpleSubgoal::InterestIn {
             kind: InterestKind::Region,
             id,
         } => format!("interest_in(region={id})"),
-        Atom::Gdp { rel, value } => format!("gdp {} {value}", rel_str(*rel)),
-        Atom::WeeklyBalance { rel, value } => {
+        SimpleSubgoal::Gdp { rel, value } => format!("gdp {} {value}", rel_str(*rel)),
+        SimpleSubgoal::WeeklyBalance { rel, value } => {
             format!("weekly_balance {} {value}", rel_str(*rel))
         }
-        Atom::PopulationWeightedWealth { rel, value } => {
+        SimpleSubgoal::PopulationWeightedWealth { rel, value } => {
             format!("population_weighted_wealth {} {value}", rel_str(*rel))
         }
-        Atom::DebtPrincipal { rel, value } => {
+        SimpleSubgoal::DebtPrincipal { rel, value } => {
             format!("debt_principal {} {value}", rel_str(*rel))
         }
-        Atom::CreditHeadroom { rel, value } => {
+        SimpleSubgoal::CreditHeadroom { rel, value } => {
             format!("credit_headroom {} {value}", rel_str(*rel))
         }
     }

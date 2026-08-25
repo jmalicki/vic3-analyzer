@@ -55,10 +55,10 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::path::Path;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save, SavePatch};
-use vic3_planning::Atom;
 use vic3_planning::EconomyContext;
 use vic3_planning::PlanOpts;
 use vic3_planning::PlanningState;
+use vic3_planning::SimpleSubgoal;
 use vic3_prices::{
     alerts as diagnose_alerts, optimize_pms, preview as solve_preview, solve,
     what_if as solve_what_if, OptimizePmsOpts, PricesResult, SolveOpts, WhatIfOpts, World,
@@ -603,7 +603,7 @@ pub fn loaded_gaps_json(goal: &str) -> Result<String, ApiError> {
             &loaded.defs,
         )?;
         let mut limitations = loaded.prices.limitations.clone();
-        if goal.has_army_atom() {
+        if goal.has_army_simple_subgoal() {
             state.push_army_power_limitation(&mut limitations);
         }
         let result = GapsResult {
@@ -825,7 +825,7 @@ pub fn gaps_json(
     let state = PlanningState::from_world_with_prices(&world, country, &prices, &defs)?;
     let goal = vic3_planning::parse(goal)?;
     let mut limitations = prices.limitations;
-    if goal.has_army_atom() {
+    if goal.has_army_simple_subgoal() {
         state.push_army_power_limitation(&mut limitations);
     }
     let result = GapsResult {
@@ -1107,7 +1107,7 @@ fn is_navy(kind: Option<&str>) -> bool {
 #[derive(Debug, Serialize)]
 struct GapsResult {
     satisfied: bool,
-    gaps: Vec<Atom>,
+    gaps: Vec<SimpleSubgoal>,
     limitations: Vec<String>,
 }
 

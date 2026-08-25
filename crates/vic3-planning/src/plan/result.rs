@@ -122,7 +122,7 @@ pub enum GapStatus {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GapDiff {
-    pub atom: Value,
+    pub simple_subgoal: Value,
     pub status: GapStatus,
 }
 
@@ -186,7 +186,7 @@ pub fn compare(left: &AnalysisRecord, right: &AnalysisRecord) -> CompareResult {
         let right_gaps = stored_gaps(&right.result);
         for atom in &left_gaps {
             result.gaps.push(GapDiff {
-                atom: atom.clone(),
+                simple_subgoal: atom.clone(),
                 status: if right_gaps.contains(atom) {
                     GapStatus::StillFailing
                 } else {
@@ -197,7 +197,7 @@ pub fn compare(left: &AnalysisRecord, right: &AnalysisRecord) -> CompareResult {
         for atom in right_gaps {
             if !left_gaps.contains(&atom) {
                 result.gaps.push(GapDiff {
-                    atom,
+                    simple_subgoal: atom,
                     status: GapStatus::NewlyFailing,
                 });
             }

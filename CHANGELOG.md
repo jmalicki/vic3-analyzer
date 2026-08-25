@@ -8,6 +8,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### 🌟 Added / Changed
+- **Planning `SimpleSubgoal`:** Renamed goal leaf type `Atom` → `SimpleSubgoal`,
+  `Goal::Atom` → `Goal::Simple`, `atoms()` → `simple_subgoals()`, and related
+  helpers (`AtomStatus` → `SimpleSubgoalStatus`, `has_*_atom` →
+  `has_*_simple_subgoal`). Compare `GapDiff.atom` → `simple_subgoal` (JSON +
+  TypeScript). Docs define **simple subgoal** as “simple in this compile,” not
+  forever irreducible. **Breaking** for `vic3-planning` / compare JSON / web
+  types.
+
 - **Planning `ConstructionSlots`:** `max_parallel_construction_jobs` now returns
   `ConstructionSlots` (`NonZeroUsize` newtype, always ≥ 1) instead of `usize`.
   Call sites need `.get()` (or `Into<usize>`) for a raw count. **Breaking** for

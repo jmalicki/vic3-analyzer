@@ -6,8 +6,8 @@
 use chumsky::prelude::*;
 
 use super::{
-    Atom, Goal, GoalError, InterestKind, Rel, COLONIZE_ARMY_THRESHOLD, COLONIZE_NAVY_THRESHOLD,
-    COLONIZE_QUININE_TECH, COLONIZE_TECH, DECLARE_WAR_ARMY_THRESHOLD,
+    Goal, GoalError, InterestKind, Rel, SimpleSubgoal, COLONIZE_ARMY_THRESHOLD,
+    COLONIZE_NAVY_THRESHOLD, COLONIZE_QUININE_TECH, COLONIZE_TECH, DECLARE_WAR_ARMY_THRESHOLD,
     DECLARE_WAR_MUNITIONS_PRICE_CEILING, LAW_COLONIAL_EXPLOITATION, LAW_COLONIAL_RESETTLEMENT,
     MUNITIONS_GOOD,
 };
@@ -211,27 +211,29 @@ fn compile_pred(pred: RawPred) -> Result<Goal, GoalError> {
         "research" => compile_research(&pred),
         "has_tech" => {
             let tech = first_ident(&pred, "tech").ok_or(GoalError::ResearchTech)?;
-            Ok(Goal::Atom(Atom::HasTech(tech)))
+            Ok(Goal::Simple(SimpleSubgoal::HasTech(tech)))
         }
         "has_law" => {
             let law = first_ident(&pred, "law")
                 .ok_or_else(|| GoalError::Parse("has_law requires a law id".into()))?;
-            Ok(Goal::Atom(Atom::HasLaw(law)))
+            Ok(Goal::Simple(SimpleSubgoal::HasLaw(law)))
         }
-        "solvent" if pred.args.is_empty() && pred.rel.is_none() => Ok(Goal::Atom(Atom::Solvent)),
+        "solvent" if pred.args.is_empty() && pred.rel.is_none() => {
+            Ok(Goal::Simple(SimpleSubgoal::Solvent))
+        }
         "interest_in" => {
             if let Some(id) = named(&pred, "state") {
-                Ok(Goal::Atom(Atom::InterestIn {
+                Ok(Goal::Simple(SimpleSubgoal::InterestIn {
                     kind: InterestKind::State,
                     id,
                 }))
             } else if let Some(id) = named(&pred, "region") {
-                Ok(Goal::Atom(Atom::InterestIn {
+                Ok(Goal::Simple(SimpleSubgoal::InterestIn {
                     kind: InterestKind::Region,
                     id,
                 }))
             } else if let Some(id) = first_ident(&pred, "state") {
-                Ok(Goal::Atom(Atom::InterestIn {
+                Ok(Goal::Simple(SimpleSubgoal::InterestIn {
                     kind: InterestKind::State,
                     id,
                 }))
@@ -245,49 +247,52 @@ fn compile_pred(pred: RawPred) -> Result<Goal, GoalError> {
             let (rel, value) = pred
                 .rel
                 .ok_or_else(|| GoalError::Parse("good_price requires a comparison".into()))?;
-            Ok(Goal::Atom(Atom::GoodPrice { good, rel, value }))
+            Ok(Goal::Simple(SimpleSubgoal::GoodPrice { good, rel, value }))
         }
         "army_power_projection" => {
             let (rel, value) = pred.rel.ok_or_else(|| {
                 GoalError::Parse("army_power_projection requires a comparison".into())
             })?;
-            Ok(Goal::Atom(Atom::ArmyPower { rel, value }))
+            Ok(Goal::Simple(SimpleSubgoal::ArmyPower { rel, value }))
         }
         "navy_power_projection" => {
             let (rel, value) = pred.rel.ok_or_else(|| {
                 GoalError::Parse("navy_power_projection requires a comparison".into())
             })?;
-            Ok(Goal::Atom(Atom::NavyPower { rel, value }))
+            Ok(Goal::Simple(SimpleSubgoal::NavyPower { rel, value }))
         }
         "gdp" => {
             let (rel, value) = pred
                 .rel
                 .ok_or_else(|| GoalError::Parse("gdp requires a comparison".into()))?;
-            Ok(Goal::Atom(Atom::Gdp { rel, value }))
+            Ok(Goal::Simple(SimpleSubgoal::Gdp { rel, value }))
         }
         "weekly_balance" => {
             let (rel, value) = pred
                 .rel
                 .ok_or_else(|| GoalError::Parse("weekly_balance requires a comparison".into()))?;
-            Ok(Goal::Atom(Atom::WeeklyBalance { rel, value }))
+            Ok(Goal::Simple(SimpleSubgoal::WeeklyBalance { rel, value }))
         }
         "population_weighted_wealth" => {
             let (rel, value) = pred.rel.ok_or_else(|| {
                 GoalError::Parse("population_weighted_wealth requires a comparison".into())
             })?;
-            Ok(Goal::Atom(Atom::PopulationWeightedWealth { rel, value }))
+            Ok(Goal::Simple(SimpleSubgoal::PopulationWeightedWealth {
+                rel,
+                value,
+            }))
         }
         "debt_principal" => {
             let (rel, value) = pred
                 .rel
                 .ok_or_else(|| GoalError::Parse("debt_principal requires a comparison".into()))?;
-            Ok(Goal::Atom(Atom::DebtPrincipal { rel, value }))
+            Ok(Goal::Simple(SimpleSubgoal::DebtPrincipal { rel, value }))
         }
         "credit_headroom" => {
             let (rel, value) = pred
                 .rel
                 .ok_or_else(|| GoalError::Parse("credit_headroom requires a comparison".into()))?;
-            Ok(Goal::Atom(Atom::CreditHeadroom { rel, value }))
+            Ok(Goal::Simple(SimpleSubgoal::CreditHeadroom { rel, value }))
         }
         other => Err(GoalError::Parse(format!("unknown predicate `{other}`"))),
     }
@@ -303,17 +308,17 @@ fn compile_declare_war(pred: &RawPred) -> Result<Goal, GoalError> {
         return Err(GoalError::DeclareWarTarget);
     };
     Ok(Goal::And(vec![
-        Goal::Atom(Atom::InterestIn { kind, id }),
-        Goal::Atom(Atom::ArmyPower {
+        Goal::Simple(SimpleSubgoal::InterestIn { kind, id }),
+        Goal::Simple(SimpleSubgoal::ArmyPower {
             rel: Rel::Ge,
             value: DECLARE_WAR_ARMY_THRESHOLD,
         }),
-        Goal::Atom(Atom::GoodPrice {
+        Goal::Simple(SimpleSubgoal::GoodPrice {
             good: MUNITIONS_GOOD.into(),
             rel: Rel::Le,
             value: DECLARE_WAR_MUNITIONS_PRICE_CEILING,
         }),
-        Goal::Atom(Atom::Solvent),
+        Goal::Simple(SimpleSubgoal::Solvent),
     ]))
 }
 
@@ -327,28 +332,28 @@ fn compile_colonize(pred: &RawPred) -> Result<Goal, GoalError> {
         return Err(GoalError::ColonizeTarget);
     };
     Ok(Goal::And(vec![
-        Goal::Atom(Atom::HasTech(COLONIZE_TECH.into())),
+        Goal::Simple(SimpleSubgoal::HasTech(COLONIZE_TECH.into())),
         Goal::Or(vec![
-            Goal::Atom(Atom::HasLaw(LAW_COLONIAL_RESETTLEMENT.into())),
-            Goal::Atom(Atom::HasLaw(LAW_COLONIAL_EXPLOITATION.into())),
+            Goal::Simple(SimpleSubgoal::HasLaw(LAW_COLONIAL_RESETTLEMENT.into())),
+            Goal::Simple(SimpleSubgoal::HasLaw(LAW_COLONIAL_EXPLOITATION.into())),
         ]),
-        Goal::Atom(Atom::HasTech(COLONIZE_QUININE_TECH.into())),
-        Goal::Atom(Atom::InterestIn { kind, id }),
-        Goal::Atom(Atom::ArmyPower {
+        Goal::Simple(SimpleSubgoal::HasTech(COLONIZE_QUININE_TECH.into())),
+        Goal::Simple(SimpleSubgoal::InterestIn { kind, id }),
+        Goal::Simple(SimpleSubgoal::ArmyPower {
             rel: Rel::Ge,
             value: COLONIZE_ARMY_THRESHOLD,
         }),
-        Goal::Atom(Atom::NavyPower {
+        Goal::Simple(SimpleSubgoal::NavyPower {
             rel: Rel::Ge,
             value: COLONIZE_NAVY_THRESHOLD,
         }),
-        Goal::Atom(Atom::Solvent),
+        Goal::Simple(SimpleSubgoal::Solvent),
     ]))
 }
 
 fn compile_research(pred: &RawPred) -> Result<Goal, GoalError> {
     let tech = first_ident(pred, "tech").ok_or(GoalError::ResearchTech)?;
-    Ok(Goal::Atom(Atom::HasTech(tech)))
+    Ok(Goal::Simple(SimpleSubgoal::HasTech(tech)))
 }
 
 fn named(pred: &RawPred, key: &str) -> Option<String> {

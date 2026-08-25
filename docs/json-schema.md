@@ -287,9 +287,9 @@ Save bytes are **not** in this JSON when talking to the UI list endpoint; they l
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["atom", "status"],
+        "required": ["simple_subgoal", "status"],
         "properties": {
-          "atom": {},
+          "simple_subgoal": {},
           "status": { "enum": ["still_failing", "cleared", "newly_failing"] }
         }
       }

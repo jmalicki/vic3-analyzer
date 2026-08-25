@@ -47,8 +47,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use vic3_defs::GameDefs;
 use vic3_load::{empty_tokens, export_save, load_path_world, load_tokens_path, SavePatch};
-use vic3_planning::Atom;
 use vic3_planning::PlanningState;
+use vic3_planning::SimpleSubgoal;
 use vic3_planning::{compare, AnalysisRecord, EconomyContext, PlanOpts, PlanResult};
 use vic3_prices::{
     alerts, optimize_pms, preview, solve, what_if, AlertsResult, OptimizeAxis as PriceOptimizeAxis,
@@ -108,7 +108,7 @@ enum Commands {
     OptimizePms(OptimizePmsCli),
     /// Patch a plaintext `.v3` into a new file. Never overwrites `--save`.
     ExportSave(ExportSaveCli),
-    /// Evaluate a goal and list its currently unsatisfied atoms.
+    /// Evaluate a goal and list its currently unsatisfied simple subgoals.
     Gaps(GapsCli),
     /// Find and archive a shortest goal-relevant action sequence.
     Plan(PlanCli),
@@ -345,7 +345,7 @@ enum ArchiveCommand {
 #[derive(Debug, Serialize)]
 struct GapsResult {
     satisfied: bool,
-    gaps: Vec<Atom>,
+    gaps: Vec<SimpleSubgoal>,
     limitations: Vec<String>,
 }
 
@@ -475,7 +475,7 @@ fn run_gaps(cmd: GapsCli) -> Result<()> {
     let state = PlanningState::from_world_with_prices(&world, country_tag, &prices, &defs)?;
     let goal = vic3_planning::parse(&cmd.goal)?;
     let mut limitations = prices.limitations;
-    if goal.has_army_atom() {
+    if goal.has_army_simple_subgoal() {
         state.push_army_power_limitation(&mut limitations);
     }
     let result = GapsResult {

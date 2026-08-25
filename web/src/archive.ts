@@ -3,7 +3,7 @@ import type {
   ActionDiff,
   AnalysisRecord,
   CompareResult,
-  GapAtom,
+  GapSimpleSubgoal,
   GapDiff,
   GapsResult,
   PlanResult,
@@ -104,12 +104,13 @@ export function compareAnalyses(left: AnalysisRecord, right: AnalysisRecord): Co
   ) {
     const leftGaps = (left.result as GapsResult).gaps
     const rightGaps = (right.result as GapsResult).gaps
-    const gaps: GapDiff[] = leftGaps.map((atom) => ({
-      atom,
-      status: includesAtom(rightGaps, atom) ? 'still_failing' : 'cleared',
+    const gaps: GapDiff[] = leftGaps.map((subgoal) => ({
+      simple_subgoal: subgoal,
+      status: includesSimpleSubgoal(rightGaps, subgoal) ? 'still_failing' : 'cleared',
     }))
-    for (const atom of rightGaps) {
-      if (!includesAtom(leftGaps, atom)) gaps.push({ atom, status: 'newly_failing' })
+    for (const subgoal of rightGaps) {
+      if (!includesSimpleSubgoal(leftGaps, subgoal))
+        gaps.push({ simple_subgoal: subgoal, status: 'newly_failing' })
     }
     if (gaps.length) comparison.gaps = gaps
   }
@@ -117,9 +118,12 @@ export function compareAnalyses(left: AnalysisRecord, right: AnalysisRecord): Co
   return comparison
 }
 
-function includesAtom(atoms: GapAtom[], candidate: GapAtom): boolean {
+function includesSimpleSubgoal(
+  items: GapSimpleSubgoal[],
+  candidate: GapSimpleSubgoal,
+): boolean {
   const encoded = JSON.stringify(candidate)
-  return atoms.some((atom) => JSON.stringify(atom) === encoded)
+  return items.some((item) => JSON.stringify(item) === encoded)
 }
 
 function alignActions(left: PlanResult['actions'], right: PlanResult['actions']): ActionDiff[] {
