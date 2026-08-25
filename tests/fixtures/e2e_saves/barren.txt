@@ -1,0 +1,22 @@
+SAV01000000000000000000
+meta_data={
+	version="1.9.0"
+	game_date=1836.1.1
+	name="Barren CLI fixture"
+}
+country_manager={
+	database={
+		16777216={
+			definition="GER"
+			budget={
+				gold_reserves=-100
+			}
+		}
+	}
+}
+previous_played={
+	{
+		idtype=16777216
+		name="GER"
+	}
+}
