@@ -1770,11 +1770,13 @@ mod tests {
         );
     }
 
+    /// Manual live-save smoke: load analysis + gaps under env-provided paths.
     #[test]
     #[ignore = "set VIC3_SAVE, VIC3_TOKENS, and VIC3_GAME or VIC3_DEFS"]
     fn live_load_analysis_session() {
         use std::time::Instant;
 
+        let _session = session_lock();
         let save = std::fs::read(std::env::var("VIC3_SAVE").expect("VIC3_SAVE")).expect("save");
         let tokens = std::env::var("VIC3_TOKENS")
             .ok()
