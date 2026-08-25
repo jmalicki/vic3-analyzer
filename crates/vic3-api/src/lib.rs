@@ -1869,9 +1869,11 @@ mod tests {
         load_analysis_json(&mock_shortage_fixture(), None, &mock_game_defs_blob(), "{}")
             .expect("load mock_shortage");
         let prices = loaded_prices_json().expect("prices");
+        let parsed: PricesResult = serde_json::from_str(&prices).expect("PricesResult");
         assert!(
-            prices.contains("mock_lumber"),
-            "expected mock_lumber in prices: {prices}"
+            parsed.goods.iter().any(|g| g.id == "mock_lumber"),
+            "expected mock_lumber in goods: {:?}",
+            parsed.goods.iter().map(|g| &g.id).collect::<Vec<_>>()
         );
         clear_analysis();
     }
