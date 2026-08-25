@@ -1770,6 +1770,7 @@ mod tests {
         );
     }
 
+    /// Manual live-save smoke: load analysis + gaps under env-provided paths.
     #[test]
     #[ignore = "set VIC3_SAVE, VIC3_TOKENS, and VIC3_GAME or VIC3_DEFS"]
     fn live_load_analysis_session() {
