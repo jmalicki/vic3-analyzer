@@ -57,11 +57,12 @@ pub use plan::{
     TimedNode, Vic3Node,
 };
 pub use sim::{
-    apply_action, successors, successors_for_atoms, successors_with_economy, Action,
+    apply_action, successors, successors_for_simple_subgoals, successors_with_economy, Action,
     EconomyContext, SimConfig, Successor,
 };
 pub use tech::{
-    expand_tech_gap_atoms, missing_tech_closure, tech_prereqs_satisfied, tech_research_cost,
+    expand_tech_gap_simple_subgoals, missing_tech_closure, tech_prereqs_satisfied,
+    tech_research_cost,
 };
 pub use world::{
     law_key, ConstructionQueueKind, PlanningParts, PlanningState, QueuedInterest, Save, Vic3Date,

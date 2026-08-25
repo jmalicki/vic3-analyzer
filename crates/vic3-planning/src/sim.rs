@@ -2,7 +2,7 @@
 //!
 //! # Why goal-relevant only
 //!
-//! Enumerating the whole game is intractable. [`successors`] / [`successors_for_atoms`]
+//! Enumerating the whole game is intractable. [`successors`] / [`successors_for_simple_subgoals`]
 //! open only edges that can close currently failing [`crate::goals::SimpleSubgoal`]s (plus
 //! building / PM candidates when an [`EconomyContext`] is present). Idle
 //! atoms with no model action emit nothing.
@@ -92,7 +92,7 @@ fn push_military_pp_decisions(
         MilitaryBranch::Navy => args.state.navy_power_projection,
     };
     let Some(needed) = power_raise_needed(rel, value, current) else {
-        // Still may need to hire underemployed buildings so the atom can clear.
+        // Still may need to hire underemployed buildings so the simple subgoal can clear.
         let underemployed = match branch {
             MilitaryBranch::Army => !args.state.army_buildings_fully_staffed(),
             MilitaryBranch::Navy => !args.state.navy_buildings_fully_staffed(),
@@ -461,7 +461,7 @@ impl EconomyContext {
     /// Direct types come from defs (IO / GDP / mil PP), not “already in country.”
     /// Each type expands to placement states ([`Self::placement_states_for`]).
     /// Construction Sector is a **meta** type when any direct build is present.
-    /// Hire stays on the military atom arm.
+    /// Hire stays on the military simple-subgoal arm.
     ///
     /// No type-level IO dominance prune: cost/benefit axes omit state markets,
     /// slots, and unlocks, so “strictly better type” is not sound.
@@ -771,7 +771,8 @@ impl EconomyContext {
                     if current.as_ref() == Some(&candidate) {
                         continue;
                     }
-                    let relevant = pm_affects_open_atoms(&self.defs, &candidate, atoms, wants_gdp);
+                    let relevant =
+                        pm_affects_open_simple_subgoals(&self.defs, &candidate, atoms, wants_gdp);
                     if !relevant {
                         continue;
                     }
@@ -890,7 +891,7 @@ fn production_methods_legal_for_building(
     true
 }
 
-fn pm_affects_open_atoms(
+fn pm_affects_open_simple_subgoals(
     defs: &GameDefs,
     pm_id: &str,
     atoms: &[SimpleSubgoal],
@@ -1080,7 +1081,7 @@ pub enum Action {
     WaitForEvent { event: Event, days: u16 },
 }
 
-/// One edge emitted by [`successors`] or [`successors_for_atoms`].
+/// One edge emitted by [`successors`] or [`successors_for_simple_subgoals`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Successor {
     pub action: Action,
@@ -1091,8 +1092,8 @@ pub struct Successor {
 
 /// Generate successors relevant to the currently unsatisfied atoms of `goal`.
 pub fn successors(state: &PlanningState, goal: &Goal, config: SimConfig) -> Vec<Successor> {
-    let open_atoms = gaps(goal, state);
-    successors_for_atoms_with_economy(state, &open_atoms, config, None)
+    let open_simple_subgoals = gaps(goal, state);
+    successors_for_simple_subgoals_with_economy(state, &open_simple_subgoals, config, None)
 }
 
 /// Generate successors with price-solver context for building decisions.
@@ -1105,12 +1106,12 @@ pub fn successors_with_economy(
     config: SimConfig,
     economy: &EconomyContext,
 ) -> Vec<Successor> {
-    let open_atoms = if economy.defs.technologies.is_empty() {
+    let open_simple_subgoals = if economy.defs.technologies.is_empty() {
         gaps(goal, state)
     } else {
         crate::goals::gaps_with_defs(goal, state, &economy.defs)
     };
-    successors_for_atoms_with_economy(state, &open_atoms, config, Some(economy))
+    successors_for_simple_subgoals_with_economy(state, &open_simple_subgoals, config, Some(economy))
 }
 
 /// Generate successors from an already-computed list of open goal atoms.
@@ -1119,14 +1120,14 @@ pub fn successors_with_economy(
 /// research and construction may run in parallel. Instant `SwitchPm` /
 /// `AdjustTax` decisions are not blocked by other tracks. At most one wait
 /// edge is appended — the earliest completion among goal-relevant in-flight
-/// tracks, or a payday tick when a solvency-related atom can move closer.
+/// tracks, or a payday tick when a solvency-related simple subgoal can move closer.
 /// Idle states without an open solvency path emit no wait (I6).
-pub fn successors_for_atoms(
+pub fn successors_for_simple_subgoals(
     state: &PlanningState,
-    open_atoms: &[SimpleSubgoal],
+    open_simple_subgoals: &[SimpleSubgoal],
     config: SimConfig,
 ) -> Vec<Successor> {
-    successors_for_atoms_with_economy(state, open_atoms, config, None)
+    successors_for_simple_subgoals_with_economy(state, open_simple_subgoals, config, None)
 }
 
 fn interest_queued(kind: InterestKind, id: &str) -> QueuedInterest {
@@ -1189,9 +1190,9 @@ fn push_wait(
     }
 }
 
-fn successors_for_atoms_with_economy(
+fn successors_for_simple_subgoals_with_economy(
     state: &PlanningState,
-    open_atoms: &[SimpleSubgoal],
+    open_simple_subgoals: &[SimpleSubgoal],
     config: SimConfig,
     economy: Option<&EconomyContext>,
 ) -> Vec<Successor> {
@@ -1202,7 +1203,7 @@ fn successors_for_atoms_with_economy(
     let mut seen_mil_hires = BTreeSet::new();
     let mut seen_tax_deltas = BTreeSet::new();
 
-    for atom in open_atoms {
+    for atom in open_simple_subgoals {
         match atom {
             SimpleSubgoal::HasTech(tech) => {
                 if state.research_busy()
@@ -1302,7 +1303,8 @@ fn successors_for_atoms_with_economy(
     }
 
     if let Some(economy) = economy {
-        for (building, state_id) in economy.building_candidates(state, open_atoms, config) {
+        for (building, state_id) in economy.building_candidates(state, open_simple_subgoals, config)
+        {
             push_decision(
                 &mut result,
                 state,
@@ -1312,9 +1314,12 @@ fn successors_for_atoms_with_economy(
             );
         }
         let (max_pm_candidates, max_pm_overrides) = config.pm_branch_caps();
-        for (building_id, methods) in
-            economy.pm_switch_candidates(state, open_atoms, max_pm_candidates, max_pm_overrides)
-        {
+        for (building_id, methods) in economy.pm_switch_candidates(
+            state,
+            open_simple_subgoals,
+            max_pm_candidates,
+            max_pm_overrides,
+        ) {
             push_decision(
                 &mut result,
                 state,
@@ -1337,7 +1342,7 @@ fn successors_for_atoms_with_economy(
     // false [`crate::plan::PlanError::Unreachable`].
     let mut wait_candidates: Vec<(u16, Event)> = Vec::new();
     if let Some(tech) = state.queued_tech.as_ref().filter(|_| {
-        open_atoms
+        open_simple_subgoals
             .iter()
             .any(|atom| matches!(atom, SimpleSubgoal::HasTech(id) if !state.has_tech(id)))
     }) {
@@ -1352,7 +1357,7 @@ fn successors_for_atoms_with_economy(
         }
     }
     if let Some(queued) = state.queued_interest.as_ref().filter(|_| {
-        open_atoms.iter().any(|atom| match atom {
+        open_simple_subgoals.iter().any(|atom| match atom {
             SimpleSubgoal::InterestIn { kind, id } => match kind {
                 InterestKind::State => !state.has_interest_state(id),
                 InterestKind::Region => !state.has_interest_region(id),
@@ -1368,7 +1373,7 @@ fn successors_for_atoms_with_economy(
         wait_candidates.push((days, Event::InterestDeclared { kind, id }));
     }
     if let Some(building) = state.queued_hire.as_ref().filter(|queued| {
-        open_atoms.iter().any(|atom| {
+        open_simple_subgoals.iter().any(|atom| {
             matches!(
                 atom,
                 SimpleSubgoal::ArmyPower { .. } | SimpleSubgoal::NavyPower { .. }
@@ -1392,14 +1397,14 @@ fn successors_for_atoms_with_economy(
         ));
     }
     if let Some(law) = state.queued_law.as_ref().filter(|_| {
-        open_atoms
+        open_simple_subgoals
             .iter()
             .any(|atom| matches!(atom, SimpleSubgoal::HasLaw(id) if !state.has_law(id)))
     }) {
         let days = state.law_days_left.unwrap_or(config.law_days);
         wait_candidates.push((days, Event::LawEnacted { law: law.clone() }));
     }
-    if payday_can_help(state, open_atoms) {
+    if payday_can_help(state, open_simple_subgoals) {
         wait_candidates.push((config.payday_days, Event::Payday {}));
     }
 
@@ -1535,8 +1540,8 @@ fn fiscal_slack(atom: &SimpleSubgoal, state: &PlanningState) -> Option<f64> {
 
 /// Emit payday only when a solvency-related open atom can move closer after one
 /// tick. Prevents idle wait loops when the frozen balance cannot help.
-fn payday_can_help(state: &PlanningState, open_atoms: &[SimpleSubgoal]) -> bool {
-    if !open_atoms.iter().any(is_solvency_simple_subgoal) {
+fn payday_can_help(state: &PlanningState, open_simple_subgoals: &[SimpleSubgoal]) -> bool {
+    if !open_simple_subgoals.iter().any(is_solvency_simple_subgoal) {
         return false;
     }
     let mut next = state.clone();
@@ -1544,7 +1549,7 @@ fn payday_can_help(state: &PlanningState, open_atoms: &[SimpleSubgoal]) -> bool 
     if next == *state {
         return false;
     }
-    open_atoms.iter().any(|atom| {
+    open_simple_subgoals.iter().any(|atom| {
         let Some(before) = fiscal_slack(atom, state) else {
             return false;
         };
@@ -2439,7 +2444,7 @@ mod tests {
         });
         assert!(successors(&deficit, &compile("solvent").unwrap(), config).is_empty());
 
-        let wealth_only = successors_for_atoms(
+        let wealth_only = successors_for_simple_subgoals(
             &insolvent,
             &[SimpleSubgoal::PopulationWeightedWealth {
                 rel: Rel::Ge,
@@ -3960,7 +3965,7 @@ mod tests {
             }
 
             let idle_atoms = [SimpleSubgoal::Solvent];
-            let idle_edges = successors_for_atoms(
+            let idle_edges = successors_for_simple_subgoals(
                 &state_at(day_offset),
                 &idle_atoms,
                 config,

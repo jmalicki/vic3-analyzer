@@ -114,16 +114,16 @@ fn parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
                 })
             });
 
-        let atom = goal
-            .delimited_by(just('(').padded(), just(')').padded())
-            .or(pred);
+        let simple = pred;
 
         let unary = recursive(|unary| {
             text::ascii::keyword("not")
                 .padded()
                 .ignore_then(unary)
                 .map(|e| Expr::Not(Box::new(e)))
-                .or(atom)
+                .or(goal
+                    .delimited_by(just('(').padded(), just(')').padded())
+                    .or(simple))
         });
 
         let and_expr = unary

@@ -254,7 +254,7 @@ impl Default for PlanningParts {
 
 /// Compact world node for DSL eval, sim successors, and A* intern keys.
 ///
-/// Fields cover every atom `crate::goals` can read, plus queue / delta slots
+/// Fields cover every simple subgoal `crate::goals` can read, plus queue / delta slots
 /// `crate::sim` needs for waits and re-solves. Hash/eq use `f64::to_bits` (I8)
 /// for discrete floats that are part of identity. **`good_prices` and `gdp` are
 /// omitted** from Hash/Eq by default (derived solve outputs); set
@@ -321,7 +321,7 @@ pub struct PlanningState {
     pub laws: BTreeSet<String>,
     /// Law enactment in flight — sim-only (`None` at load).
     pub queued_law: Option<String>,
-    /// Country infamy when present (`None` when missing); not yet a DSL atom.
+    /// Country infamy when present (`None` when missing); not yet a DSL simple subgoal.
     pub infamy: Option<f64>,
     /// Per-building PM overrides on this branch (empty at load).
     ///

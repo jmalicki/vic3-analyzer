@@ -141,8 +141,8 @@ pub enum ConstructionEtaMode {
     ///
     /// When government slots are full, this is the soonest fed completion (slot
     /// frees). When spare slots exist, this is one default-cost level at the
-    /// leftover government feed rate — not “next finish”, so open GDP atoms are
-    /// not pinned to a sticky 1-day next-completion bound.
+    /// leftover government feed rate — not “next finish”, so open GDP simple
+    /// subgoals are not pinned to a sticky 1-day next-completion bound.
     CapacityOrSlot,
     /// Soonest actively-fed government construction completion.
     ///
@@ -340,7 +340,7 @@ pub fn construction_points_per_day_from_world(
     }
 }
 
-/// Whether open goal atoms imply the planner may need to construct buildings.
+/// Whether open simple subgoals imply the planner may need to construct buildings.
 ///
 /// Useful for docs / future gates. Construction Sector means-to-an-end now keys
 /// off a non-empty candidate set (after direct/mil adds) rather than this alone.

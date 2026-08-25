@@ -51,7 +51,7 @@ pub const DECLARE_WAR_ARMY_THRESHOLD: f64 = 100.0;
 /// without removing this munitions-price conjunct.
 pub const DECLARE_WAR_MUNITIONS_PRICE_CEILING: f64 = 40.0;
 
-/// Good id used as the munitions-price atom when compiling `declare-war`.
+/// Good id used as the munitions-price simple subgoal when compiling `declare-war`.
 pub const MUNITIONS_GOOD: &str = "ammunition";
 
 /// Colonization society tech id (model / Paradox script key).
@@ -193,7 +193,7 @@ impl SimpleSubgoal {
         matches!(self, SimpleSubgoal::HasLaw(id) if crate::world::law_key(id) == crate::world::law_key(law))
     }
 
-    /// Whether the atom holds. Unknown metrics (including missing army PP) are false.
+    /// Whether the simple subgoal holds. Unknown metrics (including missing army PP) are false.
     pub fn eval(&self, state: &PlanningState) -> bool {
         matches!(self.status(state), SimpleSubgoalStatus::Cleared)
     }
@@ -400,7 +400,7 @@ pub fn gaps_with_defs(
     defs: &vic3_defs::GameDefs,
 ) -> Vec<SimpleSubgoal> {
     let open = gaps(goal, state);
-    crate::tech::expand_tech_gap_atoms(&open, state, defs)
+    crate::tech::expand_tech_gap_simple_subgoals(&open, state, defs)
 }
 
 fn collect_gaps(goal: &Goal, state: &PlanningState, out: &mut Vec<SimpleSubgoal>) {
@@ -414,20 +414,20 @@ fn collect_gaps(goal: &Goal, state: &PlanningState, out: &mut Vec<SimpleSubgoal>
             }
         }
         Goal::Not(inner) => {
-            flatten_atoms(inner, out);
+            flatten_simple_subgoals(inner, out);
         }
         Goal::Simple(atom) => out.push(atom.clone()),
     }
 }
 
-fn flatten_atoms(goal: &Goal, out: &mut Vec<SimpleSubgoal>) {
+fn flatten_simple_subgoals(goal: &Goal, out: &mut Vec<SimpleSubgoal>) {
     match goal {
         Goal::And(xs) | Goal::Or(xs) => {
             for x in xs {
-                flatten_atoms(x, out);
+                flatten_simple_subgoals(x, out);
             }
         }
-        Goal::Not(inner) => flatten_atoms(inner, out),
+        Goal::Not(inner) => flatten_simple_subgoals(inner, out),
         Goal::Simple(atom) => out.push(atom.clone()),
     }
 }
@@ -459,7 +459,7 @@ mod tests {
             .simple_subgoals()
             .into_iter()
             .find(|a| a.is_interest())
-            .expect("interest atom");
+            .expect("interest simple subgoal");
         assert_eq!(
             interest,
             &SimpleSubgoal::InterestIn {
@@ -637,7 +637,7 @@ mod tests {
     }
 
     #[test]
-    fn gaps_unsatisfied_atoms_on_fake_state() {
+    fn gaps_unsatisfied_simple_subgoals_on_fake_state() {
         let state = PlanningState::from_parts(PlanningParts {
             country: "GER".into(),
             ..PlanningParts::default()
@@ -720,7 +720,7 @@ mod tests {
             })
         ));
         let Goal::Simple(army) = &atom else {
-            panic!("expected army atom");
+            panic!("expected army simple subgoal");
         };
         assert_eq!(army.status(&unknown), SimpleSubgoalStatus::Unknown);
         assert!(!army.eval(&unknown));

@@ -15,6 +15,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   TypeScript). Docs define **simple subgoal** as “simple in this compile,” not
   forever irreducible. **Breaking** for `vic3-planning` / compare JSON / web
   types.
+- **Follow-on naming:** `successors_for_atoms` → `successors_for_simple_subgoals`,
+  `expand_tech_gap_atoms` → `expand_tech_gap_simple_subgoals` (and private
+  helpers). **Breaking** for those `vic3-planning` call sites.
+
 
 - **Planning `ConstructionSlots`:** `max_parallel_construction_jobs` now returns
   `ConstructionSlots` (`NonZeroUsize` newtype, always ≥ 1) instead of `usize`.

@@ -14,7 +14,7 @@ Production `plan` / `plan_with_economy` wrap [`Vic3Node`] in [`PeaNode`]
 (`crates/vic3-planning/src/plan/pea.rs`):
 
 - Build one **national** candidate bag from domain successors (all placements /
-  actions for that parent), scored by \(f - g = \mathrm{edge} + h(\mathrm{child})\).
+  actions for that current node), scored by \(f - g = \mathrm{edge} + h(\mathrm{child})\).
 - Choose top [`DEFAULT_PEA_BEAM`] (**16**) with `select_nth` (sort only that
   prefix); defer the rest in one `Expanding` cursor (`Rc<[Candidate]>`).
 - **Apply child only on emit** — bag rows store `action` / `days` / score /
@@ -27,7 +27,7 @@ no-refit GDP / profit-per-level proxy on Prussia 1836 (~50 build-level
 candidates; top 8–16 held the high-value head). Not a proven optimum — tune
 with real planner histograms later.
 
-This **defers OPEN insertion** per parent expand. It is **not** a shared slot
+This **defers OPEN insertion** per node expand. It is **not** a shared slot
 budget across the whole A* frontier (that would need heaps-crate changes).
 
 ---
@@ -69,5 +69,5 @@ helpful-operator ordering may return later as heuristics only.
 ## Suggested later ladder
 
 1. Measure PEA* OPEN size / wall time vs full expand on real goals; retune beam.
-2. EPEA*-style OSF where \(\Delta f\) is cheap (e.g. research atoms).
+2. EPEA*-style OSF where \(\Delta f\) is cheap (e.g. research simple subgoals).
 3. Optional satisficing preferences — still not dominance theorems.

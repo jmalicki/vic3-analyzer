@@ -61,10 +61,10 @@ pub fn tech_prereqs_satisfied(tech: &str, state: &PlanningState, defs: Option<&G
 
 /// Expand open `HasTech` atoms into the full missing ancestor set.
 ///
-/// Non-tech atoms are preserved. Duplicate tech ids collapse. Without a
+/// Non-tech simple subgoals are preserved. Duplicate tech ids collapse. Without a
 /// useful graph (empty technologies map), returns `atoms` unchanged aside
 /// from dropping already-owned techs.
-pub fn expand_tech_gap_atoms(
+pub fn expand_tech_gap_simple_subgoals(
     atoms: &[SimpleSubgoal],
     state: &PlanningState,
     defs: &GameDefs,
