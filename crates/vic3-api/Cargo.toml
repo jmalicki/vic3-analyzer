@@ -10,6 +10,7 @@ description = "Transport-free analysis API (bytes/paths in, JSON out)"
 workspace = true
 
 [dependencies]
+arc-swap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

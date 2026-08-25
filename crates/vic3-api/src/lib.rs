@@ -21,8 +21,8 @@
 //!    `alerts_json`, … take save/defs bytes (or `*_from_paths`) and return JSON.
 //!    Does not install a session.
 //! 2. **Session** — [`load_analysis_json`] (or [`load_analysis_snapshot`] with
-//!    `install = true`) stores defs, world, baseline prices, and save IR in a
-//!    process-local cell. Follow-ups: [`loaded_prices_json`],
+//!    `install = true`) stores defs, world, baseline prices, and save IR behind
+//!    an atomically swapped [`std::sync::Arc`]. Follow-ups: [`loaded_prices_json`],
 //!    [`loaded_what_if_json`], [`loaded_gaps_json`], [`loaded_plan_json`],
 //!    [`loaded_alerts_json`], [`loaded_apply_delta_json`],
 //!    [`loaded_optimize_pms_json`], [`loaded_military_json`],
@@ -30,7 +30,8 @@
 //!    [`clear_analysis`] drops the session.
 //!
 //! Wasm hosts the session in the analysis worker (one at a time). Native hosts
-//! share the same model. [`load_analysis_snapshot`] with `install = false` builds
+//! publish/load the same `Arc` across threads (Tauri blocking pool + async
+//! runtime). [`load_analysis_snapshot`] with `install = false` builds
 //! an owned snapshot without mutating the active session (SQL `latest.*`).
 //!
 //! # Contracts
@@ -50,10 +51,11 @@
 
 mod error;
 
+use arc_swap::ArcSwapOption;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::Arc;
 use vic3_load::{empty_tokens, load_slice, load_tokens_slice, Save, SavePatch};
 use vic3_planning::EconomyContext;
 use vic3_planning::PlanOpts;
@@ -76,10 +78,24 @@ struct LoadedAnalysis {
     save: Save,
 }
 
-thread_local! {
-    /// Process-local analysis session (one at a time). Wasm hosts this in the
-    /// analysis worker; native callers share the same model.
-    static LOADED_ANALYSIS: RefCell<Option<LoadedAnalysis>> = const { RefCell::new(None) };
+/// Process-wide analysis session (one at a time).
+///
+/// Published as an atomically swapped [`Arc`] so Tauri can install on a
+/// blocking-pool thread and `loaded_*` can read from the async/UI runtime
+/// without a cross-thread `thread_local` miss (or holding a mutex for the
+/// duration of gaps/plan).
+static LOADED_ANALYSIS: ArcSwapOption<LoadedAnalysis> = ArcSwapOption::const_empty();
+
+fn install_loaded_analysis(loaded: LoadedAnalysis) {
+    LOADED_ANALYSIS.store(Some(Arc::new(loaded)));
+}
+
+fn clear_loaded_analysis() {
+    LOADED_ANALYSIS.store(None::<Arc<LoadedAnalysis>>);
+}
+
+fn current_loaded_analysis() -> Option<Arc<LoadedAnalysis>> {
+    LOADED_ANALYSIS.load_full()
 }
 
 /// Read a file into memory for path-based loaders.
@@ -293,13 +309,11 @@ pub fn parse_save_from_path(save: &Path, tokens: Option<&Path>) -> Result<String
     parse_save_json(&save_bytes, tokens_bytes.as_deref())
 }
 
-/// Clear the process-local analysis session.
+/// Clear the process-wide analysis session.
 ///
 /// Idempotent. After this, every `loaded_*` call returns [`ApiError::NoLoadedAnalysis`].
 pub fn clear_analysis() {
-    LOADED_ANALYSIS.with(|loaded| {
-        loaded.borrow_mut().take();
-    });
+    clear_loaded_analysis();
 }
 
 /// Parse a save into a compact summary JSON (tag, date, counts, building types).
@@ -409,9 +423,7 @@ pub fn load_analysis_snapshot(
         date: summary.date,
     };
     if install {
-        LOADED_ANALYSIS.with(|cell| {
-            cell.replace(Some(loaded));
-        });
+        install_loaded_analysis(loaded);
     }
     Ok(snap)
 }
@@ -461,9 +473,7 @@ pub fn load_analysis_json(
         summary,
         prices: &loaded.prices,
     })?;
-    LOADED_ANALYSIS.with(|cell| {
-        cell.replace(Some(loaded));
-    });
+    install_loaded_analysis(loaded);
     Ok(json)
 }
 
@@ -717,10 +727,8 @@ pub fn loaded_production_methods_json() -> Result<String, ApiError> {
 fn with_loaded_analysis<T>(
     run: impl FnOnce(&LoadedAnalysis) -> Result<T, ApiError>,
 ) -> Result<T, ApiError> {
-    LOADED_ANALYSIS.with(|loaded| {
-        let loaded = loaded.borrow();
-        run(loaded.as_ref().ok_or(ApiError::NoLoadedAnalysis)?)
-    })
+    let loaded = current_loaded_analysis().ok_or(ApiError::NoLoadedAnalysis)?;
+    run(loaded.as_ref())
 }
 
 /// Solve market prices ([`PricesResult`] JSON). One-shot; does not install a session.
@@ -1324,6 +1332,12 @@ mod tests {
     use vic3_load::{empty_tokens, load_slice, LoadError};
     use vic3_prices::SolveStatus;
 
+    /// Process-wide session is shared; serialize tests that install/clear it.
+    fn session_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
     fn load_fixture() -> Vec<u8> {
         std::fs::read(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1443,6 +1457,7 @@ mod tests {
 
     #[test]
     fn loaded_analysis_keeps_baseline_world_and_prices() {
+        let _session = session_lock();
         clear_analysis();
         assert!(matches!(
             loaded_prices_json(),
@@ -1470,7 +1485,26 @@ mod tests {
     }
 
     #[test]
+    fn loaded_analysis_is_visible_across_threads() {
+        let _session = session_lock();
+        clear_analysis();
+        let save = load_fixture();
+        let defs = defs_blob();
+        std::thread::spawn(move || {
+            load_analysis_json(&save, None, &defs, "{}").expect("install on worker");
+        })
+        .join()
+        .expect("worker join");
+
+        let prices = loaded_prices_json().expect("read on main after worker install");
+        let parsed: PricesResult = serde_json::from_str(&prices).expect("PricesResult");
+        assert!(!parsed.goods.is_empty());
+        clear_analysis();
+    }
+
+    #[test]
     fn loaded_apply_delta_does_not_change_subsequent_loaded_prices() {
+        let _session = session_lock();
         clear_analysis();
         load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
         let baseline = loaded_prices_json().expect("cached prices");
@@ -1488,6 +1522,7 @@ mod tests {
 
     #[test]
     fn loaded_optimize_pms_after_load_analysis_returns_axis() {
+        let _session = session_lock();
         clear_analysis();
         load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
         let json = loaded_optimize_pms_json(r#"{"axis":"income"}"#).expect("optimize");
@@ -1505,6 +1540,7 @@ mod tests {
 
     #[test]
     fn loaded_military_json_after_load_has_army_and_navy_arrays() {
+        let _session = session_lock();
         clear_analysis();
         load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
         let json = loaded_military_json().expect("military snapshot");
@@ -1527,6 +1563,7 @@ mod tests {
 
     #[test]
     fn loaded_constructions_json_after_load_has_private_and_government_arrays() {
+        let _session = session_lock();
         clear_analysis();
         load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
         let json = loaded_constructions_json().expect("constructions snapshot");
@@ -1583,6 +1620,7 @@ mod tests {
 
     #[test]
     fn loaded_alerts_after_load_analysis() {
+        let _session = session_lock();
         clear_analysis();
         load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
         let json = loaded_alerts_json().expect("loaded alerts");
@@ -1597,6 +1635,7 @@ mod tests {
 
     #[test]
     fn loaded_production_methods_after_load_analysis() {
+        let _session = session_lock();
         clear_analysis();
         load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
         let json = loaded_production_methods_json().expect("loaded production methods");
