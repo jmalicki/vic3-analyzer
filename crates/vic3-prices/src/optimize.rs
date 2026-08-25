@@ -149,7 +149,7 @@ pub fn optimize_pms(
     for building in &world.buildings {
         if player_ids.contains(&building.id) {
             by_type
-                .entry(building.building.clone())
+                .entry(building.type_id.clone())
                 .or_default()
                 .push(building);
         }
@@ -326,7 +326,7 @@ fn try_type_methods(
 fn candidate_pms(world: &World, type_id: &str) -> Vec<String> {
     let mut ids = BTreeSet::new();
     for building in &world.buildings {
-        if building.building == type_id {
+        if building.type_id == type_id {
             ids.extend(building.production_methods.iter().cloned());
         }
     }
@@ -464,7 +464,7 @@ fn changes_from_delta(world: &World, delta: &WorldDelta) -> Vec<OptimizeChange> 
             continue;
         }
         changes.push(OptimizeChange {
-            building_type: building.building.clone(),
+            building_type: building.type_id.clone(),
             building_id: building.id,
             from: building.production_methods.clone(),
             to: entry.methods.clone(),
@@ -526,7 +526,7 @@ mod tests {
         WorldBuilding {
             id,
             state: None,
-            building: "workshop".into(),
+            type_id: "workshop".into(),
             level: 1.0,
             staffing: 1.0,
             production_methods: vec![method.into()],

@@ -306,7 +306,7 @@ async fn preview_delta_rye_drops_wood_price() {
 
     let delta = WorldDelta {
         extra_levels: vec![ExtraLevelsDelta {
-            building: Some("building_rye_farm".into()),
+            type_id: Some("building_rye_farm".into()),
             building_id: None,
             extra_levels: 1,
         }],

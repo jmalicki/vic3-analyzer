@@ -68,8 +68,9 @@ impl Default for SolveOpts {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WhatIfOpts {
-    /// Building type id (matches [`crate::WorldBuilding::building`]).
-    pub building: String,
+    /// Building type script id (matches [`crate::WorldBuilding::type_id`]).
+    #[serde(alias = "building")]
+    pub type_id: String,
     /// Non-negative extra levels added to matching buildings.
     #[schemars(range(min = 0))]
     pub extra_levels: u32,
@@ -104,13 +105,13 @@ pub struct ProductionMethodDelta {
 
 /// Extra levels on a building type and/or a single instance.
 ///
-/// When `building_id` is set it wins; otherwise `building` matches
-/// [`crate::WorldBuilding::building`]. Neither set is a no-op.
+/// When `building_id` is set it wins; otherwise `type_id` matches
+/// [`crate::WorldBuilding::type_id`]. Neither set is a no-op.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExtraLevelsDelta {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub building: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "building")]
+    pub type_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub building_id: Option<u32>,
     #[schemars(range(min = 0))]
@@ -129,7 +130,7 @@ impl From<WhatIfOpts> for WorldDelta {
     fn from(opts: WhatIfOpts) -> Self {
         Self {
             extra_levels: vec![ExtraLevelsDelta {
-                building: Some(opts.building),
+                type_id: Some(opts.type_id),
                 building_id: None,
                 extra_levels: opts.extra_levels,
             }],

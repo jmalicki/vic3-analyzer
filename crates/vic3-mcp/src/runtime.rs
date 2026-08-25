@@ -301,7 +301,7 @@ pub fn world_delta_from_sugar(
         }
         return Ok(WorldDelta {
             extra_levels: vec![ExtraLevelsDelta {
-                building: None,
+                type_id: None,
                 building_id: Some(id),
                 extra_levels,
             }],
@@ -318,7 +318,7 @@ pub fn world_delta_from_sugar(
             .world
             .buildings
             .iter()
-            .filter(|b| b.building == building && b.state == Some(want_state))
+            .filter(|b| b.type_id == building && b.state == Some(want_state))
             .map(|b| b.id)
             .collect();
         if ids.is_empty() {
@@ -328,7 +328,7 @@ pub fn world_delta_from_sugar(
             extra_levels: ids
                 .into_iter()
                 .map(|id| ExtraLevelsDelta {
-                    building: None,
+                    type_id: None,
                     building_id: Some(id),
                     extra_levels,
                 })
@@ -339,7 +339,7 @@ pub fn world_delta_from_sugar(
 
     Ok(WorldDelta {
         extra_levels: vec![ExtraLevelsDelta {
-            building: Some(building.to_string()),
+            type_id: Some(building.to_string()),
             building_id: None,
             extra_levels,
         }],

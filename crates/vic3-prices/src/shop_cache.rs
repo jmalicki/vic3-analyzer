@@ -497,7 +497,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(10),
-                building: "building_rye_farm".into(),
+                type_id: "building_rye_farm".into(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_grain".into()],

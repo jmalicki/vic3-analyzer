@@ -215,7 +215,7 @@ fn detail_rows(
         buildings.push(BuildingEconomics {
             id: building.id,
             state_id: building.state,
-            type_id: building.building.clone(),
+            type_id: building.type_id.clone(),
             level: building.level,
             staffing: building.staffing,
             production_method_ids: building.production_methods.clone(),

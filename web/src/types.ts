@@ -177,6 +177,9 @@ export interface ProductionMethodDelta {
 }
 
 export interface ExtraLevelsDelta {
+  /** Building type script id when targeting all instances of a type. */
+  type_id?: string
+  /** @deprecated Use `type_id`. */
   building?: string
   building_id?: number
   extra_levels: number

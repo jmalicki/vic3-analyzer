@@ -1080,7 +1080,7 @@ async fn constructions_table_lists_private_and_government() {
             queue: ConstructionQueueKind::Private,
             country_id,
             state_id: Some(1),
-            building: "building_logging_camp".into(),
+            type_id: "building_logging_camp".into(),
             remaining: Some(5.0),
         },
         WorldConstruction {
@@ -1088,7 +1088,7 @@ async fn constructions_table_lists_private_and_government() {
             queue: ConstructionQueueKind::Government,
             country_id,
             state_id: Some(1),
-            building: "building_construction_sector".into(),
+            type_id: "building_construction_sector".into(),
             remaining: Some(40.0),
         },
     ];
@@ -1097,7 +1097,7 @@ async fn constructions_table_lists_private_and_government() {
 
     let batches = eng
         .query(
-            "SELECT queue, position, building, remaining FROM constructions ORDER BY queue, position",
+            "SELECT queue, position, type_id, remaining FROM constructions ORDER BY queue, position",
         )
         .await
         .expect("constructions");
@@ -1112,7 +1112,7 @@ async fn constructions_table_lists_private_and_government() {
     assert_eq!(queues.value(1), "private");
 
     let gov = eng
-        .query("SELECT building FROM constructions WHERE queue = 'government'")
+        .query("SELECT type_id FROM constructions WHERE queue = 'government'")
         .await
         .expect("gov filter");
     let buildings = gov[0]

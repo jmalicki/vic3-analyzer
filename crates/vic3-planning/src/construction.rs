@@ -283,7 +283,7 @@ pub fn construction_points_per_day_from_save(
         let world_building = vic3_prices::WorldBuilding {
             id,
             state: building.state,
-            building: building.building.clone(),
+            type_id: building.building.clone(),
             level,
             staffing: building.staffing.max(0.0),
             production_methods: methods,
@@ -317,7 +317,7 @@ pub fn construction_points_per_day_from_world(
         .filter_map(|state| (state.country == Some(country_id)).then_some(state.id))
         .collect();
     let cs = world.buildings.iter().filter(|building| {
-        building.building == BUILDING_CONSTRUCTION_SECTOR
+        building.type_id == BUILDING_CONSTRUCTION_SECTOR
             && building
                 .state
                 .is_some_and(|state_id| owned_states.contains(&state_id))
@@ -369,7 +369,7 @@ pub fn construction_sector_levels(state: &PlanningState, economy: &EconomyContex
         .apply_planning_to_world(state)
         .buildings
         .iter()
-        .filter(|b| b.building == BUILDING_CONSTRUCTION_SECTOR)
+        .filter(|b| b.type_id == BUILDING_CONSTRUCTION_SECTOR)
         .map(|b| b.level.max(0.0))
         .sum()
 }
@@ -389,7 +389,7 @@ pub fn national_construction_points_per_day(
     for building in world
         .buildings
         .iter()
-        .filter(|b| b.building == BUILDING_CONSTRUCTION_SECTOR)
+        .filter(|b| b.type_id == BUILDING_CONSTRUCTION_SECTOR)
     {
         let level = building.level.max(0.0);
         if level <= 0.0 {
@@ -555,7 +555,7 @@ pub fn construction_points_per_day_per_job(state: &PlanningState, config: SimCon
         if fed >= max_jobs || remaining <= 0.0 {
             break;
         }
-        let cap = allocation_cap_points_per_day(state, config, Some(job.building.as_str()));
+        let cap = allocation_cap_points_per_day(state, config, Some(job.type_id.as_str()));
         let take = cap.min(remaining);
         out[idx] = take;
         remaining -= take;
@@ -607,16 +607,16 @@ pub fn construction_wait_target(
         };
         let replace = match &best {
             None => true,
-            Some((best_days, best_building, best_state)) => {
+            Some((best_days, best_type_id, best_state)) => {
                 days < *best_days
-                    || (days == *best_days && job.building < *best_building)
+                    || (days == *best_days && job.type_id < *best_type_id)
                     || (days == *best_days
-                        && job.building == *best_building
+                        && job.type_id == *best_type_id
                         && job.state_id < *best_state)
             }
         };
         if replace {
-            best = Some((days, job.building.clone(), job.state_id));
+            best = Some((days, job.type_id.clone(), job.state_id));
         }
     }
     best
@@ -686,7 +686,7 @@ pub fn construction_work_complete(
     state_id: Option<u32>,
 ) -> bool {
     state.constructions.iter().any(|row| {
-        row.building == building
+        row.type_id == building
             && state_id
                 .map(|want| row.state_id == Some(want) || row.state_id.is_none())
                 .unwrap_or(true)
@@ -782,7 +782,7 @@ mod tests {
         let building = WorldBuilding {
             id: 7,
             state: Some(1),
-            building: BUILDING_CONSTRUCTION_SECTOR.into(),
+            type_id: BUILDING_CONSTRUCTION_SECTOR.into(),
             level: 1.0,
             staffing: 1.0,
             production_methods: vec!["pm_not_construction".into()],
@@ -800,7 +800,7 @@ mod tests {
             order_id: 1,
             queue: ConstructionQueueKind::Government,
             state_id: None,
-            building: "building_logging_camp".into(),
+            type_id: "building_logging_camp".into(),
             remaining: Some(100.0),
         };
         let slow = PlanningState::from_parts(PlanningParts {
@@ -831,14 +831,14 @@ mod tests {
                     order_id: 1,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building: "building_a".into(),
+                    type_id: "building_a".into(),
                     remaining: Some(50.0),
                 },
                 PlanningConstruction {
                     order_id: 2,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building: "building_b".into(),
+                    type_id: "building_b".into(),
                     remaining: Some(50.0),
                 },
             ],
@@ -872,14 +872,14 @@ mod tests {
                     order_id: 1,
                     queue: ConstructionQueueKind::Private,
                     state_id: None,
-                    building: "building_private".into(),
+                    type_id: "building_private".into(),
                     remaining: Some(50.0),
                 },
                 PlanningConstruction {
                     order_id: 2,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building: "building_govt".into(),
+                    type_id: "building_govt".into(),
                     remaining: Some(50.0),
                 },
             ],
@@ -946,14 +946,14 @@ mod tests {
                     order_id: 1,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building: "building_a".into(),
+                    type_id: "building_a".into(),
                     remaining: Some(20.0),
                 },
                 PlanningConstruction {
                     order_id: 2,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building: "building_b".into(),
+                    type_id: "building_b".into(),
                     remaining: Some(100.0),
                 },
             ],
@@ -1024,7 +1024,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                type_id: BUILDING_CONSTRUCTION_SECTOR.into(),
                 level: 0.0,
                 staffing: 0.0,
                 production_methods: vec!["pm_iron_frame_buildings".into()],

@@ -99,7 +99,7 @@ fn register_output_building(
     world.buildings.push(WorldBuilding {
         id: next_building_id(world),
         state: Some(state_id),
-        building: building.into(),
+        type_id: building.into(),
         level: 1.0,
         staffing: 1.0,
         production_methods: vec![pm],
@@ -141,7 +141,7 @@ fn register_construction_sector(
     world.buildings.push(WorldBuilding {
         id: next_building_id(world),
         state: Some(state_id),
-        building: BUILDING_CONSTRUCTION_SECTOR.into(),
+        type_id: BUILDING_CONSTRUCTION_SECTOR.into(),
         level: 0.0,
         staffing: 0.0,
         production_methods: vec![pm.into()],
@@ -336,7 +336,7 @@ impl GerStateBuilder {
                     order_id: 1,
                     queue: ConstructionQueueKind::Government,
                     state_id: Some(1),
-                    building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                    type_id: BUILDING_CONSTRUCTION_SECTOR.into(),
                     remaining: Some(remaining),
                 }],
             ),

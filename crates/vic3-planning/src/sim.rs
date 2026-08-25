@@ -119,7 +119,7 @@ fn mil_levels(state: &PlanningState, pred: fn(&str) -> bool) -> u32 {
     state
         .mil_buildings
         .iter()
-        .filter(|b| pred(&b.building))
+        .filter(|b| pred(&b.type_id))
         .map(|b| b.levels.floor() as u32)
         .sum()
 }
@@ -183,7 +183,7 @@ fn synthetic_world_building(
         id: next_id,
         // TODO(buildability): verify free slot / potential in this state.
         state: Some(state_id),
-        building: building.to_string(),
+        type_id: building.to_string(),
         level,
         staffing: level,
         production_methods: default_pms_for_building(defs, building_type),
@@ -208,19 +208,19 @@ fn push_mil_hire_decisions(args: &mut MilitaryPpDecisionArgs<'_>, branch: Milita
             continue;
         }
         let relevant = match branch {
-            MilitaryBranch::Army => is_barracks_building(&row.building),
+            MilitaryBranch::Army => is_barracks_building(&row.type_id),
             MilitaryBranch::Navy => {
-                is_shipyard_building(&row.building) || is_naval_admin_building(&row.building)
+                is_shipyard_building(&row.type_id) || is_naval_admin_building(&row.type_id)
             }
         };
-        if !relevant || !seen_hires.insert(row.building.clone()) {
+        if !relevant || !seen_hires.insert(row.type_id.clone()) {
             continue;
         }
         push_decision(
             result,
             state,
             Action::QueueHireMilitary {
-                building: row.building.clone(),
+                building: row.type_id.clone(),
             },
             economy,
             *config,
@@ -292,7 +292,7 @@ impl EconomyContext {
             }
             let mut found = false;
             for row in &mut world.buildings {
-                if row.building == *building && row.state == Some(*state_id) {
+                if row.type_id == *building && row.state == Some(*state_id) {
                     row.add_extra_levels(*levels);
                     found = true;
                 }
@@ -331,7 +331,7 @@ impl EconomyContext {
             }
             let mut found = false;
             for row in &self.base_world.buildings {
-                if row.building == *building && row.state == Some(*state_id) {
+                if row.type_id == *building && row.state == Some(*state_id) {
                     found = true;
                     let (old_i, old_o) = row.goods_io(&self.defs);
                     let mut bumped = row.clone();
@@ -384,7 +384,7 @@ impl EconomyContext {
             if let Some(sid) = before.state {
                 if let Some(levels) = state
                     .building_level_deltas
-                    .get(&(before.building.clone(), sid))
+                    .get(&(before.type_id.clone(), sid))
                 {
                     if *levels > 0 {
                         before.add_extra_levels(*levels);
@@ -436,11 +436,11 @@ impl EconomyContext {
         let mut have: BTreeSet<u32> = world
             .buildings
             .iter()
-            .filter(|row| row.building == building)
+            .filter(|row| row.type_id == building)
             .filter_map(|row| row.state.filter(|sid| owned.contains(sid)))
             .collect();
         for job in &state.constructions {
-            if job.building == building {
+            if job.type_id == building {
                 if let Some(sid) = job.state_id.filter(|sid| owned.contains(sid)) {
                     have.insert(sid);
                 }
@@ -492,7 +492,7 @@ impl EconomyContext {
             let Some(good_idx) = self.defs.index_of(good) else {
                 continue;
             };
-            for (building_id, building_type) in &self.defs.buildings {
+            for (type_id, building_type) in &self.defs.buildings {
                 let (inputs, outputs) = default_building_io_per_level(&self.defs, building_type);
                 let produces = outputs[good_idx];
                 let consumes = inputs[good_idx];
@@ -504,7 +504,7 @@ impl EconomyContext {
                 if benefit <= ORDER_EPS || !benefit.is_finite() {
                     continue;
                 }
-                types.insert(building_id.clone());
+                types.insert(type_id.clone());
             }
         }
 
@@ -517,7 +517,7 @@ impl EconomyContext {
                 }
             )
         }) {
-            for (building_id, building_type) in &self.defs.buildings {
+            for (type_id, building_type) in &self.defs.buildings {
                 let (_, outputs) = default_building_io_per_level(&self.defs, building_type);
                 let benefit = outputs
                     .iter_indexed()
@@ -534,7 +534,7 @@ impl EconomyContext {
                 if benefit <= ORDER_EPS || !benefit.is_finite() {
                     continue;
                 }
-                types.insert(building_id.clone());
+                types.insert(type_id.clone());
             }
         }
 
@@ -667,10 +667,10 @@ impl EconomyContext {
         if expensive_inputs.is_empty() {
             return;
         }
-        for (building_id, building_type) in &self.defs.buildings {
+        for (type_id, building_type) in &self.defs.buildings {
             let (_, outputs) = default_building_io_per_level(&self.defs, building_type);
             if expensive_inputs.iter().any(|idx| outputs[*idx] > ORDER_EPS) {
-                candidates.insert(building_id.clone());
+                candidates.insert(type_id.clone());
             }
         }
     }
@@ -753,7 +753,7 @@ impl EconomyContext {
             if state.pm_overrides.contains_key(&building.id) {
                 continue;
             }
-            let Some(building_type) = self.defs.buildings.get(&building.building) else {
+            let Some(building_type) = self.defs.buildings.get(&building.type_id) else {
                 continue;
             };
             // One Vic3 PM group == one slot. Prefer def group count; fall back to
@@ -854,7 +854,7 @@ fn pm_alternatives_for_slot(
         alternatives.insert(current.clone());
     }
     for other in peers {
-        if other.building == building.building {
+        if other.type_id == building.type_id {
             if let Some(pm) = other.production_methods.get(slot) {
                 alternatives.insert(pm.clone());
             }
@@ -1388,7 +1388,7 @@ fn successors_for_simple_subgoals_with_economy(
         }) && state
             .mil_buildings
             .iter()
-            .any(|row| row.building == **queued && !row.is_fully_staffed())
+            .any(|row| row.type_id == **queued && !row.is_fully_staffed())
     }) {
         let default_days = if is_barracks_building(building) {
             config.army_training_days
@@ -1621,7 +1621,7 @@ pub fn apply_action(
             let row = next
                 .mil_buildings
                 .iter()
-                .find(|row| row.building == *building)?;
+                .find(|row| row.type_id == *building)?;
             if row.is_fully_staffed() {
                 return None;
             }
@@ -1800,7 +1800,7 @@ fn apply_wait_for_event(
         }
         Event::BuildingCompleted { building, state_id } => {
             if !next.constructions.iter().any(|row| {
-                row.building == *building
+                row.type_id == *building
                     && state_id
                         .map(|want| row.state_id == Some(want) || row.state_id.is_none())
                         .unwrap_or(true)
@@ -1983,12 +1983,12 @@ mod tests {
             navy_pp_baseline: Some(0.0),
             mil_buildings: vec![
                 ModeledMilBuilding {
-                    building: BUILDING_SHIPYARD.into(),
+                    type_id: BUILDING_SHIPYARD.into(),
                     levels,
                     staffing: 0.0,
                 },
                 ModeledMilBuilding {
-                    building: BUILDING_NAVAL_ADMIN.into(),
+                    type_id: BUILDING_NAVAL_ADMIN.into(),
                     levels,
                     staffing: 0.0,
                 },
@@ -2025,7 +2025,7 @@ mod tests {
             army_power_projection: Some(0.0),
             army_pp_baseline: Some(0.0),
             mil_buildings: vec![ModeledMilBuilding {
-                building: BUILDING_BARRACKS.into(),
+                type_id: BUILDING_BARRACKS.into(),
                 levels,
                 staffing: 0.0,
             }],
@@ -2251,7 +2251,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_sawmills".into()],
@@ -2645,7 +2645,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_low".into()],
@@ -2789,7 +2789,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_sawmills".into()],
@@ -2881,7 +2881,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
@@ -2899,7 +2899,7 @@ mod tests {
                 order_id: 1,
                 queue: ConstructionQueueKind::Government,
                 state_id: None,
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 remaining: Some(25.0),
             }],
             construction_points_per_day: 10.0,
@@ -2974,7 +2974,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
@@ -3073,7 +3073,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
@@ -3091,7 +3091,7 @@ mod tests {
                 order_id: 1,
                 queue: ConstructionQueueKind::Government,
                 state_id: None,
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 remaining: Some(25.0),
             }],
             construction_points_per_day: 10.0,
@@ -3156,7 +3156,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
@@ -3181,7 +3181,7 @@ mod tests {
                 order_id: 1,
                 queue: ConstructionQueueKind::Government,
                 state_id: None,
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 remaining: Some(50.0),
             }],
             construction_points_per_day: 1.0,
@@ -3266,7 +3266,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
@@ -3286,7 +3286,7 @@ mod tests {
             order_id: 1,
             queue: ConstructionQueueKind::Government,
             state_id: None,
-            building: "building_logging_camp".into(),
+            type_id: "building_logging_camp".into(),
             remaining: Some(100.0),
         };
         let slow = PlanningState::from_parts(PlanningParts {
@@ -3349,7 +3349,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
@@ -3373,14 +3373,14 @@ mod tests {
                     order_id: 1,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building: "building_a".into(),
+                    type_id: "building_a".into(),
                     remaining: Some(50.0),
                 },
                 PlanningConstruction {
                     order_id: 2,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building: "building_b".into(),
+                    type_id: "building_b".into(),
                     remaining: Some(50.0),
                 },
             ],
@@ -3467,7 +3467,7 @@ mod tests {
                 WorldBuilding {
                     id: 1,
                     state: Some(1),
-                    building: "building_logging_camp".into(),
+                    type_id: "building_logging_camp".into(),
                     level: 1.0,
                     staffing: 1.0,
                     production_methods: Vec::new(),
@@ -3477,7 +3477,7 @@ mod tests {
                 WorldBuilding {
                     id: 2,
                     state: Some(1),
-                    building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                    type_id: BUILDING_CONSTRUCTION_SECTOR.into(),
                     level: 0.0,
                     staffing: 0.0,
                     production_methods: vec!["pm_iron_frame_buildings".into()],
@@ -3609,7 +3609,7 @@ mod tests {
                 WorldBuilding {
                     id: 1,
                     state: Some(state_id),
-                    building: "building_logging_camp".into(),
+                    type_id: "building_logging_camp".into(),
                     level: 1.0,
                     staffing: 1.0,
                     production_methods: vec!["pm_sawmills".into()],
@@ -3619,7 +3619,7 @@ mod tests {
                 WorldBuilding {
                     id: 2,
                     state: Some(state_id),
-                    building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                    type_id: BUILDING_CONSTRUCTION_SECTOR.into(),
                     level: 0.0,
                     staffing: 0.0,
                     production_methods: vec!["pm_iron_frame_buildings".into()],
@@ -3759,7 +3759,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_sawmills".into()],
@@ -3978,7 +3978,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(10),
-                building: "building_good_mill".into(),
+                type_id: "building_good_mill".into(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_building_good_mill".into()],

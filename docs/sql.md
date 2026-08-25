@@ -290,18 +290,18 @@ Full private + government construction queues from save IR (`World.constructions
 | `position` | Dense 0-based index within `(country_id, queue)` (scan order) |
 | `country_id` | Owner resolved from the order's state; nullable if unknown |
 | `state_id` | Target state; nullable if missing on the order |
-| `building` | Building type script id; FK → `building_types.type_id` |
-| `building_name` | Localized label when defs provide one |
+| `type_id` | Building type script id; FK → `building_types.type_id` |
+| `type_name` | Localized label when defs provide one |
 | `remaining` | Remaining construction points when present |
 
 ```sql
-SELECT queue, position, building, building_name, remaining
+SELECT queue, position, type_id, type_name, remaining
 FROM constructions
 WHERE country_id = 16777216 AND queue = 'government'
 ORDER BY position;
 ```
 
-**Storage:** `Vec<WorldConstruction>` ordered private then government by `order_id`. Exact pushdown on `order_id`, `country_id`, `state_id`, `queue`, `building`.
+**Storage:** `Vec<WorldConstruction>` ordered private then government by `order_id`. Exact pushdown on `order_id`, `country_id`, `state_id`, `queue`, `type_id`.
 
 ### `formations` (military)
 

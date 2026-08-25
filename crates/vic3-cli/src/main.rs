@@ -195,7 +195,7 @@ struct WhatIfArgs {
 impl From<WhatIfArgs> for WhatIfOpts {
     fn from(args: WhatIfArgs) -> Self {
         Self {
-            building: args.building,
+            type_id: args.building,
             extra_levels: args.extra_levels,
         }
     }

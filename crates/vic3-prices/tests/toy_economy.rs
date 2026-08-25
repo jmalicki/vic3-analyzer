@@ -40,7 +40,7 @@ fn mill_id(world: &World) -> u32 {
     world
         .buildings
         .iter()
-        .find(|b| b.building == "building_flour_mill")
+        .find(|b| b.type_id == "building_flour_mill")
         .map(|b| b.id)
         .expect("flour mill in toy save")
 }
@@ -49,7 +49,7 @@ fn trade_center(world: &World) -> &vic3_prices::WorldBuilding {
     world
         .buildings
         .iter()
-        .find(|b| b.building == "building_trade_center")
+        .find(|b| b.type_id == "building_trade_center")
         .expect("trade center in toy save")
 }
 
@@ -60,11 +60,11 @@ fn toy_economy_solve_converges() {
     assert!(world
         .buildings
         .iter()
-        .any(|b| b.building == "building_wheat_farm"));
+        .any(|b| b.type_id == "building_wheat_farm"));
     assert!(world
         .buildings
         .iter()
-        .any(|b| b.building == "building_bakery"));
+        .any(|b| b.type_id == "building_bakery"));
 
     let result = solve(&world, &defs, SolveOpts::default());
     assert!(
@@ -97,7 +97,7 @@ fn what_if_extra_farm_levels_raises_wheat_supply_and_lowers_price() {
         &world,
         &defs,
         &WhatIfOpts {
-            building: "building_wheat_farm".into(),
+            type_id: "building_wheat_farm".into(),
             extra_levels: 2,
         },
         SolveOpts::default(),
@@ -121,7 +121,7 @@ fn what_if_extra_farm_levels_raises_wheat_supply_and_lowers_price() {
         world
             .buildings
             .iter()
-            .find(|b| b.building == "building_wheat_farm")
+            .find(|b| b.type_id == "building_wheat_farm")
             .map(|b| b.level),
         Some(3.0),
         "source world must stay immutable"
@@ -136,7 +136,7 @@ fn what_if_extra_bakery_levels_raises_bread_supply_and_lowers_price() {
         &world,
         &defs,
         &WhatIfOpts {
-            building: "building_bakery".into(),
+            type_id: "building_bakery".into(),
             extra_levels: 2,
         },
         SolveOpts::default(),
@@ -250,7 +250,7 @@ fn preview_extra_levels_on_trade_center_type() {
 
     let delta = WorldDelta {
         extra_levels: vec![ExtraLevelsDelta {
-            building: Some("building_trade_center".into()),
+            type_id: Some("building_trade_center".into()),
             building_id: None,
             extra_levels: 2,
         }],

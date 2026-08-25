@@ -146,7 +146,7 @@ pub struct WorldConstruction {
     pub queue: ConstructionQueueKind,
     pub country_id: Option<u32>,
     pub state_id: Option<u32>,
-    pub building: String,
+    pub type_id: String,
     pub remaining: Option<f64>,
 }
 
@@ -263,7 +263,7 @@ impl WorldStatePop {
 pub struct WorldBuilding {
     pub id: u32,
     pub state: Option<u32>,
-    pub building: String,
+    pub type_id: String,
     pub level: f64,
     /// Staffed levels. Frozen except that what-if does not touch it.
     pub staffing: f64,
@@ -488,7 +488,7 @@ impl World {
                     queue: entry.queue.into(),
                     country_id: entry.country_id,
                     state_id: entry.state_id,
-                    building: entry.building,
+                    type_id: entry.building,
                     remaining: entry.remaining,
                 })
                 .collect(),
@@ -505,10 +505,10 @@ impl World {
     /// The saved staffing ratio and absolute saved goods IO are held constant
     /// per level, so explicit level additions scale both proportionally. Other
     /// employment, wages, and trade volumes remain frozen.
-    pub fn with_extra_levels(&self, building: &str, extra_levels: u32) -> Self {
+    pub fn with_extra_levels(&self, type_id: &str, extra_levels: u32) -> Self {
         let mut next = self.clone();
         for b in &mut next.buildings {
-            if b.building == building {
+            if b.type_id == type_id {
                 b.add_extra_levels(extra_levels);
             }
         }
@@ -521,13 +521,13 @@ impl World {
     /// no-op clone (callers that need greenfield insert a row themselves).
     pub fn with_extra_levels_in_state(
         &self,
-        building: &str,
+        type_id: &str,
         state_id: u32,
         extra_levels: u32,
     ) -> Self {
         let mut next = self.clone();
         for b in &mut next.buildings {
-            if b.building == building && b.state == Some(state_id) {
+            if b.type_id == type_id && b.state == Some(state_id) {
                 b.add_extra_levels(extra_levels);
             }
         }
@@ -603,7 +603,7 @@ impl WorldBuilding {
         Some(Self {
             id,
             state: building.state,
-            building: building.building.clone(),
+            type_id: building.building.clone(),
             level: f64::from(building.level.max(0)),
             staffing: building.staffing.max(0.0),
             production_methods: building.active_production_methods(),
@@ -862,7 +862,7 @@ mod tests {
         let world = World::from_save(&save, &defs_with_goods(&[]));
         assert_eq!(world.constructions.len(), 2);
         assert_eq!(world.constructions[0].queue, ConstructionQueueKind::Private);
-        assert_eq!(world.constructions[0].building, "building_logging_camp");
+        assert_eq!(world.constructions[0].type_id, "building_logging_camp");
         assert_eq!(
             world.constructions[1].queue,
             ConstructionQueueKind::Government
@@ -959,7 +959,7 @@ mod tests {
         assert_eq!(weighted_pop.size, 10_000.0);
         assert_eq!(weighted_pop.wealth, 8);
         assert_eq!(world.buildings.len(), 1);
-        assert_eq!(world.buildings[0].building, "building_rye_farm");
+        assert_eq!(world.buildings[0].type_id, "building_rye_farm");
         assert_eq!(world.buildings[0].level, 2.0);
         assert_eq!(world.buildings[0].production_methods, ["pm_simple_farming"]);
         assert_eq!(world.frozen_buy.as_slice(), &[0.0, 0.0]);
@@ -1037,7 +1037,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(7),
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 level: 2.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_unknown_modded".into()],
@@ -1064,7 +1064,7 @@ mod tests {
                 WorldBuilding {
                     id: 1,
                     state: Some(7),
-                    building: "building_logging_camp".into(),
+                    type_id: "building_logging_camp".into(),
                     level: 2.0,
                     staffing: 1.0,
                     production_methods: Vec::new(),
@@ -1074,7 +1074,7 @@ mod tests {
                 WorldBuilding {
                     id: 2,
                     state: Some(7),
-                    building: "building_logging_camp".into(),
+                    type_id: "building_logging_camp".into(),
                     level: 2.0,
                     staffing: 1.0,
                     production_methods: Vec::new(),
@@ -1121,7 +1121,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: None,
-                building: "building_tooling_workshops".into(),
+                type_id: "building_tooling_workshops".into(),
                 level: 2.0,
                 staffing: 2.0,
                 production_methods: vec!["pm_smithy".into(), "pm_steam".into()],
@@ -1153,7 +1153,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_iron_mine".into(),
+                type_id: "building_iron_mine".into(),
                 level: 10.0,
                 staffing: 5.0,
                 production_methods: vec!["pm_mine".into()],
@@ -1198,7 +1198,7 @@ mod tests {
                 WorldBuilding {
                     id: 1,
                     state: Some(1),
-                    building: "building_farm".into(),
+                    type_id: "building_farm".into(),
                     level: 2.0,
                     staffing: 2.0,
                     production_methods: vec!["pm_wood".into()],
@@ -1208,7 +1208,7 @@ mod tests {
                 WorldBuilding {
                     id: 2,
                     state: Some(1),
-                    building: "building_logging_camp".into(),
+                    type_id: "building_logging_camp".into(),
                     level: 1.0,
                     staffing: 1.0,
                     production_methods: vec!["pm_wood".into()],
@@ -1257,7 +1257,7 @@ mod tests {
         assert_eq!(world.states[0].market, Some(1));
         assert_eq!(world.countries[0].laws, ["law_autocracy"]);
         assert_eq!(world.buildings.len(), 1);
-        assert_eq!(world.buildings[0].building, "building_rye_farm");
+        assert_eq!(world.buildings[0].type_id, "building_rye_farm");
         assert_eq!(world.name_opt(pops[0].profession), Some("farmers"));
         assert_eq!(world.name_opt(pops[0].culture), Some("north_german"));
         assert!(

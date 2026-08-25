@@ -135,9 +135,9 @@ pub fn apply_delta(world: &World, delta: &WorldDelta) -> World {
             if let Some(building) = next.buildings.iter_mut().find(|b| b.id == id) {
                 building.add_extra_levels(extra.extra_levels);
             }
-        } else if let Some(kind) = extra.building.as_deref() {
+        } else if let Some(kind) = extra.type_id.as_deref() {
             for building in &mut next.buildings {
-                if building.building == kind {
+                if building.type_id == kind {
                     building.add_extra_levels(extra.extra_levels);
                 }
             }
@@ -412,7 +412,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: None,
-                building: "logging_camp".into(),
+                type_id: "logging_camp".into(),
                 level: 0.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_simple_forestry".into()],
@@ -438,7 +438,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: None,
-                building: "building_logging_camp".into(),
+                type_id: "building_logging_camp".into(),
                 level: 2.0,
                 staffing: 2.0,
                 production_methods: vec!["pm_simple_forestry".into()],
@@ -572,7 +572,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 9,
                 state: Some(7),
-                building: "building_goofy_factory".into(),
+                type_id: "building_goofy_factory".into(),
                 level: 2.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_goofy_factory".into()],
@@ -640,7 +640,7 @@ mod tests {
         let building = |id, state, method: &str| WorldBuilding {
             id,
             state: Some(state),
-            building: format!("building_{method}"),
+            type_id: format!("building_{method}"),
             level: 1.0,
             staffing: 1.0,
             production_methods: vec![method.into()],
@@ -720,7 +720,7 @@ mod tests {
         let building = |id, state, method: &str| WorldBuilding {
             id,
             state: Some(state),
-            building: format!("building_{method}"),
+            type_id: format!("building_{method}"),
             level: 1.0,
             staffing: 1.0,
             production_methods: vec![method.into()],
@@ -858,7 +858,7 @@ mod tests {
             &world,
             &defs,
             &WhatIfOpts {
-                building: "logging_camp".into(),
+                type_id: "logging_camp".into(),
                 extra_levels: 1,
             },
             SolveOpts::default(),
@@ -904,7 +904,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 7,
                 state: None,
-                building: "farm".into(),
+                type_id: "farm".into(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_simple_forestry".into()],
@@ -974,7 +974,7 @@ mod tests {
         let defs = two_good_defs();
         let world = balanced_world(&defs);
         let opts = WhatIfOpts {
-            building: "logging_camp".into(),
+            type_id: "logging_camp".into(),
             extra_levels: 1,
         };
         let via_what_if = what_if(&world, &defs, &opts, SolveOpts::default());
@@ -992,7 +992,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 3,
                 state: Some(1),
-                building: "building_trade_center".into(),
+                type_id: "building_trade_center".into(),
                 level: 2.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
@@ -1003,7 +1003,7 @@ mod tests {
         };
         let delta = WorldDelta {
             extra_levels: vec![ExtraLevelsDelta {
-                building: Some("building_trade_center".into()),
+                type_id: Some("building_trade_center".into()),
                 building_id: None,
                 extra_levels: 2,
             }],

@@ -615,7 +615,7 @@ mod tests {
                 army_power_projection: Some(0.0),
                 army_pp_baseline: Some(0.0),
                 mil_buildings: vec![ModeledMilBuilding {
-                    building: BUILDING_BARRACKS.into(),
+                    type_id: BUILDING_BARRACKS.into(),
                     levels,
                     staffing: 0.0,
                 }],
@@ -911,7 +911,7 @@ mod tests {
                 order_id: 1,
                 queue: ConstructionQueueKind::Government,
                 state_id: None,
-                building: "building_rye_farm".into(),
+                type_id: "building_rye_farm".into(),
                 remaining: Some(30.0),
             }],
             construction_points_per_day: 1.0,

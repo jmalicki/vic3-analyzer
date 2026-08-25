@@ -759,11 +759,11 @@ impl<'a> MitigationIndex<'a> {
 
         for (i, building) in world.buildings.iter().enumerate() {
             by_type
-                .entry(building.building.as_str())
+                .entry(building.type_id.as_str())
                 .or_default()
                 .push(i);
             by_type_state
-                .entry((building.building.as_str(), building.state))
+                .entry((building.type_id.as_str(), building.state))
                 .or_default()
                 .push(i);
             by_state.entry(building.state).or_default().push(i);
@@ -860,7 +860,7 @@ impl<'a> MitigationIndex<'a> {
             if state_id.is_some_and(|sid| row.state != Some(sid)) {
                 continue;
             }
-            return Some(row.building.clone());
+            return Some(row.type_id.clone());
         }
         None
     }
@@ -885,7 +885,7 @@ impl<'a> MitigationIndex<'a> {
             if current.is_empty() {
                 continue;
             }
-            let candidates = self.type_pm_candidates(&building.building);
+            let candidates = self.type_pm_candidates(&building.type_id);
             if candidates.len() < 2 {
                 continue;
             }
@@ -904,7 +904,7 @@ impl<'a> MitigationIndex<'a> {
                         best_score = score;
                         best = Some(PmPick {
                             building_id: building.id,
-                            type_id: building.building.clone(),
+                            type_id: building.type_id.clone(),
                             from: current.clone(),
                             to: methods,
                             new_pm: candidate.clone(),
@@ -987,10 +987,10 @@ fn extra_levels_on_type(
         .buildings
         .iter()
         .filter(|building| {
-            building.building == type_id && state_id.is_none_or(|sid| building.state == Some(sid))
+            building.type_id == type_id && state_id.is_none_or(|sid| building.state == Some(sid))
         })
         .map(|building| ExtraLevelsDelta {
-            building: None,
+            type_id: None,
             building_id: Some(building.id),
             extra_levels: extra,
         })
@@ -1835,7 +1835,7 @@ fn has_unstaffed_university(prices: &PricesResult, world: &World, state_id: u32)
             && building.staffing + ORDER_EPS < building.level
     }) || world.buildings.iter().any(|building| {
         building.state == Some(state_id)
-            && id_has(&building.building, "university")
+            && id_has(&building.type_id, "university")
             && building.staffing + ORDER_EPS < building.level
     })
 }
@@ -1912,7 +1912,7 @@ fn economics_from_world(building: &WorldBuilding) -> BuildingEconomics {
     BuildingEconomics {
         id: building.id,
         state_id: building.state,
-        type_id: building.building.clone(),
+        type_id: building.type_id.clone(),
         level: building.level,
         staffing: building.staffing,
         production_method_ids: building.production_methods.clone(),
@@ -2139,8 +2139,14 @@ mod tests {
         }
     }
 
-    fn world_building(id: u32, state: u32, kind: &str, level: f64, staffing: f64) -> WorldBuilding {
-        world_building_pm(id, state, kind, level, staffing, &["pm_default"])
+    fn world_building(
+        id: u32,
+        state: u32,
+        type_id: &str,
+        level: f64,
+        staffing: f64,
+    ) -> WorldBuilding {
+        world_building_pm(id, state, type_id, level, staffing, &["pm_default"])
     }
 
     fn world_building_pm(
@@ -2154,7 +2160,7 @@ mod tests {
         WorldBuilding {
             id,
             state: Some(state),
-            building: kind.into(),
+            type_id: kind.into(),
             level,
             staffing,
             production_methods: methods.iter().map(|id| (*id).to_string()).collect(),
@@ -2955,7 +2961,7 @@ mod tests {
     fn naive_type_pm_candidates(world: &World, type_id: &str) -> Vec<String> {
         let mut ids = BTreeSet::new();
         for building in &world.buildings {
-            if building.building == type_id {
+            if building.type_id == type_id {
                 ids.extend(building.production_methods.iter().cloned());
             }
         }
@@ -2979,7 +2985,7 @@ mod tests {
             if current.is_empty() {
                 continue;
             }
-            let candidates = naive_type_pm_candidates(world, &building.building);
+            let candidates = naive_type_pm_candidates(world, &building.type_id);
             if candidates.len() < 2 {
                 continue;
             }
@@ -2998,7 +3004,7 @@ mod tests {
                         best_score = score;
                         best = Some(PmPick {
                             building_id: building.id,
-                            type_id: building.building.clone(),
+                            type_id: building.type_id.clone(),
                             from: current.clone(),
                             to: methods,
                             new_pm: candidate.clone(),
@@ -3030,7 +3036,7 @@ mod tests {
             }
             let idx = defs.index_of(good_id)?;
             let (inputs, outputs) = row.goods_io(defs);
-            (outputs[idx] > ORDER_EPS || inputs[idx] > ORDER_EPS).then(|| row.building.clone())
+            (outputs[idx] > ORDER_EPS || inputs[idx] > ORDER_EPS).then(|| row.type_id.clone())
         })
     }
 

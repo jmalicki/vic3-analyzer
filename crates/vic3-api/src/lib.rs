@@ -1028,7 +1028,7 @@ struct ConstructionSnap {
     state_id: Option<u32>,
     /// Localized state display label when known (demonym-prefixed for minority splits).
     state_name: Option<String>,
-    building: String,
+    type_id: String,
     building_name: Option<String>,
     remaining: Option<f64>,
 }
@@ -1077,8 +1077,8 @@ fn constructions_snapshot(
             country_id: row.country_id,
             state_id: row.state_id,
             state_name: state_name(row.state_id),
-            building: row.building.clone(),
-            building_name: defs.labels.get(&row.building).cloned(),
+            type_id: row.type_id.clone(),
+            building_name: defs.labels.get(&row.type_id).cloned(),
             remaining: row.remaining,
         };
         match row.queue {

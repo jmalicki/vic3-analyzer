@@ -238,9 +238,9 @@ describe('wasm wrapper (real wasm-pack build)', () => {
 
   it('schemas are non-empty and describe required fields', () => {
     const whatIf = JSON.parse(api.what_if_schema())
-    expect(whatIf.properties.building).toBeTruthy()
+    expect(whatIf.properties.type_id).toBeTruthy()
     expect(whatIf.properties.extra_levels).toBeTruthy()
-    expect(whatIf.required).toEqual(expect.arrayContaining(['building', 'extra_levels']))
+    expect(whatIf.required).toEqual(expect.arrayContaining(['type_id', 'extra_levels']))
 
     const prices = JSON.parse(api.prices_schema())
     expect(prices.properties.residual).toBeTruthy()

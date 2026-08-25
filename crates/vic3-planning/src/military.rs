@@ -33,7 +33,7 @@ pub const MIL_INPUT_PRICE_FACTOR: f64 = 1.25;
 /// One military (or navy support) building aggregate on a planning branch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModeledMilBuilding {
-    pub building: String,
+    pub type_id: String,
     /// Built levels (capacity).
     pub levels: f64,
     /// Employed level-equivalents (same units as [`vic3_prices::WorldBuilding::staffing`]).
@@ -44,7 +44,7 @@ impl Eq for ModeledMilBuilding {}
 
 impl std::hash::Hash for ModeledMilBuilding {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.building.hash(state);
+        self.type_id.hash(state);
         self.levels.to_bits().hash(state);
         self.staffing.to_bits().hash(state);
     }
@@ -137,7 +137,7 @@ fn building_key(id: &str) -> String {
 pub fn army_pp_from_buildings(buildings: &[ModeledMilBuilding], unit: UnitCombatStats) -> f64 {
     buildings
         .iter()
-        .filter(|b| is_barracks_building(&b.building))
+        .filter(|b| is_barracks_building(&b.type_id))
         .map(|b| b.effective_levels() * unit.full_power_projection())
         .sum()
 }
@@ -146,12 +146,12 @@ pub fn army_pp_from_buildings(buildings: &[ModeledMilBuilding], unit: UnitCombat
 pub fn navy_pp_from_buildings(buildings: &[ModeledMilBuilding], unit: UnitCombatStats) -> f64 {
     let shipyard = buildings
         .iter()
-        .filter(|b| is_shipyard_building(&b.building))
+        .filter(|b| is_shipyard_building(&b.type_id))
         .map(ModeledMilBuilding::effective_levels)
         .sum::<f64>();
     let admin = buildings
         .iter()
-        .filter(|b| is_naval_admin_building(&b.building))
+        .filter(|b| is_naval_admin_building(&b.type_id))
         .map(ModeledMilBuilding::effective_levels)
         .sum::<f64>();
     shipyard.min(admin) * unit.full_power_projection()
@@ -161,7 +161,7 @@ pub fn navy_pp_from_buildings(buildings: &[ModeledMilBuilding], unit: UnitCombat
 pub fn army_buildings_fully_staffed(buildings: &[ModeledMilBuilding]) -> bool {
     buildings
         .iter()
-        .filter(|b| is_barracks_building(&b.building) && b.levels > 0.0)
+        .filter(|b| is_barracks_building(&b.type_id) && b.levels > 0.0)
         .all(ModeledMilBuilding::is_fully_staffed)
 }
 
@@ -170,7 +170,7 @@ pub fn navy_buildings_fully_staffed(buildings: &[ModeledMilBuilding]) -> bool {
     buildings
         .iter()
         .filter(|b| {
-            (is_shipyard_building(&b.building) || is_naval_admin_building(&b.building))
+            (is_shipyard_building(&b.type_id) || is_naval_admin_building(&b.type_id))
                 && b.levels > 0.0
         })
         .all(ModeledMilBuilding::is_fully_staffed)
@@ -219,12 +219,12 @@ mod tests {
     #[test]
     fn underemployed_barracks_cut_army_pp() {
         let full = ModeledMilBuilding {
-            building: BUILDING_BARRACKS.into(),
+            type_id: BUILDING_BARRACKS.into(),
             levels: 2.0,
             staffing: 2.0,
         };
         let half = ModeledMilBuilding {
-            building: BUILDING_BARRACKS.into(),
+            type_id: BUILDING_BARRACKS.into(),
             levels: 2.0,
             staffing: 1.0,
         };
@@ -242,12 +242,12 @@ mod tests {
     fn navy_limited_by_min_shipyard_and_admin() {
         let buildings = vec![
             ModeledMilBuilding {
-                building: BUILDING_SHIPYARD.into(),
+                type_id: BUILDING_SHIPYARD.into(),
                 levels: 4.0,
                 staffing: 4.0,
             },
             ModeledMilBuilding {
-                building: BUILDING_NAVAL_ADMIN.into(),
+                type_id: BUILDING_NAVAL_ADMIN.into(),
                 levels: 2.0,
                 staffing: 2.0,
             },
@@ -262,7 +262,7 @@ mod tests {
     #[test]
     fn underemployed_blocks_full_staffed_check() {
         let buildings = vec![ModeledMilBuilding {
-            building: BUILDING_BARRACKS.into(),
+            type_id: BUILDING_BARRACKS.into(),
             levels: 1.0,
             staffing: 0.5,
         }];
