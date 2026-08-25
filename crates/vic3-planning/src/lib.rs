@@ -25,6 +25,9 @@ pub mod tech;
 pub mod tracks;
 pub mod world;
 
+#[cfg(test)]
+mod test_support;
+
 pub use construction::{
     allocation_cap_points_per_day, construction_add_for_cs_building, construction_eta_days,
     construction_points_per_day_from_save, construction_points_per_day_from_sectors,
