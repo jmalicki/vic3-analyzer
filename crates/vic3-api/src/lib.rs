@@ -1846,4 +1846,37 @@ mod tests {
         assert_eq!(again, path);
         let _ = std::fs::remove_dir_all(&tmp);
     }
+
+    /// Encode `tests/fixtures/mock_game` as a defs postcard blob.
+    fn mock_game_defs_blob() -> Vec<u8> {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mock_game");
+        let defs = load_from_path(&root).expect("mock_game defs");
+        encode_blob(&defs).expect("encode mock_game")
+    }
+
+    /// Bytes for the e2e `mock_shortage` plaintext save fixture.
+    fn mock_shortage_fixture() -> Vec<u8> {
+        std::fs::read(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/e2e_saves/mock_shortage.txt"),
+        )
+        .expect("mock_shortage fixture")
+    }
+
+    /// Load mock_shortage + mock_game and assert prices expose `mock_lumber`.
+    #[test]
+    fn e2e_mock_shortage_loads_and_exposes_mock_lumber() {
+        let _session = session_lock();
+        clear_analysis();
+        load_analysis_json(&mock_shortage_fixture(), None, &mock_game_defs_blob(), "{}")
+            .expect("load mock_shortage");
+        let prices = loaded_prices_json().expect("prices");
+        let parsed: PricesResult = serde_json::from_str(&prices).expect("PricesResult");
+        assert!(
+            parsed.goods.iter().any(|g| g.id == "mock_lumber"),
+            "expected mock_lumber in goods: {:?}",
+            parsed.goods.iter().map(|g| &g.id).collect::<Vec<_>>()
+        );
+        clear_analysis();
+    }
 }
