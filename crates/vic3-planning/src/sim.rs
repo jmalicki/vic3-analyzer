@@ -45,8 +45,8 @@
 //! See [`docs/planning.md`](../../../docs/planning.md).
 
 use crate::construction::{
-    construction_points_per_day_per_job, construction_queue_full, construction_wait_target,
-    construction_work_complete, construction_work_points_for_enqueue,
+    construction_points_per_day_per_job, construction_queue_full, construction_wait_days,
+    construction_wait_target, construction_work_complete, construction_work_points_for_enqueue,
     ensure_construction_work_points, maybe_add_construction_sector_candidate,
     sync_construction_points_per_day, BUILDING_CONSTRUCTION_SECTOR,
 };
@@ -1681,6 +1681,61 @@ pub fn apply_action_with_economy(
         }
     }
     Some(next)
+}
+
+/// Failure modes for [`speculative_completed_state`] — never soft-fail with `None`.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub(crate) enum SpeculativeCompleteError {
+    #[error("action could not be applied for speculative complete")]
+    ApplyRejected,
+    #[error("construction wait days unavailable for speculative complete")]
+    WaitUnavailable,
+}
+
+/// Build a planning world where `action`'s economics have landed, without mutating
+/// the caller's enqueue-only search state.
+///
+/// # What “completed” means
+///
+/// - [`Action::QueueBuildingLevel`]: apply the enqueue, then advance through
+///   [`Event::BuildingCompleted`] for that job alone using
+///   [`construction_wait_days`]. Level deltas, construction-point sync, and
+///   price/GDP refresh match a finished build. Shorter intervening waits on
+///   other tracks are not modeled.
+/// - Other actions: identical to [`apply_action_with_economy`] (already
+///   instant / no separate completion phase in this sim).
+///
+/// `economy` is required: queue/complete paths need defs and price refresh.
+#[allow(dead_code)] // score/emit callers land in a later PR
+pub(crate) fn speculative_completed_state(
+    state: &PlanningState,
+    action: &Action,
+    economy: &EconomyContext,
+    config: SimConfig,
+) -> Result<PlanningState, SpeculativeCompleteError> {
+    match action {
+        Action::QueueBuildingLevel { building, state_id } => {
+            let queued = apply_action_with_economy(state, action, Some(economy), config)
+                .ok_or(SpeculativeCompleteError::ApplyRejected)?;
+            let wait_days = construction_wait_days(&queued, config)
+                .ok_or(SpeculativeCompleteError::WaitUnavailable)?;
+            apply_action_with_economy(
+                &queued,
+                &Action::WaitForEvent {
+                    event: Event::BuildingCompleted {
+                        building: building.clone(),
+                        state_id: Some(*state_id),
+                    },
+                    days: wait_days,
+                },
+                Some(economy),
+                config,
+            )
+            .ok_or(SpeculativeCompleteError::ApplyRejected)
+        }
+        _ => apply_action_with_economy(state, action, Some(economy), config)
+            .ok_or(SpeculativeCompleteError::ApplyRejected),
+    }
 }
 
 /// Seed missing track timers from `config` so parallel ticks advance save-loaded queues.
@@ -3456,6 +3511,180 @@ mod tests {
         );
         // base 1 + 5 per CS level
         assert!((done.construction_points_per_day - 6.0).abs() < 1e-9);
+    }
+
+    /// Tiny local GER world with logging + CS for speculative tests (not shared fixtures).
+    fn speculative_logging_cs_mini() -> (PlanningState, EconomyContext, SimConfig, u32) {
+        use vic3_defs::{BuildingType, ProductionMethod};
+
+        let wood = GoodIdx::from_usize(0);
+        let state_id = 1u32;
+        let mut defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    id: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        defs.buildings.insert(
+            "building_logging_camp".into(),
+            BuildingType {
+                id: "building_logging_camp".into(),
+                group: None,
+                city_type: None,
+                production_method_groups: vec!["pmg_logging".into()],
+                required_construction: Some(10.0),
+            },
+        );
+        defs.production_method_groups
+            .insert("pmg_logging".into(), vec!["pm_sawmills".into()]);
+        defs.production_methods.insert(
+            "pm_sawmills".into(),
+            ProductionMethod {
+                id: "pm_sawmills".into(),
+                outputs: vec![(wood, 10.0)],
+                ..ProductionMethod::default()
+            },
+        );
+        defs.buildings.insert(
+            BUILDING_CONSTRUCTION_SECTOR.into(),
+            BuildingType {
+                id: BUILDING_CONSTRUCTION_SECTOR.into(),
+                group: None,
+                city_type: None,
+                production_method_groups: vec!["pmg_base_building_construction_sector".into()],
+                required_construction: Some(10.0),
+            },
+        );
+        defs.production_method_groups.insert(
+            "pmg_base_building_construction_sector".into(),
+            vec!["pm_iron_frame_buildings".into()],
+        );
+        defs.production_methods.insert(
+            "pm_iron_frame_buildings".into(),
+            ProductionMethod {
+                id: "pm_iron_frame_buildings".into(),
+                country_construction_add: Some(5.0),
+                ..ProductionMethod::default()
+            },
+        );
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: state_id,
+                country: Some(1),
+                ..WorldState::default()
+            }],
+            buildings: vec![
+                WorldBuilding {
+                    id: 1,
+                    state: Some(state_id),
+                    building: "building_logging_camp".into(),
+                    level: 1.0,
+                    staffing: 1.0,
+                    production_methods: vec!["pm_sawmills".into()],
+                    saved_inputs: Vec::new(),
+                    saved_outputs: vec![(wood, 10.0)],
+                },
+                WorldBuilding {
+                    id: 2,
+                    state: Some(state_id),
+                    building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                    level: 0.0,
+                    staffing: 0.0,
+                    production_methods: vec!["pm_iron_frame_buildings".into()],
+                    saved_inputs: Vec::new(),
+                    saved_outputs: Vec::new(),
+                },
+            ],
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let config = SimConfig {
+            base_construction_capacity: 1,
+            default_construction_cost: 10,
+            ..SimConfig::default()
+        };
+        let state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            gdp: 1.0,
+            construction_points_per_day: 1.0,
+            good_prices: vec![("wood".into(), 30.0)],
+            ..PlanningParts::default()
+        });
+        (state, economy, config, state_id)
+    }
+
+    #[test]
+    fn speculative_completed_state_finishes_cs_and_raises_points() {
+        let (state, economy, config, state_id) = speculative_logging_cs_mini();
+        let done = speculative_completed_state(
+            &state,
+            &Action::QueueBuildingLevel {
+                building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                state_id,
+            },
+            &economy,
+            config,
+        )
+        .expect("speculative complete CS");
+        assert_eq!(
+            done.building_level_deltas
+                .get(&(BUILDING_CONSTRUCTION_SECTOR.into(), state_id)),
+            Some(&1)
+        );
+        // base 1 + 5 per CS level
+        assert!((done.construction_points_per_day - 6.0).abs() < 1e-9);
+        assert!(done.gdp.is_finite());
+    }
+
+    #[test]
+    fn speculative_completed_state_finishes_logging_and_refreshes_gdp() {
+        let (state, economy, config, state_id) = speculative_logging_cs_mini();
+        let done = speculative_completed_state(
+            &state,
+            &Action::QueueBuildingLevel {
+                building: "building_logging_camp".into(),
+                state_id,
+            },
+            &economy,
+            config,
+        )
+        .expect("speculative complete logging");
+        assert_eq!(
+            done.building_level_deltas
+                .get(&("building_logging_camp".into(), state_id)),
+            Some(&1)
+        );
+        assert!(done.gdp.is_finite());
+        assert_ne!(done.gdp, state.gdp);
+    }
+
+    #[test]
+    fn speculative_completed_state_rejects_unapplicable_action() {
+        let (state, economy, config, _) = speculative_logging_cs_mini();
+        let err = speculative_completed_state(
+            &state,
+            &Action::QueueTech {
+                tech: String::new(),
+            },
+            &economy,
+            config,
+        )
+        .expect_err("empty tech must fail");
+        assert_eq!(err, SpeculativeCompleteError::ApplyRejected);
     }
 
     #[test]
