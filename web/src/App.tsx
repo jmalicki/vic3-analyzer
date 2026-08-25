@@ -399,6 +399,14 @@ function App({ wasmApi }: Props) {
     clearAnalysisUi()
     setBusy(true)
     setError(undefined)
+    // E2E probe surface — proves whether Load entered this path and where it failed.
+    window.__vic3_desktop_save_trace__ = {
+      phase: 'start',
+      stub: stub.name,
+      location: stub.location,
+      at: Date.now(),
+      invokePath: window.__TAURI__?.core?.invoke ? 'current' : 'missing',
+    }
     try {
       const json = await invokeTauri<string>('use_save', {
         name: stub.name,
@@ -415,14 +423,37 @@ function App({ wasmApi }: Props) {
         version: payload.summary?.version ?? '—',
       })
       setDesktopSaveName(stub.name)
+      window.__vic3_desktop_save_trace__ = {
+        phase: 'use_save_ok',
+        stub: stub.name,
+        location: stub.location,
+        at: Date.now(),
+        invokePath: 'current',
+      }
       const pricesJson = await invokeTauri<string>('loaded_prices')
       setResult(JSON.parse(pricesJson) as PricesResult)
       setAnalysisReady(true)
       selectView('prices')
+      window.__vic3_desktop_save_trace__ = {
+        phase: 'loaded_prices_ok',
+        stub: stub.name,
+        location: stub.location,
+        at: Date.now(),
+        invokePath: 'current',
+      }
     } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason)
+      window.__vic3_desktop_save_trace__ = {
+        phase: 'error',
+        stub: stub.name,
+        location: stub.location,
+        at: Date.now(),
+        error: message,
+        invokePath: window.__TAURI__?.core?.invoke ? 'current' : 'missing',
+      }
       setDesktopSaveName(undefined)
       clearAnalysisUi()
-      setError(reason instanceof Error ? reason.message : String(reason))
+      setError(message)
       throw reason
     } finally {
       setBusy(false)
