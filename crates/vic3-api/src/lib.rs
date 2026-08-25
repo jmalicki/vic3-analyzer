@@ -1845,12 +1845,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    /// Encode `tests/fixtures/mock_game` as a defs postcard blob.
     fn mock_game_defs_blob() -> Vec<u8> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mock_game");
         let defs = load_from_path(&root).expect("mock_game defs");
         encode_blob(&defs).expect("encode mock_game")
     }
 
+    /// Bytes for the e2e `mock_shortage` plaintext save fixture.
     fn mock_shortage_fixture() -> Vec<u8> {
         std::fs::read(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1859,6 +1861,7 @@ mod tests {
         .expect("mock_shortage fixture")
     }
 
+    /// Load mock_shortage + mock_game and assert prices expose `mock_lumber`.
     #[test]
     fn e2e_mock_shortage_loads_and_exposes_mock_lumber() {
         let _session = session_lock();
