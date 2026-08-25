@@ -486,6 +486,15 @@ pub fn loaded_prices_json() -> Result<String, ApiError> {
     with_loaded_analysis(|loaded| Ok(serde_json::to_string(&loaded.prices)?))
 }
 
+/// [`SaveSummary`] JSON for the loaded session (tag, market/country ids, buildings).
+///
+/// # Errors
+///
+/// [`ApiError::NoLoadedAnalysis`] if nothing is loaded; JSON serialize failures.
+pub fn loaded_summary_json() -> Result<String, ApiError> {
+    with_loaded_analysis(|loaded| Ok(serde_json::to_string(&SaveSummary::from(&loaded.save))?))
+}
+
 /// Conservative military snapshot JSON for the played country.
 ///
 /// Incomplete IR yields empty lists plus a limitations string.

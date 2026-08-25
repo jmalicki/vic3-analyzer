@@ -38,9 +38,14 @@ export function createTauriApi(): WasmApi {
     loaded_military: async () => await invokeTauri<string>('loaded_military'),
     loaded_constructions: async () => await invokeTauri<string>('loaded_constructions'),
     export_save: async () => { throw new Error('Export save not currently supported in Tauri API via invoke') },
-    loaded_what_if: async () => "{}",
-    loaded_apply_delta: async () => "{}",
-    loaded_optimize_pms: async () => "{}",
+    // What-if / optimize / apply still stubbed until companion commands land.
+    loaded_what_if: async () => {
+      throw new Error('What-if is not available in the desktop companion yet')
+    },
+    loaded_apply_delta: async () => {
+      throw new Error('Apply delta is not available in the desktop companion yet')
+    },
+    loaded_optimize_pms: undefined as unknown as WasmApi['loaded_optimize_pms'],
     loaded_gaps: async (goal) => await invokeTauri<string>('loaded_gaps', { goal }),
     loaded_plan: async (planOptsJson) => await invokeTauri<string>('loaded_plan', { planOptsJson }),
     loaded_alerts: async () => await invokeTauri<string>('loaded_alerts'),
