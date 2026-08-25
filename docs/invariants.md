@@ -24,6 +24,6 @@ If any underlying assumption is violated, the corresponding property test suite 
 
 ## Goal Compilation Guarantees
 
-- **`declare-war` Expansion:** `declare-war(...)` compilation is guaranteed to produce `interest_in`, `army_power_projection`, munitions price stability, and `solvent` atoms.
-- **`colonize` Expansion:** `colonize(...)` compilation is guaranteed to produce tech prerequisites, colonial laws, naval and army thresholds, and `solvent` atoms.
+- **`declare-war` Expansion:** `declare-war(...)` compilation is guaranteed to produce `interest_in`, `army_power_projection`, munitions price stability, and `solvent` simple subgoals.
+- **`colonize` Expansion:** `colonize(...)` compilation is guaranteed to produce tech prerequisites, colonial laws, naval and army thresholds, and `solvent` simple subgoals.
 - **Determinism:** Identical save IR, game definitions, and solve options produce identical price vectors and action plans. Archive fingerprints are cryptographic SHA-256 hashes of save bytes (independent of filesystem modification times).

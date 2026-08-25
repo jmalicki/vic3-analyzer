@@ -8,17 +8,17 @@ These expressions power the **Goal Gaps** evaluator (which checks unsatisfied re
 
 ## Grammar
 
-Goals are parsed into boolean abstract syntax trees (AND, OR, NOT). After
-compile, each predicate becomes a **simple subgoal** (`SimpleSubgoal`); the
-grammar nonterminal `atom` below is only the parser production (predicate or
-parenthesized goal), not the Rust type name.
+Goals are parsed into boolean abstract syntax trees (AND, OR, NOT). A
+`simple` production is a bare predicate; after compile it becomes a
+**simple subgoal** (`Goal::Simple` / `SimpleSubgoal`). Parenthesized goals
+stay compound until flattened.
 
 ```text
 goal        := or
 or          := and ("||" and)*
 and         := unary ("&&" unary)*
-unary       := "not" unary | atom
-atom        := pred | "(" goal ")"
+unary       := "not" unary | simple | "(" goal ")"
+simple      := pred
 
 pred        := ident "(" args? ")"
             |  ident rel number

@@ -8,7 +8,7 @@ The planner evaluates goal predicates and discovers time-optimal action sequence
 
 A **simple subgoal** is a compiled goal node with no further goal children in the
 current tree (`Goal::Simple` / `SimpleSubgoal` in Rust). Compound goals
-(AND / OR / NOT) refine into **simple subgoal**s; future sugar may refine them
+(AND / OR / NOT) refine into simple subgoals; future sugar may refine them
 further — the name means “simple in this compile,” not forever irreducible.
 
 ---
@@ -91,7 +91,7 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
 - **National pool only:** Victoria 3 does not allocate construction by geographic state. The planner models national throughput split into **government** vs **private** (`1 − country_private_construction_allocation_mult` from economic-system laws). Private queue rows do not consume government feed slots.
 - **Cost** per queued level uses save `remaining`, else defs `required_construction`, else `default_construction_cost`.
 - **Allocation cap** defaults to max weekly construction progress ÷ 7 (vanilla base 10/week + owned tech adds such as urbanization). `SimConfig::max_construction_allocation = Some(n)` overrides for tests. Leftover government capacity fills later government queue entries, so enough capacity yields parallel builds. Wait edges advance to the soonest **fed** government completion.
-- **Heuristic ETA** (`construction_eta_days`): default = time until a free government feed slot / usable leftover capacity (one default-cost level at that rate when slots are open); when slots are full = next fed finish. Explicit next-finish mode remains available for wait-with-spare-slots semantics. Open GDP / price atoms no longer clamp every bound through a blanket `.max(1)` on next-completion alone.
+- **Heuristic ETA** (`construction_eta_days`): default = time until a free government feed slot / usable leftover capacity (one default-cost level at that rate when slots are open); when slots are full = next fed finish. Explicit next-finish mode remains available for wait-with-spare-slots semantics. Open GDP / price simple subgoals no longer clamp every bound through a blanket `.max(1)` on next-completion alone.
 - **Building candidates** are `(building_type, state_id)` for `QueueBuildingLevel` (Vic3 placement):
   - **Direct:** defs building types whose default PM IO helps open `good_price` / raising `gdp`, plus barracks/shipyards/naval admin when PP needs levels (hire stays on the military simple-subgoal arm). Each type expands to states that already have that building, or every owned state for first-of-type / greenfield. Completion bumps levels in that state (synthetic row when absent) so prices move.
   - **No type-level dominance prune:** modeled benefit/cost axes omit slots, local markets, and unlocks, so “strictly better type” is not sound.
