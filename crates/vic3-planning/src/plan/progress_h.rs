@@ -1,19 +1,39 @@
-//! Progress-aware ranking heuristic library (unwired).
+//! Progress-aware ranking heuristic library (not wired into search yet).
 //!
-//! A* [`super::Vic3Node`] heuristic stays on the timing DAG relaxation. This
-//! module exposes residual-days ranking and cheap/emit bag scorers for later
-//! PEA wiring — nothing here is called from search yet. See
-//! `docs/planning-progress-heuristic.md`.
+//! # Role in search
 //!
-//! # Math symbols (design doc) ↔ Rust names
+//! Wired A\* / PEA\* still order Ready keys with the **admissible timing**
+//! heuristic on [`super::Vic3Node`] (calendar-day lower bound from the timing
+//! DAG). That bound is correct but blind to *how much* of a goal meter (e.g.
+//! GDP) remains.
+//!
+//! This module estimates **residual calendar days to close the goal**, using
+//! gaps, construction throughput, and cheap GDP / Construction Sector
+//! guesstimates. Those scores are meant only to **rank** the open set / PEA
+//! bag so search prefers actions that make progress. They are **not** a proven
+//! admissible lower bound and must not be used as an incumbent upper bound $U$
+//! (greedy $U$ is a later PR).
+//!
+//! Nothing here is called from `plan()` / PEA yet — PEA wiring lands later.
+//! Design write-up: `docs/planning-progress-heuristic.md`.
+//!
+//! # Timeline naming
+//!
+//! - **Current state** (`state_t` in the doc): the node being expanded.
+//! - **Successor** (`state_{t'}`): after applying an action (may share the same
+//!   calendar day when the edge costs 0 days).
+//! - Rust suffixes: `*_curr` for values computed on the current state and reused
+//!   for every candidate in one expand; avoid “parent” for bag GDP math.
+//!
+//! # Math symbols ↔ Rust
 //!
 //! | Design doc | Rust |
 //! | --- | --- |
-//! | $\mathrm{state}_t$ bag context | [`CheapBagCurr`] |
-//! | $H_{\mathrm{follow}}$, $G_t$, $R^{*}_t$ | [`BagResidualCurr`] |
-//! | cheap GDP delta guesstimate | [`cheap_gdp_delta_guesstimate`] |
-//! | emit residual on completed state | [`emit_bag_score`] |
-//! | construction units (points/day) | `construction_points_per_day` on [`PlanningState`] |
+//! | Current-state bag context | [`CheapBagCurr`] |
+//! | Follow-on residual $H_{\mathrm{follow}}$, gap $G_t$, rate $R^{*}_t$ | [`BagResidualCurr`] |
+//! | Cheap GDP Δ guesstimate for an ordinary build | [`cheap_gdp_delta_guesstimate`] |
+//! | Emit residual on a **completed** planning world | [`emit_bag_score`] |
+//! | Construction throughput (points/day) | `construction_points_per_day` on [`PlanningState`] |
 
 #![allow(dead_code)] // unwired library; PEA / greedy call sites land in later PRs
 
@@ -26,7 +46,15 @@ use crate::goals::{Goal, Rel, SimpleSubgoal};
 use crate::sim::{Action, EconomyContext, SimConfig};
 use crate::world::PlanningState;
 
-/// Shortfall of a scalar / band meter toward satisfaction (`None` if unknown).
+/// How far a simple subgoal still is from satisfaction on `state`.
+///
+/// Returns the non-negative shortfall in the subgoal’s native units (GDP,
+/// price, power, …). Binary subgoals (`HasTech`, `HasLaw`, …) use `0.0` when
+/// already true and `1.0` when false.
+///
+/// Returns [`None`] when the planning state does not carry the meter needed to
+/// evaluate the subgoal (e.g. missing good price). Callers treat unknown as
+/// “no gap signal” rather than inventing a value.
 pub fn simple_subgoal_gap(subgoal: &SimpleSubgoal, state: &PlanningState) -> Option<f64> {
     match subgoal {
         SimpleSubgoal::Gdp { rel, value } => Some(raise_gap(state.gdp, *rel, *value)),
@@ -71,7 +99,12 @@ pub fn simple_subgoal_gap(subgoal: &SimpleSubgoal, state: &PlanningState) -> Opt
     }
 }
 
-/// Gap using an explicit GDP level (for `gdp_for_rates` anticipation).
+/// Like [`simple_subgoal_gap`], but GDP subgoals use `gdp_for_rates` instead of
+/// `state.gdp`.
+///
+/// Emit / PEA paths often keep the search child’s **enqueue-only** GDP while
+/// ranking as if a build had already completed. Pass the anticipated GDP as
+/// `gdp_for_rates` so residual-day math sees the projected meter.
 fn simple_subgoal_gap_with_gdp(
     subgoal: &SimpleSubgoal,
     state: &PlanningState,
@@ -95,10 +128,15 @@ fn band_or_raise_gap(current: f64, rel: Rel, target: f64) -> f64 {
     raise_gap(current, rel, target)
 }
 
-/// Progress-aware remaining-days estimate (may overestimate).
+/// Progress-aware remaining-days estimate for ranking (may overestimate).
 ///
-/// Uses `state.gdp` for GDP gaps. Prefer [`rank_heuristic_with_gdp_for_rates`]
-/// when the caller supplies an anticipated GDP for residual math.
+/// Walks the goal tree: `And` takes the max child residual, `Or` the min,
+/// `Not` contributes 0. GDP gaps use `state.gdp`.
+///
+/// Prefer [`rank_heuristic_with_gdp_for_rates`] when the caller already knows an
+/// anticipated GDP (emit after speculative complete).
+///
+/// This is a **ranking bias**, not the admissible A\* `h`.
 pub fn rank_heuristic(
     goal: &Goal,
     state: &PlanningState,
@@ -111,8 +149,9 @@ pub fn rank_heuristic(
 /// Like [`rank_heuristic`], but GDP gaps use `gdp_for_rates` instead of `state.gdp`.
 ///
 /// `gdp_for_rates` is the GDP plugged into residual-days math (design doc:
-/// $\mathrm{gdp}_{\mathrm{for\_rates}}$). It may anticipate an emit-time GDP
-/// delta before `BuildingCompleted` refreshes `state.gdp`.
+/// $\mathrm{gdp}_{\mathrm{for\_rates}}$). Emit can pass
+/// `state.gdp + anticipated_delta` before `BuildingCompleted` refreshes the
+/// child’s stored GDP.
 pub fn rank_heuristic_with_gdp_for_rates(
     goal: &Goal,
     state: &PlanningState,
@@ -142,6 +181,8 @@ pub fn rank_heuristic_with_gdp_for_rates(
     }
 }
 
+/// Residual days for one simple subgoal leaf (GDP/price/power use gap→days;
+/// tech/law/interest use track ETAs; other meters contribute 0 today).
 fn rank_simple_subgoal(
     subgoal: &SimpleSubgoal,
     state: &PlanningState,
@@ -180,8 +221,9 @@ fn rank_simple_subgoal(
     }
 }
 
-/// Serial research ETA for ranking (mirrors Vic3 timing leaf; local so this
-/// module stays independent of `vic3` visibility).
+/// Serial research ETA for ranking: sum of missing tech costs at a constant
+/// research rate (mirrors the timing-leaf idea; kept local so this module does
+/// not depend on `vic3` crate visibility).
 fn research_eta_for_rank(
     tech: &str,
     state: &PlanningState,
@@ -224,6 +266,11 @@ fn single_tech_research_eta(
     fallback
 }
 
+/// Convert a meter gap into an approximate residual calendar-day count.
+///
+/// Uses construction ETA × parallel feed slots as a stand-in aggregate
+/// “progress per day,” then `ceil(gap / rate)`. Coarse by design — ranking
+/// only.
 fn residual_days_from_gap(
     gap: f64,
     state: &PlanningState,
@@ -253,10 +300,13 @@ fn residual_days_from_gap(
     (days as u32).clamp(1, u32::MAX / 4)
 }
 
-/// Follow-on residual days on $\mathrm{state}_t$ at **current** construction capacity.
+/// Follow-on residual days on the **current** timeline state at today’s
+/// construction capacity.
 ///
-/// Design doc: $H_{\mathrm{follow}}$. Computed once per bag on the current
-/// timeline state and reused for Construction Sector cheap scores.
+/// Design doc: $H_{\mathrm{follow}}$. Computed once per PEA bag on the node
+/// being expanded and reused when scoring Construction Sector candidates
+/// (cheap path scales this value; it does not recompute a full post-CS
+/// schedule).
 pub fn follow_on_days_curr(
     goal: &Goal,
     state: &PlanningState,
@@ -267,7 +317,12 @@ pub fn follow_on_days_curr(
     rank_heuristic_with_gdp_for_rates(goal, state, config, economy, gdp_for_rates)
 }
 
-/// Aggregate meter/day used in cheap ordinary-build residual (design: $R^{*}$).
+/// Aggregate meter progress per day implied by the current residual
+/// (`gap / follow_on_days` style).
+///
+/// Design doc: $R^{*}$. Used when cheap ordinary-build scoring credits a GDP
+/// guesstimate and needs to turn the remaining gap back into days:
+/// `ceil(remaining_gap / aggregate_rate)`.
 pub fn aggregate_rate_curr(
     goal: &Goal,
     state: &PlanningState,
@@ -306,7 +361,11 @@ pub fn aggregate_rate_curr(
     total_gap / f64::from(follow)
 }
 
-/// Open GDP-style gap on $\mathrm{state}_t$ using `gdp_for_rates`.
+/// Sum of open meter gaps on the current state (GDP-style subgoals), using
+/// `gdp_for_rates` for GDP leaves.
+///
+/// Design doc: $G_t$. Cheap build scoring subtracts a GDP guesstimate from this
+/// before converting the remainder to follow-on days.
 pub fn meter_gap_curr(goal: &Goal, state: &PlanningState, gdp_for_rates: f64) -> f64 {
     let mut total = 0.0_f64;
     for subgoal in goal.simple_subgoals() {
@@ -317,20 +376,25 @@ pub fn meter_gap_curr(goal: &Goal, state: &PlanningState, gdp_for_rates: f64) ->
     total
 }
 
-/// Precomputed $H_{\mathrm{follow}}$, $G_t$, and $R^{*}_t$ on $\mathrm{state}_t$
-/// for one PEA bag (computed once, reused for every candidate).
+/// Precomputed residual inputs for one PEA bag expand on the current state.
+///
+/// Built once via [`BagResidualCurr::compute`], then shared by every
+/// [`cheap_bag_score`] call for candidates from that expand so follow-on days,
+/// gap, and aggregate rate stay consistent across the bag.
 #[derive(Debug, Clone, Copy)]
 pub struct BagResidualCurr {
-    /// Design: $H_{\mathrm{follow}}$.
+    /// Estimated residual days to clear the goal at **current** capacity
+    /// ($H_{\mathrm{follow}}$).
     pub follow_on_days: u32,
-    /// Design: $G_t$.
+    /// Combined open meter gap ($G_t$).
     pub meter_gap: f64,
-    /// Design: $R^{*}_t$.
+    /// Implied meter units per day ($R^{*}_t`) for converting remaining gap → days.
     pub aggregate_rate: f64,
 }
 
 impl BagResidualCurr {
-    /// Compute residual bag inputs from the current timeline state.
+    /// Snapshot [`follow_on_days_curr`], [`meter_gap_curr`], and
+    /// [`aggregate_rate_curr`] for `state`.
     pub fn compute(
         goal: &Goal,
         state: &PlanningState,
@@ -346,16 +410,23 @@ impl BagResidualCurr {
     }
 }
 
-/// $\mathrm{state}_t$ context shared by every [`cheap_bag_score`] in one expand.
+/// Shared handles for scoring every cheap bag candidate in one expand.
+///
+/// Holds the current planning state, sim config, optional economy (defs / world
+/// for construction and GDP guesstimates), and the precomputed
+/// [`BagResidualCurr`].
 pub struct CheapBagCurr<'a> {
+    /// Node being expanded (current timeline state).
     pub state: &'a PlanningState,
     pub config: SimConfig,
+    /// Price/defs context when available; cheap paths degrade without it.
     pub economy: Option<&'a EconomyContext>,
+    /// Follow-on / gap / rate snapshot shared by all candidates in this bag.
     pub residual: BagResidualCurr,
 }
 
 impl<'a> CheapBagCurr<'a> {
-    /// Build bag context: residual rates on `state` plus shared sim handles.
+    /// Build bag context: residual snapshot on `state` plus shared sim handles.
     pub fn new(
         goal: &Goal,
         state: &'a PlanningState,
@@ -372,12 +443,22 @@ impl<'a> CheapBagCurr<'a> {
     }
 }
 
-/// Cheap GDP delta guesstimate for an ordinary building level (not Construction Sector).
+/// Rough GDP gain from finishing one ordinary building level (not Construction
+/// Sector).
+///
+/// Walks the building’s default production methods, sums `output_qty × price`
+/// (current planning price, else defs base price). **Does not** subtract
+/// inputs, model staffing, or run a price/GDP solve — emit recomputes after
+/// speculative complete.
+///
+/// Without an economy (or if the building is missing / yields nothing), falls
+/// back to a small fraction of `|state.gdp|` so ranking still has a positive
+/// credit.
 ///
 /// **Deficiencies vs emit / formal greedy** (keep in sync with PEA bag comments):
-/// - Not a full price/GDP solve; emit recomputes after speculative complete.
+/// - Not a full price/GDP solve.
 /// - Ignores input costs, staffing, and market clearance.
-/// - Follow-on days after this credit can score lower (better) than this
+/// - Follow-on days after this credit can score **lower (better)** than this
 ///   guesstimate implies once real slots, prices, and greedy order apply.
 pub fn cheap_gdp_delta_guesstimate(
     state: &PlanningState,
@@ -440,9 +521,12 @@ pub fn cheap_gdp_delta_guesstimate(
     }
 }
 
-/// Construction points/day gained by +1 Construction Sector level (government share).
+/// Construction points/day gained by finishing **one** Construction Sector
+/// level, scaled by government construction share from laws.
 ///
-/// Cheap analytic $\Delta C$; emit/rebuild use real sync after complete.
+/// Cheap analytic $\Delta C$ from defs / world CS PM (`country_construction_add`).
+/// Returns `0.0` without an economy. Emit and greedy rebuild use the real
+/// construction-point sync after the build completes instead of this estimate.
 pub fn cheap_construction_sector_points_delta(
     state: &PlanningState,
     economy: Option<&EconomyContext>,
@@ -490,7 +574,9 @@ pub fn cheap_construction_sector_points_delta(
     }
 }
 
-/// Estimated calendar days to finish one newly queued building at $\mathrm{state}_t$ capacity.
+/// Estimated calendar days to finish one newly queued building at the current
+/// state’s construction points/day (`ceil(work / points)` when economy is
+/// present; otherwise falls back to construction ETA).
 fn estimated_build_days(
     state: &PlanningState,
     building: &str,
@@ -509,22 +595,32 @@ fn estimated_build_days(
     construction_eta_days(state, config, ConstructionEtaMode::CapacityOrSlot).max(1)
 }
 
-/// Cheap PEA bag ranking key: predicted build/CS time + follow-on days, or
-/// `edge_days +` follow-on on $\mathrm{state}_t$ for non-build actions.
+/// Cheap PEA bag ranking key for one candidate (lower is better).
 ///
-/// **Deficiencies vs emit / formal greedy rebuild** (plain English — do not
-/// treat these numbers as admissible or equal to emit):
-/// - Construction Sector: scales follow-on days on $\mathrm{state}_t$ by construction-unit
-///   ratio only. Does **not** use actual slots, CS finish day, or post-CS
-///   residual schedule (those appear on emit / greedy rebuild).
-/// - Ordinary builds: credits a cheap GDP guesstimate, not the emit full
-///   price/GDP solve.
-/// - Cheap Construction Sector path ignores that building’s GDP delta.
+/// - **Construction Sector:** estimated build days + follow-on days scaled by
+///   the construction-throughput ratio
+///   `points_now / (points_now + ΔC)`.
+/// - **Ordinary build:** estimated build days + follow-on days after crediting
+///   [`cheap_gdp_delta_guesstimate`] against the bag’s meter gap.
+/// - **Other actions:** `edge_days +` follow-on residual on the current state.
+///
+/// Queue edges are often 0 calendar days; `build_days` stands in for completion
+/// time in the ranking key while path cost still uses the real 0-then-wait
+/// edges.
+///
+/// **Deficiencies vs emit / formal greedy rebuild** — do not treat these
+/// numbers as admissible or equal to emit:
+/// - Construction Sector: scales follow-on on the **current** state by
+///   throughput ratio only. Does **not** model actual slots, CS finish day, or
+///   a post-CS residual schedule (those appear on emit / greedy rebuild).
+/// - Ordinary builds: credits a cheap GDP guesstimate, not a full price/GDP
+///   solve.
+/// - Cheap Construction Sector path ignores that building’s own GDP delta.
 /// - Bag does not re-run greedy; formal upper-bound rebuild does (and honors
 ///   in-flight CS).
-/// - The delayed / follow-on portion can score differently than this
-///   heuristic — including **lower (better)** — once slots, intervening
-///   completions, prices, and greedy order are real. Bag score is a bias only.
+/// - The delayed / follow-on portion can score differently than this heuristic
+///   — including **lower (better)** — once slots, intervening completions,
+///   prices, and greedy order are real. Bag score is a bias only.
 pub fn cheap_bag_score(action: &Action, edge_days: u16, curr: &CheapBagCurr<'_>) -> u32 {
     let residual = &curr.residual;
     match action {
@@ -554,6 +650,11 @@ pub fn cheap_bag_score(action: &Action, edge_days: u16, curr: &CheapBagCurr<'_>)
     }
 }
 
+/// Construction Sector cheap score: build time + scaled follow-on days.
+///
+/// `follow ≈ points_now / (points_now + points_delta) * follow_on_days` when
+/// throughput is already positive. Not equal to emit/rebuild (those use real
+/// slots and post-CS residual).
 fn cheap_construction_sector_bag_score(curr: &CheapBagCurr<'_>, building: &str) -> u32 {
     let follow_on_days = curr.residual.follow_on_days;
     let build_days = estimated_build_days(curr.state, building, curr.config, curr.economy);
@@ -580,11 +681,13 @@ fn cheap_construction_sector_bag_score(curr: &CheapBagCurr<'_>, building: &str) 
     build_days.saturating_add(follow)
 }
 
-/// Emit ranking key after speculative completed world: `edge_days +` residual.
+/// Emit-time ranking key after building a **speculatively completed** planning
+/// world: `edge_days +` residual days on that completed state.
 ///
-/// Uses full [`rank_heuristic_with_gdp_for_rates`] on the completed state (real
-/// post-CS capacity when CS finished). Does **not** use the cheap
-/// construction-unit scale.
+/// Unlike [`cheap_bag_score`], this runs the full
+/// [`rank_heuristic_with_gdp_for_rates`] on `completed_state` (so a finished
+/// Construction Sector sees real post-complete throughput). It does **not** use
+/// the cheap construction-unit scale.
 pub fn emit_bag_score(
     edge_days: u16,
     goal: &Goal,
@@ -602,7 +705,10 @@ pub fn emit_bag_score(
     u32::from(edge_days).saturating_add(residual)
 }
 
-/// Meter gain from `before` → `after` on `subgoal` (0 if unknown / no help).
+/// How much `after` improved `subgoal` relative to `before`.
+///
+/// `max(0, gap(before) - gap(after))`. Returns `0.0` if either gap is unknown
+/// or the successor did not help.
 pub fn simple_subgoal_delta(
     subgoal: &SimpleSubgoal,
     before: &PlanningState,
