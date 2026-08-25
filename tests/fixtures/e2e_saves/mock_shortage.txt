@@ -1,0 +1,164 @@
+SAV01000000000000000000
+meta_data={
+	version="1.9.0"
+	game_date=1836.6.1
+	name="MockShortage"
+}
+country_manager={
+	database={
+		1=none
+		16777216={
+			definition="MOCK"
+			government="gov_absolute_monarchy"
+			capital=1
+			market=1
+			market_capital=1
+			is_main_tag=yes
+			country_type="recognized"
+			infamy=0
+			states={ 1 }
+			budget={
+				gold_reserves=1000
+				credit=0
+				principal=0
+				weekly_income={ 0.0 10.0 }
+			}
+		}
+	}
+}
+states={
+	database={
+		1={
+			region="STATE_MOCK"
+			country=16777216
+			arable_land=40
+			infrastructure=10
+			infrastructure_usage=5
+			trade={
+				goods={
+				}
+			}
+			pop_statistics={
+				population_by_profession={ 15 7=10000 }
+				population_workforce_by_profession={ 15 7=8000 }
+				population_employable_qualifications={ 15 7=100 }
+			}
+		}
+	}
+}
+building_manager={
+	database={
+		1={
+			building="building_mock_lumber_camp"
+			state=1
+			levels=1
+			staffing=1
+			production_methods={ "pm_mock_lumber_camp_1" }
+			input_goods={
+				goods={
+				}
+			}
+			output_goods={
+				goods={
+					0={ value=20 }
+				}
+			}
+		}
+		2={
+			building="building_mock_tool_workshop"
+			state=1
+			levels=2
+			staffing=2
+			production_methods={ "pm_mock_tool_workshop_1" }
+			input_goods={
+				goods={
+					0={ value=20 }
+				}
+			}
+			output_goods={
+				goods={
+					2={ value=40 }
+				}
+			}
+		}
+	}
+}
+pops={
+	database={
+		1={
+			type="mock_laborers"
+			workforce=4000
+			dependents=2000
+			wealth=8
+			culture=0
+			location=1
+			workplace=1
+			num_literate=800
+			qualifications={ 15 7=50 }
+		}
+		2={
+			type="mock_laborers"
+			workforce=4000
+			dependents=2000
+			wealth=7
+			culture=0
+			location=1
+			workplace=2
+			num_literate=800
+			qualifications={ 15 7=50 }
+		}
+	}
+}
+cultures={
+	database={
+		0={
+			type=mock_culture
+		}
+		1=none
+	}
+}
+laws={
+	database={
+		1={
+			law="law_autocracy"
+			country=16777216
+			active=yes
+		}
+	}
+}
+market_manager={
+	database={
+		1={
+			owner=16777216
+		}
+	}
+}
+trade_route_manager={
+	database={
+		1=none
+	}
+}
+building_constructions={
+	database={
+		1=none
+	}
+}
+government_constructions={
+	database={
+		1=none
+	}
+}
+technology={
+	database={
+		1={
+			country=16777216
+			acquired_technologies={ value={ } }
+		}
+	}
+}
+previous_played={
+	{
+		idtype=16777216
+		name="mock_player"
+	}
+}

@@ -1,6 +1,9 @@
 import { join } from 'node:path'
 import { config as baseConfig } from './wdio.web.conf.js'
 
+// Override after importing web conf (which sets VIC3_E2E_RUNTIME=web).
+process.env.VIC3_E2E_RUNTIME = 'tauri'
+
 // Workspace cargo target; matches scripts/docs-screenshots/desktop-tauri/prepare.mjs
 const binary = join(
     process.cwd(),
@@ -41,4 +44,11 @@ export const config = {
         },
     }],
     baseUrl: 'tauri://localhost',
+    // WebKit is slow; keep explicit waits in helpers rather than 10s default.
+    waitforTimeout: 3000,
+    mochaOpts: {
+        ui: 'bdd',
+        // Desktop Load + pricing + WebKit IPC can exceed 5 minutes on CI.
+        timeout: 600_000,
+    },
 }
