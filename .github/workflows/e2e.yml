@@ -74,7 +74,16 @@ jobs:
             webkit2gtk-driver \
             xvfb \
             dbus-x11
+      # Linux only: restore CI `rust`'s `ci-native` cache. Always save-if: false —
+      # never write that key from e2e (#108). If we ever re-enable e2e saves,
+      # drop shared-key (or use a Tauri-specific key) so we do not overwrite
+      # `ci-native`; the old per-job tauri key was the right shape for saves,
+      # but those multi-OS saves were too big for the ~10GB quota.
       - uses: Swatinem/rust-cache@v2
+        if: runner.os == 'Linux'
+        with:
+          shared-key: ci-native
+          save-if: "false"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
