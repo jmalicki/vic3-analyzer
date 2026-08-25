@@ -2,19 +2,19 @@
 //!
 //! # Role in search
 //!
-//! Wired A\* / PEA\* still order Ready keys with the **admissible timing**
+//! Wired A\* still orders Ready keys with the **admissible timing**
 //! heuristic on [`super::Vic3Node`] (calendar-day lower bound from the timing
 //! DAG). That bound is correct but blind to *how much* of a goal meter (e.g.
 //! GDP) remains.
 //!
 //! This module estimates **residual calendar days to close the goal**, using
 //! gaps, construction throughput, and cheap GDP / Construction Sector
-//! guesstimates. Those scores are meant only to **rank** the open set / PEA
-//! bag so search prefers actions that make progress. They are **not** a proven
-//! admissible lower bound and must not be used as an incumbent upper bound $U$
-//! (greedy $U$ is a later PR).
+//! guesstimates. Those scores are meant only to **rank** the open set /
+//! candidate bag so search prefers actions that make progress. They are **not**
+//! a proven admissible lower bound and must not be used as an incumbent upper
+//! bound (greedy upper bounds are a later PR).
 //!
-//! Nothing here is called from `plan()` / PEA yet — PEA wiring lands later.
+//! Nothing here is called from `plan()` / search yet — wiring lands later.
 //! Design write-up: `docs/planning-progress-heuristic.md`.
 //!
 //! # Timeline naming
@@ -25,17 +25,17 @@
 //! - Rust suffixes: `*_curr` for values computed on the current state and reused
 //!   for every candidate in one expand; avoid “parent” for bag GDP math.
 //!
-//! # Math symbols ↔ Rust
+//! # Design-doc names ↔ Rust
 //!
 //! | Design doc | Rust |
 //! | --- | --- |
 //! | Current-state bag context | [`CheapBagCurr`] |
-//! | Follow-on residual $H_{\mathrm{follow}}$, gap $G_t$, rate $R^{*}_t$ | [`BagResidualCurr`] |
+//! | Follow-on residual, meter gap, aggregate rate | [`BagResidualCurr`] (`follow_on_days`, `meter_gap`, `aggregate_rate`) |
 //! | Cheap GDP Δ guesstimate for an ordinary build | [`cheap_gdp_delta_guesstimate`] |
 //! | Emit residual on a **completed** planning world | [`emit_bag_score`] |
 //! | Construction throughput (points/day) | `construction_points_per_day` on [`PlanningState`] |
 
-#![allow(dead_code)] // unwired library; PEA / greedy call sites land in later PRs
+#![allow(dead_code)] // unwired library; search / greedy call sites land in later PRs
 
 use crate::construction::{
     allocation_cap_points_per_day, construction_add_for_cs_building, construction_eta_days,
@@ -46,72 +46,106 @@ use crate::goals::{Goal, Rel, SimpleSubgoal};
 use crate::sim::{Action, EconomyContext, SimConfig};
 use crate::world::PlanningState;
 
+/// Failure while measuring a subgoal gap on planning state.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum ProgressGapError {
+    #[error("planning state missing {meter} needed to evaluate subgoal")]
+    MissingMeter { meter: &'static str },
+}
+
 /// How far a simple subgoal still is from satisfaction on `state`.
 ///
 /// Returns the non-negative shortfall in the subgoal’s native units (GDP,
 /// price, power, …). Binary subgoals (`HasTech`, `HasLaw`, …) use `0.0` when
 /// already true and `1.0` when false.
 ///
-/// Returns [`None`] when the planning state does not carry the meter needed to
-/// evaluate the subgoal (e.g. missing good price). Callers treat unknown as
-/// “no gap signal” rather than inventing a value.
-pub fn simple_subgoal_gap(subgoal: &SimpleSubgoal, state: &PlanningState) -> Option<f64> {
+/// Returns [`ProgressGapError::MissingMeter`] when the planning state does not
+/// carry the meter needed to evaluate the subgoal (e.g. no recorded good
+/// price). In practice that means the planner never loaded that field from the
+/// save/world — ranking cannot invent a gap, so callers must bubble the error
+/// rather than treating it as “already satisfied.”
+pub fn simple_subgoal_gap(
+    subgoal: &SimpleSubgoal,
+    state: &PlanningState,
+) -> Result<f64, ProgressGapError> {
     match subgoal {
-        SimpleSubgoal::Gdp { rel, value } => Some(raise_gap(state.gdp, *rel, *value)),
+        SimpleSubgoal::Gdp { rel, value } => Ok(raise_gap(state.gdp, *rel, *value)),
         SimpleSubgoal::GoodPrice { good, rel, value } => {
-            let price = state.price(good)?;
-            Some(band_or_raise_gap(price, *rel, *value))
+            let price = state.price(good).ok_or(ProgressGapError::MissingMeter {
+                meter: "good price",
+            })?;
+            Ok(band_or_raise_gap(price, *rel, *value))
         }
         SimpleSubgoal::ArmyPower { rel, value } => {
-            let power = state.army_power_projection?;
-            Some(raise_gap(power, *rel, *value))
+            let power = state
+                .army_power_projection
+                .ok_or(ProgressGapError::MissingMeter {
+                    meter: "army power projection",
+                })?;
+            Ok(raise_gap(power, *rel, *value))
         }
         SimpleSubgoal::NavyPower { rel, value } => {
-            let power = state.navy_power_projection?;
-            Some(raise_gap(power, *rel, *value))
+            let power = state
+                .navy_power_projection
+                .ok_or(ProgressGapError::MissingMeter {
+                    meter: "navy power projection",
+                })?;
+            Ok(raise_gap(power, *rel, *value))
         }
         SimpleSubgoal::WeeklyBalance { rel, value } => {
-            let bal = state.weekly_balance?;
-            Some(raise_gap(bal, *rel, *value))
+            let bal = state.weekly_balance.ok_or(ProgressGapError::MissingMeter {
+                meter: "weekly balance",
+            })?;
+            Ok(raise_gap(bal, *rel, *value))
         }
         SimpleSubgoal::PopulationWeightedWealth { rel, value } => {
-            let w = state.population_weighted_wealth?;
-            Some(raise_gap(w, *rel, *value))
+            let w = state
+                .population_weighted_wealth
+                .ok_or(ProgressGapError::MissingMeter {
+                    meter: "population-weighted wealth",
+                })?;
+            Ok(raise_gap(w, *rel, *value))
         }
         SimpleSubgoal::DebtPrincipal { rel, value } => {
-            let d = state.debt_principal?;
-            Some(raise_gap(d, *rel, *value))
+            let d = state.debt_principal.ok_or(ProgressGapError::MissingMeter {
+                meter: "debt principal",
+            })?;
+            Ok(raise_gap(d, *rel, *value))
         }
         SimpleSubgoal::CreditHeadroom { rel, value } => {
-            let headroom = state.credit_headroom?;
-            Some(raise_gap(headroom, *rel, *value))
+            let headroom = state
+                .credit_headroom
+                .ok_or(ProgressGapError::MissingMeter {
+                    meter: "credit headroom",
+                })?;
+            Ok(raise_gap(headroom, *rel, *value))
         }
-        SimpleSubgoal::HasTech(tech) => Some(if state.has_tech(tech) { 0.0 } else { 1.0 }),
-        SimpleSubgoal::HasLaw(law) => Some(if state.has_law(law) { 0.0 } else { 1.0 }),
+        SimpleSubgoal::HasTech(tech) => Ok(if state.has_tech(tech) { 0.0 } else { 1.0 }),
+        SimpleSubgoal::HasLaw(law) => Ok(if state.has_law(law) { 0.0 } else { 1.0 }),
         SimpleSubgoal::InterestIn { kind, id } => {
             let held = match kind {
                 crate::goals::InterestKind::State => state.has_interest_state(id),
                 crate::goals::InterestKind::Region => state.has_interest_region(id),
             };
-            Some(if held { 0.0 } else { 1.0 })
+            Ok(if held { 0.0 } else { 1.0 })
         }
-        SimpleSubgoal::Solvent => Some(if state.solvent { 0.0 } else { 1.0 }),
+        SimpleSubgoal::Solvent => Ok(if state.solvent { 0.0 } else { 1.0 }),
     }
 }
 
 /// Like [`simple_subgoal_gap`], but GDP subgoals use `gdp_for_rates` instead of
 /// `state.gdp`.
 ///
-/// Emit / PEA paths often keep the search child’s **enqueue-only** GDP while
+/// Emit / search paths often keep the search child’s **enqueue-only** GDP while
 /// ranking as if a build had already completed. Pass the anticipated GDP as
 /// `gdp_for_rates` so residual-day math sees the projected meter.
 fn simple_subgoal_gap_with_gdp(
     subgoal: &SimpleSubgoal,
     state: &PlanningState,
     gdp_for_rates: f64,
-) -> Option<f64> {
+) -> Result<f64, ProgressGapError> {
     match subgoal {
-        SimpleSubgoal::Gdp { rel, value } => Some(raise_gap(gdp_for_rates, *rel, *value)),
+        SimpleSubgoal::Gdp { rel, value } => Ok(raise_gap(gdp_for_rates, *rel, *value)),
         _ => simple_subgoal_gap(subgoal, state),
     }
 }
@@ -141,83 +175,103 @@ pub fn rank_heuristic(
     goal: &Goal,
     state: &PlanningState,
     config: SimConfig,
-    economy: Option<&EconomyContext>,
-) -> u32 {
+    economy: &EconomyContext,
+) -> Result<u32, ProgressGapError> {
     rank_heuristic_with_gdp_for_rates(goal, state, config, economy, state.gdp)
 }
 
 /// Like [`rank_heuristic`], but GDP gaps use `gdp_for_rates` instead of `state.gdp`.
 ///
-/// `gdp_for_rates` is the GDP plugged into residual-days math (design doc:
-/// $\mathrm{gdp}_{\mathrm{for\_rates}}$). Emit can pass
+/// `gdp_for_rates` is the GDP plugged into residual-days math. Emit can pass
 /// `state.gdp + anticipated_delta` before `BuildingCompleted` refreshes the
 /// child’s stored GDP.
 pub fn rank_heuristic_with_gdp_for_rates(
     goal: &Goal,
     state: &PlanningState,
     config: SimConfig,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
     gdp_for_rates: f64,
-) -> u32 {
+) -> Result<u32, ProgressGapError> {
     match goal {
-        Goal::And(children) => children
-            .iter()
-            .map(|child| {
-                rank_heuristic_with_gdp_for_rates(child, state, config, economy, gdp_for_rates)
-            })
-            .max()
-            .unwrap_or(0),
-        Goal::Or(children) => children
-            .iter()
-            .map(|child| {
-                rank_heuristic_with_gdp_for_rates(child, state, config, economy, gdp_for_rates)
-            })
-            .min()
-            .unwrap_or(0),
-        Goal::Not(_) => 0,
+        Goal::And(children) => {
+            let mut max = 0_u32;
+            for child in children {
+                max = max.max(rank_heuristic_with_gdp_for_rates(
+                    child,
+                    state,
+                    config,
+                    economy,
+                    gdp_for_rates,
+                )?);
+            }
+            Ok(max)
+        }
+        Goal::Or(children) => {
+            let mut min: Option<u32> = None;
+            for child in children {
+                let child_h = rank_heuristic_with_gdp_for_rates(
+                    child,
+                    state,
+                    config,
+                    economy,
+                    gdp_for_rates,
+                )?;
+                min = Some(match min {
+                    Some(m) => m.min(child_h),
+                    None => child_h,
+                });
+            }
+            Ok(min.unwrap_or(0))
+        }
+        Goal::Not(_) => Ok(0),
         Goal::Simple(subgoal) => {
             rank_simple_subgoal(subgoal, state, config, economy, gdp_for_rates)
         }
     }
 }
 
-/// Residual days for one simple subgoal leaf (GDP/price/power use gap→days;
-/// tech/law/interest use track ETAs; other meters contribute 0 today).
+/// Residual days for one simple subgoal leaf (meter gaps → days; tech/law/
+/// interest use track ETAs).
 fn rank_simple_subgoal(
     subgoal: &SimpleSubgoal,
     state: &PlanningState,
     config: SimConfig,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
     gdp_for_rates: f64,
-) -> u32 {
+) -> Result<u32, ProgressGapError> {
     let satisfied = match subgoal {
         SimpleSubgoal::Gdp { rel, value } => raise_gap(gdp_for_rates, *rel, *value) <= 0.0,
         _ => subgoal.eval(state),
     };
     if satisfied {
-        return 0;
+        return Ok(0);
     }
     match subgoal {
         SimpleSubgoal::Gdp { .. }
         | SimpleSubgoal::GoodPrice { .. }
         | SimpleSubgoal::ArmyPower { .. }
-        | SimpleSubgoal::NavyPower { .. } => {
-            let Some(gap) = simple_subgoal_gap_with_gdp(subgoal, state, gdp_for_rates) else {
-                return 0;
-            };
-            if gap <= 0.0 {
-                return 0;
-            }
-            residual_days_from_gap(gap, state, config, economy, subgoal, gdp_for_rates)
-        }
-        SimpleSubgoal::HasTech(tech) => research_eta_for_rank(tech, state, config, economy),
-        SimpleSubgoal::HasLaw(_) => u32::from(config.law_days.max(1)),
-        SimpleSubgoal::InterestIn { .. } => u32::from(config.interest_days.max(1)),
-        SimpleSubgoal::Solvent
+        | SimpleSubgoal::NavyPower { .. }
+        | SimpleSubgoal::Solvent
         | SimpleSubgoal::WeeklyBalance { .. }
         | SimpleSubgoal::PopulationWeightedWealth { .. }
         | SimpleSubgoal::DebtPrincipal { .. }
-        | SimpleSubgoal::CreditHeadroom { .. } => 0,
+        | SimpleSubgoal::CreditHeadroom { .. } => {
+            let gap = simple_subgoal_gap_with_gdp(subgoal, state, gdp_for_rates)?;
+            if gap <= 0.0 {
+                return Ok(0);
+            }
+            Ok(residual_days_from_gap(
+                gap,
+                state,
+                config,
+                economy,
+                subgoal,
+                gdp_for_rates,
+            ))
+        }
+        SimpleSubgoal::HasTech(tech) => Ok(research_eta_for_rank(tech, state, config, economy)),
+        SimpleSubgoal::HasLaw(_) => Ok(u32::from(config.law_days.max(1))),
+        SimpleSubgoal::InterestIn { .. } => Ok(u32::from(config.interest_days.max(1))),
     }
 }
 
@@ -228,19 +282,16 @@ fn research_eta_for_rank(
     tech: &str,
     state: &PlanningState,
     config: SimConfig,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
 ) -> u32 {
     if state.has_tech(tech) {
         return 0;
     }
     let fallback = u32::from(config.research_days.max(1));
-    let Some(defs) = economy.map(|e| &e.defs) else {
-        return fallback;
-    };
-    if defs.technologies.is_empty() {
+    if economy.defs.technologies.is_empty() {
         return fallback;
     }
-    let missing = crate::tech::missing_tech_closure(tech, state, defs);
+    let missing = crate::tech::missing_tech_closure(tech, state, &economy.defs);
     if missing.is_empty() {
         return 0;
     }
@@ -251,14 +302,9 @@ fn research_eta_for_rank(
     total.max(1)
 }
 
-fn single_tech_research_eta(
-    tech: &str,
-    config: SimConfig,
-    economy: Option<&EconomyContext>,
-) -> u32 {
+fn single_tech_research_eta(tech: &str, config: SimConfig, economy: &EconomyContext) -> u32 {
     let fallback = u32::from(config.research_days.max(1));
-    let defs = economy.map(|e| &e.defs);
-    if let Some(cost) = crate::tech::tech_research_cost(tech, defs) {
+    if let Some(cost) = crate::tech::tech_research_cost(tech, &economy.defs) {
         if let Some(days) = crate::tracks::days_for_work(cost, crate::tracks::CONSTANT_RATE) {
             return days.max(1);
         }
@@ -275,7 +321,7 @@ fn residual_days_from_gap(
     gap: f64,
     state: &PlanningState,
     config: SimConfig,
-    _economy: Option<&EconomyContext>,
+    _economy: &EconomyContext,
     subgoal: &SimpleSubgoal,
     gdp_for_rates: f64,
 ) -> u32 {
@@ -303,7 +349,7 @@ fn residual_days_from_gap(
 /// Follow-on residual days on the **current** timeline state at today’s
 /// construction capacity.
 ///
-/// Design doc: $H_{\mathrm{follow}}$. Computed once per PEA bag on the node
+/// Design-doc follow-on residual. Computed once per candidate bag on the node
 /// being expanded and reused when scoring Construction Sector candidates
 /// (cheap path scales this value; it does not recompute a full post-CS
 /// schedule).
@@ -311,24 +357,25 @@ pub fn follow_on_days_curr(
     goal: &Goal,
     state: &PlanningState,
     config: SimConfig,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
     gdp_for_rates: f64,
-) -> u32 {
+) -> Result<u32, ProgressGapError> {
     rank_heuristic_with_gdp_for_rates(goal, state, config, economy, gdp_for_rates)
 }
 
 /// Aggregate meter progress per day implied by the current residual
 /// (`gap / follow_on_days` style).
 ///
-/// Design doc: $R^{*}$. Used when cheap ordinary-build scoring credits a GDP
-/// guesstimate and needs to turn the remaining gap back into days:
+/// Used when cheap ordinary-build scoring credits a GDP guesstimate and needs
+/// to turn the remaining gap back into days:
 /// `ceil(remaining_gap / aggregate_rate)`.
 pub fn aggregate_rate_curr(
     goal: &Goal,
     state: &PlanningState,
     config: SimConfig,
+    economy: &EconomyContext,
     gdp_for_rates: f64,
-) -> f64 {
+) -> Result<f64, ProgressGapError> {
     let mut total_gap = 0.0_f64;
     for subgoal in goal.simple_subgoals() {
         match subgoal {
@@ -336,21 +383,20 @@ pub fn aggregate_rate_curr(
             | SimpleSubgoal::GoodPrice { .. }
             | SimpleSubgoal::ArmyPower { .. }
             | SimpleSubgoal::NavyPower { .. } => {
-                if let Some(gap) = simple_subgoal_gap_with_gdp(subgoal, state, gdp_for_rates) {
-                    total_gap += gap.max(0.0);
-                }
+                let gap = simple_subgoal_gap_with_gdp(subgoal, state, gdp_for_rates)?;
+                total_gap += gap.max(0.0);
             }
             _ => {}
         }
     }
     if total_gap <= 1e-12 {
-        return 1.0;
+        return Ok(1.0);
     }
     let follow = residual_days_from_gap(
         total_gap,
         state,
         config,
-        None,
+        economy,
         &SimpleSubgoal::Gdp {
             rel: Rel::Ge,
             value: gdp_for_rates + total_gap,
@@ -358,25 +404,30 @@ pub fn aggregate_rate_curr(
         gdp_for_rates,
     )
     .max(1);
-    total_gap / f64::from(follow)
+    Ok(total_gap / f64::from(follow))
 }
 
-/// Sum of open meter gaps on the current state (GDP-style subgoals), using
+/// Sum of open meter gaps across every simple leaf of `goal`, using
 /// `gdp_for_rates` for GDP leaves.
 ///
-/// Design doc: $G_t$. Cheap build scoring subtracts a GDP guesstimate from this
-/// before converting the remainder to follow-on days.
-pub fn meter_gap_curr(goal: &Goal, state: &PlanningState, gdp_for_rates: f64) -> f64 {
+/// Cheap ordinary-build scoring subtracts a GDP guesstimate from this total
+/// before converting the remainder to follow-on days via `aggregate_rate`.
+/// Binary leaves contribute `0.0` or `1.0`; missing meters bubble
+/// [`ProgressGapError`].
+pub fn meter_gap_curr(
+    goal: &Goal,
+    state: &PlanningState,
+    gdp_for_rates: f64,
+) -> Result<f64, ProgressGapError> {
     let mut total = 0.0_f64;
     for subgoal in goal.simple_subgoals() {
-        if let Some(gap) = simple_subgoal_gap_with_gdp(subgoal, state, gdp_for_rates) {
-            total += gap.max(0.0);
-        }
+        let gap = simple_subgoal_gap_with_gdp(subgoal, state, gdp_for_rates)?;
+        total += gap.max(0.0);
     }
-    total
+    Ok(total)
 }
 
-/// Precomputed residual inputs for one PEA bag expand on the current state.
+/// Precomputed residual inputs for one candidate-bag expand on the current state.
 ///
 /// Built once via [`BagResidualCurr::compute`], then shared by every
 /// [`cheap_bag_score`] call for candidates from that expand so follow-on days,
@@ -384,11 +435,12 @@ pub fn meter_gap_curr(goal: &Goal, state: &PlanningState, gdp_for_rates: f64) ->
 #[derive(Debug, Clone, Copy)]
 pub struct BagResidualCurr {
     /// Estimated residual days to clear the goal at **current** capacity
-    /// ($H_{\mathrm{follow}}$).
+    /// ([`follow_on_days_curr`]).
     pub follow_on_days: u32,
-    /// Combined open meter gap ($G_t$).
+    /// Combined open meter gap ([`meter_gap_curr`]).
     pub meter_gap: f64,
-    /// Implied meter units per day ($R^{*}_t`) for converting remaining gap → days.
+    /// Implied meter units per day ([`aggregate_rate_curr`]) for converting
+    /// remaining gap → days.
     pub aggregate_rate: f64,
 }
 
@@ -399,28 +451,27 @@ impl BagResidualCurr {
         goal: &Goal,
         state: &PlanningState,
         config: SimConfig,
-        economy: Option<&EconomyContext>,
+        economy: &EconomyContext,
         gdp_for_rates: f64,
-    ) -> Self {
-        Self {
-            follow_on_days: follow_on_days_curr(goal, state, config, economy, gdp_for_rates),
-            meter_gap: meter_gap_curr(goal, state, gdp_for_rates),
-            aggregate_rate: aggregate_rate_curr(goal, state, config, gdp_for_rates),
-        }
+    ) -> Result<Self, ProgressGapError> {
+        Ok(Self {
+            follow_on_days: follow_on_days_curr(goal, state, config, economy, gdp_for_rates)?,
+            meter_gap: meter_gap_curr(goal, state, gdp_for_rates)?,
+            aggregate_rate: aggregate_rate_curr(goal, state, config, economy, gdp_for_rates)?,
+        })
     }
 }
 
 /// Shared handles for scoring every cheap bag candidate in one expand.
 ///
-/// Holds the current planning state, sim config, optional economy (defs / world
-/// for construction and GDP guesstimates), and the precomputed
-/// [`BagResidualCurr`].
+/// Holds the current planning state, sim config, economy (defs / world for
+/// construction and GDP guesstimates), and the precomputed [`BagResidualCurr`].
 pub struct CheapBagCurr<'a> {
     /// Node being expanded (current timeline state).
     pub state: &'a PlanningState,
     pub config: SimConfig,
-    /// Price/defs context when available; cheap paths degrade without it.
-    pub economy: Option<&'a EconomyContext>,
+    /// Price/defs context for construction work and GDP guesstimates.
+    pub economy: &'a EconomyContext,
     /// Follow-on / gap / rate snapshot shared by all candidates in this bag.
     pub residual: BagResidualCurr,
 }
@@ -431,15 +482,15 @@ impl<'a> CheapBagCurr<'a> {
         goal: &Goal,
         state: &'a PlanningState,
         config: SimConfig,
-        economy: Option<&'a EconomyContext>,
+        economy: &'a EconomyContext,
         gdp_for_rates: f64,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ProgressGapError> {
+        Ok(Self {
             state,
             config,
             economy,
-            residual: BagResidualCurr::compute(goal, state, config, economy, gdp_for_rates),
-        }
+            residual: BagResidualCurr::compute(goal, state, config, economy, gdp_for_rates)?,
+        })
     }
 }
 
@@ -451,11 +502,10 @@ impl<'a> CheapBagCurr<'a> {
 /// inputs, model staffing, or run a price/GDP solve — emit recomputes after
 /// speculative complete.
 ///
-/// Without an economy (or if the building is missing / yields nothing), falls
-/// back to a small fraction of `|state.gdp|` so ranking still has a positive
-/// credit.
+/// If the building is missing / yields nothing, falls back to a small fraction
+/// of `|state.gdp|` so ranking still has a positive credit.
 ///
-/// **Deficiencies vs emit / formal greedy** (keep in sync with PEA bag comments):
+/// **Deficiencies vs emit / formal greedy** (keep in sync with bag-score comments):
 /// - Not a full price/GDP solve.
 /// - Ignores input costs, staffing, and market clearance.
 /// - Follow-on days after this credit can score **lower (better)** than this
@@ -463,11 +513,8 @@ impl<'a> CheapBagCurr<'a> {
 pub fn cheap_gdp_delta_guesstimate(
     state: &PlanningState,
     building: &str,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
 ) -> f64 {
-    let Some(economy) = economy else {
-        return (state.gdp.abs() * 0.005).max(1.0);
-    };
     let Some(building_type) = economy.defs.buildings.get(building) else {
         return (state.gdp.abs() * 0.005).max(1.0);
     };
@@ -524,47 +571,41 @@ pub fn cheap_gdp_delta_guesstimate(
 /// Construction points/day gained by finishing **one** Construction Sector
 /// level, scaled by government construction share from laws.
 ///
-/// Cheap analytic $\Delta C$ from defs / world CS PM (`country_construction_add`).
-/// Returns `0.0` without an economy. Emit and greedy rebuild use the real
+/// Cheap analytic points delta from defs / world CS PM
+/// (`country_construction_add`). Emit and greedy rebuild use the real
 /// construction-point sync after the build completes instead of this estimate.
 pub fn cheap_construction_sector_points_delta(
     state: &PlanningState,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
 ) -> f64 {
-    let Some(economy) = economy else {
-        return 0.0;
-    };
     let world = economy.apply_planning_to_world(state);
-    let add = world
+
+    // Prefer the live CS building’s PM on the applied world when one exists.
+    let from_world_cs = world
         .buildings
         .iter()
         .find(|building| building.building == BUILDING_CONSTRUCTION_SECTOR)
-        .and_then(|building| construction_add_for_cs_building(building, &economy.defs).ok())
-        .or_else(|| {
-            economy
-                .defs
-                .buildings
-                .get(BUILDING_CONSTRUCTION_SECTOR)
-                .and_then(|building_type| {
-                    building_type
-                        .production_method_groups
-                        .iter()
-                        .find_map(|group_id| {
-                            let pm_id = economy
-                                .defs
-                                .production_method_groups
-                                .get(group_id)?
-                                .first()?;
-                            economy
-                                .defs
-                                .production_methods
-                                .get(pm_id)?
-                                .country_construction_add
-                                .filter(|value| value.is_finite() && *value >= 0.0)
-                        })
+        .and_then(|building| construction_add_for_cs_building(building, &economy.defs).ok());
+
+    // Else fall back to the first CS production method’s country_construction_add in defs.
+    let from_defs_pm = economy
+        .defs
+        .buildings
+        .get(BUILDING_CONSTRUCTION_SECTOR)
+        .and_then(|building_type| {
+            building_type
+                .production_method_groups
+                .iter()
+                .find_map(|group_id| {
+                    let pm_ids = economy.defs.production_method_groups.get(group_id)?;
+                    let pm_id = pm_ids.first()?;
+                    let pm = economy.defs.production_methods.get(pm_id)?;
+                    pm.country_construction_add
+                        .filter(|value| value.is_finite() && *value >= 0.0)
                 })
-        })
-        .unwrap_or(0.0);
+        });
+
+    let add = from_world_cs.or(from_defs_pm).unwrap_or(0.0);
     let share = government_construction_share_from_laws(state.laws.iter().map(String::as_str));
     let delta = add * share;
     if delta.is_finite() && delta > 0.0 {
@@ -575,31 +616,34 @@ pub fn cheap_construction_sector_points_delta(
 }
 
 /// Estimated calendar days to finish one newly queued building at the current
-/// state’s construction points/day (`ceil(work / points)` when economy is
-/// present; otherwise falls back to construction ETA).
+/// state’s construction points/day (`ceil(work / points)` when work is known;
+/// otherwise falls back to construction ETA).
 fn estimated_build_days(
     state: &PlanningState,
     building: &str,
     config: SimConfig,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
 ) -> u32 {
-    if let Some(economy) = economy {
-        let work = construction_work_points_for_enqueue(building, economy, config)
-            .unwrap_or(f64::from(config.default_construction_cost));
-        let points_per_day = state.construction_points_per_day.max(1e-9);
-        let days = (work / points_per_day).ceil();
-        if days.is_finite() && days > 0.0 {
-            return (days as u32).clamp(1, u32::MAX / 4);
-        }
+    let work = construction_work_points_for_enqueue(building, economy, config)
+        .unwrap_or(f64::from(config.default_construction_cost));
+    let points_per_day = state.construction_points_per_day.max(1e-9);
+    let days = (work / points_per_day).ceil();
+    if days.is_finite() && days > 0.0 {
+        return (days as u32).clamp(1, u32::MAX / 4);
     }
     construction_eta_days(state, config, ConstructionEtaMode::CapacityOrSlot).max(1)
 }
 
-/// Cheap PEA bag ranking key for one candidate (lower is better).
+/// Cheap candidate-bag ranking key for one action (lower is better).
 ///
 /// - **Construction Sector:** estimated build days + follow-on days scaled by
 ///   the construction-throughput ratio
 ///   `points_now / (points_now + ΔC)`.
+///   CS also moves GDP via construction-goods demand (iron, wood, …); that
+///   effect is real but secondary in this cheap path — the primary ranking
+///   benefit modeled here is shortening follow-on days via higher throughput.
+///   Emit ([`emit_bag_score`]) runs a full residual on the completed world and
+///   therefore sees post-complete GDP as well as throughput.
 /// - **Ordinary build:** estimated build days + follow-on days after crediting
 ///   [`cheap_gdp_delta_guesstimate`] against the bag’s meter gap.
 /// - **Other actions:** `edge_days +` follow-on residual on the current state.
@@ -611,11 +655,12 @@ fn estimated_build_days(
 /// **Deficiencies vs emit / formal greedy rebuild** — do not treat these
 /// numbers as admissible or equal to emit:
 /// - Construction Sector: scales follow-on on the **current** state by
-///   throughput ratio only. Does **not** model actual slots, CS finish day, or
-///   a post-CS residual schedule (those appear on emit / greedy rebuild).
+///   throughput ratio only. Does **not** credit CS’s own GDP delta in the cheap
+///   key (construction-goods demand can still move GDP; emit’s full residual
+///   after speculative complete sees that). Also omits actual slots, CS finish
+///   day, and a post-CS residual schedule (those appear on emit / greedy rebuild).
 /// - Ordinary builds: credits a cheap GDP guesstimate, not a full price/GDP
 ///   solve.
-/// - Cheap Construction Sector path ignores that building’s own GDP delta.
 /// - Bag does not re-run greedy; formal upper-bound rebuild does (and honors
 ///   in-flight CS).
 /// - The delayed / follow-on portion can score differently than this heuristic
@@ -653,8 +698,9 @@ pub fn cheap_bag_score(action: &Action, edge_days: u16, curr: &CheapBagCurr<'_>)
 /// Construction Sector cheap score: build time + scaled follow-on days.
 ///
 /// `follow ≈ points_now / (points_now + points_delta) * follow_on_days` when
-/// throughput is already positive. Not equal to emit/rebuild (those use real
-/// slots and post-CS residual).
+/// throughput is already positive. Primary cheap benefit is throughput; GDP
+/// from construction-goods demand is left to emit’s full residual. Not equal
+/// to emit/rebuild (those use real slots and post-CS residual).
 fn cheap_construction_sector_bag_score(curr: &CheapBagCurr<'_>, building: &str) -> u32 {
     let follow_on_days = curr.residual.follow_on_days;
     let build_days = estimated_build_days(curr.state, building, curr.config, curr.economy);
@@ -686,69 +732,56 @@ fn cheap_construction_sector_bag_score(curr: &CheapBagCurr<'_>, building: &str) 
 ///
 /// Unlike [`cheap_bag_score`], this runs the full
 /// [`rank_heuristic_with_gdp_for_rates`] on `completed_state` (so a finished
-/// Construction Sector sees real post-complete throughput). It does **not** use
-/// the cheap construction-unit scale.
+/// Construction Sector sees real post-complete throughput **and** GDP,
+/// including construction-goods demand). It does **not** use the cheap
+/// construction-unit scale.
 pub fn emit_bag_score(
     edge_days: u16,
     goal: &Goal,
     completed_state: &PlanningState,
     config: SimConfig,
-    economy: Option<&EconomyContext>,
-) -> u32 {
+    economy: &EconomyContext,
+) -> Result<u32, ProgressGapError> {
     let residual = rank_heuristic_with_gdp_for_rates(
         goal,
         completed_state,
         config,
         economy,
         completed_state.gdp,
-    );
-    u32::from(edge_days).saturating_add(residual)
+    )?;
+    Ok(u32::from(edge_days).saturating_add(residual))
 }
 
 /// How much `after` improved `subgoal` relative to `before`.
 ///
-/// `max(0, gap(before) - gap(after))`. Returns `0.0` if either gap is unknown
-/// or the successor did not help.
+/// `max(0, gap(before) - gap(after))`. Bubbles [`ProgressGapError`] if either
+/// gap cannot be evaluated.
 pub fn simple_subgoal_delta(
     subgoal: &SimpleSubgoal,
     before: &PlanningState,
     after: &PlanningState,
-) -> f64 {
-    match (
-        simple_subgoal_gap(subgoal, before),
-        simple_subgoal_gap(subgoal, after),
-    ) {
-        (Some(gap_before), Some(gap_after)) => (gap_before - gap_after).max(0.0),
-        _ => 0.0,
-    }
+) -> Result<f64, ProgressGapError> {
+    let gap_before = simple_subgoal_gap(subgoal, before)?;
+    let gap_after = simple_subgoal_gap(subgoal, after)?;
+    Ok((gap_before - gap_after).max(0.0))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::goals::compile;
-    use crate::test_support::{ger_planning_state, logging_and_cs_economy, GerStateOpts};
+    use crate::test_support::{ger_state, logging_and_cs_economy};
     use crate::world::{PlanningParts, PlanningState};
 
     fn state_curr_for_cheap_bag() -> PlanningState {
-        ger_planning_state(GerStateOpts {
-            gdp: 1000.0,
-            construction_points_per_day: 5.0,
-            wood_price: 40.0,
-            ..GerStateOpts::default()
-        })
+        ger_state().gdp(1000.0).points(5.0).wood_price(40.0).get()
     }
 
     /// Same as [`logging_and_cs_economy`], with logging `required_construction` overridden.
     fn logging_economy_with_cost(logging_required_construction: f64) -> EconomyContext {
-        let mut mini = logging_and_cs_economy();
-        mini.economy
-            .defs
-            .buildings
-            .get_mut("building_logging_camp")
-            .expect("logging camp")
-            .required_construction = Some(logging_required_construction);
-        mini.economy
+        logging_and_cs_economy()
+            .building_cost("building_logging_camp", logging_required_construction)
+            .economy
     }
 
     #[test]
@@ -757,10 +790,11 @@ mod tests {
             gdp: 1000.0,
             ..PlanningParts::default()
         });
+        let economy = EconomyContext::empty();
         let small = compile("gdp >= 1100").unwrap();
         let big = compile("gdp >= 5000").unwrap();
-        let h_small = rank_heuristic(&small, &state, SimConfig::default(), None);
-        let h_big = rank_heuristic(&big, &state, SimConfig::default(), None);
+        let h_small = rank_heuristic(&small, &state, SimConfig::default(), &economy).unwrap();
+        let h_big = rank_heuristic(&big, &state, SimConfig::default(), &economy).unwrap();
         assert!(h_big >= h_small, "h_big={h_big} h_small={h_small}");
         assert!(h_small >= 1);
     }
@@ -772,19 +806,43 @@ mod tests {
             ..PlanningParts::default()
         });
         let goal = compile("gdp >= 1000").unwrap();
-        assert_eq!(rank_heuristic(&goal, &state, SimConfig::default(), None), 0);
+        assert_eq!(
+            rank_heuristic(
+                &goal,
+                &state,
+                SimConfig::default(),
+                &EconomyContext::empty()
+            )
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn missing_good_price_gap_errors() {
+        let state = PlanningState::from_parts(PlanningParts {
+            gdp: 1000.0,
+            ..PlanningParts::default()
+        });
+        let subgoal = SimpleSubgoal::GoodPrice {
+            good: "wood".into(),
+            rel: Rel::Le,
+            value: 30.0,
+        };
+        let err = simple_subgoal_gap(&subgoal, &state).unwrap_err();
+        assert_eq!(
+            err,
+            ProgressGapError::MissingMeter {
+                meter: "good price"
+            }
+        );
     }
 
     #[test]
     fn cheap_cs_points_delta_from_economy_fixture() {
         let mini = logging_and_cs_economy();
-        let state_curr = ger_planning_state(GerStateOpts {
-            construction_points_per_day: 5.0,
-            gdp: 1000.0,
-            wood_price: 30.0,
-            ..GerStateOpts::default()
-        });
-        let points_delta = cheap_construction_sector_points_delta(&state_curr, Some(&mini.economy));
+        let state_curr = ger_state().gdp(1000.0).points(5.0).wood_price(30.0).get();
+        let points_delta = cheap_construction_sector_points_delta(&state_curr, &mini.economy);
         assert!(
             (points_delta - 5.0).abs() < 1e-9,
             "expected government share 1.0 × country_construction_add 5 → 5, got {points_delta}"
@@ -795,12 +853,7 @@ mod tests {
     fn cheap_cs_bag_score_halves_follow_on_when_delta_equals_points() {
         let mini = logging_and_cs_economy();
         let config = SimConfig::default();
-        let state_curr = ger_planning_state(GerStateOpts {
-            construction_points_per_day: 5.0,
-            gdp: 1000.0,
-            wood_price: 30.0,
-            ..GerStateOpts::default()
-        });
+        let state_curr = ger_state().gdp(1000.0).points(5.0).wood_price(30.0).get();
         let goal = compile("gdp >= 5000").unwrap();
         let action = Action::QueueBuildingLevel {
             building: BUILDING_CONSTRUCTION_SECTOR.into(),
@@ -818,13 +871,8 @@ mod tests {
         // ceil(5 / (5 + 5) * 100) = 50 when follow_on_days overridden to 100
         let expected_follow_on = 50_u32;
 
-        let mut curr = CheapBagCurr::new(
-            &goal,
-            &state_curr,
-            config,
-            Some(&mini.economy),
-            state_curr.gdp,
-        );
+        let mut curr = CheapBagCurr::new(&goal, &state_curr, config, &mini.economy, state_curr.gdp)
+            .expect("bag residual");
         curr.residual.follow_on_days = 100;
         let score = cheap_bag_score(&action, 0, &curr);
         assert_eq!(
@@ -839,8 +887,7 @@ mod tests {
     fn cheap_gdp_delta_guesstimate_positive_for_logging() {
         let economy = logging_economy_with_cost(30.0);
         let state_curr = state_curr_for_cheap_bag();
-        let delta =
-            cheap_gdp_delta_guesstimate(&state_curr, "building_logging_camp", Some(&economy));
+        let delta = cheap_gdp_delta_guesstimate(&state_curr, "building_logging_camp", &economy);
         assert!(
             delta > 0.0,
             "expected positive wood×price guesstimate, got {delta}"
@@ -868,13 +915,13 @@ mod tests {
             aggregate_rate: 10.0,
         };
         let cheap_delta =
-            cheap_gdp_delta_guesstimate(&state_curr, "building_logging_camp", Some(&economy));
+            cheap_gdp_delta_guesstimate(&state_curr, "building_logging_camp", &economy);
         assert!(cheap_delta > 0.0);
 
         let curr = CheapBagCurr {
             state: &state_curr,
             config,
-            economy: Some(&economy),
+            economy: &economy,
             residual,
         };
         let score = cheap_bag_score(&action, 0, &curr);
@@ -899,7 +946,7 @@ mod tests {
         let curr = CheapBagCurr {
             state: &state_curr,
             config,
-            economy: Some(&economy),
+            economy: &economy,
             residual: BagResidualCurr {
                 follow_on_days: 10_000,
                 meter_gap: 4000.0,
@@ -931,6 +978,7 @@ mod tests {
         let goal = compile("gdp >= 5000").unwrap();
         let config = SimConfig::default();
         let edge_days: u16 = 30;
+        let economy = EconomyContext::empty();
 
         let state_curr = PlanningState::from_parts(PlanningParts {
             gdp: 1000.0,
@@ -941,11 +989,12 @@ mod tests {
             ..PlanningParts::default()
         });
 
-        let emit = emit_bag_score(edge_days, &goal, &completed, config, None);
-        let naive_curr =
-            u32::from(edge_days).saturating_add(rank_heuristic(&goal, &state_curr, config, None));
+        let emit = emit_bag_score(edge_days, &goal, &completed, config, &economy).unwrap();
+        let naive_curr = u32::from(edge_days)
+            .saturating_add(rank_heuristic(&goal, &state_curr, config, &economy).unwrap());
         let residual_completed =
-            rank_heuristic_with_gdp_for_rates(&goal, &completed, config, None, completed.gdp);
+            rank_heuristic_with_gdp_for_rates(&goal, &completed, config, &economy, completed.gdp)
+                .unwrap();
 
         assert!(
             emit < naive_curr,
@@ -957,6 +1006,6 @@ mod tests {
             "emit must be edge + residual on completed GDP"
         );
         // state_t still has a large open gap; completed nearly clears it.
-        assert!(rank_heuristic(&goal, &state_curr, config, None) > residual_completed);
+        assert!(rank_heuristic(&goal, &state_curr, config, &economy).unwrap() > residual_completed);
     }
 }

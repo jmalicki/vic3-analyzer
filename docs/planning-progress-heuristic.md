@@ -49,12 +49,12 @@ A **simple subgoal** is a compiled goal node with no further goal children
 
 1. **Cost is calendar days.** Find a shortest path in days until GDP reaches
    the target (`evaluate` true).
-2. **A\*** / PEA* use $f = g + h$ with $g$ = days so far and edge costs in days
+2. **A\*** / open-set search use $f = g + h$ with $g$ = days so far and edge costs in days
    (0-day decisions, positive waits). Today’s wired search still uses
    $h_{\mathrm{adm}}$ for Ready keys; $h_{\mathrm{rank}}$ is library-only until
-   PEA wiring.
+   search wiring.
 3. **$h_{\mathrm{rank}}$ only orders.** Progress residual scores are meant to
-   rank the open set / PEA bag so search is not blind. They are **not** a
+   rank the open set / candidate bag so search is not blind. They are **not** a
    proven admissible lower bound and do **not** define an incumbent upper
    bound $U$ (greedy $U$ is a later PR).
 
@@ -65,7 +65,7 @@ changes — see [Other goal types](#other-goal-types-how-gdp-story-changes).
 
 ## Progress ranking for GDP
 
-Used to order candidates (library APIs today; PEA wiring later). New symbols
+Used to order candidates (library APIs today; search wiring later). New symbols
 for the residual-days bias:
 
 | Math | Definition | Rust |
@@ -166,8 +166,8 @@ $$
 ## Cheap bag library (GDP)
 
 Bag-order scorers live in `progress_h` as **library APIs**. They are **not**
-called from PEA yet. Bag order is a **bias**, not a true PEA $f$-layer — see
-[`planning-search.md`](planning-search.md#known-mixed-f-on-the-open-set-tolerated-for-v1)
+called from search yet. Bag order is a **bias**, not a true open-set $f$-layer —
+see [`planning-search.md`](planning-search.md#known-mixed-f-on-the-open-set-tolerated-for-v1)
 when wiring.
 
 New symbols for cheap scoring (quantities on $\mathrm{state}_t$ use
@@ -202,7 +202,10 @@ $$
 $$
 
 Construction Sector (guesstimate — construction-unit scale of follow-on on
-$\mathrm{state}_t$; ignores CS $\widetilde{\Delta\mathrm{gdp}}$):
+$\mathrm{state}_t$). CS also moves GDP via construction-goods demand (iron,
+wood, …); the cheap key prioritizes throughput shortening of follow-on days
+and does not credit that GDP delta (emit’s full residual after speculative
+complete does):
 
 $$
 \mathrm{score}_{\mathrm{cheap}}(\mathrm{CS})
@@ -210,9 +213,10 @@ $$
 $$
 
 **Deficiencies vs a full emit / later greedy rebuild** (also in code comments on
-`cheap_bag_score`): CS scale ≠ actual slots + CS finish day; cheap GDP
-guesstimate ≠ full price solve; the delayed / follow-on portion can score
-**lower (better)** than this heuristic once slots and prices are real.
+`cheap_bag_score`): CS scale ≠ actual slots + CS finish day; cheap path omits
+CS GDP from construction-goods demand; cheap GDP guesstimate ≠ full price
+solve; the delayed / follow-on portion can score **lower (better)** than this
+heuristic once slots and prices are real.
 
 ### Emit residual (library API)
 
