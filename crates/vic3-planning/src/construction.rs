@@ -362,68 +362,43 @@ pub fn simple_subgoals_need_construction(atoms: &[SimpleSubgoal]) -> bool {
 
 /// Sum Construction Sector levels on the planning branch.
 ///
-/// When `economy` is present, reads levels from
-/// [`EconomyContext::apply_planning_to_world`] (base world plus `building_level_deltas`).
-/// Without economy, falls back to summing CS entries in
-/// [`PlanningState::building_level_deltas`].
-pub fn construction_sector_levels(state: &PlanningState, economy: Option<&EconomyContext>) -> f64 {
-    if let Some(economy) = economy {
-        return economy
-            .apply_planning_to_world(state)
-            .buildings
-            .iter()
-            .filter(|b| b.building == BUILDING_CONSTRUCTION_SECTOR)
-            .map(|b| b.level.max(0.0))
-            .sum();
-    }
-    f64::from(
-        state
-            .building_level_deltas
-            .iter()
-            .filter(|((building, _), _)| building == BUILDING_CONSTRUCTION_SECTOR)
-            .map(|(_, levels)| *levels)
-            .sum::<u32>(),
-    )
+/// Reads levels from [`EconomyContext::apply_planning_to_world`] (base world
+/// plus `building_level_deltas`).
+pub fn construction_sector_levels(state: &PlanningState, economy: &EconomyContext) -> f64 {
+    economy
+        .apply_planning_to_world(state)
+        .buildings
+        .iter()
+        .filter(|b| b.building == BUILDING_CONSTRUCTION_SECTOR)
+        .map(|b| b.level.max(0.0))
+        .sum()
 }
 
 /// National (pre-share) construction throughput from CS levels / **required** PMs.
 ///
-/// When `economy` is present, every positive-level Construction Sector building
-/// must resolve `country_construction_add` in defs (see
-/// [`construction_add_for_cs_building`]). Without economy, only the base
-/// capacity is returned — callers that raised CS levels via deltas must supply
-/// an [`EconomyContext`] so PMs can be read from the projected world.
+/// Every positive-level Construction Sector building must resolve
+/// `country_construction_add` in defs (see [`construction_add_for_cs_building`]).
 pub fn national_construction_points_per_day(
     state: &PlanningState,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
     config: SimConfig,
 ) -> f64 {
     let base = f64::from(config.base_construction_capacity);
-    let points_per_day = if let Some(economy) = economy {
-        let world = economy.apply_planning_to_world(state);
-        let mut from_buildings = 0.0;
-        for building in world
-            .buildings
-            .iter()
-            .filter(|b| b.building == BUILDING_CONSTRUCTION_SECTOR)
-        {
-            let level = building.level.max(0.0);
-            if level <= 0.0 {
-                continue;
-            }
-            let add = expect_construction_add(building, &economy.defs);
-            from_buildings += add * level;
+    let world = economy.apply_planning_to_world(state);
+    let mut from_buildings = 0.0;
+    for building in world
+        .buildings
+        .iter()
+        .filter(|b| b.building == BUILDING_CONSTRUCTION_SECTOR)
+    {
+        let level = building.level.max(0.0);
+        if level <= 0.0 {
+            continue;
         }
-        base + from_buildings
-    } else {
-        let levels = construction_sector_levels(state, None);
-        assert!(
-            levels <= 0.0,
-            "EconomyContext required to resolve Construction Sector production methods \
-             (CS levels={levels}); PMs are not optional"
-        );
-        base
-    };
+        let add = expect_construction_add(building, &economy.defs);
+        from_buildings += add * level;
+    }
+    let points_per_day = base + from_buildings;
     if points_per_day.is_finite() && points_per_day > 0.0 {
         points_per_day
     } else {
@@ -438,7 +413,7 @@ pub fn national_construction_points_per_day(
 /// stalls.
 pub fn construction_points_per_day_from_sectors(
     state: &PlanningState,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
     config: SimConfig,
 ) -> f64 {
     let national = national_construction_points_per_day(state, economy, config);
@@ -462,7 +437,7 @@ pub fn sync_construction_points_per_day(
     config: SimConfig,
 ) {
     state.construction_points_per_day =
-        construction_points_per_day_from_sectors(state, Some(economy), config);
+        construction_points_per_day_from_sectors(state, economy, config);
 }
 
 /// Max weekly construction progress (points/week) from base + owned techs.

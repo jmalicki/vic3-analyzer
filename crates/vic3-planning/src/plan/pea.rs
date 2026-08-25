@@ -277,7 +277,7 @@ mod tests {
     use super::*;
     use crate::goals::compile;
     use crate::plan::pathfinding::shortest_path;
-    use crate::sim::SimConfig;
+    use crate::sim::{EconomyContext, SimConfig};
     use crate::world::{PlanningParts, PlanningState};
     use rust_advanced_heaps::pairing::PairingHeap;
 
@@ -313,6 +313,7 @@ mod tests {
             }),
             compile("research(tech=nitroglycerin)").unwrap(),
             SimConfig::default(),
+            EconomyContext::empty(),
         );
         let (_, vic3_cost) = shortest_path::<_, PairingHeap<_, _>>(&root).unwrap();
         let (_, pea_cost) = shortest_path::<_, PairingHeap<_, _>>(&PeaNode::ready(root)).unwrap();
@@ -335,6 +336,7 @@ mod tests {
                     }),
                     compile("research(tech=nitroglycerin)").unwrap(),
                     SimConfig::default(),
+                    EconomyContext::empty(),
                 ),
             ),
             (
@@ -346,6 +348,7 @@ mod tests {
                     }),
                     compile("has_tech(railways) && has_tech(nitroglycerin)").unwrap(),
                     SimConfig::default(),
+                    EconomyContext::empty(),
                 ),
             ),
             (
@@ -357,6 +360,7 @@ mod tests {
                         interest_days: 25,
                         ..SimConfig::default()
                     },
+                    EconomyContext::empty(),
                 ),
             ),
             (
@@ -365,6 +369,7 @@ mod tests {
                     PlanningState::default(),
                     compile("has_law(law_homesteading)").unwrap(),
                     SimConfig::default(),
+                    EconomyContext::empty(),
                 ),
             ),
             (
@@ -383,6 +388,7 @@ mod tests {
                         interest_days: 30,
                         ..SimConfig::default()
                     },
+                    EconomyContext::empty(),
                 ),
             ),
             ("army", {
@@ -405,6 +411,7 @@ mod tests {
                         army_training_days: 77,
                         ..SimConfig::default()
                     },
+                    EconomyContext::empty(),
                 )
             }),
             (
@@ -425,6 +432,7 @@ mod tests {
                         payday_days: 7,
                         ..SimConfig::default()
                     },
+                    EconomyContext::empty(),
                 ),
             ),
         ];
@@ -447,6 +455,7 @@ mod tests {
                 root.state().clone(),
                 root.goal().clone(),
                 root.config(),
+                EconomyContext::empty(),
                 10_000,
                 0.0,
                 vec![],
@@ -473,6 +482,7 @@ mod tests {
             }),
             compile("research(tech=nitroglycerin)").unwrap(),
             SimConfig::default(),
+            EconomyContext::empty(),
         );
         let pea = PeaNode::ready(root);
         let succs = pea.successors();
@@ -494,7 +504,6 @@ mod tests {
     #[test]
     #[ignore = "set VIC3_SAVE and VIC3_DEFS for live Prussia GDP spot-check"]
     fn spotcheck_live_save_gdp_pea_vs_full_astar() {
-        use crate::sim::EconomyContext;
         use std::time::Instant;
         use vic3_load::{empty_tokens, load_path_world, load_tokens_path};
         use vic3_prices::{solve, SolveOpts, World};
