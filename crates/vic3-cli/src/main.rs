@@ -182,6 +182,7 @@ impl From<SolveArgs> for SolveOpts {
             residual_eps: args.residual_eps,
             max_iters: args.max_iters,
             warm_rel: None,
+            strategy: Default::default(),
         }
     }
 }

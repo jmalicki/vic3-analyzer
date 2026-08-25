@@ -22,6 +22,7 @@
 
 use std::collections::BTreeMap;
 use std::convert::Infallible;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use basin::{
@@ -32,7 +33,9 @@ use vic3_defs::{GameDefs, GoodId, GoodsVec};
 use crate::consumption::add_wage_bins;
 use crate::formula::{local_price, price};
 use crate::report::{building_revenues_from_cache, report_from_solve};
-use crate::result::{GoodPrice, PricesResult, SolveOpts, SolveOutcome, SolveStatus};
+use crate::result::{
+    GoodPrice, PricesResult, SolveOpts, SolveOutcome, SolveStats, SolveStatus, SolveStrategy,
+};
 use crate::shop_cache::{ShopCache, StateShop};
 use crate::world::World;
 
@@ -94,11 +97,33 @@ pub fn what_if(
 ///
 /// Steps: validate goods → build residual → warm start → Basin TRF → polish →
 /// evaluate → building revenues from `cache.buildings`.
+///
+/// [`SolveStrategy::Joint`] currently aliases [`SolveStrategy::Nested`].
 fn equilibrate_from_cache(
     cache: &ShopCache,
     defs: &GameDefs,
     opts: SolveOpts,
 ) -> (SolveOutcome, Option<ShopSnapshot>) {
+    match opts.strategy {
+        SolveStrategy::Nested | SolveStrategy::Joint => equilibrate_nested(cache, defs, opts),
+    }
+}
+
+fn empty_stats(strategy: SolveStrategy) -> SolveStats {
+    SolveStats {
+        strategy,
+        param_dim: 0,
+        n_residual_evals: 0,
+        n_jacobian_evals: 0,
+    }
+}
+
+fn equilibrate_nested(
+    cache: &ShopCache,
+    defs: &GameDefs,
+    opts: SolveOpts,
+) -> (SolveOutcome, Option<ShopSnapshot>) {
+    let strategy = opts.strategy;
     let goods = market_goods(&cache.base_prices);
     if goods.is_empty() {
         return (
@@ -108,6 +133,7 @@ fn equilibrate_from_cache(
                 status: SolveStatus::Converged,
                 relative: Vec::new(),
                 building_revenues: Vec::new(),
+                stats: empty_stats(strategy),
             },
             None,
         );
@@ -122,6 +148,7 @@ fn equilibrate_from_cache(
                 status: SolveStatus::Failed,
                 relative: Vec::new(),
                 building_revenues: Vec::new(),
+                stats: empty_stats(strategy),
             },
             None,
         );
@@ -129,6 +156,8 @@ fn equilibrate_from_cache(
 
     let price_range = defs.price_range.max(0.0);
     let n = goods.len();
+    let n_residual_evals = Arc::new(AtomicU64::new(0));
+    let n_jacobian_evals = Arc::new(AtomicU64::new(0));
     let problem = PriceResidual {
         defs,
         goods: &goods,
@@ -137,6 +166,8 @@ fn equilibrate_from_cache(
         lower: vec![1.0 - price_range; n],
         upper: vec![1.0 + price_range; n],
         cache: Arc::new(cache.clone()),
+        n_residual_evals: Arc::clone(&n_residual_evals),
+        n_jacobian_evals: Arc::clone(&n_jacobian_evals),
     };
 
     let mut rel = vec![1.0; n];
@@ -189,6 +220,12 @@ fn equilibrate_from_cache(
     };
 
     let building_revenues = building_revenues_from_cache(cache, defs, &rows, Some(&snapshot));
+    let stats = SolveStats {
+        strategy,
+        param_dim: rel.len(),
+        n_residual_evals: n_residual_evals.load(Ordering::Relaxed),
+        n_jacobian_evals: n_jacobian_evals.load(Ordering::Relaxed),
+    };
     (
         SolveOutcome {
             goods: rows,
@@ -196,6 +233,7 @@ fn equilibrate_from_cache(
             status,
             relative: rel,
             building_revenues,
+            stats,
         },
         Some(snapshot),
     )
@@ -242,6 +280,7 @@ pub(crate) struct ShopSnapshot {
 /// * `price_range` — Vic3 clamp width.
 /// * `lower` / `upper` — box bounds on relative prices.
 /// * `cache` — frozen shops/orders (Arc so Basin `Clone` only bumps refcount).
+/// * `n_residual_evals` / `n_jacobian_evals` — shared Basin call counters.
 #[derive(Clone)]
 struct PriceResidual<'a> {
     defs: &'a GameDefs,
@@ -251,6 +290,8 @@ struct PriceResidual<'a> {
     lower: Vec<f64>,
     upper: Vec<f64>,
     cache: Arc<ShopCache>,
+    n_residual_evals: Arc<AtomicU64>,
+    n_jacobian_evals: Arc<AtomicU64>,
 }
 
 impl PriceResidual<'_> {
@@ -440,6 +481,7 @@ impl CostFunction for PriceResidual<'_> {
     type Error = Infallible;
 
     fn cost(&self, param: &Vec<f64>) -> Result<f64, Infallible> {
+        self.n_residual_evals.fetch_add(1, Ordering::Relaxed);
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         Ok(0.5
             * self
@@ -456,6 +498,7 @@ impl Residual for PriceResidual<'_> {
     type Error = Infallible;
 
     fn residual(&self, param: &Vec<f64>) -> Result<Vec<f64>, Infallible> {
+        self.n_residual_evals.fetch_add(1, Ordering::Relaxed);
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         Ok(self.residual_at(param, &mut scratch))
     }
@@ -465,6 +508,7 @@ impl Jacobian for PriceResidual<'_> {
     type Jacobian = DenseMatrix<f64>;
 
     fn jacobian(&self, param: &Vec<f64>) -> Result<DenseMatrix<f64>, Infallible> {
+        self.n_jacobian_evals.fetch_add(1, Ordering::Relaxed);
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         let r0 = self.residual_at(param, &mut scratch);
         let n = param.len();

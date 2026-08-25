@@ -34,6 +34,32 @@ use vic3_defs::{pretty_id, BuildingTypeId, GameDefs, GoodId, NeedId};
 
 use crate::world::Intern;
 
+/// Which equilibrium formulation Basin should run.
+///
+/// [`Self::Joint`] currently aliases [`Self::Nested`] (same residual path)
+/// until a later PR lands the simultaneous national+local solve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SolveStrategy {
+    /// National relative prices only; local settle nested inside each residual.
+    #[default]
+    Nested,
+    /// Simultaneous national + local (aliases Nested until Joint is real).
+    Joint,
+}
+
+/// Counters from one [`crate::equilibrate`] / Basin run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SolveStats {
+    pub strategy: SolveStrategy,
+    /// Length of the Basin parameter vector (`relative.len()` for Nested).
+    pub param_dim: usize,
+    /// Calls to [`basin::CostFunction::cost`] / [`basin::Residual::residual`].
+    pub n_residual_evals: u64,
+    /// Calls to [`basin::Jacobian::jacobian`].
+    pub n_jacobian_evals: u64,
+}
+
 /// Solver iteration / residual tolerances.
 ///
 /// Passed through `vic3-api` as JSON (`solve_opts_json`). Defaults match a
@@ -58,6 +84,9 @@ pub struct SolveOpts {
     /// set this automatically from the loaded baseline solve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warm_rel: Option<Vec<f64>>,
+    /// Equilibrium formulation. Default [`SolveStrategy::Nested`].
+    #[serde(default)]
+    pub strategy: SolveStrategy,
 }
 
 fn default_residual_eps() -> f64 {
@@ -74,7 +103,30 @@ impl Default for SolveOpts {
             residual_eps: default_residual_eps(),
             max_iters: default_max_iters(),
             warm_rel: None,
+            strategy: SolveStrategy::Nested,
         }
+    }
+}
+
+#[cfg(test)]
+mod solve_opts_tests {
+    use super::{SolveOpts, SolveStrategy};
+
+    #[test]
+    fn default_strategy_is_nested() {
+        assert_eq!(SolveOpts::default().strategy, SolveStrategy::Nested);
+    }
+
+    #[test]
+    fn strategy_serde_roundtrip_and_default() {
+        let nested: SolveOpts = serde_json::from_str(r#"{"strategy":"nested"}"#).unwrap();
+        assert_eq!(nested.strategy, SolveStrategy::Nested);
+        let joint: SolveOpts = serde_json::from_str(r#"{"strategy":"joint"}"#).unwrap();
+        assert_eq!(joint.strategy, SolveStrategy::Joint);
+        let omitted: SolveOpts = serde_json::from_str("{}").unwrap();
+        assert_eq!(omitted.strategy, SolveStrategy::Nested);
+        let back = serde_json::to_value(&joint).unwrap();
+        assert_eq!(back["strategy"], "joint");
     }
 }
 
@@ -774,6 +826,8 @@ pub struct SolveOutcome {
     pub relative: Vec<f64>,
     /// Building revenues at solved local prices (for modeled GDP).
     pub building_revenues: Vec<BuildingRevenue>,
+    /// Basin eval counters and strategy used for this run.
+    pub stats: SolveStats,
 }
 
 /// One building's revenue after a compact solve (planning GDP).
