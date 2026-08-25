@@ -333,17 +333,16 @@ impl Hash for Vic3Node {
 /// zero. This is deliberately a relaxation of the real state graph, not a
 /// replacement for A*.
 ///
-/// // TODO(anytime-ub): `h` is a lower bound only. A later PR can compute a
-/// // greedy feasible path for easy goal shapes, take its cost as incumbent
-/// // `U`, and prune nodes/edges with `g + h >= U`. That complements wide
-/// // state-scoped building candidate sets (no type-level IO dominance prune).
-///
-/// Goal-DAG timing lower bound used by A*.
+/// Goal-DAG timing lower bound used by A* (`h_adm`).
 ///
 /// AND → max, OR → min across children (independent tracks finish near the
 /// max). Open research uses defs cost / remaining-style ETA when available but
 /// never treats a missing tech as free while queued (consistency over 0-day
 /// enqueue). Construction uses head remaining ÷ rate when set.
+///
+/// PEA bag ordering may use progress-aware [`super::progress_h`] scorers in a
+/// later PR. Incumbent $U$ from greedy (builds allowed; Construction Sector
+/// excluded) prunes via `PathFinderBuilder::max_cost` in [`super::result`].
 fn goal_timing_lower_bound(
     goal: &Goal,
     state: &PlanningState,
