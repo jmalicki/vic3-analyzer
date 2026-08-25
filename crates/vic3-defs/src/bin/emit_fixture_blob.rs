@@ -1,10 +1,11 @@
-//! Emit a postcard defs blob from the in-repo fixture tree for local development
+//! Emit a postcard defs blob from an in-repo fixture tree for local development
 //! and tests. It stays out of `web/public/` so production builds ship no demo
 //! definitions; a deployed site has none until the user builds their own.
 //!
 //! Usage:
 //! ```text
 //! cargo run -p vic3-defs --bin emit_fixture_blob -- web/fixtures/defs.postcard
+//! cargo run -p vic3-defs --bin emit_fixture_blob -- tests/fixtures/mock_game.defs.postcard path/to/mock_game
 //! ```
 
 use std::env;
@@ -12,15 +13,20 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-fn fixture_root() -> PathBuf {
+fn default_fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
 fn main() -> ExitCode {
-    let Some(out) = env::args().nth(1) else {
-        eprintln!("usage: emit_fixture_blob <output.postcard>");
+    let mut args = env::args().skip(1);
+    let Some(out) = args.next() else {
+        eprintln!("usage: emit_fixture_blob <output.postcard> [fixture_root]");
         return ExitCode::FAILURE;
     };
+    let root = args
+        .next()
+        .map(PathBuf::from)
+        .unwrap_or_else(default_fixture_root);
     let out = Path::new(&out);
     if let Some(parent) = out.parent() {
         if !parent.as_os_str().is_empty() {
@@ -31,7 +37,6 @@ fn main() -> ExitCode {
         }
     }
 
-    let root = fixture_root();
     let defs = match vic3_defs::load_from_path(&root) {
         Ok(defs) => defs,
         Err(err) => {
