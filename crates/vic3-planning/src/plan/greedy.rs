@@ -1,11 +1,25 @@
-//! Greedy incumbent → upper bound $U$ (calendar days).
+//! Greedy incumbent → upper bound U (calendar days).
+//!
+//! # What v1 returns (and what it does not)
+//!
+//! [`greedy_upper_bound`] **simulates** a feasible path (0-day decisions +
+//! waits) and returns **only** the calendar-day count for
+//! [`PathFinderBuilder::max_cost`] prune. It does **not** return, keep, edit,
+//! simplify, or splice the decision sequence into search. Decisions chosen
+//! inside the loop are discarded once days are known.
+//!
+//! **v1 refresh policy:** if U must be recomputed, run this loop again from
+//! the chosen start state (full rebuild). There is no incremental membership,
+//! end-subtract, or in-place timeline patch — see
+//! `docs/planning-progress-heuristic.md` (“Future: incremental membership”).
 //!
 //! # Construction Sector policy
 //!
 //! Greedy **never** queues a **new** Construction Sector
 //! (`building_construction_sector`). That hard-skip is intentional: shortage
 //! greedy would not pick CS anyway (it does not produce the scarce good), and
-//! inventing CS picks would scramble incremental rebuild assumptions later.
+//! inventing CS picks would scramble **future** incremental-rebuild
+//! assumptions (not something v1 edits today).
 //!
 //! When rebuilding greedy from a search state that **already has CS enqueued**
 //! in `state.constructions`, this loop does **not** invent CS decisions. It
@@ -33,6 +47,8 @@ use crate::world::PlanningState;
 /// Run greedy from `root` until the goal or `max_days`.
 ///
 /// Returns calendar days to first goal hit, or `None` if stuck / over budget.
+/// That scalar is the only output: the path of decisions is **not** retained
+/// for editing, simplifying, or incremental membership (v1).
 ///
 /// Loop shape:
 /// 1. If the goal already holds → done.

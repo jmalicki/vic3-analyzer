@@ -70,4 +70,9 @@ helpful-operator ordering may return later as heuristics only.
 
 1. Measure PEA* OPEN size / wall time vs full expand on real goals; retune beam.
 2. EPEA*-style OSF where \(\Delta f\) is cheap (e.g. research simple subgoals).
-3. Optional satisficing preferences — still not dominance theorems.
+3. Tighten progress \(R^{*}\) (real build/PM \(\Delta\) predictions) per
+   [`planning-progress-heuristic.md`](planning-progress-heuristic.md).
+4. Optional later: incremental greedy membership (keep/edit an intended
+   decision sequence). **v1** only simulates and returns scalar \(U\)
+   (`greedy_upper_bound`); full-rebuild on refresh — no editable plan.
+5. Optional satisficing preferences — still not dominance theorems.

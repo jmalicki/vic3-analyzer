@@ -56,10 +56,11 @@ A **simple subgoal** is a compiled goal node with no further goal children
    (0-day decisions, positive waits). Today’s wired search still uses
    $h_{\mathrm{adm}}$ for Ready keys; $h_{\mathrm{rank}}$ is library-only until
    PEA wiring.
-3. **Upper bound $U$ comes from greedy.** Run a feasible greedy plan to the
-   GDP goal; $U$ is that plan’s day length. Prune any node with $g \ge U$
-   (`PathFinderBuilder::max_cost` in `plan()`). **v1:** when $U$ must be
-   refreshed, **rebuild the whole greedy path** (no incremental membership).
+3. **Upper bound $U$ comes from greedy.** Run a feasible greedy simulation to
+   the GDP goal; $U$ is **only** that run’s day length (decisions are not kept).
+   Prune any node with $g \ge U$ (`PathFinderBuilder::max_cost` in `plan()`).
+   **v1:** when $U$ must be refreshed, **rebuild the whole greedy simulation**
+   (no retained plan to edit; no incremental membership).
 4. **$h_{\mathrm{rank}}$ only orders.** Progress residual scores are meant to
    rank the open set / candidate bag so search is not blind. They are **not** a
    proven admissible lower bound and do **not** define $U$.
@@ -75,8 +76,15 @@ progress meter changes — see [Other goal types](#other-goal-types-how-the-gdp-
 
 ## Incumbent upper bound $U$ (greedy defines days)
 
-$U$ is the **length in calendar days** of one concrete greedy path that
+$U$ is the **length in calendar days** of one concrete greedy simulation that
 satisfies the goal (`evaluate` true). It is **not** derived from $h_{\mathrm{rank}}$.
+
+**v1 contract:** `greedy_upper_bound` returns a **scalar day count** for prune
+only. It does **not** return or retain the decision sequence. Search does not
+edit, simplify, or splice greedy picks — the loop invents decisions while
+simulating, then **discards** them once $U$ is known. A later “incremental
+membership” pass may keep an editable intended sequence; that is **not** this
+PR / not v1.
 
 - From the **root**, greedy runs to completion → $U$ is total plan days.
 - From a **search node** (optional refine), greedy builds only the
@@ -85,14 +93,15 @@ satisfies the goal (`evaluate` true). It is **not** derived from $h_{\mathrm{ran
 ### Seeding and refreshing $U$
 
 Before or interleaved with A*/PEA*, run a **full** greedy from the root to
-seed $U$. **v1:** any later refresh **rebuilds the whole greedy path** from
-the chosen start state (no incremental membership).
+seed $U$. **v1:** any later refresh **re-runs the whole greedy simulation** from
+the chosen start state (no patching a stored decision list; no incremental
+membership).
 
 - A feasible plan of length $U$ proves $\mathrm{optimal} \le U$.
 - Greedy **never** enqueues a **new** Construction Sector. Excluding CS picks
   from greedy is **costless** (shortage-greedy would not choose CS — it does
   not produce the scarce good) and **protects** future incremental greedy
-  assumptions.
+  assumptions (when/if we keep a membership set — not required for scalar $U$).
 - When rebuilding greedy from a world that **already has CS enqueued** by
   search, greedy still does not pick a *new* CS; it waits the real
   construction timeline (slots / points) until that job completes.
@@ -101,15 +110,18 @@ the chosen start state (no incremental membership).
   (base capacity floor). So GDP greedy can get a finite $U$ by enqueueing a
   logging camp (etc.) even when Construction Sector is never chosen.
 
-### Greedy loop (produces the day timeline)
+### Greedy loop (simulates days; v1 discards the path)
+
+The steps below describe how the day count is produced. **v1 does not persist**
+this timeline as an editable plan — only $U$ is returned to search.
 
 1. If `evaluate(goal)` already holds → $U = 0$.
 2. While a track has a spare slot, enqueue the greedy pick among allowed
    0-day decisions (edge cost $0$). Allowed picks include ordinary
    `QueueBuildingLevel` jobs; **exclude** Construction Sector.
-3. **Advance time** to the next completion (or payday), apply, record the
-   landing day and GDP change on the timeline.
-4. When the GDP goal is satisfied, stop. **$U = t$** (current timeline day).
+3. **Advance time** to the next completion (or payday), apply, and count the
+   landing day (v1 need not store a timeline row — only the running day total).
+4. When the GDP goal is satisfied, stop. **$U = t$** (current day).
    Do not enqueue further “just in case” work.
 5. If nothing helps and no wait advances the goal → stop with no greedy $U$.
 
@@ -189,18 +201,22 @@ capacity admits a job.
 
 ### Bookkeeping the incumbent
 
-**v1:** search prune only needs the scalar $U$. Optionally keep the last greedy
-timeline for explanation:
+**v1 (shipped):** search prune needs **only** the scalar $U$.
+`greedy_upper_bound` does not return actions, a timeline, or a membership set —
+there is nothing to edit or simplify after the run.
+
+**Optional later (debug / incremental):** keep a greedy timeline or intended
+sequence for explanation or membership refresh:
 
 | Math | Definition | Rust / notes |
 | --- | --- | --- |
-| $t$ | Calendar day when a timeline event lands | greedy timeline row |
+| $t$ | Calendar day when a timeline event lands | future timeline row (not v1) |
 | $\Delta$ | Predicted GDP change at that event | same units as the GDP gap |
 | $G_{\mathrm{after}}$ | Residual GDP gap after $\Delta$ | — |
 
-No membership set required until the future incremental pass. If search
-reaches a world it already solved, copy that world’s prices/GDP instead of
-running the price solver again.
+No membership set until the future incremental pass. If search reaches a world
+it already solved, copy that world’s prices/GDP instead of running the price
+solver again.
 
 ---
 
