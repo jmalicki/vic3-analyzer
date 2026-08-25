@@ -20,7 +20,7 @@ first: gap, build rates, Construction Sector cheap scores.
 Search cost is always calendar days for every goal. What changes for other
 simple subgoals is only how progress is measured (gap, per-option yield, which
 successors matter). That plug-in table lives at the end:
-[Other goal types](#other-goal-types-how-gdp-story-changes).
+[Other goal types](#other-goal-types-how-the-gdp-story-changes).
 
 Symbols are **introduced where first used**, in Math | Definition | Rust
 tables. Later sections reuse earlier symbols without repeating the table.
@@ -59,7 +59,7 @@ A **simple subgoal** is a compiled goal node with no further goal children
    bound $U$ (greedy $U$ is a later PR).
 
 The same day-cost skeleton applies to other goals; only the progress meter
-changes — see [Other goal types](#other-goal-types-how-gdp-story-changes).
+changes — see [Other goal types](#other-goal-types-how-the-gdp-story-changes).
 
 ---
 
