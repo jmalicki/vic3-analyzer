@@ -9,7 +9,8 @@
 //! | `get_config` / `save_config` / `reset_config` | Settings ↔ [`vic3_catalog::AppConfig`] |
 //! | `list_saves` / `get_dashboard` / `detection_hints` | Catalog + status |
 //! | `use_save` | Stub → SQL bind + analysis session |
-//! | `loaded_prices` / `loaded_alerts` / `loaded_gaps` / `loaded_defs_icons` | Session analysis / defs icon JSON |
+//! | `loaded_prices` / `loaded_summary` / `loaded_alerts` / `loaded_gaps` / `loaded_defs_icons` | Session analysis / defs icon JSON |
+//! | `loaded_military` / `loaded_constructions` | Military + construction queue snapshots |
 //! | `sql_query` / `sql_docs` | Advanced Query (shared shape with MCP) |
 //! | `api_ping` | Smoke link to `vic3-api` |
 
@@ -173,6 +174,39 @@ pub async fn loaded_defs_icons(app: AppHandle) -> Result<String, String> {
     })
     .await
     .map_err(|e| format!("loaded_defs_icons join: {e}"))?
+}
+
+/// Save summary JSON (tag, market/country ids, building type ids) for the bound session.
+///
+/// # Errors
+///
+/// No loaded analysis, or lock poison.
+#[tauri::command]
+pub fn loaded_summary(state: State<'_, AppState>) -> Result<String, String> {
+    let session = state.inner.lock().map_err(|_| "state lock poisoned")?;
+    session.loaded_summary_json()
+}
+
+/// Military snapshot JSON for the bound session.
+///
+/// # Errors
+///
+/// No loaded analysis, or lock poison.
+#[tauri::command]
+pub fn loaded_military(state: State<'_, AppState>) -> Result<String, String> {
+    let session = state.inner.lock().map_err(|_| "state lock poisoned")?;
+    session.loaded_military_json()
+}
+
+/// Construction queue snapshot JSON for the bound session.
+///
+/// # Errors
+///
+/// No loaded analysis, or lock poison.
+#[tauri::command]
+pub fn loaded_constructions(state: State<'_, AppState>) -> Result<String, String> {
+    let session = state.inner.lock().map_err(|_| "state lock poisoned")?;
+    session.loaded_constructions_json()
 }
 
 /// Alerts JSON for the bound analysis session.
