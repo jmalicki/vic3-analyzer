@@ -186,6 +186,7 @@ fn raise_gap(current: f64, rel: Rel, target: f64) -> f64 {
     }
 }
 
+/// Price-band shortfall; same raise/lower/eq math as [`raise_gap`] today.
 fn band_or_raise_gap(current: f64, rel: Rel, target: f64) -> f64 {
     raise_gap(current, rel, target)
 }
@@ -229,36 +230,24 @@ pub fn rank_heuristic_with_gdp_for_rates(
     gdp_for_rates: f64,
 ) -> Result<u32, ProgressGapError> {
     match goal {
-        Goal::And(children) => {
-            let mut max = 0_u32;
-            for child in children {
-                max = max.max(rank_heuristic_with_gdp_for_rates(
-                    child,
-                    state,
-                    config,
-                    economy,
-                    gdp_for_rates,
-                )?);
-            }
-            Ok(max)
-        }
-        Goal::Or(children) => {
-            let mut min: Option<u32> = None;
-            for child in children {
-                let child_h = rank_heuristic_with_gdp_for_rates(
-                    child,
-                    state,
-                    config,
-                    economy,
-                    gdp_for_rates,
-                )?;
-                min = Some(match min {
-                    Some(m) => m.min(child_h),
-                    None => child_h,
-                });
-            }
-            Ok(min.unwrap_or(0))
-        }
+        Goal::And(children) => Ok(children
+            .iter()
+            .map(|child| {
+                rank_heuristic_with_gdp_for_rates(child, state, config, economy, gdp_for_rates)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .max()
+            .unwrap_or(0)),
+        Goal::Or(children) => Ok(children
+            .iter()
+            .map(|child| {
+                rank_heuristic_with_gdp_for_rates(child, state, config, economy, gdp_for_rates)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .min()
+            .unwrap_or(0)),
         Goal::Not(_) => Ok(0),
         Goal::Simple(subgoal) => {
             rank_simple_subgoal(subgoal, state, config, economy, gdp_for_rates)
@@ -316,6 +305,9 @@ fn rank_simple_subgoal(
 /// Serial research ETA for ranking: sum of missing tech costs at a constant
 /// research rate (mirrors the timing-leaf idea; kept local so this module does
 /// not depend on `vic3` crate visibility).
+///
+/// Uses [`u32::saturating_add`] when summing prereq ETAs (same no-wrap policy
+/// as bag score day sums).
 fn research_eta_for_rank(
     tech: &str,
     state: &PlanningState,
@@ -340,6 +332,7 @@ fn research_eta_for_rank(
     total.max(1)
 }
 
+/// Days to research one tech from defs cost, or `config.research_days` fallback.
 fn single_tech_research_eta(tech: &str, config: SimConfig, economy: &EconomyContext) -> u32 {
     let fallback = u32::from(config.research_days.max(1));
     if let Some(cost) = crate::tech::tech_research_cost(tech, &economy.defs) {
@@ -469,6 +462,9 @@ pub fn meter_gap_curr(
 }
 
 /// True when every **open** simple leaf is a GDP goal (so cheap GDP credit is safe).
+///
+/// If tech/law/interest/fiscal (etc.) still have a positive gap, ordinary-build
+/// cheap scoring must not subtract a GDP guesstimate from the bag residual.
 fn allow_cheap_gdp_credit(
     goal: &Goal,
     state: &PlanningState,
@@ -725,6 +721,10 @@ fn estimated_build_days(
 /// - The delayed / follow-on portion can score differently than this heuristic
 ///   -- including **lower (better)** -- once slots, intervening completions,
 ///   prices, and greedy order are real. Bag score is a bias only.
+///
+/// Day components of bag scores are combined with [`u32::saturating_add`]
+/// (also research ETA sums and [`emit_bag_score`]): ranking keys must not wrap
+/// or panic on pathologically large residuals.
 pub fn cheap_bag_score(action: &Action, edge_days: u16, curr: &CheapBagCurr<'_>) -> u32 {
     let residual = &curr.residual;
     match action {
@@ -800,6 +800,10 @@ fn cheap_construction_sector_bag_score(curr: &CheapBagCurr<'_>, building: &str) 
 /// Construction Sector sees real post-complete throughput **and** GDP,
 /// including construction-goods demand). It does **not** use the cheap
 /// construction-unit scale.
+///
+/// Day components are combined with [`u32::saturating_add`] (same policy as
+/// [`cheap_bag_score`] and research ETA sums): ranking keys must not wrap or
+/// panic if residuals are pathologically large.
 pub fn emit_bag_score(
     edge_days: u16,
     goal: &Goal,
@@ -838,17 +842,19 @@ mod tests {
     use crate::test_support::{ger_state, logging_and_cs_economy};
     use crate::world::{PlanningParts, PlanningState};
 
+    /// GER planning state with GDP 1000, 5 construction points/day, wood @ 40.
     fn state_curr_for_cheap_bag() -> PlanningState {
         ger_state().gdp(1000.0).points(5.0).wood_price(40.0).get()
     }
 
-    /// Same as [`logging_and_cs_economy`], with logging `required_construction` overridden.
+    /// Logging+CS mini economy with logging `required_construction` overridden.
     fn logging_economy_with_cost(logging_required_construction: f64) -> EconomyContext {
         logging_and_cs_economy()
             .building_cost("building_logging_camp", logging_required_construction)
             .economy
     }
 
+    /// Larger GDP shortfall should not rank *better* (lower) than a smaller one.
     #[test]
     fn gdp_gap_and_rank_increase_with_shortfall() {
         let state = PlanningState::from_parts(PlanningParts {
@@ -864,6 +870,7 @@ mod tests {
         assert!(h_small >= 1);
     }
 
+    /// Satisfied GDP goal ranks as zero residual days.
     #[test]
     fn cleared_gdp_ranks_zero() {
         let state = PlanningState::from_parts(PlanningParts {
@@ -883,6 +890,7 @@ mod tests {
         );
     }
 
+    /// Missing price meter must error (no silent "already satisfied" gap).
     #[test]
     fn missing_good_price_gap_errors() {
         let state = PlanningState::from_parts(PlanningParts {
@@ -903,6 +911,7 @@ mod tests {
         );
     }
 
+    /// Fixture CS PM (`country_construction_add` 5) * government share 1.0 -> +5 points/day.
     #[test]
     fn cheap_cs_points_delta_from_economy_fixture() {
         let mini = logging_and_cs_economy();
@@ -914,6 +923,11 @@ mod tests {
         );
     }
 
+    /// When CS points delta equals current throughput, cheap follow-on scales by ~1/2.
+    ///
+    /// With points_now = 5 and delta = 5, follow ~= ceil(5/(5+5) * 100) = 50 for an
+    /// overridden follow_on_days of 100 -- the throughput-ratio path in
+    /// [`cheap_construction_sector_bag_score`].
     #[test]
     fn cheap_cs_bag_score_halves_follow_on_when_delta_equals_points() {
         let mini = logging_and_cs_economy();
@@ -933,7 +947,6 @@ mod tests {
         .expect("CS required_construction");
         let points_per_day = state_curr.construction_points_per_day.max(1e-9);
         let estimated_build_days = (work_points / points_per_day).ceil() as u32;
-        // ceil(5 / (5 + 5) * 100) = 50 when follow_on_days overridden to 100
         let expected_follow_on = 50_u32;
 
         let mut curr = CheapBagCurr::new(&goal, &state_curr, config, &mini.economy, state_curr.gdp)
@@ -948,6 +961,7 @@ mod tests {
         assert_eq!(score - estimated_build_days, expected_follow_on);
     }
 
+    /// Logging camp cheap GDP guesstimate is output qty * wood price (10 * 40 = 400).
     #[test]
     fn cheap_gdp_delta_guesstimate_positive_for_logging() {
         let economy = logging_economy_with_cost(30.0);
@@ -964,6 +978,7 @@ mod tests {
         );
     }
 
+    /// Ordinary-build cheap score must shrink follow-on after GDP credit vs no-credit baseline.
     #[test]
     fn cheap_build_bag_score_credits_gdp_guesstimate() {
         let economy = logging_economy_with_cost(30.0);
@@ -1003,6 +1018,7 @@ mod tests {
         );
     }
 
+    /// Very expensive logging should lose to CS when CS halves a large follow-on residual.
     #[test]
     fn cheap_cs_can_outrank_slow_productive_build() {
         // Huge logging construction -> build_days dominate; CS scales follow-on by 0.5.
@@ -1038,14 +1054,13 @@ mod tests {
         );
     }
 
-    /// Emit ranking must plug completed-world GDP into residual, not the
-    /// unfinished state_t gap (enqueue-only / pre-complete shortfall).
+    /// Emit ranking must use completed-world GDP residual, not the pre-complete gap.
     #[test]
     fn emit_bag_score_uses_completed_gdp_not_curr_gap() {
         let goal = compile("gdp >= 5000").unwrap();
         let config = SimConfig::default();
-        let edge_days: u16 = 30;
         let economy = EconomyContext::empty();
+        let edge_days: u16 = 30;
 
         let state_curr = PlanningState::from_parts(PlanningParts {
             gdp: 1000.0,
@@ -1072,7 +1087,7 @@ mod tests {
             u32::from(edge_days).saturating_add(residual_completed),
             "emit must be edge + residual on completed GDP"
         );
-        // state_t still has a large open gap; completed nearly clears it.
+        // Current state still has a large open gap; completed nearly clears it.
         assert!(rank_heuristic(&goal, &state_curr, config, &economy).unwrap() > residual_completed);
     }
 }
