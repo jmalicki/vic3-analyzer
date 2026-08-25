@@ -18,6 +18,7 @@
 //! [`equilibrate_cached`] with a patched [`crate::ShopCache`].
 //!
 //! Downstream: [`PricesResult`] feeds `vic3-api` JSON; see the crate root docs.
+//! Formulation (nested today, joint/star target): [`docs/prices-equilibrium.md`](../../../../docs/prices-equilibrium.md).
 
 use std::collections::BTreeMap;
 use std::convert::Infallible;

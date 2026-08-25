@@ -85,3 +85,4 @@ world projection). Price refresh does not.
 - Solve: [`crates/vic3-prices/src/solve.rs`](../crates/vic3-prices/src/solve.rs)
 - Planning wire: [`EconomyContext`](../crates/vic3-planning/src/sim.rs)
 - Methodology overview: [`prices.md`](prices.md).
+- NLS formulation (nested today / joint target): [`prices-equilibrium.md`](prices-equilibrium.md).

@@ -15,6 +15,8 @@ If any underlying assumption is violated, the corresponding property test suite 
 | **I3** | Monotonicity: Weakly more buy orders (sell fixed) $\implies$ weakly higher price | `proptest` on price response curves away from clamps |
 | **I4** | Pop need substitution strictly respects `min_supply_share` and `max_supply_share` | `proptest` on synthetic pop need packages in `vic3-defs` |
 | **I5** | Solver residual is always reported; $\text{status} = \text{converged} \implies \text{residual} < \varepsilon$ | `proptest` across diverse world economic states |
+
+**I5 note:** Under the target unclipped \(\tau\) + box MCP map ([`prices-equilibrium.md`](prices-equilibrium.md)), shortages on a price bound can leave \(\|R\|\) large while Basin’s projected-gradient termination is still valid. I5’s residual-\(\varepsilon\) gate matches the **current** clipped nested path; expect a documented revision when Joint/MCP becomes default.
 | **I6** | Search transitions strictly advance game time ($\Delta t > 0$); no empty wait edges | `proptest` on `vic3_planning` successor generators |
 | **I7** | Remaining-time heuristic $h$ is admissible ($h \le \text{true remaining days}$) | `proptest` on timed dependency DAG relaxations |
 | **I8** | State hashing and transition operators are strictly deterministic | Hash and action application round-trip tests on `PlanningState` |

@@ -15,7 +15,9 @@
 //! - `vic3-sql` diagnostics (`good_price`, `shortage_analysis`, …) and MCP
 //!   `query` read that session’s last solve; they do not re-derive the NLS.
 //!
-//! Narrative design notes: [`docs/prices.md`](../../../docs/prices.md).
+//! Narrative design notes: [`docs/prices.md`](../../../docs/prices.md)
+//! (product hub) and [`docs/prices-equilibrium.md`](../../../docs/prices-equilibrium.md)
+//! (NLS formulation).
 //!
 //! # Inner problem
 //!
