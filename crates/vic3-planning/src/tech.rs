@@ -47,12 +47,9 @@ pub fn missing_tech_closure(leaf: &str, state: &PlanningState, defs: &GameDefs) 
 
 /// Whether every prerequisite of `tech` is already owned (or `tech` has none).
 ///
-/// When `defs` is [`None`] or the id is unknown, returns `true` so legacy
-/// leaf-only plans keep working without a tech graph.
-pub fn tech_prereqs_satisfied(tech: &str, state: &PlanningState, defs: Option<&GameDefs>) -> bool {
-    let Some(defs) = defs else {
-        return true;
-    };
+/// Unknown ids (absent from defs) return `true` so leaf-only plans still queue
+/// when the goal names a tech without a graph entry.
+pub fn tech_prereqs_satisfied(tech: &str, state: &PlanningState, defs: &GameDefs) -> bool {
     let Some(def) = defs.technologies.get(tech) else {
         return true;
     };
@@ -97,9 +94,8 @@ pub fn expand_tech_gap_simple_subgoals(
 }
 
 /// Innovation cost for `tech` when defs provide a finite non-negative cost.
-pub fn tech_research_cost(tech: &str, defs: Option<&GameDefs>) -> Option<f64> {
-    defs?
-        .technologies
+pub fn tech_research_cost(tech: &str, defs: &GameDefs) -> Option<f64> {
+    defs.technologies
         .get(tech)?
         .cost
         .filter(|c| c.is_finite() && *c >= 0.0)
@@ -224,16 +220,12 @@ mod tests {
     fn prereqs_gate_eligibility() {
         let defs = fixture_defs();
         let empty = PlanningState::default();
-        assert!(tech_prereqs_satisfied("manufacturies", &empty, Some(&defs)));
-        assert!(!tech_prereqs_satisfied("shaft_mining", &empty, Some(&defs)));
+        assert!(tech_prereqs_satisfied("manufacturies", &empty, &defs));
+        assert!(!tech_prereqs_satisfied("shaft_mining", &empty, &defs));
         let with_root = PlanningState::from_parts(PlanningParts {
             techs: vec!["manufacturies".into()],
             ..PlanningParts::default()
         });
-        assert!(tech_prereqs_satisfied(
-            "shaft_mining",
-            &with_root,
-            Some(&defs)
-        ));
+        assert!(tech_prereqs_satisfied("shaft_mining", &with_root, &defs));
     }
 }

@@ -9,7 +9,8 @@
 //!
 //! - Phase 9a toys: [`timed`] graphs with cheap [`timed::TimedNode`] ids
 //! - Phase 9b: [`Vic3Node`] wires `rust_advanced_heaps::pathfinding` to sim
-//! - [`plan`] / [`plan_with_economy`] → [`PlanResult`] for CLI, wasm, SQL `plan()`
+//! - [`plan`] / [`plan_with_economy`] (aliases) → [`PlanResult`] for CLI, wasm, SQL `plan()`
+//!   — both require [`crate::sim::EconomyContext`] (use [`crate::sim::EconomyContext::empty`] for timing-only)
 //!
 //! # Why cheap intern keys
 //!

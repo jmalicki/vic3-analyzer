@@ -280,19 +280,21 @@ pub enum PlanError {
 /// Run Vic3 shortest-path search and retain simulator actions.
 ///
 /// Cost is total event-wait days. Decision edges contribute 0.
+/// `economy` is required (use [`EconomyContext::empty`] for timing-only plans).
 pub fn plan(
     state: PlanningState,
     goal: Goal,
     config: SimConfig,
+    economy: EconomyContext,
     max_days: u32,
     residual: f64,
     limitations: Vec<String>,
 ) -> Result<PlanResult, PlanError> {
-    let root = Vic3Node::new(state, goal, config);
+    let root = Vic3Node::new(state, goal, config, economy);
     plan_from_root(root, max_days, residual, limitations)
 }
 
-/// Run shortest-path search with immutable economy context for building actions.
+/// Alias for [`plan`] (historical name from the optional-economy era).
 pub fn plan_with_economy(
     state: PlanningState,
     goal: Goal,
@@ -302,8 +304,15 @@ pub fn plan_with_economy(
     residual: f64,
     limitations: Vec<String>,
 ) -> Result<PlanResult, PlanError> {
-    let root = Vic3Node::new_with_economy(state, goal, config, economy);
-    plan_from_root(root, max_days, residual, limitations)
+    plan(
+        state,
+        goal,
+        config,
+        economy,
+        max_days,
+        residual,
+        limitations,
+    )
 }
 
 fn plan_from_root(
@@ -400,6 +409,7 @@ mod tests {
             state,
             compile("research(tech=nitroglycerin)").unwrap(),
             SimConfig::default(),
+            EconomyContext::empty(),
             1000,
             0.01,
             vec!["Frozen world".into()],

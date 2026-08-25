@@ -4,7 +4,7 @@
 //!
 //! Enumerating the whole game is intractable. [`successors`] / [`successors_for_simple_subgoals`]
 //! open only edges that can close currently failing [`crate::goals::SimpleSubgoal`]s (plus
-//! building / PM candidates when an [`EconomyContext`] is present). Idle
+//! building / PM candidates from [`EconomyContext`]). Idle
 //! atoms with no model action emit nothing.
 //!
 //! Building candidates are `(building_type, state_id)` for [`Action::QueueBuildingLevel`]:
@@ -76,7 +76,7 @@ enum MilitaryBranch {
 struct MilitaryPpDecisionArgs<'a> {
     result: &'a mut Vec<Successor>,
     state: &'a PlanningState,
-    economy: Option<&'a EconomyContext>,
+    economy: &'a EconomyContext,
     config: SimConfig,
     seen_hires: &'a mut BTreeSet<String>,
 }
@@ -222,7 +222,7 @@ fn push_mil_hire_decisions(args: &mut MilitaryPpDecisionArgs<'_>, branch: Milita
             Action::QueueHireMilitary {
                 building: row.building.clone(),
             },
-            *economy,
+            economy,
             *config,
         );
         pushed = true;
@@ -267,6 +267,11 @@ impl EconomyContext {
             solve_opts,
             shop_cache,
         }
+    }
+
+    /// Empty world + default defs — for timing-only paths that still require economy.
+    pub fn empty() -> Self {
+        Self::new(World::default(), GameDefs::default(), SolveOpts::default())
     }
 
     /// Apply this planning branch onto a clone of [`Self::base_world`].
@@ -1091,16 +1096,10 @@ pub struct Successor {
 }
 
 /// Generate successors relevant to the currently unsatisfied atoms of `goal`.
-pub fn successors(state: &PlanningState, goal: &Goal, config: SimConfig) -> Vec<Successor> {
-    let open_simple_subgoals = gaps(goal, state);
-    successors_for_simple_subgoals_with_economy(state, &open_simple_subgoals, config, None)
-}
-
-/// Generate successors with price-solver context for building decisions.
 ///
 /// When `economy.defs` carries technologies, open research gaps expand to
 /// missing ancestors and only prereq-satisfied techs are queued.
-pub fn successors_with_economy(
+pub fn successors(
     state: &PlanningState,
     goal: &Goal,
     config: SimConfig,
@@ -1111,7 +1110,17 @@ pub fn successors_with_economy(
     } else {
         crate::goals::gaps_with_defs(goal, state, &economy.defs)
     };
-    successors_for_simple_subgoals_with_economy(state, &open_simple_subgoals, config, Some(economy))
+    successors_for_simple_subgoals(state, &open_simple_subgoals, config, economy)
+}
+
+/// Alias for [`successors`] (historical name from the optional-economy era).
+pub fn successors_with_economy(
+    state: &PlanningState,
+    goal: &Goal,
+    config: SimConfig,
+    economy: &EconomyContext,
+) -> Vec<Successor> {
+    successors(state, goal, config, economy)
 }
 
 /// Generate successors from an already-computed list of open goal atoms.
@@ -1126,8 +1135,9 @@ pub fn successors_for_simple_subgoals(
     state: &PlanningState,
     open_simple_subgoals: &[SimpleSubgoal],
     config: SimConfig,
+    economy: &EconomyContext,
 ) -> Vec<Successor> {
-    successors_for_simple_subgoals_with_economy(state, open_simple_subgoals, config, None)
+    successors_for_simple_subgoals_with_economy(state, open_simple_subgoals, config, economy)
 }
 
 fn interest_queued(kind: InterestKind, id: &str) -> QueuedInterest {
@@ -1159,10 +1169,10 @@ fn push_decision(
     result: &mut Vec<Successor>,
     state: &PlanningState,
     action: Action,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
     config: SimConfig,
 ) {
-    if let Some(next) = apply_action_with_economy(state, &action, economy, config) {
+    if let Some(next) = apply_action(state, &action, economy, config) {
         result.push(Successor {
             action,
             days: 0,
@@ -1176,12 +1186,12 @@ fn push_wait(
     state: &PlanningState,
     event: Event,
     days: u16,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
     config: SimConfig,
 ) {
     // `days == 0` is allowed when the track timer has already elapsed.
     let action = Action::WaitForEvent { event, days };
-    if let Some(next) = apply_action_with_economy(state, &action, economy, config) {
+    if let Some(next) = apply_action(state, &action, economy, config) {
         result.push(Successor {
             action,
             days,
@@ -1194,7 +1204,7 @@ fn successors_for_simple_subgoals_with_economy(
     state: &PlanningState,
     open_simple_subgoals: &[SimpleSubgoal],
     config: SimConfig,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
 ) -> Vec<Successor> {
     let mut result = Vec::new();
     let mut seen_techs = BTreeSet::new();
@@ -1209,7 +1219,7 @@ fn successors_for_simple_subgoals_with_economy(
                 if state.research_busy()
                     || state.has_tech(tech)
                     || !seen_techs.insert(tech.clone())
-                    || !crate::tech::tech_prereqs_satisfied(tech, state, economy.map(|e| &e.defs))
+                    || !crate::tech::tech_prereqs_satisfied(tech, state, &economy.defs)
                 {
                     continue;
                 }
@@ -1302,35 +1312,32 @@ fn successors_for_simple_subgoals_with_economy(
         }
     }
 
-    if let Some(economy) = economy {
-        for (building, state_id) in economy.building_candidates(state, open_simple_subgoals, config)
-        {
-            push_decision(
-                &mut result,
-                state,
-                Action::QueueBuildingLevel { building, state_id },
-                Some(economy),
-                config,
-            );
-        }
-        let (max_pm_candidates, max_pm_overrides) = config.pm_branch_caps();
-        for (building_id, methods) in economy.pm_switch_candidates(
+    for (building, state_id) in economy.building_candidates(state, open_simple_subgoals, config) {
+        push_decision(
+            &mut result,
             state,
-            open_simple_subgoals,
-            max_pm_candidates,
-            max_pm_overrides,
-        ) {
-            push_decision(
-                &mut result,
-                state,
-                Action::SwitchPm {
-                    building_id,
-                    methods,
-                },
-                Some(economy),
-                config,
-            );
-        }
+            Action::QueueBuildingLevel { building, state_id },
+            economy,
+            config,
+        );
+    }
+    let (max_pm_candidates, max_pm_overrides) = config.pm_branch_caps();
+    for (building_id, methods) in economy.pm_switch_candidates(
+        state,
+        open_simple_subgoals,
+        max_pm_candidates,
+        max_pm_overrides,
+    ) {
+        push_decision(
+            &mut result,
+            state,
+            Action::SwitchPm {
+                building_id,
+                methods,
+            },
+            economy,
+            config,
+        );
     }
 
     // Earliest wait among independent tracks.
@@ -1351,7 +1358,7 @@ fn successors_for_simple_subgoals_with_economy(
             .unwrap_or_else(|| research_days_for_tech(tech, config, economy));
         wait_candidates.push((days, Event::TechCompleted { tech: tech.clone() }));
     }
-    if let (Some(_), Some(_)) = (state.queued_building.as_ref(), economy) {
+    if state.queued_building.is_some() {
         if let Some((days, building, state_id)) = construction_wait_target(state, config) {
             wait_candidates.push((days, Event::BuildingCompleted { building, state_id }));
         }
@@ -1417,9 +1424,8 @@ fn successors_for_simple_subgoals_with_economy(
 
 /// Research duration for a queued tech: defs cost at [`crate::tracks::CONSTANT_RATE`]
 /// when present, otherwise [`SimConfig::research_days`].
-fn research_days_for_tech(tech: &str, config: SimConfig, economy: Option<&EconomyContext>) -> u16 {
-    let defs = economy.map(|e| &e.defs);
-    if let Some(cost) = crate::tech::tech_research_cost(tech, defs) {
+fn research_days_for_tech(tech: &str, config: SimConfig, economy: &EconomyContext) -> u16 {
+    if let Some(cost) = crate::tech::tech_research_cost(tech, &economy.defs) {
         if let Some(days) = crate::tracks::days_for_work(cost, crate::tracks::CONSTANT_RATE) {
             return u16::try_from(days).unwrap_or(u16::MAX).max(1);
         }
@@ -1563,20 +1569,12 @@ fn payday_can_help(state: &PlanningState, open_simple_subgoals: &[SimpleSubgoal]
 /// Apply an action if its preconditions hold.
 ///
 /// Timing comes from `config` (queue durations) and the action's wait `days`.
-/// Applying the same `(state, action, config)` always yields the same result (I8).
+/// Applying the same `(state, action, economy, config)` always yields the same
+/// result (I8). `economy` is required for building / PM / price refresh paths.
 pub fn apply_action(
     state: &PlanningState,
     action: &Action,
-    config: SimConfig,
-) -> Option<PlanningState> {
-    apply_action_with_economy(state, action, None, config)
-}
-
-/// Apply an action with optional price-solver context and sim timing config.
-pub fn apply_action_with_economy(
-    state: &PlanningState,
-    action: &Action,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
     config: SimConfig,
 ) -> Option<PlanningState> {
     let mut next = state.clone();
@@ -1585,7 +1583,7 @@ pub fn apply_action_with_economy(
             if tech.is_empty()
                 || next.research_busy()
                 || next.has_tech(tech)
-                || !crate::tech::tech_prereqs_satisfied(tech, &next, economy.map(|e| &e.defs))
+                || !crate::tech::tech_prereqs_satisfied(tech, &next, &economy.defs)
             {
                 return None;
             }
@@ -1593,7 +1591,6 @@ pub fn apply_action_with_economy(
             next.tech_days_left = Some(research_days_for_tech(tech, config, economy));
         }
         Action::QueueBuildingLevel { building, state_id } => {
-            let economy = economy?;
             if building.is_empty() || construction_queue_full(&next, config) {
                 return None;
             }
@@ -1646,7 +1643,6 @@ pub fn apply_action_with_economy(
             building_id,
             methods,
         } => {
-            let economy = economy?;
             if methods.is_empty() {
                 return None;
             }
@@ -1683,6 +1679,16 @@ pub fn apply_action_with_economy(
     Some(next)
 }
 
+/// Alias for [`apply_action`] (historical name from the optional-economy era).
+pub fn apply_action_with_economy(
+    state: &PlanningState,
+    action: &Action,
+    economy: &EconomyContext,
+    config: SimConfig,
+) -> Option<PlanningState> {
+    apply_action(state, action, economy, config)
+}
+
 /// Failure modes for [`speculative_completed_state`] — never soft-fail with `None`.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub(crate) enum SpeculativeCompleteError {
@@ -1715,11 +1721,11 @@ pub(crate) fn speculative_completed_state(
 ) -> Result<PlanningState, SpeculativeCompleteError> {
     match action {
         Action::QueueBuildingLevel { building, state_id } => {
-            let queued = apply_action_with_economy(state, action, Some(economy), config)
+            let queued = apply_action(state, action, economy, config)
                 .ok_or(SpeculativeCompleteError::ApplyRejected)?;
             let wait_days = construction_wait_days(&queued, config)
                 .ok_or(SpeculativeCompleteError::WaitUnavailable)?;
-            apply_action_with_economy(
+            apply_action(
                 &queued,
                 &Action::WaitForEvent {
                     event: Event::BuildingCompleted {
@@ -1728,12 +1734,12 @@ pub(crate) fn speculative_completed_state(
                     },
                     days: wait_days,
                 },
-                Some(economy),
+                economy,
                 config,
             )
             .ok_or(SpeculativeCompleteError::ApplyRejected)
         }
-        _ => apply_action_with_economy(state, action, Some(economy), config)
+        _ => apply_action(state, action, economy, config)
             .ok_or(SpeculativeCompleteError::ApplyRejected),
     }
 }
@@ -1774,7 +1780,7 @@ fn apply_wait_for_event(
     next: &mut PlanningState,
     event: &Event,
     days: u16,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
     config: SimConfig,
 ) -> Option<()> {
     ensure_track_timers(next, config);
@@ -1793,7 +1799,6 @@ fn apply_wait_for_event(
             next.techs.insert(tech.clone());
         }
         Event::BuildingCompleted { building, state_id } => {
-            let economy = economy?;
             if !next.constructions.iter().any(|row| {
                 row.building == *building
                     && state_id
@@ -1946,7 +1951,7 @@ mod tests {
             ..SimConfig::default()
         };
 
-        let decisions = successors(&start, &goal, config);
+        let decisions = successors(&start, &goal, config, &EconomyContext::empty());
         assert_eq!(decisions.len(), 1);
         assert_eq!(decisions[0].days, 0);
         assert!(matches!(
@@ -1957,7 +1962,7 @@ mod tests {
             } if id == "alsace"
         ));
 
-        let waits = successors(&decisions[0].state, &goal, config);
+        let waits = successors(&decisions[0].state, &goal, config, &EconomyContext::empty());
         assert_eq!(waits.len(), 1);
         assert_eq!(waits[0].days, 45);
         assert!(waits[0].state.has_interest_state("alsace"));
@@ -2000,7 +2005,7 @@ mod tests {
             if evaluate(&goal, &state) {
                 break;
             }
-            let edges = successors(&state, &goal, config);
+            let edges = successors(&state, &goal, config, &EconomyContext::empty());
             assert!(!edges.is_empty(), "expected hire/wait edges at {state:?}");
             state = edges[0].state.clone();
         }
@@ -2031,14 +2036,14 @@ mod tests {
             ..SimConfig::default()
         };
 
-        let decisions = successors(&start, &goal, config);
+        let decisions = successors(&start, &goal, config, &EconomyContext::empty());
         assert_eq!(decisions.len(), 1);
         assert!(matches!(
             decisions[0].action,
             Action::QueueHireMilitary { ref building } if building == BUILDING_BARRACKS
         ));
 
-        let waits = successors(&decisions[0].state, &goal, config);
+        let waits = successors(&decisions[0].state, &goal, config, &EconomyContext::empty());
         assert_eq!(waits.len(), 1);
         assert_eq!(waits[0].days, 60);
         assert!(waits[0]
@@ -2053,7 +2058,12 @@ mod tests {
         let goal = compile("army_power_projection >= 100").unwrap();
         let start = state_at(0);
         assert_eq!(start.army_power_projection, None);
-        let decisions = successors(&start, &goal, SimConfig::default());
+        let decisions = successors(
+            &start,
+            &goal,
+            SimConfig::default(),
+            &EconomyContext::empty(),
+        );
         assert!(
             decisions.iter().all(|s| {
                 !matches!(
@@ -2077,6 +2087,7 @@ mod tests {
                 research_days: 100,
                 ..SimConfig::default()
             },
+            &EconomyContext::empty(),
         );
         assert_eq!(decisions.len(), 1);
         assert_eq!(decisions[0].days, 0);
@@ -2092,6 +2103,7 @@ mod tests {
                 research_days: 100,
                 ..SimConfig::default()
             },
+            &EconomyContext::empty(),
         );
         assert_eq!(waits.len(), 1);
         assert_eq!(waits[0].days, 100);
@@ -2119,6 +2131,7 @@ mod tests {
                 research_days: 100,
                 ..SimConfig::default()
             },
+            &EconomyContext::empty(),
         );
         assert!(
             edges.iter().any(|edge| {
@@ -2317,8 +2330,7 @@ mod tests {
             })
             .expect("good_price goal should queue logging camp");
         assert_eq!(logging.days, 0);
-        let repeated_decision =
-            apply_action_with_economy(&state, &logging.action, Some(&economy), config).unwrap();
+        let repeated_decision = apply_action(&state, &logging.action, &economy, config).unwrap();
         assert_eq!(repeated_decision, logging.state);
         assert_eq!(repeated_decision.fingerprint(), logging.state.fingerprint());
         let waits = successors_with_economy(&logging.state, &goal, config, &economy);
@@ -2339,9 +2351,7 @@ mod tests {
         assert!(evaluate(&goal, &wait.state));
         assert_eq!(wait.state.gdp, next_gdp);
         assert!(evaluate(&gdp_goal, &wait.state));
-        let repeated_wait =
-            apply_action_with_economy(&logging.state, &wait.action, Some(&economy), config)
-                .unwrap();
+        let repeated_wait = apply_action(&logging.state, &wait.action, &economy, config).unwrap();
         assert_eq!(repeated_wait, wait.state);
         assert_eq!(repeated_wait.fingerprint(), wait.state.fingerprint());
         assert_eq!(
@@ -2410,7 +2420,7 @@ mod tests {
         };
 
         assert!(!evaluate(&goal, &start));
-        let waits = successors(&start, &goal, config);
+        let waits = successors(&start, &goal, config, &EconomyContext::empty());
         assert_eq!(waits.len(), 1);
         assert_eq!(waits[0].days, 7);
         assert!(matches!(
@@ -2426,7 +2436,8 @@ mod tests {
         assert!(waits[0].state.solvent);
         assert_eq!(start.date.days_until(&waits[0].state.date), 7);
 
-        let repeated = apply_action(&start, &waits[0].action, config).unwrap();
+        let repeated =
+            apply_action(&start, &waits[0].action, &EconomyContext::empty(), config).unwrap();
         assert_eq!(repeated, waits[0].state);
         assert_eq!(repeated.fingerprint(), waits[0].state.fingerprint());
     }
@@ -2451,7 +2462,7 @@ mod tests {
 
         for _ in 0..2 {
             assert!(!evaluate(&goal, &state));
-            let waits = successors(&state, &goal, config);
+            let waits = successors(&state, &goal, config, &EconomyContext::empty());
             assert_eq!(waits.len(), 1);
             state = waits[0].state.clone();
         }
@@ -2476,6 +2487,7 @@ mod tests {
             &insolvent,
             &compile("research(tech=railways)").unwrap(),
             config,
+            &EconomyContext::empty(),
         );
         assert!(research.iter().all(|edge| {
             !matches!(
@@ -2497,7 +2509,13 @@ mod tests {
             treasury: 0.0,
             ..PlanningParts::default()
         });
-        assert!(successors(&deficit, &compile("solvent").unwrap(), config).is_empty());
+        assert!(successors(
+            &deficit,
+            &compile("solvent").unwrap(),
+            config,
+            &EconomyContext::empty()
+        )
+        .is_empty());
 
         let wealth_only = successors_for_simple_subgoals(
             &insolvent,
@@ -2506,6 +2524,7 @@ mod tests {
                 value: 20.0,
             }],
             config,
+            &EconomyContext::empty(),
         );
         assert!(wealth_only.is_empty());
     }
@@ -2519,7 +2538,7 @@ mod tests {
             ..SimConfig::default()
         };
 
-        let decisions = successors(&start, &goal, config);
+        let decisions = successors(&start, &goal, config, &EconomyContext::empty());
         assert_eq!(decisions.len(), 1);
         assert_eq!(decisions[0].days, 0);
         assert!(matches!(
@@ -2527,7 +2546,7 @@ mod tests {
             Action::QueueLaw { ref law } if law == "law_homesteading"
         ));
 
-        let waits = successors(&decisions[0].state, &goal, config);
+        let waits = successors(&decisions[0].state, &goal, config, &EconomyContext::empty());
         assert_eq!(waits.len(), 1);
         assert_eq!(waits[0].days, 40);
         assert!(waits[0].state.has_law("homesteading"));
@@ -2548,7 +2567,7 @@ mod tests {
             ..SimConfig::default()
         };
 
-        let decisions = successors(&start, &goal, config);
+        let decisions = successors(&start, &goal, config, &EconomyContext::empty());
         assert_eq!(decisions.len(), 1);
         assert!(matches!(
             decisions[0].action,
@@ -2557,7 +2576,7 @@ mod tests {
         assert_eq!(decisions[0].state.weekly_balance, Some(90.0));
         assert!(!evaluate(&goal, &decisions[0].state));
 
-        let second = successors(&decisions[0].state, &goal, config);
+        let second = successors(&decisions[0].state, &goal, config, &EconomyContext::empty());
         assert_eq!(second.len(), 1);
         assert_eq!(second[0].state.weekly_balance, Some(140.0));
         assert!(evaluate(&goal, &second[0].state));
@@ -2984,7 +3003,7 @@ mod tests {
                 building: "building_logging_camp".into(),
                 state_id: 1,
             },
-            Some(&economy),
+            &economy,
             config,
         )
         .expect("enqueue");
@@ -3487,7 +3506,7 @@ mod tests {
                 building: BUILDING_CONSTRUCTION_SECTOR.into(),
                 state_id: 1,
             },
-            Some(&economy),
+            &economy,
             config,
         )
         .expect("queue CS");
@@ -3500,7 +3519,7 @@ mod tests {
                 },
                 days: 10,
             },
-            Some(&economy),
+            &economy,
             config,
         )
         .expect("complete CS");
@@ -3862,7 +3881,7 @@ mod tests {
                 building: "building_logging_camp".into(),
                 state_id: 1,
             },
-            Some(&economy),
+            &economy,
             config,
         )
         .expect("enqueue first-of-type");
@@ -3875,7 +3894,7 @@ mod tests {
                 },
                 days: construction_wait_days(&queued, config).expect("wait"),
             },
-            Some(&economy),
+            &economy,
             config,
         )
         .expect("complete first-of-type");
@@ -4054,7 +4073,7 @@ mod tests {
                 building: BUILDING_BARRACKS.into(),
                 state_id: 1,
             },
-            Some(&economy),
+            &economy,
             SimConfig::default(),
         )
         .is_some());
@@ -4064,6 +4083,7 @@ mod tests {
                 &Action::QueueTech {
                     tech: "nitroglycerin".into(),
                 },
+                &EconomyContext::empty(),
                 SimConfig::default(),
             )
             .is_none(),
@@ -4085,7 +4105,13 @@ mod tests {
             },
             days: 0,
         };
-        let next = apply_action(&start, &wait, SimConfig::default()).unwrap();
+        let next = apply_action(
+            &start,
+            &wait,
+            &EconomyContext::empty(),
+            SimConfig::default(),
+        )
+        .unwrap();
         assert!(next.has_tech("railways"));
         assert!(next.queued_tech.is_none());
         assert!(next.tech_days_left.is_none());
@@ -4103,7 +4129,13 @@ mod tests {
             tech_days_left: Some(5),
             ..PlanningParts::default()
         });
-        assert!(apply_action(&not_ready, &rejected, SimConfig::default()).is_none());
+        assert!(apply_action(
+            &not_ready,
+            &rejected,
+            &EconomyContext::empty(),
+            SimConfig::default()
+        )
+        .is_none());
     }
 
     #[test]
@@ -4118,6 +4150,7 @@ mod tests {
             state,
             compile("research(tech=nitroglycerin)").unwrap(),
             SimConfig::default(),
+            EconomyContext::empty(),
             1000,
             0.0,
             Vec::new(),
@@ -4134,8 +4167,14 @@ mod tests {
         let action = Action::QueueTech {
             tech: "railways".into(),
         };
-        let a = apply_action(&state, &action, config).unwrap();
-        let b = apply_action(&state.clone(), &action.clone(), config).unwrap();
+        let a = apply_action(&state, &action, &EconomyContext::empty(), config).unwrap();
+        let b = apply_action(
+            &state.clone(),
+            &action.clone(),
+            &EconomyContext::empty(),
+            config,
+        )
+        .unwrap();
         assert_eq!(a, b);
         assert_eq!(a.fingerprint(), b.fingerprint());
 
@@ -4145,8 +4184,8 @@ mod tests {
             },
             days: 45,
         };
-        let a = apply_action(&a, &wait, config).unwrap();
-        let b = apply_action(&b, &wait, config).unwrap();
+        let a = apply_action(&a, &wait, &EconomyContext::empty(), config).unwrap();
+        let b = apply_action(&b, &wait, &EconomyContext::empty(), config).unwrap();
         assert_eq!(a, b);
         assert_eq!(a.fingerprint(), b.fingerprint());
     }
@@ -4171,7 +4210,7 @@ mod tests {
                 research_days,
                 ..SimConfig::default()
             };
-            let edges = successors(&state, &goal, config);
+            let edges = successors(&state, &goal, config, &EconomyContext::empty());
 
             let wait_count = edges
                 .iter()
@@ -4198,6 +4237,7 @@ mod tests {
                 &state_at(day_offset),
                 &idle_atoms,
                 config,
+            &EconomyContext::empty(),
             );
             let has_wait = idle_edges
                 .iter()
@@ -4218,6 +4258,7 @@ mod tests {
                 &solvent_start,
                 &compile("solvent").unwrap(),
                 config,
+            &EconomyContext::empty(),
             );
             prop_assert_eq!(solvent_edges.len(), 1);
             let is_payday = matches!(

@@ -133,7 +133,7 @@ impl SearchTraceStats {
 struct SearchContext {
     goal: Goal,
     config: SimConfig,
-    economy: Option<Rc<EconomyContext>>,
+    economy: Rc<EconomyContext>,
     /// Vic3-side search counters — see [`SearchTraceStats`].
     trace: SearchTraceStats,
 }
@@ -194,21 +194,8 @@ impl Hash for Vic3Identity {
 }
 
 impl Vic3Node {
-    /// Create the root of a planning search.
-    pub fn new(state: PlanningState, goal: Goal, config: SimConfig) -> Self {
-        Self::with_context(
-            state,
-            Rc::new(SearchContext {
-                goal,
-                config,
-                economy: None,
-                trace: SearchTraceStats::default(),
-            }),
-        )
-    }
-
-    /// Create a root with immutable price-solver context for building actions.
-    pub fn new_with_economy(
+    /// Create the root of a planning search with required economy context.
+    pub fn new(
         state: PlanningState,
         goal: Goal,
         config: SimConfig,
@@ -219,10 +206,20 @@ impl Vic3Node {
             Rc::new(SearchContext {
                 goal,
                 config,
-                economy: Some(Rc::new(economy)),
+                economy: Rc::new(economy),
                 trace: SearchTraceStats::default(),
             }),
         )
+    }
+
+    /// Alias for [`Self::new`] (historical name from the optional-economy era).
+    pub fn new_with_economy(
+        state: PlanningState,
+        goal: Goal,
+        config: SimConfig,
+        economy: EconomyContext,
+    ) -> Self {
+        Self::new(state, goal, config, economy)
     }
 
     fn with_context(state: PlanningState, context: Rc<SearchContext>) -> Self {
@@ -281,35 +278,28 @@ impl Vic3Node {
         self.cache.context.config
     }
 
+    /// Economy context shared by this search.
+    pub fn economy(&self) -> &EconomyContext {
+        &self.cache.context.economy
+    }
+
     pub(crate) fn sim_successors(&self) -> Vec<Successor> {
-        match self.cache.context.economy.as_deref() {
-            Some(economy) => crate::sim::successors_with_economy(
-                &self.identity.state,
-                &self.cache.context.goal,
-                self.cache.context.config,
-                economy,
-            ),
-            None => crate::sim::successors(
-                &self.identity.state,
-                &self.cache.context.goal,
-                self.cache.context.config,
-            ),
-        }
+        crate::sim::successors(
+            &self.identity.state,
+            &self.cache.context.goal,
+            self.cache.context.config,
+            &self.cache.context.economy,
+        )
     }
 
     /// Apply one action against this domain node (PEA* emit path).
     pub(crate) fn apply_action(&self, action: &crate::sim::Action) -> Option<PlanningState> {
-        match self.cache.context.economy.as_deref() {
-            Some(economy) => crate::sim::apply_action_with_economy(
-                &self.identity.state,
-                action,
-                Some(economy),
-                self.cache.context.config,
-            ),
-            None => {
-                crate::sim::apply_action(&self.identity.state, action, self.cache.context.config)
-            }
-        }
+        crate::sim::apply_action(
+            &self.identity.state,
+            action,
+            &self.cache.context.economy,
+            self.cache.context.config,
+        )
     }
 }
 
@@ -358,7 +348,7 @@ fn goal_timing_lower_bound(
     goal: &Goal,
     state: &PlanningState,
     config: SimConfig,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
 ) -> u32 {
     let interest_days = u32::from(config.interest_days.max(1));
     let army_train_days = u32::from(config.army_training_days.max(1));
@@ -426,9 +416,7 @@ fn goal_timing_lower_bound(
         }
         Goal::Simple(atom @ (SimpleSubgoal::GoodPrice { .. } | SimpleSubgoal::Gdp { .. })) => {
             if atom.eval(state)
-                || economy.is_some_and(|economy| {
-                    economy.has_pm_switch_path(state, std::slice::from_ref(atom), config)
-                })
+                || economy.has_pm_switch_path(state, std::slice::from_ref(atom), config)
             {
                 0
             } else {
@@ -447,19 +435,16 @@ fn research_eta_for_leaf(
     tech: &str,
     state: &PlanningState,
     config: SimConfig,
-    economy: Option<&EconomyContext>,
+    economy: &EconomyContext,
 ) -> u32 {
     if state.has_tech(tech) {
         return 0;
     }
     let fallback = u32::from(config.research_days.max(1));
-    let Some(defs) = economy.map(|e| &e.defs) else {
-        return fallback;
-    };
-    if defs.technologies.is_empty() {
+    if economy.defs.technologies.is_empty() {
         return fallback;
     }
-    let missing = crate::tech::missing_tech_closure(tech, state, defs);
+    let missing = crate::tech::missing_tech_closure(tech, state, &economy.defs);
     if missing.is_empty() {
         return 0;
     }
@@ -470,14 +455,9 @@ fn research_eta_for_leaf(
     total.max(1)
 }
 
-fn single_tech_research_eta(
-    tech: &str,
-    config: SimConfig,
-    economy: Option<&EconomyContext>,
-) -> u32 {
+fn single_tech_research_eta(tech: &str, config: SimConfig, economy: &EconomyContext) -> u32 {
     let fallback = u32::from(config.research_days.max(1));
-    let defs = economy.map(|e| &e.defs);
-    if let Some(cost) = crate::tech::tech_research_cost(tech, defs) {
+    if let Some(cost) = crate::tech::tech_research_cost(tech, &economy.defs) {
         if let Some(days) = crate::tracks::days_for_work(cost, crate::tracks::CONSTANT_RATE) {
             return days.max(1);
         }
@@ -556,7 +536,7 @@ impl SearchNode for Vic3Node {
             &self.cache.context.goal,
             &self.identity.state,
             self.cache.context.config,
-            self.cache.context.economy.as_deref(),
+            &self.cache.context.economy,
         )
     }
 }
@@ -566,7 +546,7 @@ mod tests {
     use super::*;
     use crate::goals::compile;
     use crate::plan::pathfinding::{shortest_path, shortest_path_lazy};
-    use crate::sim::Action;
+    use crate::sim::{Action, EconomyContext};
     use crate::world::{PlanningParts, PlanningState};
     use proptest::prelude::*;
     use rust_advanced_heaps::pairing::PairingHeap;
@@ -583,6 +563,7 @@ mod tests {
                 research_days,
                 ..SimConfig::default()
             },
+            EconomyContext::empty(),
         )
     }
 
@@ -603,6 +584,7 @@ mod tests {
                 interest_days: 30,
                 ..SimConfig::default()
             },
+            EconomyContext::empty(),
         );
 
         assert_eq!(
@@ -644,6 +626,7 @@ mod tests {
                 army_training_days: 77,
                 ..SimConfig::default()
             },
+            EconomyContext::empty(),
         );
         assert_eq!(start.heuristic(), 77);
         let (path, cost) =
@@ -667,6 +650,7 @@ mod tests {
                 interest_days: 25,
                 ..SimConfig::default()
             },
+            EconomyContext::empty(),
         );
         assert_eq!(start.heuristic(), 25);
         let (path, cost) =
@@ -692,7 +676,12 @@ mod tests {
         assert!(path[2].state().has_tech("nitroglycerin"));
         assert!(path[2].is_goal());
 
-        let first_edges = crate::sim::successors(start.state(), start.goal(), start.config());
+        let first_edges = crate::sim::successors(
+            start.state(),
+            start.goal(),
+            start.config(),
+            &EconomyContext::empty(),
+        );
         assert!(matches!(
             first_edges.as_slice(),
             [crate::sim::Successor {
@@ -721,6 +710,7 @@ mod tests {
                 payday_days: 7,
                 ..SimConfig::default()
             },
+            EconomyContext::empty(),
         );
         let (path, cost) =
             shortest_path::<_, PairingHeap<_, _>>(&start).expect("solvent is reachable");
@@ -739,6 +729,7 @@ mod tests {
                 law_days: 55,
                 ..SimConfig::default()
             },
+            EconomyContext::empty(),
         );
         assert_eq!(start.heuristic(), 55);
         let (path, cost) =
@@ -762,6 +753,7 @@ mod tests {
                 max_tax_steps: 3,
                 ..SimConfig::default()
             },
+            EconomyContext::empty(),
         );
         assert_eq!(start.heuristic(), 0);
         let (path, cost) =
@@ -787,11 +779,12 @@ mod tests {
                 max_construction_allocation: Some(1000),
                 ..SimConfig::default()
             },
+            EconomyContext::empty(),
         );
         assert_eq!(
             start.heuristic(),
             33,
-            "without economy PM candidates, open price uses capacity ETA (one level)"
+            "empty economy has no PM candidates; open price uses capacity ETA (one level)"
         );
     }
 
@@ -816,6 +809,7 @@ mod tests {
                 research_days: 40,
                 ..SimConfig::default()
             },
+            EconomyContext::empty(),
         );
         let (_, and_cost) =
             shortest_path::<_, PairingHeap<_, _>>(&and).expect("two techs are reachable");
@@ -829,6 +823,7 @@ mod tests {
                 research_days: 40,
                 ..SimConfig::default()
             },
+            EconomyContext::empty(),
         );
         let (_, or_cost) =
             shortest_path::<_, PairingHeap<_, _>>(&or).expect("either tech is reachable");
@@ -945,7 +940,12 @@ mod tests {
         };
         let goal = compile("research(tech=railways)").unwrap();
 
-        let idle = Vic3Node::new(PlanningState::default(), goal.clone(), config);
+        let idle = Vic3Node::new(
+            PlanningState::default(),
+            goal.clone(),
+            config,
+            EconomyContext::empty(),
+        );
         assert_eq!(idle.heuristic(), 40);
 
         let matching = PlanningState {
@@ -953,7 +953,7 @@ mod tests {
             ..PlanningState::default()
         };
         assert_eq!(
-            Vic3Node::new(matching, goal.clone(), config).heuristic(),
+            Vic3Node::new(matching, goal.clone(), config, EconomyContext::empty()).heuristic(),
             40
         );
 
@@ -961,7 +961,10 @@ mod tests {
             queued_tech: Some("unrelated_tech".into()),
             ..PlanningState::default()
         };
-        assert_eq!(Vic3Node::new(unrelated, goal, config).heuristic(), 40);
+        assert_eq!(
+            Vic3Node::new(unrelated, goal, config, EconomyContext::empty()).heuristic(),
+            40
+        );
     }
 
     #[test]
@@ -973,6 +976,7 @@ mod tests {
                 research_days: 40,
                 ..SimConfig::default()
             },
+            EconomyContext::empty(),
         );
         assert_eq!(start.heuristic(), 40);
         for (successor, days) in start.successors() {
@@ -988,7 +992,12 @@ mod tests {
     #[test]
     fn cloned_state_has_same_compact_identity() {
         let start = tech_fixture(10);
-        let rebuilt = Vic3Node::new(start.state().clone(), start.goal().clone(), start.config());
+        let rebuilt = Vic3Node::new(
+            start.state().clone(),
+            start.goal().clone(),
+            start.config(),
+            EconomyContext::empty(),
+        );
         assert_eq!(start, rebuilt);
         assert_eq!(start.fingerprint(), rebuilt.fingerprint());
     }
@@ -1015,7 +1024,8 @@ mod tests {
                     research_days,
                     ..SimConfig::default()
                 },
-            );
+            EconomyContext::empty()
+        );
             let (path, cost) = shortest_path::<_, PairingHeap<_, _>>(&start)
                 .expect("research formula is reachable");
             prop_assert!(start.heuristic() <= cost);
