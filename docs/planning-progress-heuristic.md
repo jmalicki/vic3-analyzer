@@ -3,12 +3,12 @@
 Developer internals for planner search. Related:
 [`planning.md`](planning.md), [`planning-search.md`](planning-search.md).
 
-**Status:** ranking / cheap-bag **library** lives in `plan/progress_h.rs`
-(not wired into search yet). Greedy incumbent $U$ lives in `plan/greedy.rs` and is
-wired into `plan()` via `PathFinderBuilder::max_cost`.
+**Status:** ranking / cheap-bag scorers live in `plan/progress_h.rs` and are
+**wired into search** via `plan/bag_rank.rs` (`cheap_bag_score` /
+`emit_bag_score` + `gdp_for_rates`). Greedy incumbent $U$ lives in
+`plan/greedy.rs` and is wired into `plan()` via `PathFinderBuilder::max_cost`.
 
-Code: `plan/progress_h.rs` (unwired ranking), `plan/greedy.rs` + `plan/result.rs`
-(greedy $U$ prune).
+Code: `plan/progress_h.rs`, `plan/bag_rank.rs`, `plan/pea.rs`, `plan/greedy.rs`, `plan/result.rs`.
 
 ---
 
@@ -53,17 +53,17 @@ A **simple subgoal** is a compiled goal node with no further goal children
 1. **Cost is calendar days.** Find a shortest path in days until GDP reaches
    the target (`evaluate` true).
 2. **A\*** / open-set search use $f = g + h$ with $g$ = days so far and edge costs in days
-   (0-day decisions, positive waits). Today’s wired search still uses
-   $h_{\mathrm{adm}}$ for Ready keys; $h_{\mathrm{rank}}$ is library-only until
-   candidate-bag wiring.
+   (0-day decisions, positive waits). Ready keys still report $h_{\mathrm{adm}}$;
+   candidate bags / Expanding cursor use $h_{\mathrm{rank}}$ / cheap scores (mixed $f$ —
+   see [`planning-search.md`](planning-search.md)).
 3. **Upper bound $U$ comes from greedy.** Run a feasible greedy simulation to
    the GDP goal; $U$ is **only** that run’s day length (decisions are not kept).
    Prune any node with $g \ge U$ (`PathFinderBuilder::max_cost` in `plan()`).
    **v1:** when $U$ must be refreshed, **rebuild the whole greedy simulation**
    (no retained plan to edit; no incremental membership).
-4. **$h_{\mathrm{rank}}$ only orders.** Progress residual scores are meant to
-   rank the open set / candidate bag so search is not blind. They are **not** a
-   proven admissible lower bound and do **not** define $U$.
+4. **$h_{\mathrm{rank}}$ only orders.** Progress residual scores rank the
+   candidate bag / open bias. They are **not** a proven admissible lower bound and do
+   **not** define $U$.
 
 $$
 U = t_{\mathrm{goal}}^{\mathrm{greedy}}
@@ -168,7 +168,7 @@ the gap), take it before waiting; otherwise fall through to builds / waits.
 
 | Quantity | Role |
 | --- | --- |
-| $h_{\mathrm{rank}}$ | Order open-set candidates (library today) |
+| $h_{\mathrm{rank}}$ | Order open-set candidates (wired via `bag_rank`) |
 | $U = t_{\mathrm{goal}}^{\mathrm{greedy}}$ | Feasible plan days; prune with $g$ |
 | Partial-expansion cursor | Eventually emits deferred candidates |
 
@@ -222,7 +222,7 @@ solver again.
 
 ## Progress ranking for GDP
 
-Used to order candidates (library APIs today; search wiring later). New symbols
+Used to order search candidate bags (wired via `bag_rank`). New symbols
 for the residual-days bias:
 
 | Math | Definition | Rust |
@@ -320,33 +320,34 @@ $$
 
 ---
 
-## Cheap bag library (GDP)
+## PEA ranking (cheap bag vs emit) — GDP
 
-Bag-order scorers live in `progress_h` as **library APIs**. They are **not**
-called from search yet. Bag order is a **bias**, not a true open-set $f$-layer —
-see [`planning-search.md`](planning-search.md#known-mixed-f-on-the-open-set-tolerated-for-v1)
-when wiring.
+Bag order is a **bias**, not a true PEA $f$-layer — see
+[`planning-search.md`](planning-search.md#known-mixed-f-on-the-open-set-tolerated-for-v1).
+Do **not** prune on $g + h_{\mathrm{rank}} \ge U$.
 
-New symbols for cheap scoring (quantities on $\mathrm{state}_t$ use
-subscript $t$ / Rust `*_curr`):
+New symbols for cheap vs emit scoring (quantities on $\mathrm{state}_t$ use
+subscript $t$ / Rust `*_curr`; successor worlds use $t'$ / `*_succ`):
 
 | Math | Definition | Rust |
 | --- | --- | --- |
 | $\widetilde{\Delta\mathrm{gdp}}(a)$ | **Cheap** GDP change guesstimate for $a$ (not a full price solve; not a bag key by itself) | `cheap_gdp_delta_guesstimate` |
+| $\widehat{\Delta\mathrm{gdp}}(a)$ | **Emit-time** GDP change from a full price/GDP solve on the speculative completed successor | `speculative_completed_state` → `gdp_succ - gdp_curr` |
+| $\mathrm{gdp}_t$ | GDP used for rates on $\mathrm{state}_t$ | `gdp_curr` / domain `gdp_for_rates()` |
+| $\mathrm{gdp}_{\mathrm{for\_rates}}$ | GDP input to residual math on a node; after emit, $\mathrm{gdp}_t + \widehat{\Delta\mathrm{gdp}}$ so the successor anticipates completion before `state.gdp` updates | `Vic3Node::gdp_for_rates` |
 | $G_t$, $R^{*}_t$, $H_{\mathrm{follow}}$ | Gap, aggregate rate, and follow-on days on $\mathrm{state}_t$ (one bag) | [`BagResidualCurr`](../crates/vic3-planning/src/plan/progress_h.rs) |
 | $T_b$, $T_{\mathrm{CS}}$ | Days until ordinary build / Construction Sector completion | construction ETA helpers |
 | $C$ | Construction points/day on $\mathrm{state}_t$ | `PlanningState::construction_points_per_day` |
 | $\Delta C$ | Points/day from +1 Construction Sector (× government share) | `cheap_construction_sector_points_delta` |
 | — | $\mathrm{state}_t$ context for every cheap score in one expand | [`CheapBagCurr`](../crates/vic3-planning/src/plan/progress_h.rs) |
 | $\mathrm{score}_{\mathrm{cheap}}(a)$ | **Bag** order key (cheap follow-on) | `cheap_bag_score` |
-| $\mathrm{score}_{\mathrm{emit}}(a)$ | Emit-style key $e(a) + h(\mathrm{completed})$ (library; not wired into search) | `emit_bag_score` |
+| $\mathrm{score}_{\mathrm{emit}}(a)$ | Emit key $e(a) + h(W_a)$ | `emit_bag_score` |
+| $W_a$ | Speculative successor after $a$’s economics land ($\mathrm{state}_{t'}$ with completion applied) | `speculative_completed_state` |
 
-**Tilde:** $\widetilde{\cdot}$ = cheap bag approximation. Neither cheap nor
-emit scorers redefine path cost $g$.
+**Tilde vs hat:** $\widetilde{\cdot}$ = cheap bag approximation; $\widehat{\cdot}$ = emit full solve. Neither redefines path cost $g$.
 
 Always $\mathrm{score}(a) = e(a) + \text{(follow-on days after } a\text{)}$.
-**Cheap bag** uses approximate follow-on; **emit** (library) uses residual $h$
-on a completed-world state the caller supplies.
+**Cheap bag** and **emit** use different follow-on estimates.
 
 ### Cheap bag (order only)
 
@@ -359,34 +360,76 @@ $$
 $$
 
 Construction Sector (guesstimate — construction-unit scale of follow-on on
-$\mathrm{state}_t$). CS also moves GDP via construction-goods demand (iron,
-wood, …); the cheap key prioritizes throughput shortening of follow-on days
-and does not credit that GDP delta (emit’s full residual after speculative
-complete does):
+$\mathrm{state}_t$; ignores CS $\widetilde{\Delta\mathrm{gdp}}$ /
+$\widehat{\Delta\mathrm{gdp}}$):
 
 $$
 \mathrm{score}_{\mathrm{cheap}}(\mathrm{CS})
   = T_{\mathrm{CS}} + \frac{C}{C + \Delta C}\, H_{\mathrm{follow}}
 $$
 
-**Deficiencies vs a full emit / later greedy rebuild** (also in code comments on
-`cheap_bag_score`): CS scale ≠ actual slots + CS finish day; cheap path omits
-CS GDP from construction-goods demand; cheap GDP guesstimate ≠ full price
-solve; the delayed / follow-on portion can score **lower (better)** than this
-heuristic once slots and prices are real.
+**Deficiencies vs emit / formal greedy** (also in code comments on
+`cheap_bag_score`): CS scale ≠ actual slots + CS finish day; cheap GDP
+guesstimate ≠ full price solve; bag does not re-run greedy; the delayed /
+follow-on portion can score **lower (better)** than this heuristic once slots,
+prices, and greedy order are real.
 
-### Emit residual (library API)
+### Emit (expensive)
 
 $$
-\mathrm{score}_{\mathrm{emit}}(a) = e(a) + h(\mathrm{completed})
+\mathrm{score}_{\mathrm{emit}}(a) = e(a) + h(W_a)
 $$
 
 `emit_bag_score` takes a completed `PlanningState` and returns
 $e(a) +$ [`rank_heuristic_with_gdp_for_rates`](../crates/vic3-planning/src/plan/progress_h.rs)
-on that state’s GDP. Speculative complete / `gdp_for_rates` node fields /
-emit mismatch warns are **not** wired yet (later search-ranking PR).
+on that state’s GDP. Full residual $h(W_a)$ uses real post-CS capacity when relevant.
+[`bag_rank::emit_child`](../crates/vic3-planning/src/plan/bag_rank.rs) caches
+$\widehat{\Delta\mathrm{gdp}}$ on the emitted successor as `gdp_for_rates`.
 
-Tie-break (when wired): higher $r_i$ for that candidate, then fingerprint.
+$$
+\mathrm{gdp}_{\mathrm{for\_rates}}
+  = \mathrm{gdp}_t + \widehat{\Delta\mathrm{gdp}}(a).
+$$
+
+If $\mathrm{score}_{\mathrm{emit}}(a)$ is greater than the best deferred
+$\mathrm{score}_{\mathrm{cheap}}$, `tracing::warn!` (`vic3_planning::pea`) —
+[`bag_rank::emit_deferred_cheap_mismatch`](../crates/vic3-planning/src/plan/bag_rank.rs).
+
+Tie-break: higher $r_i$ for that candidate, then fingerprint.
+
+---
+
+## When search considers a new successor
+
+Expensive work is the price/GDP solve and progress scoring. Duplicate worlds
+show up often (two different action sequences, same queues and buildings). Do
+**not** pay for a solve only to discover A* already has that world.
+
+Target order when expanding $\mathrm{state}_t$:
+
+1. **Apply the action to planning fields only** — copy-on-write the queues,
+   PMs, building levels, dates, etc. Do **not** run the price solver yet.
+   Prices and GDP are derived; they are not part of A* identity.
+2. **Look up that world in the open/closed map** keyed by fingerprint (and
+   full state equality on collision). Remember the best path cost $g$ seen for
+   that world so far.
+3. **If this path is no better** ($g_{\mathrm{new}} \ge g_{\mathrm{best}}$): drop
+   the successor. Skip the price solve, skip progress ranking, skip greedy.
+4. **If this is a new world, or a cheaper path to a known world:**
+   - New world: run the price/GDP solve once, then compute progress scores for
+     PEA / ranking, and store the solved prices on the map entry.
+   - Cheaper path to a known world: copy the **already solved** prices/GDP from
+     the map entry onto this node. Do not solve again. Update $g_{\mathrm{best}}$.
+5. **Greedy / $U$ refresh** is not per successor. Only when you promote a new
+   feasible plan or explicitly rebuild the incumbent (full greedy rebuild in
+   v1).
+
+Also safe before any solve: if path cost $g$ is already $\ge U$, prune.
+
+**Why:** identity ignores `good_prices` / `gdp`. Solving first, then detecting
+a duplicate, wastes the solve. Today’s code often refreshes prices inside
+`apply` and ranks before the pathfinder merges — this section is the intended
+order, not what ships yet.
 
 ---
 

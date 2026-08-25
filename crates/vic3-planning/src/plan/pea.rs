@@ -2,7 +2,7 @@
 //!
 //! Encodes PEA* as distinct [`SearchNode`] identities so the existing
 //! closed-set `shortest_path` loop can defer surplus successors without a
-//! heaps-crate change: after emitting a fixed-size beam, the parent is
+//! heaps-crate change: after emitting a fixed-size beam, the current node is
 //! re-inserted via a 0-cost self-edge whose heuristic matches the next
 //! child's \(f - g = \mathrm{edge} + h\).
 //!
@@ -10,10 +10,12 @@
 //!
 //! Each Ready expand builds one **national** [`Candidate`] bag from
 //! [`Vic3Node::sim_successors`] (all placement states / actions for that
-//! parent). Top‑[`DEFAULT_PEA_BEAM`] rows are chosen with `select_nth` (only
-//! that prefix is fully sorted). Child [`Vic3Node`]s are applied **on emit
-//! only**; deferred rows stay action + score. ShopCache stays unranked —
-//! used only when scoring/applying.
+//! current node). Ranking uses [`super::progress_h::cheap_bag_score`] (quick
+//! guesstimate). Top‑[`DEFAULT_PEA_BEAM`] rows are chosen with `select_nth`.
+//! On emit, successors are applied and scored with speculative complete +
+//! [`super::progress_h::emit_bag_score`]; emit GDP anticipation is stored on
+//! the successor as [`Vic3Node::gdp_for_rates`]. Deferred rows stay action + cheap
+//! score. ShopCache stays unranked — used only when scoring/applying.
 //!
 //! Expanding identity is `(domain, emitted)` — the candidate list is
 //! `Rc<[…]>` so [`SearchNode`] clones are refcount bumps, and is not hashed.
@@ -62,7 +64,7 @@ impl CandidateDeps {
 struct Candidate {
     action: Action,
     days: u16,
-    /// `edge + h(child)` — parent-\(g\)-independent sort key and resume \(h\).
+    /// `edge + h(child)` — independent of current-node \(g\) as a sort key and resume \(h\).
     f_minus_g: u32,
     #[allow(dead_code)] // reserved for live-rescore / dirty sets
     deps: CandidateDeps,
@@ -101,13 +103,45 @@ pub struct PeaNode {
     inner: PeaInner,
 }
 
+/// True when emit ranking is worse than the best deferred cheap bag score.
+///
+/// Design: emit score > deferred_min_cheap → warn (cheap under-ranked a rival).
+/// Emit/rebuild follow-on better than cheap is expected — do not warn.
+pub(crate) fn emit_score_exceeds_deferred_cheap(emit_score: u32, deferred_min_cheap: u32) -> bool {
+    emit_score > deferred_min_cheap
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EmitDeferredCheapMismatch {
+    pub cheap_bag_score: u32,
+    pub emit_score: u32,
+    pub deferred_min_cheap: u32,
+}
+
+/// Build a mismatch record when a warn should fire; `None` if no warn.
+pub(crate) fn emit_deferred_cheap_mismatch(
+    cheap_bag_score: u32,
+    emit_score: u32,
+    deferred_min_cheap: Option<u32>,
+) -> Option<EmitDeferredCheapMismatch> {
+    let deferred_min = deferred_min_cheap?;
+    if !emit_score_exceeds_deferred_cheap(emit_score, deferred_min) {
+        return None;
+    }
+    Some(EmitDeferredCheapMismatch {
+        cheap_bag_score,
+        emit_score,
+        deferred_min_cheap: deferred_min,
+    })
+}
+
 /// Expanding identity is `(domain, emitted)` only — `candidates` is ignored.
 #[derive(Clone, Debug, Derivative)]
 #[derivative(PartialEq, Eq, Hash)]
 enum PeaInner {
     Ready(Vic3Node),
     /// Resume handle: `candidates` is the **remaining** deferred bag after
-    /// prior beams. `emitted` counts how many children this parent expand has
+    /// prior beams. `emitted` counts how many successors this expand has
     /// already pushed (Hash/Eq). `Rc` makes pathfinding's required [`Clone`]
     /// cheap until `to_vec` on resume.
     Expanding {
@@ -135,22 +169,67 @@ impl PeaNode {
     }
 
     fn build_candidates(domain: &Vic3Node) -> Vec<Candidate> {
+        let state_curr = domain.state();
+        let curr = match super::progress_h::CheapBagCurr::new(
+            domain.goal(),
+            state_curr,
+            domain.config(),
+            domain.economy(),
+            domain.gdp_for_rates(),
+        ) {
+            Ok(curr) => curr,
+            Err(err) => {
+                // Bag ranking needs meters; fall back to admissible edge+h so
+                // PEA still expands (do not drop the expand).
+                tracing::warn!(
+                    target: "vic3_planning::pea",
+                    ?err,
+                    "CheapBagCurr failed; PEA bag falls back to h_adm"
+                );
+                return domain
+                    .sim_successors()
+                    .into_iter()
+                    .map(|successor| {
+                        let node = Vic3Node::with_shared_context(successor.state, domain);
+                        let edge = u32::from(successor.days);
+                        let f_minus_g = edge.saturating_add(node.heuristic());
+                        let deps = CandidateDeps::from_action(&successor.action);
+                        Candidate {
+                            action: successor.action,
+                            days: successor.days,
+                            f_minus_g,
+                            deps,
+                            tie: node.fingerprint(),
+                        }
+                    })
+                    .collect();
+            }
+        };
+
         domain
             .sim_successors()
             .into_iter()
             .map(|successor| {
-                // Score once with a temporary child; drop the node — emit
-                // re-applies so the bag stays action/score only.
-                let node = Vic3Node::with_shared_context(successor.state, domain);
-                let edge = u32::from(successor.days);
-                let f_minus_g = edge.saturating_add(node.heuristic());
+                // Cheap bag score only (see progress_h::cheap_bag_score deficiencies).
+                // Emit recomputes with speculative complete + full residual.
+                let f_minus_g =
+                    super::progress_h::cheap_bag_score(&successor.action, successor.days, &curr);
+                // Tie-break without building a full child: hash action + days.
+                let tie = {
+                    use std::collections::hash_map::DefaultHasher;
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = DefaultHasher::new();
+                    successor.action.hash(&mut hasher);
+                    successor.days.hash(&mut hasher);
+                    hasher.finish()
+                };
                 let deps = CandidateDeps::from_action(&successor.action);
                 Candidate {
                     action: successor.action,
                     days: successor.days,
                     f_minus_g,
                     deps,
-                    tie: node.fingerprint(),
+                    tie,
                 }
             })
             .collect()
@@ -158,8 +237,53 @@ impl PeaNode {
 
     fn emit_candidate(domain: &Vic3Node, candidate: &Candidate) -> Option<(Self, u32)> {
         let state = domain.apply_action(&candidate.action)?;
-        let node = Vic3Node::with_shared_context(state, domain);
+        let mut node = Vic3Node::with_shared_context(state, domain);
+
+        // Emit-time GDP: speculative complete + full price solve when possible.
+        // Emitted successor remains post-enqueue; gdp_for_rates anticipates the delta.
+        let gdp_curr = domain.gdp_for_rates();
+        match crate::sim::speculative_completed_state(
+            domain.state(),
+            &candidate.action,
+            domain.economy(),
+            domain.config(),
+        ) {
+            Ok(completed) => {
+                let emit_gdp_delta = completed.gdp - gdp_curr;
+                let gdp_for_rates = gdp_curr + emit_gdp_delta;
+                node = node.with_gdp_for_rates(gdp_for_rates);
+            }
+            Err(err) => {
+                // Apply already succeeded; keep enqueue-only gdp_for_rates (= state.gdp).
+                tracing::debug!(
+                    target: "vic3_planning::pea",
+                    ?err,
+                    action = ?candidate.action,
+                    "speculative_completed_state failed; emit without GDP anticipation"
+                );
+            }
+        }
+
         Some((Self::ready(node), u32::from(candidate.days)))
+    }
+
+    /// Emit ranking key on speculative completed world (`edge +` residual).
+    fn emit_f_minus_g(domain: &Vic3Node, candidate: &Candidate) -> Option<u32> {
+        let completed = crate::sim::speculative_completed_state(
+            domain.state(),
+            &candidate.action,
+            domain.economy(),
+            domain.config(),
+        )
+        .ok()?;
+        super::progress_h::emit_bag_score(
+            candidate.days,
+            domain.goal(),
+            &completed,
+            domain.config(),
+            domain.economy(),
+        )
+        .ok()
     }
 
     /// Select top‑K from `bag`, emit applied children, defer the rest.
@@ -174,16 +298,46 @@ impl PeaNode {
         }
         select_top_k(&mut bag, beam);
         let take = beam.min(bag.len());
+        // Best deferred **cheap** bag score (for warn vs emit).
+        let deferred_min_cheap = (take < bag.len()).then(|| bag[take].f_minus_g);
+
         let mut out = Vec::with_capacity(take.saturating_add(1));
         for candidate in &bag[..take] {
-            if let Some(edge) = Self::emit_candidate(domain, candidate) {
-                out.push(edge);
+            let Some((child, edge)) = Self::emit_candidate(domain, candidate) else {
+                continue;
+            };
+            let actual = Self::emit_f_minus_g(domain, candidate).unwrap_or_else(|| {
+                // Fallback when speculative complete / residual unavailable.
+                let residual = super::progress_h::rank_heuristic_with_gdp_for_rates(
+                    domain.goal(),
+                    child.domain().state(),
+                    domain.config(),
+                    domain.economy(),
+                    child.domain().gdp_for_rates(),
+                )
+                .unwrap_or_else(|_| child.domain().heuristic());
+                u32::from(candidate.days).saturating_add(residual)
+            });
+            if let Some(mismatch) =
+                emit_deferred_cheap_mismatch(candidate.f_minus_g, actual, deferred_min_cheap)
+            {
+                tracing::warn!(
+                    target: "vic3_planning::pea",
+                    cheap_bag_score = mismatch.cheap_bag_score,
+                    emit_score = mismatch.emit_score,
+                    deferred_min_cheap = mismatch.deferred_min_cheap,
+                    gdp = child.domain().state().gdp,
+                    gdp_for_rates = child.domain().gdp_for_rates(),
+                    action = ?candidate.action,
+                    "PEA beam emit score exceeds best deferred cheap bag score \
+                     (cheap under-ranked a deferred rival; see docs/planning-search.md)"
+                );
             }
+            out.push((child, edge));
         }
         let deferred = take < bag.len();
         domain.note_beam_emit(out.len(), deferred);
         if deferred {
-            // After select_nth, bag[take] is the best deferred score.
             out.push((
                 Self {
                     inner: PeaInner::Expanding {
@@ -265,7 +419,9 @@ impl SearchNode for PeaNode {
             PeaInner::Ready(n) => n.heuristic(),
             PeaInner::Expanding { candidates, .. } => {
                 // Remaining bag was sliced after select_nth: index 0 is the
-                // best deferred `f - g`.
+                // best deferred `edge + h_rank`. That is **not** h_adm; mixing
+                // this into A* f can drop when the child becomes Ready. v1
+                // tolerates — see docs/planning-search.md.
                 candidates.first().map(|c| c.f_minus_g).unwrap_or(0)
             }
         }
@@ -277,9 +433,35 @@ mod tests {
     use super::*;
     use crate::goals::compile;
     use crate::plan::pathfinding::shortest_path;
-    use crate::sim::{EconomyContext, SimConfig};
+    use crate::sim::{Action, EconomyContext, SimConfig};
     use crate::world::{PlanningParts, PlanningState};
     use rust_advanced_heaps::pairing::PairingHeap;
+
+    #[test]
+    fn emit_score_exceeds_deferred_cheap_only_when_worse() {
+        assert!(!emit_score_exceeds_deferred_cheap(10, 10));
+        assert!(!emit_score_exceeds_deferred_cheap(9, 10));
+        assert!(emit_score_exceeds_deferred_cheap(11, 10));
+    }
+
+    #[test]
+    fn emit_deferred_cheap_mismatch_none_without_deferred() {
+        assert_eq!(emit_deferred_cheap_mismatch(5, 20, None), None);
+    }
+
+    #[test]
+    fn emit_deferred_cheap_mismatch_some_when_emit_worse() {
+        assert_eq!(
+            emit_deferred_cheap_mismatch(5, 20, Some(10)),
+            Some(EmitDeferredCheapMismatch {
+                cheap_bag_score: 5,
+                emit_score: 20,
+                deferred_min_cheap: 10,
+            })
+        );
+        assert_eq!(emit_deferred_cheap_mismatch(5, 10, Some(10)), None);
+        assert_eq!(emit_deferred_cheap_mismatch(5, 9, Some(10)), None);
+    }
 
     #[test]
     fn select_top_k_puts_best_prefix_and_bound() {
@@ -491,6 +673,112 @@ mod tests {
             .iter()
             .all(|(n, _)| matches!(n.inner, PeaInner::Ready(_))));
         assert!(!succs.is_empty());
+    }
+
+    /// PEA emit stores anticipated complete GDP on `gdp_for_rates` while the
+    /// search child state stays post-enqueue (pre-complete GDP).
+    #[test]
+    fn pea_emit_sets_gdp_for_rates_from_speculative_delta() {
+        use crate::test_support::{ger_state, logging_and_cs_economy};
+        use vic3_prices::solve;
+
+        let mini = logging_and_cs_economy();
+        // Seed state GDP from a real solve so speculative complete delta is meaningful.
+        let baseline = solve(
+            &mini.economy.base_world,
+            &mini.economy.defs,
+            mini.economy.solve_opts.clone(),
+        );
+        let bumped = solve(
+            &mini
+                .economy
+                .base_world
+                .with_extra_levels("building_logging_camp", 1),
+            &mini.economy.defs,
+            mini.economy.solve_opts.clone(),
+        );
+        let gdp_curr = baseline.buildings[0].revenue;
+        let expected_completed_gdp = bumped.buildings[0].revenue;
+        assert!(
+            expected_completed_gdp > gdp_curr,
+            "fixture must raise GDP on complete"
+        );
+
+        let state = ger_state()
+            .gdp(gdp_curr)
+            .points(5.0)
+            .wood_price(baseline.goods[0].price)
+            .get();
+
+        let target = (gdp_curr + expected_completed_gdp) / 2.0;
+        let config = SimConfig {
+            construction_days: 30,
+            default_construction_cost: 30,
+            max_added_levels_per_type: 2,
+            ..mini.config
+        };
+        let root = Vic3Node::new(
+            state,
+            compile(&format!("gdp >= {target}")).unwrap(),
+            config,
+            mini.economy,
+        );
+
+        let action = Action::QueueBuildingLevel {
+            building: "building_logging_camp".into(),
+            state_id: 1,
+        };
+        let completed = crate::sim::speculative_completed_state(
+            root.state(),
+            &action,
+            root.economy(),
+            root.config(),
+        )
+        .expect("speculative complete for logging enqueue");
+        assert!(
+            (completed.gdp - expected_completed_gdp).abs() < 1e-6,
+            "completed.gdp={} expected={}",
+            completed.gdp,
+            expected_completed_gdp
+        );
+
+        let emit_gdp_delta = completed.gdp - gdp_curr;
+        let anticipated = gdp_curr + emit_gdp_delta;
+        let node = root.clone().with_gdp_for_rates(anticipated);
+        assert!((node.gdp_for_rates() - completed.gdp).abs() < 1e-9);
+        assert!((node.gdp_for_rates() - gdp_curr).abs() > 1e-6);
+
+        let succs = PeaNode::ready(root).successors();
+        let child = succs
+            .iter()
+            .find_map(|(n, _)| {
+                if !matches!(n.inner, PeaInner::Ready(_)) {
+                    return None;
+                }
+                let d = n.domain();
+                let queued =
+                    d.state().constructions.iter().any(|row| {
+                        row.building == "building_logging_camp" && row.state_id == Some(1)
+                    });
+                queued.then_some(d)
+            })
+            .expect("expected Ready PEA child for QueueBuildingLevel logging camp");
+
+        assert!(
+            (child.state().gdp - gdp_curr).abs() < 1e-6,
+            "search successor GDP must stay enqueue-only (state_t / pre-complete), got {}",
+            child.state().gdp
+        );
+        assert!(
+            (child.gdp_for_rates() - anticipated).abs() < 1e-6,
+            "gdp_for_rates={} expected anticipated={}",
+            child.gdp_for_rates(),
+            anticipated
+        );
+        assert!(
+            (child.gdp_for_rates() - child.state().gdp).abs() > 1e-6,
+            "gdp_for_rates must differ from enqueue-only state.gdp"
+        );
     }
 
     /// Live Prussia GDP bump: PEA* day cost must match full A*.

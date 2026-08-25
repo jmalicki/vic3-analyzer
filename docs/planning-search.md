@@ -4,7 +4,9 @@ Notes on planner A* scaling: what is implemented, what is deferred, and what we
 rejected.
 
 The live planning contract remains [`planning.md`](planning.md). Search still
-uses `SearchNode` / `shortest_path` from `rust-advanced-heaps`.
+uses `SearchNode` / `shortest_path` from `rust-advanced-heaps`. Progress-aware
+$h$, PEA ranking, and the **greedy incumbent** ($U$):
+[`planning-progress-heuristic.md`](planning-progress-heuristic.md).
 
 ---
 
@@ -14,12 +16,16 @@ Production `plan` / `plan_with_economy` wrap [`Vic3Node`] in [`PeaNode`]
 (`crates/vic3-planning/src/plan/pea.rs`):
 
 - Build one **national** candidate bag from domain successors (all placements /
-  actions for that current node), scored by \(f - g = \mathrm{edge} + h(\mathrm{child})\).
+  actions for that current node), scored by **cheap**
+  $\mathrm{score}_{\mathrm{cheap}} = e + \text{follow-on guesstimate}$
+  ([`cheap_bag_score`](../crates/vic3-planning/src/plan/progress_h.rs) —
+  not the admissible timing $h_{\mathrm{adm}}$).
 - Choose top [`DEFAULT_PEA_BEAM`] (**16**) with `select_nth` (sort only that
   prefix); defer the rest in one `Expanding` cursor (`Rc<[Candidate]>`).
-- **Apply child only on emit** — bag rows store `action` / `days` / score /
-  deps, not a live [`Vic3Node`].
-- Cursor heuristic is the best deferred \(f - g\) (boundary after `select_nth`).
+- **Apply child only on emit** — bag rows store `action` / `days` / cheap score /
+  deps, not a live [`Vic3Node`]. On emit: speculative complete +
+  $\mathrm{score}_{\mathrm{emit}}$; set `gdp_for_rates` from emit GDP delta.
+- Cursor heuristic is the best deferred **cheap** bag score after `select_nth`.
 - ShopCache stays unranked (score/apply substrate only).
 
 **Beam policy (locked for v1):** fixed width 16 (not ties-only). Motivated by a
@@ -30,6 +36,34 @@ with real planner histograms later.
 This **defers OPEN insertion** per node expand. It is **not** a shared slot
 budget across the whole A* frontier (that would need heaps-crate changes).
 
+### Known: mixed $f$ on the open set (tolerated for v1)
+
+Bag order is **not** a true PEA $f$-layer.
+
+- **Ready** nodes report A* heuristic $h_{\mathrm{adm}}$ (timing DAG on
+  [`Vic3Node`](../crates/vic3-planning/src/plan/vic3.rs)).
+- **Expanding** reports best deferred cheap bag score.
+- Path cost $g$ is always calendar days.
+
+$h_{\mathrm{rank}}$ / cheap bag scores are only a ranking bias. Within one bag,
+later deferred rows are $\ge$ the cursor bound under that score. Across the
+open set, when a deferred child becomes Ready its key $g + h_{\mathrm{adm}}$
+can be **lower** than the Expanding cursor’s earlier key (or lower than nodes
+already expanded). That $f$ drop looks like a negative step: classic PEA
+assumes nondecreasing true $f$ on emit; we do not have that here.
+
+**v1 tolerate:** keep bag scoring on progress/cheap ranks and Expanding’s
+reported heuristic as today. Correctness still leans on day-cost $g$,
+$h_{\mathrm{adm}}$ on Ready nodes, and incumbent $U$ — not on bag order being
+a true $f$-order. A later fix may score bags with $h_{\mathrm{rank}}$ but set
+Expanding’s A* heuristic from $h_{\mathrm{adm}}$ (or
+$\mathrm{edge} + h_{\mathrm{adm}}$) so resume cannot invent $f$ drops.
+
+When a beam emit’s $\mathrm{score}_{\mathrm{emit}}$ is **greater** than the
+best deferred $\mathrm{score}_{\mathrm{cheap}}$, `tracing::warn!`
+(`vic3_planning::pea`) fires — decided by pure
+`emit_deferred_cheap_mismatch` (testable without a tracing subscriber).
+
 ---
 
 ## Deferred (not implemented)
@@ -37,8 +71,8 @@ budget across the whole A* frontier (that would need heaps-crate changes).
 ### EPEA*
 
 [Enhanced Partial Expansion A*](https://www.jair.org/index.php/jair/article/view/10882)
-generates only the current \(f\)-tier via an Operator Selection Function, skipping
-surplus generation. Needs cheap \(\Delta f\) prediction; hard where \(h\) needs
+generates only the current $f$-tier via an Operator Selection Function, skipping
+surplus generation. Needs cheap $\Delta f$ prediction; hard where $h$ needs
 deep apply / economy resolve.
 
 ### Soft / ε partial-order reduction
@@ -69,10 +103,8 @@ helpful-operator ordering may return later as heuristics only.
 ## Suggested later ladder
 
 1. Measure PEA* OPEN size / wall time vs full expand on real goals; retune beam.
-2. EPEA*-style OSF where \(\Delta f\) is cheap (e.g. research simple subgoals).
-3. Tighten progress \(R^{*}\) (real build/PM \(\Delta\) predictions) per
+2. EPEA*-style OSF where $\Delta f$ is cheap (e.g. research simple subgoals).
+3. Tighten progress $R^{*}$ (real build/PM $\Delta$ predictions) per
    [`planning-progress-heuristic.md`](planning-progress-heuristic.md).
-4. Optional later: incremental greedy membership (keep/edit an intended
-   decision sequence). **v1** only simulates and returns scalar \(U\)
-   (`greedy_upper_bound`); full-rebuild on refresh — no editable plan.
+4. Optional later: incremental greedy membership maintain (v1 full-rebuilds $U$).
 5. Optional satisficing preferences — still not dominance theorems.
