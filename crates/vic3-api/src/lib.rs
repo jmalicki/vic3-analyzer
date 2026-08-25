@@ -1844,4 +1844,32 @@ mod tests {
         assert_eq!(again, path);
         let _ = std::fs::remove_dir_all(&tmp);
     }
+
+    fn mock_game_defs_blob() -> Vec<u8> {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mock_game");
+        let defs = load_from_path(&root).expect("mock_game defs");
+        encode_blob(&defs).expect("encode mock_game")
+    }
+
+    fn mock_shortage_fixture() -> Vec<u8> {
+        std::fs::read(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/e2e_saves/mock_shortage.txt"),
+        )
+        .expect("mock_shortage fixture")
+    }
+
+    #[test]
+    fn e2e_mock_shortage_loads_and_exposes_mock_lumber() {
+        let _session = session_lock();
+        clear_analysis();
+        load_analysis_json(&mock_shortage_fixture(), None, &mock_game_defs_blob(), "{}")
+            .expect("load mock_shortage");
+        let prices = loaded_prices_json().expect("prices");
+        assert!(
+            prices.contains("mock_lumber"),
+            "expected mock_lumber in prices: {prices}"
+        );
+        clear_analysis();
+    }
 }
