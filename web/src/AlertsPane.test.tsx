@@ -71,6 +71,55 @@ afterEach(() => {
 })
 
 describe('AlertsPane', () => {
+  it('hides foreign-state alerts when playerCountryId is set', () => {
+    const multi: AlertsResult = {
+      alerts: [
+        {
+          id: 'home',
+          kind: 'unfilled_education',
+          severity: 1,
+          title: 'Home needs more Farmers',
+          summary: 'Player state.',
+          state_id: 1,
+          evidence: [],
+          mitigations: [],
+        },
+        {
+          id: 'rival',
+          kind: 'unfilled_education',
+          severity: 1,
+          title: 'Rivalia needs more Farmers',
+          summary: 'Foreign state.',
+          state_id: 2,
+          evidence: [],
+          mitigations: [],
+        },
+        {
+          id: 'global',
+          kind: 'goods_shortage',
+          severity: 1,
+          title: 'mock_lumber shortage',
+          summary: 'Null state_id stays visible.',
+          evidence: [],
+          mitigations: [],
+        },
+      ],
+      limitations: [],
+    }
+    const home = { id: 1, region_id: 'STATE_HOME', region_name: 'Home', country_id: 10 }
+    const rival = { id: 2, region_id: 'STATE_RIVALIA', region_name: 'Rivalia', country_id: 99 }
+    render(
+      <AlertsPane
+        result={multi}
+        states={[home, rival]}
+        playerCountryId={10}
+      />,
+    )
+    expect(screen.getByText('Home needs more Farmers')).toBeInTheDocument()
+    expect(screen.getByText('mock_lumber shortage')).toBeInTheDocument()
+    expect(screen.queryByText('Rivalia needs more Farmers')).not.toBeInTheDocument()
+  })
+
   it('lists grouped links without embedding Apply on the index', () => {
     render(<AlertsPane result={result} states={[alpaca]} buildings={[rye]} />)
 

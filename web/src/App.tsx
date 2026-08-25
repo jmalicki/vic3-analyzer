@@ -1323,6 +1323,7 @@ function App({ wasmApi }: Props) {
               icons={goodIcons}
               states={result?.states}
               buildings={result?.buildings}
+              playerCountryId={summary?.country_id}
             />
           ) : (
             <p>Alerts appear after a save is priced.</p>
