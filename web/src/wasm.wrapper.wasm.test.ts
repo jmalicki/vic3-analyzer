@@ -168,7 +168,7 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     expect(result.goods.length).toBeGreaterThan(0)
     expect(result.scope).toBe('whole_save_synthetic')
     expect(result.states).toEqual(
-      expect.arrayContaining([expect.objectContaining({ region_id: 'STATE_BRANDENBURG' })]),
+      expect.arrayContaining([expect.objectContaining({ region_name: 'STATE_BRANDENBURG' })]),
     )
     expect(result.buildings).toEqual(
       expect.arrayContaining([

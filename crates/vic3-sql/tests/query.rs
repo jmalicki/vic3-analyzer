@@ -56,7 +56,7 @@ async fn selects_states_and_countries() {
     }
 
     let countries = eng
-        .query("SELECT tag FROM countries")
+        .query("SELECT country_name FROM countries")
         .await
         .expect("countries");
     let tags = countries[0]
@@ -69,7 +69,7 @@ async fn selects_states_and_countries() {
 
     // world_* is registered even when the plaintext fixture is single-country.
     let world = eng
-        .query("SELECT tag FROM world_countries ORDER BY tag")
+        .query("SELECT country_name FROM world_countries ORDER BY country_name")
         .await
         .expect("world_countries");
     assert!(world[0].num_rows() >= 1);
@@ -119,7 +119,7 @@ async fn world_tables_include_foreign_when_present() {
     });
     let prices = solve(&world, &defs, SolveOpts::default());
     assert!(
-        prices.countries.iter().any(|c| c.tag == "FRA"),
+        prices.countries.iter().any(|c| c.country_name == "FRA"),
         "solve should emit FRA"
     );
     assert!(
@@ -246,7 +246,7 @@ async fn join_example_from_docs() {
     // Exact docs example shape (`docs/sql.md`); fixture may have zero shortages.
     let batches = eng
         .query(
-            "SELECT s.state_name, g.good_name, g.shortage, g.price \
+            "SELECT s.state_label, g.good_name, g.shortage, g.price \
              FROM states s \
              JOIN goods_by_state g USING (state_id) \
              WHERE g.shortage > 0 \
@@ -320,41 +320,44 @@ async fn player_tag_scopes_owner_states() {
 }
 
 #[tokio::test]
-async fn region_name_non_null_when_region_id_set() {
+async fn region_label_non_null_when_region_name_set() {
     let eng = engine().await;
     let batches = eng
         .query(
             "SELECT count(*) AS n FROM states \
-             WHERE region_id IS NOT NULL AND region_name IS NULL",
+             WHERE region_name IS NOT NULL AND region_label IS NULL",
         )
         .await
-        .expect("null region_name");
+        .expect("null region_label");
     let count = batches[0]
         .column(0)
         .as_any()
         .downcast_ref::<datafusion::arrow::array::Int64Array>()
         .expect("count")
         .value(0);
-    assert_eq!(count, 0, "region_name must fall back when region_id is set");
+    assert_eq!(
+        count, 0,
+        "region_label must fall back when region_name is set"
+    );
 }
 
 #[tokio::test]
-async fn state_name_non_null_when_region_id_set() {
+async fn state_label_non_null_when_region_name_set() {
     let eng = engine().await;
     let batches = eng
         .query(
             "SELECT count(*) AS n FROM states \
-             WHERE region_id IS NOT NULL AND state_name IS NULL",
+             WHERE region_name IS NOT NULL AND state_label IS NULL",
         )
         .await
-        .expect("null state_name");
+        .expect("null state_label");
     let count = batches[0]
         .column(0)
         .as_any()
         .downcast_ref::<datafusion::arrow::array::Int64Array>()
         .expect("count")
         .value(0);
-    assert_eq!(count, 0, "state_name must be set when region_id is set");
+    assert_eq!(count, 0, "state_label must be set when region_name is set");
 }
 
 #[tokio::test]

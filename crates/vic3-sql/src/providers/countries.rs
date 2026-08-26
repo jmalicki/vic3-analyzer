@@ -19,7 +19,7 @@ use super::pushdown::{matches_str, matches_u32, PushSupport};
 const PUSH: PushSupport = PushSupport {
     eq_u32: &["country_id"],
     eq_i32: &[],
-    eq_str: &["tag"],
+    eq_str: &["country_name"],
     range_str: &[],
 };
 
@@ -42,24 +42,24 @@ impl CountriesProvider {
     fn batch(&self, filters: &[Expr]) -> DfResult<RecordBatch> {
         let preds = PUSH.collect_preds(filters);
         let mut country_id = UInt32Builder::new();
-        let mut tag = StringBuilder::new();
-        let mut name = StringBuilder::new();
+        let mut country_name = StringBuilder::new();
+        let mut country_label = StringBuilder::new();
 
         for c in &self.binding.prices.countries {
-            if !country_tag_in_scope(self.scope, self.binding.world.as_ref(), &c.tag) {
+            if !country_tag_in_scope(self.scope, self.binding.world.as_ref(), &c.country_name) {
                 continue;
             }
             if !matches_u32(&preds, "country_id", c.id) {
                 continue;
             }
-            if !matches_str(&preds, "tag", &c.tag) {
+            if !matches_str(&preds, "country_name", &c.country_name) {
                 continue;
             }
             country_id.append_value(c.id);
-            tag.append_value(&c.tag);
-            match &c.name {
-                Some(n) => name.append_value(n),
-                None => name.append_null(),
+            country_name.append_value(&c.country_name);
+            match &c.country_label {
+                Some(n) => country_label.append_value(n),
+                None => country_label.append_null(),
             }
         }
 
@@ -67,8 +67,8 @@ impl CountriesProvider {
             Arc::clone(&self.schema),
             vec![
                 Arc::new(country_id.finish()),
-                Arc::new(tag.finish()),
-                Arc::new(name.finish()),
+                Arc::new(country_name.finish()),
+                Arc::new(country_label.finish()),
             ],
         )
         .map_err(Into::into)

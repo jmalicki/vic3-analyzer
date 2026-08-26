@@ -377,7 +377,7 @@ export function CountryFlag({
   }
   const country = countries.find((row) => row.id === countryId)
   if (!country) return null
-  const title = country.name || country.tag
+  const title = country.country_label || country.country_name
   if (country.flag_data_url) {
     return (
       <img
@@ -392,7 +392,7 @@ export function CountryFlag({
   }
   return (
     <span className="country-tag" title={title}>
-      {country.tag}
+      {country.country_name}
     </span>
   )
 }
@@ -410,7 +410,7 @@ function StatesTable({
   const sorted = useMemo(
     () =>
       sortRows(rows, sort, (row, key) => {
-        if (key === 'name') return displayId(row.state?.region_id || `State ${row.state_id}`)
+        if (key === 'name') return displayId(row.state?.region_name || `State ${row.state_id}`)
         if (key === 'delta') return percentFromBase(row.price, row.base)
         return row[key]
       }),
@@ -438,7 +438,7 @@ function StatesTable({
                     playerCountryId={playerCountryId}
                     countries={countries}
                   />
-                  {displayId(row.state?.region_id || `State ${row.state_id}`)}
+                  {displayId(row.state?.region_name || `State ${row.state_id}`)}
                 </a>
               </th>
               <td>{row.price.toFixed(2)}</td>
@@ -888,9 +888,9 @@ function StateInformation({
 }) {
   return (
     <dl className="state-information">
-      <div><dt>Region</dt><dd>{displayId(state?.region_id || '—')}</dd></div>
-      <div><dt>Region id</dt><dd>{state?.region_id || '—'}</dd></div>
-      <div><dt>Country</dt><dd>{owner?.name || owner?.tag || '—'}</dd></div>
+      <div><dt>Region</dt><dd>{displayId(state?.region_name || '—')}</dd></div>
+      <div><dt>Region id</dt><dd>{state?.region_name || '—'}</dd></div>
+      <div><dt>Country</dt><dd>{owner?.country_label || owner?.country_name || '—'}</dd></div>
       <div><dt>Market id</dt><dd>{state?.market_id ?? '—'}</dd></div>
       <div><dt>Arable land</dt><dd>{state?.arable_land?.toLocaleString() ?? '—'}</dd></div>
       <div>
@@ -950,7 +950,7 @@ export function StatePage({
   const qualifications = stateQualifications.filter((row) => row.state_id === stateId)
   const needs = stateNeeds.filter((row) => row.state_id === stateId)
   const localGoods = stateGoods.filter((row) => row.state_id === stateId)
-  const name = state?.state_name || displayId(state?.region_id || `State ${stateId}`)
+  const name = state?.state_label || displayId(state?.region_name || `State ${stateId}`)
   const owner = countries.find((country) => country.id === state?.country_id)
   const tabs: Array<{ id: StateTab; label: string }> = [
     { id: 'overview', label: 'Overview' },
@@ -977,7 +977,7 @@ export function StatePage({
           />
           <div>
             <h2 id="state-heading">{name}</h2>
-            <span>{owner?.name || owner?.tag || 'Owner unavailable'}</span>
+            <span>{owner?.country_label || owner?.country_name || 'Owner unavailable'}</span>
           </div>
         </div>
       </div>
@@ -1099,7 +1099,7 @@ export function BuildingPage({
   const state = states.find((row) => row.id === building?.state_id)
   const type = buildingTypes.find((row) => row.id === building?.type_id)
   const name = type?.name || displayId(building?.type_id || `Building ${buildingId}`)
-  const stateName = state?.state_name || displayId(state?.region_id || (state ? `State ${state.id}` : 'State'))
+  const stateName = state?.state_label || displayId(state?.region_name || (state ? `State ${state.id}` : 'State'))
   const employment = building && building.level > 0
     ? Math.max(0, Math.min(1, building.staffing / building.level))
     : 0

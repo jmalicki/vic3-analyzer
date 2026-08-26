@@ -7,19 +7,19 @@ import type { PricesResult } from './types'
 const result: PricesResult = {
   goods: [{ name: 'apples', label: 'Apples', base: 20, price: 15, buy: 5, sell: 7 }],
   countries: [
-    { id: 10, tag: 'ALP', name: 'Alpacania' },
-    { id: 20, tag: 'BDG', name: 'Badgeria' },
+    { id: 10, country_name: 'ALP', country_label: 'Alpacania' },
+    { id: 20, country_name: 'BDG', country_label: 'Badgeria' },
   ],
   states: [
     {
       id: 1,
-      region_id: 'STATE_ALPACA',
-      state_name: 'Alpaca',
+      region_name: 'STATE_ALPACA',
+      state_label: 'Alpaca',
       country_id: 10,
       market_id: 1,
     },
-    { id: 2, region_id: 'STATE_ZEBRA', state_name: 'Zebra', country_id: 10, market_id: 2 },
-    { id: 3, region_id: 'STATE_BADGER', state_name: 'Badger', country_id: 20, market_id: 1 },
+    { id: 2, region_name: 'STATE_ZEBRA', state_label: 'Zebra', country_id: 10, market_id: 2 },
+    { id: 3, region_name: 'STATE_BADGER', state_label: 'Badger', country_id: 20, market_id: 1 },
   ],
   buildings: [
     {

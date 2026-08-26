@@ -50,21 +50,21 @@ const IRON_ICON = 'data:image/png;base64,IRONICON'
 const desktopPrices = {
   goods: [{ name: 'iron', label: 'Iron', base: 40, price: 43.5, buy: 120, sell: 100 }],
   countries: [
-    { id: 10, tag: 'ALP', name: 'Alpacania', flag_data_url: 'data:image/png;base64,FLAGALP' },
-    { id: 20, tag: 'BDG', name: 'Badgeria', flag_data_url: FLAG_PNG },
+    { id: 10, country_name: 'ALP', country_label: 'Alpacania', flag_data_url: 'data:image/png;base64,FLAGALP' },
+    { id: 20, country_name: 'BDG', country_label: 'Badgeria', flag_data_url: FLAG_PNG },
   ],
   states: [
     {
       id: 1,
-      region_id: 'STATE_ALPACA',
-      state_name: 'Alpaca',
+      region_name: 'STATE_ALPACA',
+      state_label: 'Alpaca',
       country_id: 10,
       market_id: 1,
     },
     {
       id: 3,
-      region_id: 'STATE_BADGER',
-      state_name: 'Badger',
+      region_name: 'STATE_BADGER',
+      state_label: 'Badger',
       country_id: 20,
       market_id: 1,
     },

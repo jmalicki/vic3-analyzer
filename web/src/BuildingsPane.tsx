@@ -92,7 +92,7 @@ function buildRows(result: PricesResult, buildings: BuildingEconomics[]): TypeRo
 
 function stateName(result: PricesResult, stateId?: number): string {
   const state = result.states?.find((row) => row.id === stateId)
-  return state?.state_name || displayId(state?.region_id || (stateId != null ? `State ${stateId}` : 'State'))
+  return state?.state_label || displayId(state?.region_name || (stateId != null ? `State ${stateId}` : 'State'))
 }
 
 function sameIds(left: string[], right: string[]): boolean {

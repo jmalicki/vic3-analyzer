@@ -19,7 +19,7 @@ function displayBuilding(order: ConstructionOrderSnapshot): string {
 
 function OrderCard({ order, icons }: { order: ConstructionOrderSnapshot; icons?: DefsIcons }) {
   const facts: string[] = []
-  if (order.state_name) facts.push(order.state_name)
+  if (order.state_label) facts.push(order.state_label)
   else if (order.state_id != null) facts.push(`State ${order.state_id}`)
   if (order.remaining != null) facts.push(`${order.remaining.toLocaleString()} remaining`)
   return (

@@ -9,7 +9,7 @@ const EXAMPLES = [
   ["shortage", "SELECT good, shortage, price FROM goods WHERE shortage > 0 ORDER BY shortage DESC LIMIT 15;"],
   [
     "underemployed",
-    "SELECT s.state_id, s.state_name, m.action, m.title\nFROM states s\nJOIN suggest_mitigations() m USING (state_id)\nWHERE is_underemployed(s.state_id)\nORDER BY m.rank\nLIMIT 20;",
+    "SELECT s.state_id, s.state_label, m.action, m.title\nFROM states s\nJOIN suggest_mitigations() m USING (state_id)\nWHERE is_underemployed(s.state_id)\nORDER BY m.rank\nLIMIT 20;",
   ],
   ["plan", "SELECT step, day, action, detail FROM plan('research(tech=nitroglycerin)') ORDER BY step;"],
 ]

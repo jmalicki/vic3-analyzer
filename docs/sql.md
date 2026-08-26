@@ -107,15 +107,15 @@ Identity and geography for states in scope of the active save (player-owned unde
 | Column | Notes |
 | --- | --- |
 | `state_id` | Integer Paradox id; **primary key** for joins |
-| `region_id` | Non-localized region/script key when available (`region` string as stored) |
-| `region_name` | Bare geographic label from defs (`region_id` → loc / humanize). Not stored on `StateInfo` — resolved at SQL scan. Same for all co-owners of a split region |
-| `state_name` | Per-slice display label from prices emit (bare region, or demonym-prefixed for minority holders, e.g. `Prussian Rhineland`) |
-| `owner_tag` | Country tag |
+| `region_name` | Non-localized region/script key when available (`region` string as stored) |
+| `region_label` | Bare geographic label from defs (`region_name` → loc / humanize). Same for all co-owners of a split region |
+| `state_label` | Per-slice display label from prices emit (bare region, or demonym-prefixed for minority holders, e.g. `Prussian Rhineland`) |
+| `owner_tag` | Country tag (`country_name`) |
 | `market_id` | If modeled |
 | `infrastructure` | As exposed in prices result |
 | `arable_land` | If present |
 
-**Storage today (Rust):** `World.states` / `PricesResult.states` are a **`Vec` of rows**, each with its own `id: u32`. Sparse Paradox ids. Save IR: `HashMap<u32, Option<State>>`. `StateInfo` stores `region_id` + `state_name` (not `region_name`). SQL may build a **HashMap** for Exact `region_id` / `region_name` / `state_name` equality at bind (not range Exact).
+**Storage today (Rust):** `World.states` / `PricesResult.states` are a **`Vec` of rows**, each with its own `id: u32`. Sparse Paradox ids. Save IR: `HashMap<u32, Option<State>>`. `StateInfo` stores `region_name` + `region_label` + `state_label`. SQL may build a **HashMap** for Exact `region_name` / `region_label` / `state_label` equality at bind (not range Exact).
 
 **Ordering:** prefer scan ordered by `state_id` for sort-merge on id joins.
 
@@ -276,8 +276,8 @@ Profession stock vs jobs (from `state_qualifications`).
 | Column | Notes |
 | --- | --- |
 | `country_id` | |
-| `tag` | **key** |
-| `name` | |
+| `country_name` | Tag / script key; **key** |
+| `country_label` | Localized display name |
 
 ### `constructions`
 
@@ -331,7 +331,7 @@ Examples:
 
 **Exact vs Inexact:** Exact means every returned row satisfies the predicate (DF will not re-filter). Prefer Exact for our lookups. Use Inexact only for true over-fetch pruning, not because the structure is a hash map.
 
-**Labels:** Expose **both** non-localized script/region ids and localized display names as separate columns (e.g. `good_name` + `good_label`, `region_id` + `region_name` for bare geography, `state_name` for the owned-slice display label). Index pushdown on whichever side we have a map for; typically script id is denser/stabler for joins, localized name for human/`WHERE` filters (Exact equality only unless a btree exists).
+**Labels:** Expose **both** non-localized script/region ids and localized display names as separate columns (e.g. `good_name` + `good_label`, `region_name` + `region_label` for bare geography, `state_label` for the owned-slice display label). Index pushdown on whichever side we have a map for; typically script id is denser/stabler for joins, localized name for human/`WHERE` filters (Exact equality only unless a btree exists).
 
 Other rules:
 
@@ -495,7 +495,7 @@ One row per simple subgoal for readiness (mirrors gaps CLI/UI).
 -- After use_save({ "name": "autosave" }) or selector latest
 -- Short names are already player-scoped; use world_* for save-wide rows.
 
-SELECT s.state_name, g.good_name, g.shortage, g.price
+SELECT s.state_label, g.good_name, g.shortage, g.price
 FROM states s
 JOIN goods_by_state g USING (state_id)
 WHERE g.shortage > 0
@@ -503,7 +503,7 @@ ORDER BY g.shortage DESC
 LIMIT 20;
 
 -- Full-save geography (not player-scoped):
--- SELECT region_name, state_name, owner_tag FROM world_states ORDER BY state_id LIMIT 20;
+-- SELECT region_label, state_label, owner_tag FROM world_states ORDER BY state_id LIMIT 20;
 
 SELECT kind, severity, count(*) AS n
 FROM alerts()
@@ -524,7 +524,7 @@ SELECT good_name, alert_id, kind, shortage, price
 FROM shortage_analysis('engines');
 
 -- Underemployed domestic states (no owner_tag = player_tag() needed):
-SELECT state_id, state_name
+SELECT state_id, state_label
 FROM states
 WHERE is_underemployed(state_id);
 
@@ -533,7 +533,7 @@ FROM alerts()
 WHERE kind = 'underemployed';
 
 -- Heuristic mitigations for those states (suggest_mitigations is player-scoped too):
-SELECT s.state_name, m.action, m.building, m.title
+SELECT s.state_label, m.action, m.building, m.title
 FROM states s
 JOIN suggest_mitigations() m USING (state_id)
 WHERE is_underemployed(s.state_id)
@@ -565,7 +565,7 @@ The Tauri **Advanced Query** tab uses this same dialect:
 2. ~~Mitigations as JSON columns vs child TVFs.~~ **Locked:** `evidence` / `mitigations` JSON text on `alerts()` / `shortage_analysis()`; staffing via `building_staffing(state_id)`.
 3. ~~Whether unqualified names require `use_save` or may fall back to `latest.*` automatically.~~ **Locked:** unqualified ≡ `active.*`; require `use_save` / `bind` (`SqlError::Unbound`). No auto-fallback to `latest.*`.
 4. Military `formations` column list (wait for stable military JSON).
-5. Split-state display: use `state_name` for UI/titles; `region_name` is bare geography shared by co-owners (`region_id` is the join key). Short names are already player-owned; `world_states` remains full-save.
+5. Split-state display: use `state_label` for UI/titles; `region_label` is bare geography shared by co-owners (`region_name` is the join key). Short names are already player-owned; `world_states` remains full-save.
 6. Which DF array helpers we document for `TEXT[]` contains (`array_has` vs `array_has_any` vs custom UDF) — IO element type is locked: `List<Struct{good_name, good_label, qty}>` + `unnest(unnest(…))`.
 7. Whether convenience UNNEST views (`building_goods`, `production_method_goods`) ship in v1 or stay doc-only patterns.
 

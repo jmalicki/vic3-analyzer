@@ -72,7 +72,7 @@ async fn stub_use_save_then_active_queries() {
     assert!(!loaded.value(0));
 
     let unbound = eng
-        .query("SELECT tag FROM countries")
+        .query("SELECT country_name FROM countries")
         .await
         .expect_err("unbound");
     assert!(
@@ -93,7 +93,7 @@ async fn stub_use_save_then_active_queries() {
     assert_eq!(result.country.as_deref(), Some("GER"));
 
     let countries = eng
-        .query("SELECT tag FROM active.countries WHERE tag = 'GER'")
+        .query("SELECT country_name FROM active.countries WHERE country_name = 'GER'")
         .await
         .expect("active.countries");
     let tags = countries[0]
@@ -104,7 +104,7 @@ async fn stub_use_save_then_active_queries() {
     assert_eq!(tags.value(0), "GER");
 
     let unqualified = eng
-        .query("SELECT tag FROM countries WHERE tag = 'GER'")
+        .query("SELECT country_name FROM countries WHERE country_name = 'GER'")
         .await
         .expect("unqualified countries");
     assert_eq!(unqualified[0].num_rows(), 1);
@@ -253,7 +253,7 @@ async fn selectors_and_latest_views_do_not_mutate_active() {
     assert_eq!(active.value(0), "autosave");
 
     let latest_countries = eng
-        .query("SELECT tag FROM latest.countries WHERE tag = 'GER'")
+        .query("SELECT country_name FROM latest.countries WHERE country_name = 'GER'")
         .await
         .expect("latest.countries");
     assert_eq!(latest_countries[0].num_rows(), 1);

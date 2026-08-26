@@ -9,8 +9,9 @@ export interface GoodPrice {
 
 export interface StateInfo {
   id: number
-  region_id?: string
-  state_name?: string
+  region_name?: string
+  region_label?: string
+  state_label?: string
   country_id?: number
   market_id?: number
   arable_land?: number
@@ -143,8 +144,8 @@ export interface MarketInputs {
 
 export interface CountryInfo {
   id: number
-  tag: string
-  name?: string
+  country_name: string
+  country_label?: string
   adjective?: string
   flag_coa?: string
   flag_data_url?: string
@@ -397,7 +398,7 @@ export interface ConstructionOrderSnapshot {
   /** Present as JSON `null` when missing on the order. */
   country_id: number | null
   state_id: number | null
-  state_name: string | null
+  state_label: string | null
   building: string
   building_name: string | null
   remaining: number | null

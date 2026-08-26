@@ -34,11 +34,11 @@ const result: PricesResult = {
     { name: 'apples', label: 'Apples', base: 20, price: 15, buy: 5, sell: 7 },
   ],
   states: [
-    { id: 2, region_id: 'STATE_ZEBRA', market_id: 1 },
+    { id: 2, region_name: 'STATE_ZEBRA', market_id: 1 },
     {
       id: 1,
-      region_id: 'STATE_ALPACA',
-      state_name: 'Alpaca',
+      region_name: 'STATE_ALPACA',
+      state_label: 'Alpaca',
       market_id: 1,
       arable_land: 10,
       infrastructure: 22,
@@ -133,20 +133,20 @@ const result: PricesResult = {
 const scopedResult: PricesResult = {
   ...result,
   countries: [
-    { id: 10, tag: 'ALP', name: 'Alpacania' },
+    { id: 10, country_name: 'ALP', country_label: 'Alpacania' },
     {
       id: 20,
-      tag: 'BDG',
-      name: 'Badgeria',
+      country_name: 'BDG',
+      country_label: 'Badgeria',
       flag_coa: 'BDG',
       flag_data_url: 'data:image/png;base64,FLAGBDG',
     },
   ],
   states: [
-    { id: 1, region_id: 'STATE_ALPACA', country_id: 10, market_id: 1 },
-    { id: 2, region_id: 'STATE_ZEBRA', country_id: 10, market_id: 2 },
-    { id: 3, region_id: 'STATE_BADGER', country_id: 20, market_id: 1 },
-    { id: 4, region_id: 'STATE_YAK', country_id: 20, market_id: 3 },
+    { id: 1, region_name: 'STATE_ALPACA', country_id: 10, market_id: 1 },
+    { id: 2, region_name: 'STATE_ZEBRA', country_id: 10, market_id: 2 },
+    { id: 3, region_name: 'STATE_BADGER', country_id: 20, market_id: 1 },
+    { id: 4, region_name: 'STATE_YAK', country_id: 20, market_id: 3 },
   ],
   state_goods: [
     stateGood(1, 35, 2, 7),

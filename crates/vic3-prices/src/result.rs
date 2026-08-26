@@ -174,8 +174,8 @@ pub struct GoodPrice {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CountryInfo {
     pub id: u32,
-    pub tag: String,
-    pub name: Option<String>,
+    pub country_name: String,
+    pub country_label: Option<String>,
     /// Localized demonym from `{TAG}_ADJ` (e.g. Prussian for PRU).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adjective: Option<String>,
@@ -188,9 +188,12 @@ pub struct CountryInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateInfo {
     pub id: u32,
-    pub region_id: Option<String>,
+    pub region_name: Option<String>,
+    /// Bare geographic label from defs (same for co-owners of a split region).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region_label: Option<String>,
     /// Display label for this owned slice (bare region, or demonym-prefixed when minority).
-    pub state_name: Option<String>,
+    pub state_label: Option<String>,
     pub country_id: Option<u32>,
     pub market_id: Option<u32>,
     pub arable_land: Option<f64>,

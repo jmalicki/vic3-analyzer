@@ -18,8 +18,8 @@ const rye: BuildingEconomics = {
   short_inputs: [],
 }
 
-const alpaca = { id: 1, region_id: 'STATE_ALPACA', state_name: 'Alpaca' }
-const zebra = { id: 2, region_id: 'STATE_ZEBRA', state_name: 'Zebra' }
+const alpaca = { id: 1, region_name: 'STATE_ALPACA', state_label: 'Alpaca' }
+const zebra = { id: 2, region_name: 'STATE_ZEBRA', state_label: 'Zebra' }
 
 const result: AlertsResult = {
   alerts: [
@@ -106,8 +106,8 @@ describe('AlertsPane', () => {
       ],
       limitations: [],
     }
-    const home = { id: 1, region_id: 'STATE_HOME', region_name: 'Home', country_id: 10 }
-    const rival = { id: 2, region_id: 'STATE_RIVALIA', region_name: 'Rivalia', country_id: 99 }
+    const home = { id: 1, region_name: 'STATE_HOME', state_label: 'Home', country_id: 10 }
+    const rival = { id: 2, region_name: 'STATE_RIVALIA', state_label: 'Rivalia', country_id: 99 }
     render(
       <AlertsPane
         result={multi}

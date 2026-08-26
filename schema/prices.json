@@ -167,6 +167,15 @@
             "null"
           ]
         },
+        "country_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "country_name": {
+          "type": "string"
+        },
         "flag_coa": {
           "description": "Selected coat-of-arms id when a current flag could be determined.",
           "type": [
@@ -185,20 +194,11 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
-        },
-        "name": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "tag": {
-          "type": "string"
         }
       },
       "required": [
         "id",
-        "tag"
+        "country_name"
       ],
       "type": "object"
     },
@@ -495,13 +495,20 @@
             "null"
           ]
         },
-        "region_id": {
+        "region_label": {
+          "description": "Bare geographic label from defs (same for co-owners of a split region).",
           "type": [
             "string",
             "null"
           ]
         },
-        "state_name": {
+        "region_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state_label": {
           "description": "Display label for this owned slice (bare region, or demonym-prefixed when minority).",
           "type": [
             "string",

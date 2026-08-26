@@ -2,7 +2,7 @@
 //!
 //! Prefer defs localization when present; otherwise humanize the id
 //! (`STATE_BRANDENBURG` → `Brandenburg`) so SQL `region_name` (lookup),
-//! `state_name` (owned-slice display), and alert titles share one dialect.
+//! `state_label` (owned-slice display), and alert titles share one dialect.
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -52,7 +52,7 @@ pub fn pretty_id(id: &str) -> String {
 ///
 /// Majority = largest [`StateInfo::arable_land`] (missing as 0); ties keep the
 /// lowest `state.id` unprefixed. Matches Vic3's "Prussian Rhineland" pattern
-/// without parsing province lists. Mutates [`StateInfo::state_name`].
+/// without parsing province lists. Mutates [`StateInfo::state_label`].
 pub(crate) fn apply_split_state_demonyms(
     states: &mut [StateInfo],
     tags_by_country: &HashMap<u32, &str>,
@@ -60,7 +60,7 @@ pub(crate) fn apply_split_state_demonyms(
 ) {
     let mut by_region: HashMap<&str, Vec<usize>> = HashMap::new();
     for (i, state) in states.iter().enumerate() {
-        if let Some(region) = state.region_id.as_deref() {
+        if let Some(region) = state.region_name.as_deref() {
             by_region.entry(region).or_default().push(i);
         }
     }
@@ -90,7 +90,7 @@ pub(crate) fn apply_split_state_demonyms(
             let Some(adj) = country_adjective(defs, tag) else {
                 continue;
             };
-            let Some(name) = states[i].state_name.as_deref().filter(|n| !n.is_empty()) else {
+            let Some(name) = states[i].state_label.as_deref().filter(|n| !n.is_empty()) else {
                 continue;
             };
             renames.push((i, format!("{adj} {name}")));
@@ -98,7 +98,7 @@ pub(crate) fn apply_split_state_demonyms(
     }
 
     for (i, name) in renames {
-        states[i].state_name = Some(name);
+        states[i].state_label = Some(name);
     }
 }
 
@@ -127,8 +127,9 @@ mod tests {
     fn state(id: u32, region: &str, name: &str, country_id: u32, arable: Option<f64>) -> StateInfo {
         StateInfo {
             id,
-            region_id: Some(region.into()),
-            state_name: Some(name.into()),
+            region_name: Some(region.into()),
+            region_label: Some(name.into()),
+            state_label: Some(name.into()),
             country_id: Some(country_id),
             market_id: None,
             arable_land: arable,
@@ -170,9 +171,9 @@ mod tests {
         ];
         let tags: HashMap<u32, &str> = [(1, "FRA"), (2, "PRU")].into_iter().collect();
         apply_split_state_demonyms(&mut states, &tags, &defs);
-        assert_eq!(states[0].state_name.as_deref(), Some("Rhineland"));
-        assert_eq!(states[1].state_name.as_deref(), Some("Prussian Rhineland"));
-        assert_eq!(states[2].state_name.as_deref(), Some("Other"));
+        assert_eq!(states[0].state_label.as_deref(), Some("Rhineland"));
+        assert_eq!(states[1].state_label.as_deref(), Some("Prussian Rhineland"));
+        assert_eq!(states[2].state_label.as_deref(), Some("Other"));
     }
 
     #[test]
@@ -184,8 +185,8 @@ mod tests {
         ];
         let tags: HashMap<u32, &str> = [(1, "FRA"), (2, "PRU")].into_iter().collect();
         apply_split_state_demonyms(&mut states, &tags, &defs);
-        assert_eq!(states[0].state_name.as_deref(), Some("Prussian Rhineland"));
-        assert_eq!(states[1].state_name.as_deref(), Some("Rhineland"));
+        assert_eq!(states[0].state_label.as_deref(), Some("Prussian Rhineland"));
+        assert_eq!(states[1].state_label.as_deref(), Some("Rhineland"));
     }
 
     #[test]
@@ -197,7 +198,7 @@ mod tests {
         ];
         let tags: HashMap<u32, &str> = [(1, "FRA"), (2, "PRU")].into_iter().collect();
         apply_split_state_demonyms(&mut states, &tags, &defs);
-        assert_eq!(states[0].state_name.as_deref(), Some("Rhineland"));
-        assert_eq!(states[1].state_name.as_deref(), Some("Rhineland"));
+        assert_eq!(states[0].state_label.as_deref(), Some("Rhineland"));
+        assert_eq!(states[1].state_label.as_deref(), Some("Rhineland"));
     }
 }

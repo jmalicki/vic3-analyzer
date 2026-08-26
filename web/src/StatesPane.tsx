@@ -92,7 +92,7 @@ function buildRows(result: PricesResult): StateListRow[] {
     const dependents = pops.reduce((sum, pop) => sum + (pop.dependents ?? 0), 0)
     return {
       state,
-      name: state.state_name || displayId(state.region_id || `State ${state.id}`),
+      name: state.state_label || displayId(state.region_name || `State ${state.id}`),
       population: workforce + dependents,
       marketAccess: marketAccess(state.infrastructure, state.infrastructure_usage),
       infrastructure: state.infrastructure,
