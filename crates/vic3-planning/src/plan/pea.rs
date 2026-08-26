@@ -91,19 +91,27 @@ fn candidate_cmp(a: &Candidate, b: &Candidate) -> Ordering {
         .then_with(|| a.tie.cmp(&b.tie))
 }
 
-/// Partition so the best `k` candidates are in `bag[..k]` (sorted); the rest
-/// stay unordered with `bag[k]` equal to the best deferred score when present.
-fn select_top_k(bag: &mut [Candidate], k: usize) {
-    if bag.is_empty() || k == 0 {
-        return;
+/// In-place top‑`max_beam` partition — does **not** shrink `bag`.
+///
+/// After return, `bag.len()` is unchanged. The selected beam sits in
+/// `bag[..beam_len]` (sorted); `bag[beam_len..]` is the deferred remainder
+/// (unordered, except `bag[beam_len]` lower-bounds deferred scores when a tail
+/// exists).
+///
+/// Returns `beam_len = min(max_beam, bag.len())`: configured width, or the
+/// whole bag when there are fewer candidates than the beam.
+fn select_top_k(bag: &mut [Candidate], max_beam: usize) -> usize {
+    let beam_len = std::cmp::min(max_beam, bag.len());
+    if beam_len == 0 {
+        return 0;
     }
-    let k = k.min(bag.len());
-    if bag.len() > k {
-        bag.select_nth_unstable_by(k, candidate_cmp);
-        bag[..k].sort_unstable_by(candidate_cmp);
+    if bag.len() > beam_len {
+        bag.select_nth_unstable_by(beam_len, candidate_cmp);
+        bag[..beam_len].sort_unstable_by(candidate_cmp);
     } else {
         bag.sort_unstable_by(candidate_cmp);
     }
+    beam_len
 }
 
 /// PEA* search node: domain [`Vic3Node`] or an expansion cursor over a
@@ -183,28 +191,26 @@ impl PeaNode {
         mut bag: Vec<Candidate>,
         already_emitted: usize,
     ) -> Vec<(Self, u32)> {
-        let beam_width: usize = std::cmp::max(DEFAULT_PEA_BEAM, 1);
         if bag.is_empty() {
             return Vec::new();
         }
-        select_top_k(&mut bag, beam_width);
-        let take: usize = std::cmp::min(beam_width, bag.len());
-        let mut out = Vec::with_capacity(take.saturating_add(1));
-        for candidate in &bag[..take] {
+        let beam_len = select_top_k(&mut bag, DEFAULT_PEA_BEAM);
+        let has_remainder = beam_len < bag.len();
+        let mut out = Vec::with_capacity(beam_len + usize::from(has_remainder));
+        for candidate in &bag[..beam_len] {
             if let Some(edge) = Self::emit_candidate(domain, candidate) {
                 out.push(edge);
             }
         }
-        let deferred = take < bag.len();
-        domain.note_beam_emit(out.len(), deferred);
-        if deferred {
-            // After select_nth, bag[take] is the best deferred score.
+        domain.note_beam_emit(out.len(), has_remainder);
+        if has_remainder {
+            // Tail is still in `bag` (select_top_k does not truncate).
             out.push((
                 Self {
                     inner: PeaInner::Expanding {
                         domain: domain.clone(),
-                        candidates: Rc::from(bag[take..].to_vec()),
-                        emitted: already_emitted.saturating_add(take),
+                        candidates: Rc::from(bag[beam_len..].to_vec()),
+                        emitted: already_emitted + beam_len,
                     },
                 },
                 0,
@@ -302,7 +308,7 @@ mod tests {
     use rust_advanced_heaps::pairing::PairingHeap;
 
     #[test]
-    fn select_top_k_puts_best_prefix_and_bound() {
+    fn select_top_k_puts_best_beam_and_bound() {
         let mut bag: Vec<Candidate> = [30u32, 10, 40, 20, 50, 15]
             .into_iter()
             .enumerate()
@@ -316,12 +322,16 @@ mod tests {
                 tie: i as u64,
             })
             .collect();
-        select_top_k(&mut bag, 3);
-        let prefix: Vec<u32> = bag[..3].iter().map(|c| c.f_minus_g).collect();
-        assert_eq!(prefix, vec![10, 15, 20]);
-        let deferred_min = bag[3].f_minus_g;
+        let beam_len = select_top_k(&mut bag, 3);
+        assert_eq!(beam_len, 3);
+        assert_eq!(bag.len(), 6, "select_top_k partitions; it does not shrink");
+        let head: Vec<u32> = bag[..beam_len].iter().map(|c| c.f_minus_g).collect();
+        assert_eq!(head, vec![10, 15, 20]);
+        let deferred_min = bag[beam_len].f_minus_g;
         assert_eq!(deferred_min, 30);
-        assert!(bag[4..].iter().all(|c| c.f_minus_g >= deferred_min));
+        assert!(bag[beam_len + 1..]
+            .iter()
+            .all(|c| c.f_minus_g >= deferred_min));
     }
 
     #[test]
