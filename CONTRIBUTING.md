@@ -66,6 +66,7 @@ Deep technical specifications and architectural contracts are organized under `d
 
 | Document | Area | Description |
 | :--- | :--- | :--- |
+| **[Coding conventions](docs/coding-conventions.md)** | Style | Entity field naming (`*_id` / `*_name` / `*_label`) and related house style. |
 | **[Architecture Specification](docs/architecture.md)** | Architecture | Crate boundaries, dataflow pipeline, asset decoder, and WASM bridge. |
 | **[Mathematical Invariants](docs/invariants.md)** | Correctness | Formal property-tested invariants (I1–I9) and solver guarantees. |
 | **[Dependency Registry](docs/libraries.md)** | Dependencies | Crate selection criteria, locked libraries, and WASM constraints. |

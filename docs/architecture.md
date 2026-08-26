@@ -4,6 +4,9 @@
 
 The core analysis engine is transport-independent: analytical results and option structs are shared identically across the CLI, Web UI, Desktop GUI, and MCP server.
 
+Contributor field-naming rules (`*_id` / `*_name` / `*_label`) live in
+**[Coding conventions](coding-conventions.md)**.
+
 ---
 
 ## Crate Responsibilities
