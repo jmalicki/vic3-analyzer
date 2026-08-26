@@ -400,7 +400,7 @@ mod tests {
                         army_power_projection: Some(0.0),
                         army_pp_baseline: Some(0.0),
                         mil_buildings: vec![ModeledMilBuilding {
-                            type_id: BUILDING_BARRACKS.into(),
+                            building_type_id: BUILDING_BARRACKS.into(),
                             levels,
                             staffing: 0.0,
                         }],

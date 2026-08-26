@@ -294,7 +294,7 @@ function App({ wasmApi }: Props) {
   const [label, setLabel] = useState('')
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [whatIfOpts, setWhatIfOpts] = useState<Record<string, unknown>>({
-    building: '',
+    building_type_id: '',
     extra_levels: 1,
   })
   const [activeView, setActiveView] = useState<WorkspaceView>(() => {
@@ -616,10 +616,10 @@ function App({ wasmApi }: Props) {
 
   useEffect(() => {
     const firstBuilding = summary?.buildings?.[0]
-    if (firstBuilding && !whatIfOpts.building) {
-      setWhatIfOpts((current) => ({ ...current, building: firstBuilding }))
+    if (firstBuilding && !whatIfOpts.building_type_id) {
+      setWhatIfOpts((current) => ({ ...current, building_type_id: firstBuilding }))
     }
-  }, [summary, whatIfOpts.building])
+  }, [summary, whatIfOpts.building_type_id])
 
   useEffect(() => {
     const sync = () => {
@@ -1414,7 +1414,7 @@ function App({ wasmApi }: Props) {
               api={api}
               alerts={alertsResult?.alerts}
               onWhatIf={(building, extraLevels) => {
-                void applyWhatIf({ building, extra_levels: extraLevels })
+                void applyWhatIf({ building_type_id: building, extra_levels: extraLevels })
               }}
               onApply={(delta) => void requestApply(delta)}
               embedded
@@ -1437,9 +1437,9 @@ function App({ wasmApi }: Props) {
               {summary?.buildings?.length ? (
                 <select
                   aria-label="Building"
-                  value={String(whatIfOpts.building)}
+                  value={String(whatIfOpts.building_type_id)}
                   onChange={(event) =>
-                    setWhatIfOpts((current) => ({ ...current, building: event.target.value }))
+                    setWhatIfOpts((current) => ({ ...current, building_type_id: event.target.value }))
                   }
                 >
                   {summary.buildings.map((building) => (
@@ -1451,9 +1451,9 @@ function App({ wasmApi }: Props) {
               ) : (
                 <input
                   aria-label="Building"
-                  value={String(whatIfOpts.building)}
+                  value={String(whatIfOpts.building_type_id)}
                   onChange={(event) =>
-                    setWhatIfOpts((current) => ({ ...current, building: event.target.value }))
+                    setWhatIfOpts((current) => ({ ...current, building_type_id: event.target.value }))
                   }
                   placeholder="Select a save first"
                 />
@@ -1476,7 +1476,7 @@ function App({ wasmApi }: Props) {
               />
             </label>
             <button
-              disabled={!ready || busy || !String(whatIfOpts.building)}
+              disabled={!ready || busy || !String(whatIfOpts.building_type_id)}
               type="submit"
             >
               Run what-if

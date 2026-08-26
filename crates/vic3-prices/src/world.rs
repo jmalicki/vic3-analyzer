@@ -146,7 +146,7 @@ pub struct WorldConstruction {
     pub queue: ConstructionQueueKind,
     pub country_id: Option<u32>,
     pub state_id: Option<u32>,
-    pub type_id: String,
+    pub building_type_id: String,
     pub remaining: Option<f64>,
 }
 
@@ -488,7 +488,7 @@ impl World {
                     queue: entry.queue.into(),
                     country_id: entry.country_id,
                     state_id: entry.state_id,
-                    type_id: entry.building,
+                    building_type_id: entry.building,
                     remaining: entry.remaining,
                 })
                 .collect(),
@@ -862,7 +862,10 @@ mod tests {
         let world = World::from_save(&save, &defs_with_goods(&[]));
         assert_eq!(world.constructions.len(), 2);
         assert_eq!(world.constructions[0].queue, ConstructionQueueKind::Private);
-        assert_eq!(world.constructions[0].type_id, "building_logging_camp");
+        assert_eq!(
+            world.constructions[0].building_type_id,
+            "building_logging_camp"
+        );
         assert_eq!(
             world.constructions[1].queue,
             ConstructionQueueKind::Government

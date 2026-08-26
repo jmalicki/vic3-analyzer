@@ -178,9 +178,7 @@ export interface ProductionMethodDelta {
 
 export interface ExtraLevelsDelta {
   /** Building type script id when targeting all instances of a type. */
-  type_id?: string
-  /** @deprecated Use `type_id`. */
-  building?: string
+  building_type_id?: string
   building_id?: number
   extra_levels: number
 }
@@ -399,8 +397,8 @@ export interface ConstructionOrderSnapshot {
   country_id: number | null
   state_id: number | null
   state_name: string | null
-  building: string
-  building_name: string | null
+  building_type_id: string
+  building_type_name: string | null
   remaining: number | null
 }
 

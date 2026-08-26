@@ -135,7 +135,7 @@ pub fn apply_delta(world: &World, delta: &WorldDelta) -> World {
             if let Some(building) = next.buildings.iter_mut().find(|b| b.id == id) {
                 building.add_extra_levels(extra.extra_levels);
             }
-        } else if let Some(kind) = extra.type_id.as_deref() {
+        } else if let Some(kind) = extra.building_type_id.as_deref() {
             for building in &mut next.buildings {
                 if building.type_id == kind {
                     building.add_extra_levels(extra.extra_levels);
@@ -858,7 +858,7 @@ mod tests {
             &world,
             &defs,
             &WhatIfOpts {
-                type_id: "logging_camp".into(),
+                building_type_id: "logging_camp".into(),
                 extra_levels: 1,
             },
             SolveOpts::default(),
@@ -974,7 +974,7 @@ mod tests {
         let defs = two_good_defs();
         let world = balanced_world(&defs);
         let opts = WhatIfOpts {
-            type_id: "logging_camp".into(),
+            building_type_id: "logging_camp".into(),
             extra_levels: 1,
         };
         let via_what_if = what_if(&world, &defs, &opts, SolveOpts::default());
@@ -1003,7 +1003,7 @@ mod tests {
         };
         let delta = WorldDelta {
             extra_levels: vec![ExtraLevelsDelta {
-                type_id: Some("building_trade_center".into()),
+                building_type_id: Some("building_trade_center".into()),
                 building_id: None,
                 extra_levels: 2,
             }],

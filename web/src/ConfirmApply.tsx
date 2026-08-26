@@ -27,7 +27,7 @@ export function mutationLines(delta: WorldDelta): string[] {
 
 function extraTarget(extra: ExtraLevelsDelta): string {
   if (extra.building_id != null) return `building #${extra.building_id}`
-  if (extra.building) return extra.building.replaceAll('_', ' ')
+  if (extra.building_type_id) return extra.building_type_id.replaceAll('_', ' ')
   return 'building'
 }
 
@@ -116,8 +116,8 @@ export function worldDeltaToSavePatch(
       extra_levels.push({ building_id: extra.building_id, extra_levels: extra.extra_levels })
       continue
     }
-    if (!extra.building) return undefined
-    const ids = matchingBuildingIds(buildings, extra.building)
+    if (!extra.building_type_id) return undefined
+    const ids = matchingBuildingIds(buildings, extra.building_type_id)
     if (!ids.length) return undefined
     for (const building_id of ids) {
       extra_levels.push({ building_id, extra_levels: extra.extra_levels })

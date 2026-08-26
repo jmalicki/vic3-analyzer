@@ -154,7 +154,7 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     expect(cached).toEqual(loaded.prices)
     const changed = JSON.parse(
       await api.loaded_what_if(
-        JSON.stringify({ building: 'building_rye_farm', extra_levels: 1 }),
+        JSON.stringify({ building_type_id: 'building_rye_farm', extra_levels: 1 }),
       ),
     )
     expect(changed.goods.length).toBeGreaterThan(0)
@@ -195,7 +195,7 @@ describe('wasm wrapper (real wasm-pack build)', () => {
         undefined,
         defs,
         '{}',
-        JSON.stringify({ building: 'building_rye_farm', extra_levels: 5 }),
+        JSON.stringify({ building_type_id: 'building_rye_farm', extra_levels: 5 }),
       ),
     )
     expect(typeof result.residual).toBe('number')
@@ -238,9 +238,9 @@ describe('wasm wrapper (real wasm-pack build)', () => {
 
   it('schemas are non-empty and describe required fields', () => {
     const whatIf = JSON.parse(api.what_if_schema())
-    expect(whatIf.properties.type_id).toBeTruthy()
+    expect(whatIf.properties.building_type_id).toBeTruthy()
     expect(whatIf.properties.extra_levels).toBeTruthy()
-    expect(whatIf.required).toEqual(expect.arrayContaining(['type_id', 'extra_levels']))
+    expect(whatIf.required).toEqual(expect.arrayContaining(['building_type_id', 'extra_levels']))
 
     const prices = JSON.parse(api.prices_schema())
     expect(prices.properties.residual).toBeTruthy()

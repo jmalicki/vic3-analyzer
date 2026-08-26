@@ -92,7 +92,7 @@ pub struct PlanningConstruction {
     pub order_id: u32,
     pub queue: ConstructionQueueKind,
     pub state_id: Option<u32>,
-    pub type_id: String,
+    pub building_type_id: String,
     pub remaining: Option<f64>,
 }
 
@@ -101,7 +101,7 @@ impl PartialEq for PlanningConstruction {
         self.order_id == other.order_id
             && self.queue == other.queue
             && self.state_id == other.state_id
-            && self.type_id == other.type_id
+            && self.building_type_id == other.building_type_id
             && f64_option_bits_eq(self.remaining, other.remaining)
     }
 }
@@ -113,7 +113,7 @@ impl Hash for PlanningConstruction {
         self.order_id.hash(state);
         self.queue.hash(state);
         self.state_id.hash(state);
-        self.type_id.hash(state);
+        self.building_type_id.hash(state);
         hash_f64_option(self.remaining, state);
     }
 }
@@ -124,7 +124,7 @@ impl From<&vic3_load::ConstructionQueueEntry> for PlanningConstruction {
             order_id: entry.order_id,
             queue: entry.queue,
             state_id: entry.state_id,
-            type_id: entry.building.clone(),
+            building_type_id: entry.building.clone(),
             remaining: entry.remaining,
         }
     }
@@ -139,7 +139,7 @@ impl From<&vic3_prices::WorldConstruction> for PlanningConstruction {
                 vic3_prices::ConstructionQueueKind::Government => ConstructionQueueKind::Government,
             },
             state_id: entry.state_id,
-            type_id: entry.type_id.clone(),
+            building_type_id: entry.building_type_id.clone(),
             remaining: entry.remaining,
         }
     }
@@ -680,12 +680,12 @@ impl PlanningState {
         if let Some(row) = self
             .mil_buildings
             .iter_mut()
-            .find(|row| row.type_id == building)
+            .find(|row| row.building_type_id == building)
         {
             row.levels += 1.0;
         } else {
             self.mil_buildings.push(ModeledMilBuilding {
-                type_id: building.to_string(),
+                building_type_id: building.to_string(),
                 levels: 1.0,
                 staffing: 0.0,
             });
@@ -698,7 +698,7 @@ impl PlanningState {
         if let Some(row) = self
             .mil_buildings
             .iter_mut()
-            .find(|row| row.type_id == building)
+            .find(|row| row.building_type_id == building)
         {
             row.staffing = row.levels;
         }
@@ -753,7 +753,7 @@ impl PlanningState {
         self.queued_building = self
             .constructions
             .first()
-            .map(|entry| entry.type_id.clone());
+            .map(|entry| entry.building_type_id.clone());
     }
 
     /// Append a government construction (sim `QueueBuildingLevel`).
@@ -778,7 +778,7 @@ impl PlanningState {
             order_id,
             queue: ConstructionQueueKind::Government,
             state_id: Some(state_id),
-            type_id: building,
+            building_type_id: building,
             remaining,
         });
         self.sync_queued_building_from_constructions();
@@ -791,7 +791,7 @@ impl PlanningState {
     /// that placement matches; [`None`] matches any state (save rows).
     pub fn complete_construction(&mut self, building: &str, state_id: Option<u32>) {
         let matches = |entry: &PlanningConstruction| {
-            entry.type_id == building
+            entry.building_type_id == building
                 && state_id
                     .map(|want| entry.state_id == Some(want) || entry.state_id.is_none())
                     .unwrap_or(true)
@@ -1312,7 +1312,7 @@ mod tests {
         );
         assert_eq!(state.constructions.len(), 1);
         assert_eq!(
-            state.constructions[0].type_id,
+            state.constructions[0].building_type_id,
             "building_construction_sector"
         );
 

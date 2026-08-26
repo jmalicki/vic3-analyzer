@@ -990,7 +990,7 @@ fn extra_levels_on_type(
             building.type_id == type_id && state_id.is_none_or(|sid| building.state == Some(sid))
         })
         .map(|building| ExtraLevelsDelta {
-            type_id: None,
+            building_type_id: None,
             building_id: Some(building.id),
             extra_levels: extra,
         })

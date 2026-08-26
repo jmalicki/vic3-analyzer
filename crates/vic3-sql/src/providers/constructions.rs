@@ -26,7 +26,7 @@ use super::pushdown::{matches_str, matches_u32, PushSupport};
 const PUSH: PushSupport = PushSupport {
     eq_u32: &["order_id", "country_id", "state_id"],
     eq_i32: &[],
-    eq_str: &["queue", "type_id"],
+    eq_str: &["queue", "building_type_id"],
     range_str: &[],
 };
 
@@ -53,8 +53,8 @@ impl ConstructionsProvider {
         let mut position = UInt32Builder::new();
         let mut country_id = UInt32Builder::new();
         let mut state_id = UInt32Builder::new();
-        let mut type_id = StringBuilder::new();
-        let mut type_name = StringBuilder::new();
+        let mut building_type_id = StringBuilder::new();
+        let mut building_type_name = StringBuilder::new();
         let mut remaining = Float64Builder::new();
 
         // Assign position against the full queue first so pushdown filters do
@@ -111,7 +111,7 @@ impl ConstructionsProvider {
                 }
                 _ => {}
             }
-            if !matches_str(&preds, "type_id", &row.type_id) {
+            if !matches_str(&preds, "building_type_id", &row.building_type_id) {
                 continue;
             }
 
@@ -126,10 +126,10 @@ impl ConstructionsProvider {
                 Some(id) => state_id.append_value(id),
                 None => state_id.append_null(),
             }
-            type_id.append_value(&row.type_id);
-            match self.binding.label(&row.type_id) {
-                Some(name) => type_name.append_value(name),
-                None => type_name.append_null(),
+            building_type_id.append_value(&row.building_type_id);
+            match self.binding.label(&row.building_type_id) {
+                Some(name) => building_type_name.append_value(name),
+                None => building_type_name.append_null(),
             }
             match row.remaining {
                 Some(value) => remaining.append_value(value),
@@ -145,8 +145,8 @@ impl ConstructionsProvider {
                 Arc::new(position.finish()),
                 Arc::new(country_id.finish()),
                 Arc::new(state_id.finish()),
-                Arc::new(type_id.finish()),
-                Arc::new(type_name.finish()),
+                Arc::new(building_type_id.finish()),
+                Arc::new(building_type_name.finish()),
                 Arc::new(remaining.finish()),
             ],
         )

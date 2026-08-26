@@ -521,7 +521,7 @@ function TypeBlock({
               aria-label={`Apply extra levels for ${row.name}`}
               disabled={!onApply || extra < 1}
               onClick={() =>
-                onApply?.({ extra_levels: [{ building: row.typeId, extra_levels: extra }] })
+                onApply?.({ extra_levels: [{ building_type_id: row.typeId, extra_levels: extra }] })
               }
             >
               Apply

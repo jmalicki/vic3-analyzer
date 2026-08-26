@@ -110,7 +110,7 @@ async fn stub_use_save_then_active_queries() {
     assert_eq!(unqualified[0].num_rows(), 1);
 
     let constructions = eng
-        .query("SELECT queue, type_id FROM constructions")
+        .query("SELECT queue, building_type_id FROM constructions")
         .await
         .expect("constructions fact table");
     assert_eq!(

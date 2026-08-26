@@ -761,7 +761,7 @@ pub fn prices_json(
 
 /// Apply a what-if building-level delta and re-solve. One-shot.
 ///
-/// `what_if_opts_json` is [`WhatIfOpts`] (`building`, `extra_levels`).
+/// `what_if_opts_json` is [`WhatIfOpts`] (`building_type_id`, `extra_levels`).
 ///
 /// # Errors
 ///
@@ -1028,8 +1028,8 @@ struct ConstructionSnap {
     state_id: Option<u32>,
     /// Localized state display label when known (demonym-prefixed for minority splits).
     state_name: Option<String>,
-    type_id: String,
-    building_name: Option<String>,
+    building_type_id: String,
+    building_type_name: Option<String>,
     remaining: Option<f64>,
 }
 
@@ -1077,8 +1077,8 @@ fn constructions_snapshot(
             country_id: row.country_id,
             state_id: row.state_id,
             state_name: state_name(row.state_id),
-            type_id: row.type_id.clone(),
-            building_name: defs.labels.get(&row.type_id).cloned(),
+            building_type_id: row.building_type_id.clone(),
+            building_type_name: defs.labels.get(&row.building_type_id).cloned(),
             remaining: row.remaining,
         };
         match row.queue {
@@ -1484,7 +1484,7 @@ mod tests {
                 .expect("PricesResult");
         assert!(!baseline.goods.is_empty());
         let changed: PricesResult = serde_json::from_str(
-            &loaded_what_if_json(r#"{"building":"building_rye_farm","extra_levels":5}"#)
+            &loaded_what_if_json(r#"{"building_type_id":"building_rye_farm","extra_levels":5}"#)
                 .expect("cached what-if"),
         )
         .expect("PricesResult");
@@ -1518,7 +1518,7 @@ mod tests {
         load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
         let baseline = loaded_prices_json().expect("cached prices");
         let previewed = loaded_apply_delta_json(
-            r#"{"extra_levels":[{"building":"building_rye_farm","extra_levels":5}]}"#,
+            r#"{"extra_levels":[{"building_type_id":"building_rye_farm","extra_levels":5}]}"#,
         )
         .expect("preview delta");
         let after = loaded_prices_json().expect("prices after preview");
@@ -1694,7 +1694,7 @@ mod tests {
             None,
             &defs_blob(),
             "{}",
-            r#"{"building":"building_rye_farm","extra_levels":5}"#,
+            r#"{"building_type_id":"building_rye_farm","extra_levels":5}"#,
         )
         .expect("what-if");
         let result: PricesResult = serde_json::from_str(&json).expect("PricesResult");

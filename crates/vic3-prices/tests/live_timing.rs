@@ -64,7 +64,7 @@ fn live_solve_timings() {
     let building = world.buildings.first().expect("live save has buildings");
     let extra = WorldDelta {
         extra_levels: vec![ExtraLevelsDelta {
-            type_id: None,
+            building_type_id: None,
             building_id: Some(building.id),
             extra_levels: 1,
         }],

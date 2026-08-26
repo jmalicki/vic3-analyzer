@@ -17,7 +17,7 @@
 //! | Subcommand | `vic3-api` counterpart | Notes |
 //! | --- | --- | --- |
 //! | `prices` | `prices_json` / `prices_from_paths` | table or `--json` [`PricesResult`] |
-//! | `what-if` | `what_if_json` | building + `extra_levels` |
+//! | `what-if` | `what_if_json` | `--building` type id + `extra_levels` |
 //! | `alerts` | `alerts_json` | after baseline solve |
 //! | `mutate` | `loaded_apply_delta_json` (preview) | `--delta-json` [`WorldDelta`]; no file write |
 //! | `optimize-pms` | `loaded_optimize_pms_json` | `--axis` income / productivity / sol |
@@ -195,7 +195,7 @@ struct WhatIfArgs {
 impl From<WhatIfArgs> for WhatIfOpts {
     fn from(args: WhatIfArgs) -> Self {
         Self {
-            type_id: args.building,
+            building_type_id: args.building,
             extra_levels: args.extra_levels,
         }
     }

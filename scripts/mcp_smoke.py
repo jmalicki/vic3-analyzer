@@ -269,7 +269,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         if args.preview_rye and "preview_delta" in names:
             preview = client.call_tool(
                 "preview_delta",
-                {"building": "building_rye_farm", "extra_levels": 1},
+                {"building_type_id": "building_rye_farm", "extra_levels": 1},
             )
             out["steps"]["preview_delta"] = extract_text_payload(preview)
         elif args.preview_rye:

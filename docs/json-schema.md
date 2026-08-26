@@ -29,10 +29,10 @@ Core option structs never contain `PathBuf` or OS-specific filesystem fields.
 ```json
 {
   "type": "object",
-  "required": ["building", "extra_levels"],
+  "required": ["building_type_id", "extra_levels"],
   "additionalProperties": false,
   "properties": {
-    "building": { "type": "string" },
+    "building_type_id": { "type": "string" },
     "extra_levels": { "type": "integer", "minimum": 0 }
   }
 }
@@ -66,8 +66,8 @@ Preview mutation applied to a cloned world (extra levels, then production method
         "required": ["extra_levels"],
         "additionalProperties": false,
         "properties": {
-          "building": { "type": "string", "description": "Building type id; used when building_id is omitted." },
-          "building_id": { "type": "integer", "minimum": 0, "description": "Single instance; wins over building when both are set." },
+          "building_type_id": { "type": "string", "description": "Building type id; used when building_id is omitted." },
+          "building_id": { "type": "integer", "minimum": 0, "description": "Single instance; wins over building_type_id when both are set." },
           "extra_levels": { "type": "integer", "minimum": 0 }
         }
       }
@@ -504,15 +504,15 @@ Player-scoped build queues from `loaded_constructions` / Buildings → Queues. S
     "ConstructionOrderSnapshot": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "queue", "building", "country_id", "state_id", "state_name", "building_name", "remaining"],
+      "required": ["id", "queue", "building_type_id", "country_id", "state_id", "state_name", "building_type_name", "remaining"],
       "properties": {
         "id": { "type": "integer" },
         "queue": { "type": "string", "enum": ["private", "government"] },
         "country_id": { "type": ["integer", "null"] },
         "state_id": { "type": ["integer", "null"] },
         "state_name": { "type": ["string", "null"] },
-        "building": { "type": "string" },
-        "building_name": { "type": ["string", "null"] },
+        "building_type_id": { "type": "string" },
+        "building_type_name": { "type": ["string", "null"] },
         "remaining": { "type": ["number", "null"] }
       }
     }

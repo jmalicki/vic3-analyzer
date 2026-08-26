@@ -29,7 +29,7 @@ const preview: PricesResult = {
 }
 
 const delta: WorldDelta = {
-  extra_levels: [{ building: 'building_rye_farm', extra_levels: 2 }],
+  extra_levels: [{ building_type_id: 'building_rye_farm', extra_levels: 2 }],
 }
 
 const rye: BuildingEconomics = {

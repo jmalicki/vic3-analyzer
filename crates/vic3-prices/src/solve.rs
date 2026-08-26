@@ -85,7 +85,7 @@ pub fn what_if(
     delta: &crate::result::WhatIfOpts,
     opts: SolveOpts,
 ) -> PricesResult {
-    let next = world.with_extra_levels(&delta.type_id, delta.extra_levels);
+    let next = world.with_extra_levels(&delta.building_type_id, delta.extra_levels);
     solve(&next, defs, opts)
 }
 

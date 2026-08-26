@@ -88,9 +88,9 @@ const saveSummary = {
 const schema = JSON.stringify({
   title: 'WhatIfOpts',
   type: 'object',
-  required: ['building', 'extra_levels'],
+  required: ['building_type_id', 'extra_levels'],
   properties: {
-    building: { type: 'string', description: 'Building type id.' },
+    building_type_id: { type: 'string', description: 'Building type id.' },
     extra_levels: { type: 'integer', minimum: 0 },
   },
 })
@@ -158,8 +158,8 @@ function mockApi(): WasmApi {
           {
             id: 10,
             queue: 'private',
-            building: 'building_logging_camp',
-            building_name: 'Logging Camp',
+            building_type_id: 'building_logging_camp',
+            building_type_name: 'Logging Camp',
             remaining: 5,
           },
         ],
@@ -167,8 +167,8 @@ function mockApi(): WasmApi {
           {
             id: 1,
             queue: 'government',
-            building: 'building_construction_sector',
-            building_name: 'Construction Sector',
+            building_type_id: 'building_construction_sector',
+            building_type_name: 'Construction Sector',
             remaining: 40,
           },
         ],
@@ -360,7 +360,7 @@ describe('prices UI', () => {
 
     await waitFor(() =>
       expect(api.loaded_what_if).toHaveBeenCalledWith(
-        JSON.stringify({ building: 'building_steel_mills', extra_levels: 5 }),
+        JSON.stringify({ building_type_id: 'building_steel_mills', extra_levels: 5 }),
       ),
     )
     expect((await listAnalyses())[0].kind).toBe('what_if')

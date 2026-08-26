@@ -325,7 +325,7 @@ describe('BuildingsPane', () => {
 
     await user.click(screen.getByRole('button', { name: 'Apply extra levels for Rye Farms' }))
     expect(onApply).toHaveBeenCalledWith({
-      extra_levels: [{ building: 'building_rye_farm', extra_levels: 1 }],
+      extra_levels: [{ building_type_id: 'building_rye_farm', extra_levels: 1 }],
     })
 
     await user.click(screen.getByRole('button', { name: 'Expand Silly Hammer Factory' }))

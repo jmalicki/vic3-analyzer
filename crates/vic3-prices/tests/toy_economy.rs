@@ -97,7 +97,7 @@ fn what_if_extra_farm_levels_raises_wheat_supply_and_lowers_price() {
         &world,
         &defs,
         &WhatIfOpts {
-            type_id: "building_wheat_farm".into(),
+            building_type_id: "building_wheat_farm".into(),
             extra_levels: 2,
         },
         SolveOpts::default(),
@@ -136,7 +136,7 @@ fn what_if_extra_bakery_levels_raises_bread_supply_and_lowers_price() {
         &world,
         &defs,
         &WhatIfOpts {
-            type_id: "building_bakery".into(),
+            building_type_id: "building_bakery".into(),
             extra_levels: 2,
         },
         SolveOpts::default(),
@@ -250,7 +250,7 @@ fn preview_extra_levels_on_trade_center_type() {
 
     let delta = WorldDelta {
         extra_levels: vec![ExtraLevelsDelta {
-            type_id: Some("building_trade_center".into()),
+            building_type_id: Some("building_trade_center".into()),
             building_id: None,
             extra_levels: 2,
         }],
