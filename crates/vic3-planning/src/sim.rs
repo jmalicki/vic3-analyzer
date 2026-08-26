@@ -489,13 +489,13 @@ impl EconomyContext {
             let SimpleSubgoal::GoodPrice { good, rel, .. } = atom else {
                 continue;
             };
-            let Some(good_idx) = self.defs.index_of(good) else {
+            let Some(good_id) = self.defs.index_of(good) else {
                 continue;
             };
             for (building_id, building_type) in &self.defs.buildings {
                 let (inputs, outputs) = default_building_io_per_level(&self.defs, building_type);
-                let produces = outputs[good_idx];
-                let consumes = inputs[good_idx];
+                let produces = outputs[good_id];
+                let consumes = inputs[good_id];
                 let benefit = match rel {
                     Rel::Le | Rel::Lt => produces,
                     Rel::Ge | Rel::Gt => consumes,
@@ -648,19 +648,19 @@ impl EconomyContext {
                 continue;
             };
             let (inputs, _) = default_building_io_per_level(&self.defs, building_type);
-            for (good_idx, qty) in inputs.iter_indexed() {
+            for (good_id, qty) in inputs.iter_indexed() {
                 if qty <= ORDER_EPS {
                     continue;
                 }
-                let Some(good_id) = self.defs.good_by_index(good_idx) else {
+                let Some(good_name) = self.defs.good_by_index(good_id) else {
                     continue;
                 };
-                let Some(def) = self.defs.goods.get(good_id) else {
+                let Some(def) = self.defs.goods.get(good_name) else {
                     continue;
                 };
-                let price = state.price(good_id).unwrap_or(def.base_price);
+                let price = state.price(good_name).unwrap_or(def.base_price);
                 if price > def.base_price * MIL_INPUT_PRICE_FACTOR {
-                    expensive_inputs.insert(good_idx);
+                    expensive_inputs.insert(good_id);
                 }
             }
         }
@@ -669,7 +669,10 @@ impl EconomyContext {
         }
         for (building_id, building_type) in &self.defs.buildings {
             let (_, outputs) = default_building_io_per_level(&self.defs, building_type);
-            if expensive_inputs.iter().any(|idx| outputs[*idx] > ORDER_EPS) {
+            if expensive_inputs
+                .iter()
+                .any(|good_id| outputs[*good_id] > ORDER_EPS)
+            {
                 candidates.insert(building_id.clone());
             }
         }
@@ -912,17 +915,17 @@ fn pm_affects_open_simple_subgoals(
         let SimpleSubgoal::GoodPrice { good, rel, .. } = atom else {
             continue;
         };
-        let Some(good_idx) = defs.index_of(good) else {
+        let Some(good_id) = defs.index_of(good) else {
             continue;
         };
         let produces = pm
             .outputs
             .iter()
-            .any(|(idx, qty)| *idx == good_idx && *qty > 0.0);
+            .any(|(idx, qty)| *idx == good_id && *qty > 0.0);
         let consumes = pm
             .inputs
             .iter()
-            .any(|(idx, qty)| *idx == good_idx && *qty > 0.0);
+            .any(|(idx, qty)| *idx == good_id && *qty > 0.0);
         let relevant = match rel {
             Rel::Le | Rel::Lt => produces,
             Rel::Ge | Rel::Gt => consumes,
@@ -1926,7 +1929,7 @@ mod tests {
     use crate::world::{PlanningParts, Vic3Date};
     use proptest::prelude::*;
     use std::collections::BTreeMap;
-    use vic3_defs::{Good, GoodIdx, GoodsVec};
+    use vic3_defs::{Good, GoodId, GoodsVec};
     use vic3_prices::{solve, WorldBuilding, WorldCountry, WorldState};
 
     #[test]
@@ -2202,7 +2205,7 @@ mod tests {
     fn building_level_then_wait_reaches_good_price() {
         use vic3_defs::{BuildingType, ProductionMethod};
 
-        let wood = GoodIdx::from_usize(0);
+        let wood = GoodId::from_usize(0);
         let mut defs = GameDefs {
             goods_order: vec!["wood".into()],
             goods: BTreeMap::from([(
@@ -2586,7 +2589,7 @@ mod tests {
     fn switch_pm_then_resolves_good_price() {
         use vic3_defs::{BuildingType, ProductionMethod};
 
-        let wood = GoodIdx::from_usize(0);
+        let wood = GoodId::from_usize(0);
         let mut defs = GameDefs {
             goods_order: vec!["wood".into()],
             goods: BTreeMap::from([(
@@ -2728,7 +2731,7 @@ mod tests {
         use vic3_defs::{BuildingType, ProductionMethod};
         use vic3_prices::equilibrate;
 
-        let wood = GoodIdx::from_usize(0);
+        let wood = GoodId::from_usize(0);
         let mut defs = GameDefs {
             goods_order: vec!["wood".into()],
             goods: BTreeMap::from([(
@@ -2886,7 +2889,7 @@ mod tests {
                 staffing: 1.0,
                 production_methods: Vec::new(),
                 saved_inputs: Vec::new(),
-                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+                saved_outputs: vec![(GoodId::from_usize(0), 10.0)],
             }],
             frozen_buy: GoodsVec::from_vec(vec![15.0]),
             ..World::default()
@@ -2979,7 +2982,7 @@ mod tests {
                 staffing: 1.0,
                 production_methods: Vec::new(),
                 saved_inputs: Vec::new(),
-                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+                saved_outputs: vec![(GoodId::from_usize(0), 10.0)],
             }],
             frozen_buy: GoodsVec::from_vec(vec![15.0]),
             ..World::default()
@@ -3078,7 +3081,7 @@ mod tests {
                 staffing: 1.0,
                 production_methods: Vec::new(),
                 saved_inputs: Vec::new(),
-                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+                saved_outputs: vec![(GoodId::from_usize(0), 10.0)],
             }],
             frozen_buy: GoodsVec::from_vec(vec![15.0]),
             ..World::default()
@@ -3161,7 +3164,7 @@ mod tests {
                 staffing: 1.0,
                 production_methods: Vec::new(),
                 saved_inputs: Vec::new(),
-                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+                saved_outputs: vec![(GoodId::from_usize(0), 10.0)],
             }],
             frozen_buy: GoodsVec::from_vec(vec![15.0]),
             ..World::default()
@@ -3271,7 +3274,7 @@ mod tests {
                 staffing: 1.0,
                 production_methods: Vec::new(),
                 saved_inputs: Vec::new(),
-                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+                saved_outputs: vec![(GoodId::from_usize(0), 10.0)],
             }],
             frozen_buy: GoodsVec::from_vec(vec![15.0]),
             ..World::default()
@@ -3354,7 +3357,7 @@ mod tests {
                 staffing: 1.0,
                 production_methods: Vec::new(),
                 saved_inputs: Vec::new(),
-                saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+                saved_outputs: vec![(GoodId::from_usize(0), 10.0)],
             }],
             frozen_buy: GoodsVec::from_vec(vec![15.0]),
             ..World::default()
@@ -3472,7 +3475,7 @@ mod tests {
                     staffing: 1.0,
                     production_methods: Vec::new(),
                     saved_inputs: Vec::new(),
-                    saved_outputs: vec![(GoodIdx::from_usize(0), 10.0)],
+                    saved_outputs: vec![(GoodId::from_usize(0), 10.0)],
                 },
                 WorldBuilding {
                     id: 2,
@@ -3536,7 +3539,7 @@ mod tests {
     fn speculative_logging_cs_mini() -> (PlanningState, EconomyContext, SimConfig, u32) {
         use vic3_defs::{BuildingType, ProductionMethod};
 
-        let wood = GoodIdx::from_usize(0);
+        let wood = GoodId::from_usize(0);
         let state_id = 1u32;
         let mut defs = GameDefs {
             goods_order: vec!["wood".into()],
@@ -3710,7 +3713,7 @@ mod tests {
     fn gdp_goal_can_queue_construction_sector_as_means_to_an_end() {
         use vic3_defs::{BuildingType, ProductionMethod};
 
-        let wood = GoodIdx::from_usize(0);
+        let wood = GoodId::from_usize(0);
         let mut defs = GameDefs {
             goods_order: vec!["wood".into()],
             goods: BTreeMap::from([(
@@ -3797,7 +3800,7 @@ mod tests {
     fn first_of_type_building_candidate_and_greenfield_prices() {
         use vic3_defs::{BuildingType, ProductionMethod};
 
-        let wood = GoodIdx::from_usize(0);
+        let wood = GoodId::from_usize(0);
         let mut defs = GameDefs {
             goods_order: vec!["wood".into()],
             goods: BTreeMap::from([(
@@ -3916,7 +3919,7 @@ mod tests {
     fn building_candidates_enqueue_by_state_no_dominance_prune() {
         use vic3_defs::{BuildingType, ProductionMethod};
 
-        let wood = GoodIdx::from_usize(0);
+        let wood = GoodId::from_usize(0);
         let mut defs = GameDefs {
             goods_order: vec!["wood".into()],
             goods: BTreeMap::from([(

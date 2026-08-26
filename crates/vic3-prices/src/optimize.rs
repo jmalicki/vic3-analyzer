@@ -481,7 +481,7 @@ fn changes_from_delta(world: &World, delta: &WorldDelta) -> Vec<OptimizeChange> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vic3_defs::{Good, GoodIdx, ProductionMethod};
+    use vic3_defs::{Good, GoodId, ProductionMethod};
 
     use crate::solve;
     use crate::world::WorldBuilding;
@@ -506,7 +506,7 @@ mod tests {
             ProductionMethod {
                 id: "pm_rich".into(),
                 inputs: Vec::new(),
-                outputs: vec![(GoodIdx::from_usize(0), 40.0)],
+                outputs: vec![(GoodId::from_usize(0), 40.0)],
                 ..Default::default()
             },
         );
@@ -515,7 +515,7 @@ mod tests {
             ProductionMethod {
                 id: "pm_poor".into(),
                 inputs: Vec::new(),
-                outputs: vec![(GoodIdx::from_usize(0), 1.0)],
+                outputs: vec![(GoodId::from_usize(0), 1.0)],
                 ..Default::default()
             },
         );

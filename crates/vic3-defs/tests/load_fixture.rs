@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use vic3_defs::{
-    decode_blob, encode_blob, load_from_files, load_from_path, GoodIdx, DEFAULT_PRICE_RANGE,
+    decode_blob, encode_blob, load_from_files, load_from_path, GoodId, DEFAULT_PRICE_RANGE,
     DEFAULT_TRADED_QUANTITY,
 };
 
@@ -91,7 +91,7 @@ fn fixture_goods_have_known_base_prices() {
     assert_eq!(defs.goods["coal"].traded_quantity, 6.0);
     assert_eq!(defs.goods.len(), 3);
     assert_eq!(defs.goods_order, ["grain", "wood", "coal"]);
-    assert_eq!(defs.good_by_index(GoodIdx::from_usize(1)), Some("wood"));
+    assert_eq!(defs.good_by_index(GoodId::from_usize(1)), Some("wood"));
     assert_eq!(defs.labels.get("grain").map(String::as_str), Some("Grain"));
     assert_eq!(
         defs.goods["grain"].texture.as_deref(),
@@ -112,7 +112,7 @@ fn in_memory_goods_preserve_source_order() {
     )])
     .expect("ordered goods");
     assert_eq!(
-        defs.good_by_index(GoodIdx::from_usize(18)),
+        defs.good_by_index(GoodId::from_usize(18)),
         Some("merchant_marine")
     );
 }
@@ -162,7 +162,7 @@ fn fixture_need_and_wealth_packages() {
 #[test]
 fn fixture_production_methods_have_goods_io() {
     let defs = load_fixture();
-    let qty = |rows: &[(GoodIdx, f64)], id: &str| {
+    let qty = |rows: &[(GoodId, f64)], id: &str| {
         let idx = defs.index_of(id)?;
         rows.iter()
             .find_map(|(good, qty)| (*good == idx).then_some(*qty))

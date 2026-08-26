@@ -83,7 +83,7 @@ impl ProductionMethodsProvider {
     }
 }
 
-fn flows_from_idx(binding: &SessionBinding, rows: &[(vic3_defs::GoodIdx, f64)]) -> Vec<GoodFlow> {
+fn flows_from_idx(binding: &SessionBinding, rows: &[(vic3_defs::GoodId, f64)]) -> Vec<GoodFlow> {
     rows.iter()
         .filter_map(|(idx, qty)| {
             let good_id = binding.defs.good_by_index(*idx)?.to_string();

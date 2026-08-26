@@ -26,7 +26,7 @@ use std::sync::Arc;
 use basin::{
     BoxConstraints, CostFunction, DenseMatrix, Executor, Jacobian, Residual, TerminationReason, Trf,
 };
-use vic3_defs::{GameDefs, GoodIdx, GoodsVec};
+use vic3_defs::{GameDefs, GoodId, GoodsVec};
 
 use crate::consumption::add_wage_bins;
 use crate::formula::{local_price, price};
@@ -203,7 +203,7 @@ fn equilibrate_from_cache(
 /// Goods with positive base price (NLS unknowns).
 ///
 /// * `base_prices` — aligned to `defs.goods_order`.
-fn market_goods(base_prices: &GoodsVec) -> Vec<GoodIdx> {
+fn market_goods(base_prices: &GoodsVec) -> Vec<GoodId> {
     base_prices
         .iter_indexed()
         .filter(|(_, base)| *base > 0.0)
@@ -244,7 +244,7 @@ pub(crate) struct ShopSnapshot {
 #[derive(Clone)]
 struct PriceResidual<'a> {
     defs: &'a GameDefs,
-    goods: &'a [GoodIdx],
+    goods: &'a [GoodId],
     bases: &'a [f64],
     price_range: f64,
     lower: Vec<f64>,
@@ -283,7 +283,7 @@ impl PriceResidual<'_> {
             );
             let mut delta = 0.0_f64;
             for i in 0..n {
-                let good = GoodIdx::from_usize(i);
+                let good = GoodId::from_usize(i);
                 let buy = shop.frozen_buy[good] + scratch.pop_buy[good];
                 let sell = shop.frozen_sell[good];
                 let state_price = price(self.cache.base_prices[good], buy, sell, self.price_range);

@@ -852,8 +852,8 @@ impl<'a> MitigationIndex<'a> {
                 }
             }
         }
-        let good_idx = self.defs.index_of(good_id)?;
-        let slot = good_idx.as_usize();
+        let good_id = self.defs.index_of(good_id)?;
+        let slot = good_id.as_usize();
         let indices = self.by_good_io.get(slot)?;
         for &i in indices {
             let row = &self.world.buildings[i];
@@ -2036,7 +2036,7 @@ mod tests {
         StateGood, StateInfo, StateNeed, StatePop, StateQualification, WorldBuilding, WorldState,
         WorldStateTrade,
     };
-    use vic3_defs::{GameDefs, Good, GoodIdx, ProductionMethod};
+    use vic3_defs::{GameDefs, Good, GoodId, ProductionMethod};
 
     fn defs() -> GameDefs {
         let mut defs = GameDefs {
@@ -2067,7 +2067,7 @@ mod tests {
                 },
             );
         }
-        let grain = GoodIdx::from_usize(0);
+        let grain = GoodId::from_usize(0);
         defs.production_methods.insert(
             "pm_simple_farming".into(),
             ProductionMethod {

@@ -3,7 +3,7 @@
 //! # IO element type
 //!
 //! [`good_io_list_type`] is `List<Struct{good Utf8, good_name Utf8?, qty Float64}>`.
-//! Script ids only — never bare `GoodIdx` as the sole key. Consumers explode
+//! Script ids only — never bare `GoodId` as the sole key. Consumers explode
 //! with SELECT-list `unnest(unnest(col))`.
 
 use std::sync::Arc;

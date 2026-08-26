@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 
-use vic3_defs::{GameDefs, GoodIdx, GoodsVec, ProductionMethod};
+use vic3_defs::{GameDefs, GoodId, GoodsVec, ProductionMethod};
 use vic3_load::{Building, Vic3Date, WorldSnapshot};
 
 /// Pop size unit for buy packages (Vic3: package values are per 10k working pops).
@@ -200,7 +200,7 @@ pub struct WorldState {
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorldStateTrade {
     pub state: u32,
-    pub good: GoodIdx,
+    pub good: GoodId,
     /// Positive = import into the state; negative = export from the state.
     pub quantity: f64,
 }
@@ -276,9 +276,9 @@ pub struct WorldBuilding {
     /// a bidirectional name↔id map for denser planning/world nodes?
     pub production_methods: Vec<String>,
     /// Absolute saved input volumes, resolved once against `goods_order`.
-    pub saved_inputs: Vec<(GoodIdx, f64)>,
+    pub saved_inputs: Vec<(GoodId, f64)>,
     /// Absolute saved output volumes, resolved once against `goods_order`.
-    pub saved_outputs: Vec<(GoodIdx, f64)>,
+    pub saved_outputs: Vec<(GoodId, f64)>,
 }
 
 /// Non-pop buy and sell orders: frozen maps plus building inputs/outputs.
@@ -781,12 +781,12 @@ pub(crate) fn qty_value(rows: &[(u16, f64)], id: u16) -> Option<f64> {
 fn resolve_saved_goods(
     raw: &std::collections::BTreeMap<String, f64>,
     defs: &GameDefs,
-) -> Vec<(GoodIdx, f64)> {
+) -> Vec<(GoodId, f64)> {
     raw.iter()
         .filter_map(|(key, quantity)| {
             let good = match key.parse::<usize>() {
                 Ok(index) => {
-                    let idx = GoodIdx::try_from_usize(index)?;
+                    let idx = GoodId::try_from_usize(index)?;
                     defs.good_by_index(idx)?;
                     idx
                 }
@@ -1031,8 +1031,8 @@ mod tests {
 
     #[test]
     fn extra_levels_scale_saved_io_and_staffing_ratio() {
-        let tools = GoodIdx::from_usize(0);
-        let wood = GoodIdx::from_usize(1);
+        let tools = GoodId::from_usize(0);
+        let wood = GoodId::from_usize(1);
         let world = World {
             buildings: vec![WorldBuilding {
                 id: 1,
@@ -1058,7 +1058,7 @@ mod tests {
 
     #[test]
     fn extra_levels_on_id_scales_only_that_building() {
-        let wood = GoodIdx::from_usize(1);
+        let wood = GoodId::from_usize(1);
         let world = World {
             buildings: vec![
                 WorldBuilding {
@@ -1102,8 +1102,8 @@ mod tests {
                 "pm_smithy".into(),
                 ProductionMethod {
                     id: "pm_smithy".into(),
-                    inputs: vec![(GoodIdx::from_usize(0), 2.0)],
-                    outputs: vec![(GoodIdx::from_usize(1), 3.0)],
+                    inputs: vec![(GoodId::from_usize(0), 2.0)],
+                    outputs: vec![(GoodId::from_usize(1), 3.0)],
                     ..Default::default()
                 },
             ),
@@ -1111,7 +1111,7 @@ mod tests {
                 "pm_steam".into(),
                 ProductionMethod {
                     id: "pm_steam".into(),
-                    inputs: vec![(GoodIdx::from_usize(2), 5.0), (GoodIdx::from_usize(0), 1.0)],
+                    inputs: vec![(GoodId::from_usize(2), 5.0), (GoodId::from_usize(0), 1.0)],
                     outputs: Vec::new(),
                     ..Default::default()
                 },
@@ -1144,8 +1144,8 @@ mod tests {
             "pm_mine".into(),
             ProductionMethod {
                 id: "pm_mine".into(),
-                inputs: vec![(GoodIdx::from_usize(0), 10.0)],
-                outputs: vec![(GoodIdx::from_usize(1), 20.0)],
+                inputs: vec![(GoodId::from_usize(0), 10.0)],
+                outputs: vec![(GoodId::from_usize(1), 20.0)],
                 ..Default::default()
             },
         )]);
@@ -1157,8 +1157,8 @@ mod tests {
                 level: 10.0,
                 staffing: 5.0,
                 production_methods: vec!["pm_mine".into()],
-                saved_inputs: vec![(GoodIdx::from_usize(0), 32.5)],
-                saved_outputs: vec![(GoodIdx::from_usize(1), 130.0)],
+                saved_inputs: vec![(GoodId::from_usize(0), 32.5)],
+                saved_outputs: vec![(GoodId::from_usize(1), 130.0)],
             }],
             ..World::default()
         };
@@ -1170,8 +1170,8 @@ mod tests {
 
     #[test]
     fn production_method_change_rebuilds_io_from_recipes() {
-        let wood = GoodIdx::from_usize(0);
-        let grain = GoodIdx::from_usize(1);
+        let wood = GoodId::from_usize(0);
+        let grain = GoodId::from_usize(1);
         let mut defs = defs_with_goods(&["wood", "grain"]);
         defs.production_methods = BTreeMap::from([
             (
@@ -1332,7 +1332,7 @@ mod tests {
             .expect("live plaintext save");
         let defs = vic3_defs::load_from_path(game_path).expect("live game definitions");
         assert_eq!(
-            defs.good_by_index(GoodIdx::from_usize(18)),
+            defs.good_by_index(GoodId::from_usize(18)),
             Some("merchant_marine")
         );
         let world = World::from_save(&save, &defs);

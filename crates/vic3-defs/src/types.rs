@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{GoodIdx, NeedIdx, NeedsVec, DEFAULT_PRICE_RANGE};
+use crate::{GoodId, NeedId, NeedsVec, DEFAULT_PRICE_RANGE};
 
 /// Parsed Victoria 3 definitions used by the price solver and wasm UI.
 ///
 /// Built with [`crate::load_from_path`] from a game install or fixture tree,
 /// [`crate::load_from_files`] / [`crate::DefsBuilder`] from an allowlisted
 /// in-memory selection, or [`crate::decode_blob`] from a postcard snapshot
-/// (wasm). Dense [`crate::GoodIdx`] / [`crate::NeedIdx`] vectors align with
+/// (wasm). Dense [`crate::GoodId`] / [`crate::NeedId`] vectors align with
 /// [`Self::goods_order`] / [`Self::needs_order`].
 ///
 /// Icons and flags are PNG bytes ready for the browser; DDS stays on disk
@@ -57,7 +57,7 @@ pub struct GameDefs {
     #[serde(default)]
     pub package_ladder: Vec<NeedsVec>,
     /// Culture id → obsessed good indices. Empty when the tree has no obsessions.
-    pub obsessions: BTreeMap<String, Vec<GoodIdx>>,
+    pub obsessions: BTreeMap<String, Vec<GoodId>>,
     /// Profession id → qualification script summary (`common/pop_types`).
     /// Empty when those files were not in the selected game files.
     #[serde(default)]
@@ -99,19 +99,19 @@ impl Default for GameDefs {
 
 impl GameDefs {
     /// Index of `good_id` in [`Self::goods_order`], if known.
-    pub fn index_of(&self, good_id: &str) -> Option<GoodIdx> {
+    pub fn index_of(&self, good_id: &str) -> Option<GoodId> {
         self.goods_order
             .iter()
             .position(|id| id == good_id)
-            .map(GoodIdx::from_usize)
+            .map(GoodId::from_usize)
     }
 
     /// Index of `need_id` in [`Self::needs_order`], if known.
-    pub fn need_index_of(&self, need_id: &str) -> Option<NeedIdx> {
+    pub fn need_index_of(&self, need_id: &str) -> Option<NeedId> {
         self.needs_order
             .iter()
             .position(|id| id == need_id)
-            .map(NeedIdx::from_usize)
+            .map(NeedId::from_usize)
     }
 
     /// Base price for `good_id`, if that good was parsed.
@@ -120,29 +120,29 @@ impl GameDefs {
     }
 
     /// Base price for an indexed good.
-    pub fn base_price_idx(&self, idx: GoodIdx) -> Option<f64> {
+    pub fn base_price_idx(&self, idx: GoodId) -> Option<f64> {
         self.good_by_index(idx)
             .and_then(|id| self.goods.get(id).map(|g| g.base_price))
     }
 
     /// Goods volume represented by one unit of saved state trade capacity.
-    pub fn traded_quantity_idx(&self, idx: GoodIdx) -> Option<f64> {
+    pub fn traded_quantity_idx(&self, idx: GoodId) -> Option<f64> {
         self.good_by_index(idx)
             .and_then(|id| self.goods.get(id).map(|g| g.traded_quantity))
     }
 
     /// Good id at the integer index used by saved building IO.
-    pub fn good_by_index(&self, index: GoodIdx) -> Option<&str> {
+    pub fn good_by_index(&self, index: GoodId) -> Option<&str> {
         self.goods_order.get(index.as_usize()).map(String::as_str)
     }
 
     /// Need id at `index`.
-    pub fn need_id_by_index(&self, index: NeedIdx) -> Option<&str> {
+    pub fn need_id_by_index(&self, index: NeedId) -> Option<&str> {
         self.needs_order.get(index.as_usize()).map(String::as_str)
     }
 
     /// Pop need definition at `index`.
-    pub fn need_by_index(&self, index: NeedIdx) -> Option<&PopNeed> {
+    pub fn need_by_index(&self, index: NeedId) -> Option<&PopNeed> {
         self.pop_needs.get(index.as_usize())
     }
 
@@ -230,8 +230,8 @@ pub struct Good {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ProductionMethod {
     pub id: String,
-    pub inputs: Vec<(GoodIdx, f64)>,
-    pub outputs: Vec<(GoodIdx, f64)>,
+    pub inputs: Vec<(GoodId, f64)>,
+    pub outputs: Vec<(GoodId, f64)>,
     /// `building_employment_{profession}_add` totals scraped from modifiers.
     #[serde(default)]
     pub employment: Vec<(String, f64)>,
@@ -330,14 +330,14 @@ pub struct BuildingGroup {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PopNeed {
     pub id: String,
-    pub default_good: Option<GoodIdx>,
+    pub default_good: Option<GoodId>,
     pub entries: Vec<NeedEntry>,
 }
 
 /// One substitutable good inside a [`PopNeed`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NeedEntry {
-    pub good: GoodIdx,
+    pub good: GoodId,
     pub weight: f64,
     pub min_supply_share: f64,
     pub max_supply_share: f64,

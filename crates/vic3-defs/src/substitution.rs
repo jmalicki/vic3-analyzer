@@ -6,7 +6,7 @@
 //! ([`docs/invariants.md`](../../../docs/invariants.md),
 //! [`docs/prices.md`](../../../docs/prices.md)).
 
-use crate::{GoodIdx, GoodsVec, NeedEntry, PopNeed};
+use crate::{GoodId, GoodsVec, NeedEntry, PopNeed};
 
 /// Clamp a market sell-order share to a need entry's substitution caps (I4).
 ///
@@ -30,13 +30,13 @@ pub fn substitution_weight(entry: &NeedEntry, raw_sell_share: f64) -> f64 {
 /// among its entries (missing / zero sell → raw share `0`). Shares sum to `1`
 /// when any unnormalized weight is positive; otherwise every returned share is
 /// `0`.
-pub fn substitution_shares(need: &PopNeed, sell_orders: &GoodsVec) -> Vec<(GoodIdx, f64)> {
+pub fn substitution_shares(need: &PopNeed, sell_orders: &GoodsVec) -> Vec<(GoodId, f64)> {
     let total_sell: f64 = need
         .entries
         .iter()
         .map(|e| sell_orders[e.good].max(0.0))
         .sum();
-    let weights: Vec<(GoodIdx, f64)> = need
+    let weights: Vec<(GoodId, f64)> = need
         .entries
         .iter()
         .map(|entry| {
@@ -106,7 +106,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, row)| NeedEntry {
-                good: GoodIdx::from_usize(i),
+                good: GoodId::from_usize(i),
                 weight: row.weight,
                 min_supply_share: row.min,
                 max_supply_share: row.max,
@@ -180,7 +180,7 @@ mod tests {
             let lo = min.min(max);
             let hi = min.max(max);
             let entry = NeedEntry {
-                good: GoodIdx::from_usize(0),
+                good: GoodId::from_usize(0),
                 weight,
                 min_supply_share: lo,
                 max_supply_share: hi,

@@ -1,15 +1,15 @@
 //! Clausewitz load accumulates string good/need ids; resolve them once.
 //!
 //! Staging keeps script ids while files merge. [`StagingDefs::resolve`] maps
-//! those strings onto dense [`crate::GoodIdx`] / [`crate::NeedIdx`] values and
+//! those strings onto dense [`crate::GoodId`] / [`crate::NeedId`] values and
 //! builds [`crate::GameDefs::package_ladder`] before the blob is encoded.
 
 use std::collections::{BTreeMap, HashMap};
 
 use crate::types::build_package_ladder;
 use crate::{
-    BuildingGroup, BuildingType, BuyPackage, DefsError, FlagDefinition, GameDefs, Good, GoodIdx,
-    NeedEntry, NeedIdx, NeedsVec, PopNeed, PopType, ProductionMethod, Technology,
+    BuildingGroup, BuildingType, BuyPackage, DefsError, FlagDefinition, GameDefs, Good, GoodId,
+    NeedEntry, NeedId, NeedsVec, PopNeed, PopType, ProductionMethod, Technology,
 };
 
 #[derive(Debug, Clone)]
@@ -148,17 +148,17 @@ impl StagingDefs {
             technologies: self.technologies,
         };
         crate::loc::polish_labels(&mut defs.labels);
-        let good_index: HashMap<String, GoodIdx> = defs
+        let good_index: HashMap<String, GoodId> = defs
             .goods_order
             .iter()
             .enumerate()
-            .map(|(i, id)| (id.clone(), GoodIdx::from_usize(i)))
+            .map(|(i, id)| (id.clone(), GoodId::from_usize(i)))
             .collect();
-        let need_index: HashMap<String, NeedIdx> = defs
+        let need_index: HashMap<String, NeedId> = defs
             .needs_order
             .iter()
             .enumerate()
-            .map(|(i, id)| (id.clone(), NeedIdx::from_usize(i)))
+            .map(|(i, id)| (id.clone(), NeedId::from_usize(i)))
             .collect();
         let lookup_good = |name: &str| good_index.get(name).copied();
         let lookup_need = |name: &str| need_index.get(name).copied();
