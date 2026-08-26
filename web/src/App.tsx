@@ -1502,7 +1502,7 @@ function App({ wasmApi }: Props) {
             <GoalBuilder
               key={`plan-${selectedTemplateId}`}
               idPrefix="Plan"
-              goods={result?.goods.map((good) => good.id) ?? []}
+              goods={result?.goods.map((good) => good.good_name) ?? []}
               value={goal}
               onChange={setGoal}
               initialKind={selectedTemplate?.goalKind}
@@ -1547,7 +1547,7 @@ function App({ wasmApi }: Props) {
             <GoalBuilder
               key={`gaps-${selectedTemplateId}`}
               idPrefix="Gaps"
-              goods={result?.goods.map((good) => good.id) ?? []}
+              goods={result?.goods.map((good) => good.good_name) ?? []}
               value={goal}
               onChange={setGoal}
               initialKind={selectedTemplate?.goalKind}

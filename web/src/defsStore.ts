@@ -26,9 +26,7 @@ const db = () =>
   })
 
 export async function storeDefs(file: File): Promise<void> {
-  await (await db()).put('defs', {
-    id: 'current',
-    name: file.name,
+  await (await db()).put('defs', { id: 'current', name: file.name,
     bytes: new Uint8Array(await file.arrayBuffer()),
     saved_at: new Date().toISOString(),
   })

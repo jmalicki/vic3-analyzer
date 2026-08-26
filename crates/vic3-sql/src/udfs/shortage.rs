@@ -122,7 +122,7 @@ impl ShortageAnalysisProvider {
         if !is_goods_shortage_kind(alert.kind) {
             return false;
         }
-        let Some(good_id) = alert.good_id.as_deref() else {
+        let Some(good_id) = alert.good_name.as_deref() else {
             return false;
         };
         if let Some(filter) = &self.good {
@@ -162,8 +162,13 @@ impl ShortageAnalysisProvider {
         let mut mitigations = StringBuilder::new();
 
         for alert in alerts {
-            let good_id = alert.good_id.as_deref().unwrap_or("");
-            let market = self.binding.prices.goods.iter().find(|g| g.id == good_id);
+            let good_id = alert.good_name.as_deref().unwrap_or("");
+            let market = self
+                .binding
+                .prices
+                .goods
+                .iter()
+                .find(|g| g.good_name == good_id);
 
             good_col.append_value(good_id);
             alert_id.append_value(&alert.id);
@@ -228,14 +233,14 @@ impl ShortageAnalysisProvider {
     }
 }
 
-fn shortage_matches(alert: &Alert, good_id: &str, preds: &[Pred]) -> bool {
+fn shortage_matches(alert: &Alert, good_name: &str, preds: &[Pred]) -> bool {
     if !matches_i32(preds, "severity", i32::from(alert.severity)) {
         return false;
     }
     if !matches_str(preds, "kind", alert_kind_str(alert.kind)) {
         return false;
     }
-    if !matches_str(preds, "good", good_id) {
+    if !matches_str(preds, "good_name", good_name) {
         return false;
     }
     if !matches_str(preds, "alert_id", &alert.id) {

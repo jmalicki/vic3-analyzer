@@ -504,7 +504,10 @@ pub trait IntoPriceMap {
 
 impl IntoPriceMap for &PricesResult {
     fn into_price_map(self) -> BTreeMap<String, f64> {
-        self.goods.iter().map(|g| (g.id.clone(), g.price)).collect()
+        self.goods
+            .iter()
+            .map(|g| (g.good_name.clone(), g.price))
+            .collect()
     }
 }
 
@@ -1187,8 +1190,8 @@ mod tests {
         PricesResult {
             scope: "whole_save_synthetic".into(),
             goods: vec![GoodPrice {
-                id: "ammunition".into(),
-                name: None,
+                good_name: "ammunition".into(),
+                good_label: None,
                 base: 50.0,
                 price,
                 buy: 1.0,

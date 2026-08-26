@@ -50,7 +50,7 @@ function findProducer(
   stateId?: number,
 ): BuildingEconomics | undefined {
   const produces = (building: BuildingEconomics) =>
-    building.outputs.some((flow) => flow.good_id === goodId)
+    building.outputs.some((flow) => flow.good_name === goodId)
   if (stateId != null) {
     const local = buildings.find((building) => building.state_id === stateId && produces(building))
     if (local) return local
@@ -96,8 +96,8 @@ export function deltaForMitigation(
       }
     }
     case 'sol_goods': {
-      if (!action.good_id) return undefined
-      const producer = findProducer(buildings, action.good_id, action.state_id)
+      if (!action.good_name) return undefined
+      const producer = findProducer(buildings, action.good_name, action.state_id)
       if (!producer) return undefined
       return {
         extra_levels: [{ building_id: producer.id, extra_levels: 1 }],
@@ -162,14 +162,12 @@ export function deltasFromSteps(steps: Step[], currentId?: string): WorldDelta[]
 }
 
 function pickGoods(current: PricesResult, preview: PricesResult) {
-  const afterById = new Map(preview.goods.map((good) => [good.id, good]))
+  const afterById = new Map(preview.goods.map((good) => [good.good_name, good]))
   const rows = current.goods.flatMap((good) => {
-    const after = afterById.get(good.id)
+    const after = afterById.get(good.good_name)
     if (!after) return []
     return [
-      {
-        id: good.id,
-        name: good.name ?? good.id.replaceAll('_', ' '),
+      { good_name: good.good_name, good_label: good.good_label ?? good.good_name.replaceAll('_', ' '),
         before: good.price,
         after: after.price,
       },
@@ -217,8 +215,8 @@ export function ConfirmApply({
             </dd>
           </div>
           {goods.map((good) => (
-            <div key={good.id}>
-              <dt>{good.name}</dt>
+            <div key={good.good_name}>
+              <dt>{good.good_label}</dt>
               <dd>
                 <span>{good.before.toFixed(2)}</span>
                 <span aria-hidden="true"> → </span>

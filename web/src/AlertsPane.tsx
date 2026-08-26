@@ -43,7 +43,7 @@ function actionBuilding(action?: MitigationAction): string | undefined {
 
 function actionGood(action?: MitigationAction): string | undefined {
   if (!action) return undefined
-  if (action.type === 'trade_alloc' || action.type === 'sol_goods') return action.good_id
+  if (action.type === 'trade_alloc' || action.type === 'sol_goods') return action.good_name
   return undefined
 }
 
@@ -154,7 +154,7 @@ export function hrefForAlert(alert: Alert): string {
     case 'electricity_shortage':
     case 'transportation_shortage':
     case 'goods_shortage':
-      if (alert.good_id) return hashForGood(alert.good_id)
+      if (alert.good_name) return hashForGood(alert.good_name)
       if (alert.building_id != null) return hashForBuilding(alert.building_id)
       if (alert.state_id != null) return hashForState(alert.state_id)
       return '#/prices'
@@ -171,8 +171,8 @@ export function hrefForAlert(alert: Alert): string {
 export function alertsForBuilding(alerts: Alert[], building: BuildingEconomics): Alert[] {
   const goods = new Set([
     ...(building.short_inputs ?? []),
-    ...(building.inputs ?? []).map((flow) => flow.good_id),
-    ...(building.outputs ?? []).map((flow) => flow.good_id),
+    ...(building.inputs ?? []).map((flow) => flow.good_name),
+    ...(building.outputs ?? []).map((flow) => flow.good_name),
   ])
   return alerts.filter((alert) => {
     if (alert.building_id === building.id) return true
@@ -185,8 +185,8 @@ export function alertsForBuilding(alerts: Alert[], building: BuildingEconomics):
       return true
     }
     if (
-      alert.good_id &&
-      goods.has(alert.good_id) &&
+      alert.good_name &&
+      goods.has(alert.good_name) &&
       (alert.state_id == null || alert.state_id === building.state_id)
     ) {
       return (
@@ -216,7 +216,7 @@ export function alertsForState(
 }
 
 export function alertsForGood(alerts: Alert[], goodId: string): Alert[] {
-  return alerts.filter((alert) => alert.good_id === goodId)
+  return alerts.filter((alert) => alert.good_name === goodId)
 }
 
 export function alertsForPops(alerts: Alert[]): Alert[] {
@@ -313,7 +313,7 @@ function AlertIndexRow({
     <div className="alert-index-row">
       <a className="alert-index-link" href={href}>
         <GameIcon kind="alert" id={alertIconId(alert.kind)} icons={icons} />
-        {alert.good_id && <GameIcon kind="good" id={alert.good_id} icons={icons} />}
+        {alert.good_name && <GameIcon kind="good" id={alert.good_name} icons={icons} />}
         <strong>{alert.title}</strong>
         <span className="alert-severity">severity {alert.severity}</span>
       </a>
@@ -376,7 +376,7 @@ function LocalAlertCard({
       <summary>
         <span className="alert-heading">
           <GameIcon kind="alert" id={alertIconId(alert.kind)} icons={icons} />
-          {alert.good_id && <GameIcon kind="good" id={alert.good_id} icons={icons} />}
+          {alert.good_name && <GameIcon kind="good" id={alert.good_name} icons={icons} />}
           <strong>{alert.title}</strong>
           <span className="alert-severity">severity {alert.severity}</span>
         </span>

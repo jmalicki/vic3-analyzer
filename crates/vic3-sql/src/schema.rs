@@ -2,7 +2,7 @@
 //!
 //! # IO element type
 //!
-//! [`good_io_list_type`] is `List<Struct{good Utf8, good_name Utf8?, qty Float64}>`.
+//! [`good_io_list_type`] is `List<Struct{good_name Utf8, good_label Utf8?, qty Float64}>`.
 //! Script ids only — never bare `GoodId` as the sole key. Consumers explode
 //! with SELECT-list `unnest(unnest(col))`.
 
@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::datatypes::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
 
-/// `List<Struct{good, good_name, qty}>` for building / PM IO columns.
+/// `List<Struct{good_name, good_label, qty}>` for building / PM IO columns.
 pub fn good_io_list_type() -> DataType {
     DataType::List(Arc::new(Field::new("item", good_io_struct_type(), true)))
 }
@@ -18,8 +18,8 @@ pub fn good_io_list_type() -> DataType {
 /// Struct element inside goods IO lists.
 pub fn good_io_struct_type() -> DataType {
     DataType::Struct(Fields::from(vec![
-        Field::new("good", DataType::Utf8, false),
-        Field::new("good_name", DataType::Utf8, true),
+        Field::new("good_name", DataType::Utf8, false),
+        Field::new("good_label", DataType::Utf8, true),
         Field::new("qty", DataType::Float64, false),
     ]))
 }
@@ -44,8 +44,8 @@ pub fn states_schema() -> SchemaRef {
 
 pub fn goods_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
-        Field::new("good", DataType::Utf8, false),
-        Field::new("good_name", DataType::Utf8, true),
+        Field::new("good_name", DataType::Utf8, false),
+        Field::new("good_label", DataType::Utf8, true),
         Field::new("base", DataType::Float64, false),
         Field::new("price", DataType::Float64, false),
         Field::new("buy", DataType::Float64, false),
@@ -57,7 +57,7 @@ pub fn goods_schema() -> SchemaRef {
 pub fn goods_by_state_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
         Field::new("state_id", DataType::UInt32, false),
-        Field::new("good", DataType::Utf8, false),
+        Field::new("good_name", DataType::Utf8, false),
         Field::new("price", DataType::Float64, false),
         Field::new("buy", DataType::Float64, false),
         Field::new("sell", DataType::Float64, false),
@@ -197,7 +197,7 @@ pub fn alerts_schema() -> SchemaRef {
         Field::new("summary", DataType::Utf8, false),
         Field::new("state_id", DataType::UInt32, true),
         Field::new("building_id", DataType::UInt32, true),
-        Field::new("good_id", DataType::Utf8, true),
+        Field::new("good_name", DataType::Utf8, true),
         Field::new("evidence", DataType::Utf8, false),
         Field::new("mitigations", DataType::Utf8, false),
     ]))
@@ -216,7 +216,7 @@ pub fn suggest_mitigations_schema() -> SchemaRef {
         Field::new("rank", DataType::UInt32, false),
         Field::new("action", DataType::Utf8, true),
         Field::new("building", DataType::Utf8, true),
-        Field::new("good_id", DataType::Utf8, true),
+        Field::new("good_name", DataType::Utf8, true),
         Field::new("extra_levels", DataType::UInt32, true),
         Field::new("title", DataType::Utf8, false),
         Field::new("detail", DataType::Utf8, false),
@@ -228,7 +228,7 @@ pub fn suggest_mitigations_schema() -> SchemaRef {
 /// Market magnitudes (`buy`/`sell`/…) may be NULL when no matching goods row.
 pub fn shortage_analysis_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
-        Field::new("good", DataType::Utf8, false),
+        Field::new("good_name", DataType::Utf8, false),
         Field::new("alert_id", DataType::Utf8, false),
         Field::new("kind", DataType::Utf8, false),
         Field::new("severity", DataType::Int32, false),

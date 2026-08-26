@@ -20,8 +20,8 @@ use super::pushdown::{matches_str, PushSupport};
 const PUSH: PushSupport = PushSupport {
     eq_u32: &[],
     eq_i32: &[],
-    // goods_order / index_of / name hash — Exact equality only (no range).
-    eq_str: &["good", "good_name"],
+    // goods_order / index_of / label hash — Exact equality only (no range).
+    eq_str: &["good_name", "good_label"],
     range_str: &[],
 };
 
@@ -30,24 +30,24 @@ pub struct GoodsProvider {
     binding: Arc<SessionBinding>,
     schema: SchemaRef,
     by_good: HashMap<String, usize>,
-    by_name: HashMap<String, Vec<usize>>,
+    by_label: HashMap<String, Vec<usize>>,
 }
 
 impl GoodsProvider {
     pub fn new(binding: Arc<SessionBinding>) -> Self {
         let mut by_good = HashMap::new();
-        let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut by_label: HashMap<String, Vec<usize>> = HashMap::new();
         for (i, g) in binding.prices.goods.iter().enumerate() {
-            by_good.insert(g.id.clone(), i);
-            if let Some(n) = &g.name {
-                by_name.entry(n.clone()).or_default().push(i);
+            by_good.insert(g.good_name.clone(), i);
+            if let Some(n) = &g.good_label {
+                by_label.entry(n.clone()).or_default().push(i);
             }
         }
         Self {
             binding,
             schema: goods_schema(),
             by_good,
-            by_name,
+            by_label,
         }
     }
 
@@ -55,22 +55,22 @@ impl GoodsProvider {
         let preds = PUSH.collect_preds(filters);
         let indices: Vec<usize> = if let Some(Pred::EqStr { column, value }) = preds
             .iter()
-            .find(|p| matches!(p, Pred::EqStr { column, .. } if column == "good"))
+            .find(|p| matches!(p, Pred::EqStr { column, .. } if column == "good_name"))
         {
             let _ = column;
             self.by_good.get(value).copied().into_iter().collect()
         } else if let Some(Pred::EqStr { column, value }) = preds
             .iter()
-            .find(|p| matches!(p, Pred::EqStr { column, .. } if column == "good_name"))
+            .find(|p| matches!(p, Pred::EqStr { column, .. } if column == "good_label"))
         {
             let _ = column;
-            self.by_name.get(value).cloned().unwrap_or_default()
+            self.by_label.get(value).cloned().unwrap_or_default()
         } else {
             (0..self.binding.prices.goods.len()).collect()
         };
 
-        let mut good = StringBuilder::new();
         let mut good_name = StringBuilder::new();
+        let mut good_label = StringBuilder::new();
         let mut base = Float64Builder::new();
         let mut price = Float64Builder::new();
         let mut buy = Float64Builder::new();
@@ -79,23 +79,23 @@ impl GoodsProvider {
 
         for i in indices {
             let g = &self.binding.prices.goods[i];
-            if !matches_str(&preds, "good", &g.id) {
+            if !matches_str(&preds, "good_name", &g.good_name) {
                 continue;
             }
-            if let Some(n) = &g.name {
-                if !matches_str(&preds, "good_name", n) {
+            if let Some(n) = &g.good_label {
+                if !matches_str(&preds, "good_label", n) {
                     continue;
                 }
             } else if preds
                 .iter()
-                .any(|p| matches!(p, Pred::EqStr { column, .. } if column == "good_name"))
+                .any(|p| matches!(p, Pred::EqStr { column, .. } if column == "good_label"))
             {
                 continue;
             }
-            good.append_value(&g.id);
-            match &g.name {
-                Some(n) => good_name.append_value(n),
-                None => good_name.append_null(),
+            good_name.append_value(&g.good_name);
+            match &g.good_label {
+                Some(n) => good_label.append_value(n),
+                None => good_label.append_null(),
             }
             base.append_value(g.base);
             price.append_value(g.price);
@@ -107,8 +107,8 @@ impl GoodsProvider {
         RecordBatch::try_new(
             Arc::clone(&self.schema),
             vec![
-                Arc::new(good.finish()),
                 Arc::new(good_name.finish()),
+                Arc::new(good_label.finish()),
                 Arc::new(base.finish()),
                 Arc::new(price.finish()),
                 Arc::new(buy.finish()),

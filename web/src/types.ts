@@ -1,6 +1,6 @@
 export interface GoodPrice {
-  id: string
-  name?: string
+  good_name: string
+  good_label?: string
   base: number
   price: number
   buy: number
@@ -87,7 +87,7 @@ export interface BuildingGroupInfo {
 
 export interface StateGood {
   state_id: number
-  good_id: string
+  good_name: string
   buy: number
   sell: number
   price: number
@@ -99,7 +99,7 @@ export interface StateGood {
 }
 
 export interface GoodFlow {
-  good_id: string
+  good_name: string
   quantity: number
   value: number
 }
@@ -292,9 +292,9 @@ export type MitigationAction =
   | { type: 'build'; building: string; state_id?: number; extra_levels?: number }
   | { type: 'pm'; building_id: number; production_method: string; methods?: string[] }
   | { type: 'subsidize'; building_id: number }
-  | { type: 'trade_alloc'; state_id: number; good_id: string }
+  | { type: 'trade_alloc'; state_id: number; good_name: string }
   | { type: 'feeder_job'; building: string; profession: string; state_id?: number }
-  | { type: 'sol_goods'; good_id: string; state_id?: number }
+  | { type: 'sol_goods'; good_name: string; state_id?: number }
 
 export interface AlertMitigation {
   id: string
@@ -335,7 +335,7 @@ export interface Alert {
   summary: string
   state_id?: number
   building_id?: number
-  good_id?: string
+  good_name?: string
   evidence: AlertEvidence[]
   mitigations: AlertMitigation[]
   staffing?: BuildingStaffing[]

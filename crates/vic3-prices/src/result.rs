@@ -163,8 +163,8 @@ impl fmt::Display for SolveStatus {
 /// One row of the goods table in [`PricesResult`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GoodPrice {
-    pub id: String,
-    pub name: Option<String>,
+    pub good_name: String,
+    pub good_label: Option<String>,
     pub base: f64,
     pub price: f64,
     pub buy: f64,
@@ -284,7 +284,7 @@ pub struct BuildingGroupInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateGood {
     pub state_id: u32,
-    pub good_id: String,
+    pub good_name: String,
     pub buy: f64,
     pub sell: f64,
     /// Final local price after blending market and pure state prices.
@@ -302,7 +302,7 @@ pub struct StateGood {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GoodFlow {
-    pub good_id: String,
+    pub good_name: String,
     pub quantity: f64,
     pub value: f64,
 }
@@ -594,7 +594,7 @@ struct NeedSer<'a> {
 
 #[derive(Serialize)]
 struct GoodFlowSer<'a> {
-    good_id: &'a str,
+    good_name: &'a str,
     quantity: f64,
     value: f64,
 }
@@ -641,7 +641,7 @@ impl<'a> StatePopSer<'a> {
                             .iter()
                             .filter_map(|&(idx, quantity, value)| {
                                 Some(GoodFlowSer {
-                                    good_id: tables.good(idx)?,
+                                    good_name: tables.good(idx)?,
                                     quantity,
                                     value,
                                 })
@@ -689,7 +689,7 @@ fn materialize_state_pop(tables: &EmitTables, row: &CompactStatePop) -> StatePop
                     .goods
                     .into_iter()
                     .map(|flow| GoodFlow {
-                        good_id: flow.good_id.to_string(),
+                        good_name: flow.good_name.to_string(),
                         quantity: flow.quantity,
                         value: flow.value,
                     })

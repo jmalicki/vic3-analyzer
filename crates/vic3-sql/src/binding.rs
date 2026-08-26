@@ -60,14 +60,14 @@ impl SessionBinding {
         self.defs.labels.get(id).map(String::as_str)
     }
 
-    /// Display name for a good script id (defs labels, else prices row name).
-    pub fn good_name(&self, good_id: &str) -> Option<String> {
-        self.defs.labels.get(good_id).cloned().or_else(|| {
+    /// Display label for a good script name (defs labels, else prices row label).
+    pub fn good_name(&self, good_name: &str) -> Option<String> {
+        self.defs.labels.get(good_name).cloned().or_else(|| {
             self.prices
                 .goods
                 .iter()
-                .find(|g| g.id == good_id)
-                .and_then(|g| g.name.clone())
+                .find(|g| g.good_name == good_name)
+                .and_then(|g| g.good_label.clone())
         })
     }
 

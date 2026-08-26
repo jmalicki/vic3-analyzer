@@ -177,7 +177,7 @@ async fn world_tables_include_foreign_when_present() {
 async fn goods_shortage_and_equality_filter() {
     let eng = engine().await;
     let batches = eng
-        .query("SELECT good, buy, sell, shortage FROM goods WHERE good = 'grain'")
+        .query("SELECT good_name, buy, sell, shortage FROM goods WHERE good_name = 'grain'")
         .await
         .expect("goods");
     assert_eq!(batches[0].num_rows(), 1);
@@ -246,7 +246,7 @@ async fn join_example_from_docs() {
     // Exact docs example shape (`docs/sql.md`); fixture may have zero shortages.
     let batches = eng
         .query(
-            "SELECT s.state_name, g.good, g.shortage, g.price \
+            "SELECT s.state_name, g.good_name, g.shortage, g.price \
              FROM states s \
              JOIN goods_by_state g USING (state_id) \
              WHERE g.shortage > 0 \
@@ -579,7 +579,7 @@ async fn suggest_mitigations_player_le_all_and_columns() {
         "rank",
         "action",
         "building",
-        "good_id",
+        "good_name",
         "extra_levels",
         "title",
         "detail",
@@ -862,16 +862,16 @@ async fn underemployed_states_join_suggest_mitigations() {
 async fn shortage_analysis_schema_and_filter() {
     let eng = engine().await;
     let all = eng
-        .query("SELECT good, alert_id, kind, shortage, evidence FROM shortage_analysis(NULL)")
+        .query("SELECT good_name, alert_id, kind, shortage, evidence FROM shortage_analysis(NULL)")
         .await
         .expect("shortage all");
     assert!(!all.is_empty());
     let schema = all[0].schema();
-    assert_eq!(schema.field(0).name(), "good");
+    assert_eq!(schema.field(0).name(), "good_name");
     assert_eq!(schema.field(3).name(), "shortage");
 
     let grain = eng
-        .query("SELECT good FROM shortage_analysis('grain')")
+        .query("SELECT good_name FROM shortage_analysis('grain')")
         .await
         .expect("shortage grain");
     for batch in &grain {

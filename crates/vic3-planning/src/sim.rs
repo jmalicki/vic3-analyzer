@@ -1912,7 +1912,7 @@ fn refresh_prices(state: &mut PlanningState, economy: &EconomyContext) {
     state.good_prices = outcome
         .goods
         .into_iter()
-        .map(|good| (good.id, good.price))
+        .map(|good| (good.good_name, good.price))
         .collect();
 }
 
@@ -2841,11 +2841,11 @@ mod tests {
         let from_world = equilibrate(&projected, &economy.defs, SolveOpts::default());
         assert_eq!(from_patch.goods.len(), from_world.goods.len());
         for (a, b) in from_patch.goods.iter().zip(from_world.goods.iter()) {
-            assert_eq!(a.id, b.id);
+            assert_eq!(a.good_name, b.good_name);
             assert!(
                 (a.price - b.price).abs() < 1e-9,
                 "price mismatch for {}: {} vs {}",
-                a.id,
+                a.good_name,
                 a.price,
                 b.price
             );

@@ -183,7 +183,7 @@ impl AlertsProvider {
                 Some(v) => building_id.append_value(v),
                 None => building_id.append_null(),
             }
-            match &alert.good_id {
+            match &alert.good_name {
                 Some(v) => good_id.append_value(v),
                 None => good_id.append_null(),
             }
@@ -230,7 +230,7 @@ fn alert_matches(alert: &Alert, preds: &[Pred]) -> bool {
         .iter()
         .any(|p| matches!(p, Pred::EqStr { column, .. } if column == "good_id"))
     {
-        match &alert.good_id {
+        match &alert.good_name {
             Some(g) if matches_str(preds, "good_id", g) => {}
             _ => return false,
         }

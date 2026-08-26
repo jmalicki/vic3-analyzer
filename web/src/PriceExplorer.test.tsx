@@ -15,7 +15,7 @@ function stateGood(
   const effective_mapi = 0.75 * market_access
   return {
     state_id,
-    good_id: 'zany_tools',
+    good_name: 'zany_tools',
     base: 40,
     buy,
     sell,
@@ -30,8 +30,8 @@ function stateGood(
 const result: PricesResult = {
   scope: 'whole_save_synthetic',
   goods: [
-    { id: 'zany_tools', name: 'Zany Tools', base: 40, price: 50, buy: 10, sell: 8 },
-    { id: 'apples', name: 'Apples', base: 20, price: 15, buy: 5, sell: 7 },
+    { good_name: 'zany_tools', good_label: 'Zany Tools', base: 40, price: 50, buy: 10, sell: 8 },
+    { good_name: 'apples', good_label: 'Apples', base: 20, price: 15, buy: 5, sell: 7 },
   ],
   states: [
     { id: 2, region_id: 'STATE_ZEBRA', market_id: 1 },
@@ -57,8 +57,8 @@ const result: PricesResult = {
       level: 3,
       staffing: 2.4,
       production_method_ids: ['pm_goofy_hammers'],
-      inputs: [{ good_id: 'iron', quantity: 2, value: 80 }],
-      outputs: [{ good_id: 'zany_tools', quantity: 3, value: 150 }],
+      inputs: [{ good_name: 'iron', quantity: 2, value: 80 }],
+      outputs: [{ good_name: 'zany_tools', quantity: 3, value: 150 }],
       revenue: 150,
       cost: 80,
       profit: 70,
@@ -67,18 +67,14 @@ const result: PricesResult = {
     },
   ],
   building_types: [
-    {
-      id: 'building_silly_hammer_factory',
-      name: 'Silly Hammer Factory',
+    { id: 'building_silly_hammer_factory', name: 'Silly Hammer Factory',
       group_id: 'bg_manufacturing',
     },
     { id: 'building_rye_farm', name: 'Rye Farms', group_id: 'bg_agriculture' },
   ],
   building_groups: [
     { id: 'bg_manufacturing', name: 'Manufacturing', category: 'urban', always_possible: false },
-    {
-      id: 'bg_agriculture',
-      name: 'Agriculture',
+    { id: 'bg_agriculture', name: 'Agriculture',
       category: 'rural',
       land_usage: 'rural',
       always_possible: true,
@@ -103,7 +99,7 @@ const result: PricesResult = {
           need_id: 'popneed_staple_foods',
           need_name: 'Staple foods',
           package_value: 10,
-          goods: [{ good_id: 'apples', quantity: 4, value: 60 }],
+          goods: [{ good_name: 'apples', quantity: 4, value: 60 }],
         },
       ],
     },
@@ -126,7 +122,7 @@ const result: PricesResult = {
       need_id: 'popneed_staple_foods',
       need_name: 'Staple foods',
       package_value: 10,
-      goods: [{ good_id: 'apples', quantity: 4, value: 60 }],
+      goods: [{ good_name: 'apples', quantity: 4, value: 60 }],
     },
   ],
   residual: 0,
@@ -230,8 +226,8 @@ describe('PriceExplorer', () => {
         result={{
           ...result,
           goods: [
-            { id: 'cheap', name: 'Cheap', base: 10, price: 17, buy: 1, sell: 1 },
-            { id: 'dear', name: 'Dear', base: 200, price: 220, buy: 1, sell: 1 },
+            { good_name: 'cheap', good_label: 'Cheap', base: 10, price: 17, buy: 1, sell: 1 },
+            { good_name: 'dear', good_label: 'Dear', base: 200, price: 220, buy: 1, sell: 1 },
           ],
         }}
       />,
@@ -535,7 +531,7 @@ describe('PriceExplorer', () => {
             severity: 1,
             title: 'Zany tools shortage',
             summary: 'Buy exceeds sell.',
-            good_id: 'zany_tools',
+            good_name: 'zany_tools',
             evidence: [],
             mitigations: [
               {

@@ -420,8 +420,8 @@ impl PriceResidual<'_> {
                 let buy = self.cache.frozen_buy[id] + pop_buy[id];
                 let sell = self.cache.frozen_sell[id];
                 Some(GoodPrice {
-                    id: good_id.to_string(),
-                    name: self.defs.labels.get(good_id).cloned(),
+                    good_name: good_id.to_string(),
+                    good_label: self.defs.labels.get(good_id).cloned(),
                     base: *base,
                     price: *base * *rrel,
                     buy,

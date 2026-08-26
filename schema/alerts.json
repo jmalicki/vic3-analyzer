@@ -17,7 +17,7 @@
           },
           "type": "array"
         },
-        "good_id": {
+        "good_name": {
           "type": [
             "string",
             "null"
@@ -275,7 +275,7 @@
         },
         {
           "properties": {
-            "good_id": {
+            "good_name": {
               "type": "string"
             },
             "state_id": {
@@ -291,7 +291,7 @@
           "required": [
             "type",
             "state_id",
-            "good_id"
+            "good_name"
           ],
           "type": "object"
         },
@@ -325,7 +325,7 @@
         },
         {
           "properties": {
-            "good_id": {
+            "good_name": {
               "type": "string"
             },
             "state_id": {
@@ -343,7 +343,7 @@
           },
           "required": [
             "type",
-            "good_id"
+            "good_name"
           ],
           "type": "object"
         }

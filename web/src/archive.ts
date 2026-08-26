@@ -90,11 +90,11 @@ export function compareAnalyses(left: AnalysisRecord, right: AnalysisRecord): Co
     (left.kind === 'prices' || left.kind === 'what_if') &&
     (right.kind === 'prices' || right.kind === 'what_if')
   ) {
-    const rightGoods = new Map((right.result as PricesResult).goods.map((good) => [good.id, good]))
+    const rightGoods = new Map((right.result as PricesResult).goods.map((good) => [good.good_name, good]))
     const prices = (left.result as PricesResult).goods.flatMap((good) => {
-      const other = rightGoods.get(good.id)
+      const other = rightGoods.get(good.good_name)
       const delta = other ? other.price - good.price : 0
-      return other && delta !== 0 ? [{ good: good.id, delta }] : []
+      return other && delta !== 0 ? [{ good: good.good_name, delta }] : []
     })
     if (prices.length) comparison.prices = prices
   } else if (

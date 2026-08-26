@@ -73,7 +73,7 @@ export function displayId(id: string): string {
 }
 
 function goodName(good: GoodPrice): string {
-  return good.name || displayId(good.id)
+  return good.good_label || displayId(good.good_name)
 }
 
 /** Game icons from a defs blob; goods may be nested or a flat id → URL map. */
@@ -96,12 +96,12 @@ function GoodFlows({
   return (
     <ul className="good-chips">
       {flows.map((flow) => {
-        const good = goods.find((row) => row.id === flow.good_id)
+        const good = goods.find((row) => row.good_name === flow.good_name)
         return (
-          <li key={flow.good_id}>
-            <a className="good-link" href={`#/prices/good/${encodeURIComponent(flow.good_id)}`}>
-              <GoodIcon id={flow.good_id} icons={icons} />
-              {good ? goodName(good) : displayId(flow.good_id)}
+          <li key={flow.good_name}>
+            <a className="good-link" href={`#/prices/good/${encodeURIComponent(flow.good_name)}`}>
+              <GoodIcon id={flow.good_name} icons={icons} />
+              {good ? goodName(good) : displayId(flow.good_name)}
               {' '}
               {flow.quantity.toFixed(1)} ({flow.value.toFixed(2)})
             </a>
@@ -137,16 +137,16 @@ export function NeedBaskets({
               </thead>
               <tbody>
                 {need.goods.map((flow) => {
-                  const good = goods.find((row) => row.id === flow.good_id)
+                  const good = goods.find((row) => row.good_name === flow.good_name)
                   return (
-                    <tr key={flow.good_id}>
+                    <tr key={flow.good_name}>
                       <th>
                         <a
                           className="good-link"
-                          href={`#/prices/good/${encodeURIComponent(flow.good_id)}`}
+                          href={`#/prices/good/${encodeURIComponent(flow.good_name)}`}
                         >
-                          <GoodIcon id={flow.good_id} icons={icons} />
-                          {good ? goodName(good) : displayId(flow.good_id)}
+                          <GoodIcon id={flow.good_name} icons={icons} />
+                          {good ? goodName(good) : displayId(flow.good_name)}
                         </a>
                       </th>
                       <td>{flow.quantity.toFixed(1)}</td>
@@ -281,12 +281,12 @@ function aggregateGoods(
   const scopedRows = stateGoods.filter((row) => stateIsInScope(statesById.get(row.state_id)))
   const rowsByGood = new Map<string, StateGood[]>()
   for (const row of scopedRows) {
-    const rows = rowsByGood.get(row.good_id)
+    const rows = rowsByGood.get(row.good_name)
     if (rows) rows.push(row)
-    else rowsByGood.set(row.good_id, [row])
+    else rowsByGood.set(row.good_name, [row])
   }
   return goods.map((good) => {
-    const rows = rowsByGood.get(good.id)
+    const rows = rowsByGood.get(good.good_name)
     if (!rows?.length) return good
     let buy = 0
     let sell = 0
@@ -334,14 +334,14 @@ function GoodsTable({ goods, icons }: { goods: GoodPrice[]; icons: Icons }) {
         </thead>
         <tbody>
           {sorted.map((good) => (
-            <tr key={good.id}>
+            <tr key={good.good_name}>
               <th>
                 <a
                   className="good-link"
-                  href={`#/prices/good/${encodeURIComponent(good.id)}`}
-                  title={good.id}
+                  href={`#/prices/good/${encodeURIComponent(good.good_name)}`}
+                  title={good.good_name}
                 >
-                  <GoodIcon id={good.id} icons={icons} />
+                  <GoodIcon id={good.good_name} icons={icons} />
                   {goodName(good)}
                 </a>
               </th>
@@ -822,8 +822,8 @@ function StateLocalPrices({
   const sorted = useMemo(
     () => sortRows(rows, sort, (row, key) => {
       if (key === 'name') {
-        const good = goods.find((item) => item.id === row.good_id)
-        return good ? goodName(good) : displayId(row.good_id)
+        const good = goods.find((item) => item.good_name === row.good_name)
+        return good ? goodName(good) : displayId(row.good_name)
       }
       return row[key]
     }),
@@ -851,13 +851,13 @@ function StateLocalPrices({
             </thead>
             <tbody>
               {sorted.map((row) => {
-                const good = goods.find((item) => item.id === row.good_id)
+                const good = goods.find((item) => item.good_name === row.good_name)
                 return (
-                  <tr key={row.good_id}>
+                  <tr key={row.good_name}>
                     <th>
-                      <a className="good-link" href={`#/prices/good/${encodeURIComponent(row.good_id)}`}>
-                        <GoodIcon id={row.good_id} icons={icons} />
-                        {good ? goodName(good) : displayId(row.good_id)}
+                      <a className="good-link" href={`#/prices/good/${encodeURIComponent(row.good_name)}`}>
+                        <GoodIcon id={row.good_name} icons={icons} />
+                        {good ? goodName(good) : displayId(row.good_name)}
                       </a>
                     </th>
                     <td>{row.price.toFixed(2)}</td>
@@ -1220,9 +1220,9 @@ export function PriceExplorer({
   const scopedGoods = aggregateGoods(result.goods, stateGoods, states, stateIsInScope)
 
   if (view.kind === 'good') {
-    const good = result.goods.find((row) => row.id === view.id)
+    const good = result.goods.find((row) => row.good_name === view.id)
     const rows = stateGoods
-      .filter((row) => row.good_id === view.id)
+      .filter((row) => row.good_name === view.id)
       .map((row) => ({ ...row, state: states.find((state) => state.id === row.state_id) }))
       .filter((row) => stateIsInScope(row.state))
     return (
