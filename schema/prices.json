@@ -326,14 +326,14 @@
           },
           "type": "array"
         },
-        "need_id": {
-          "type": "string"
-        },
-        "need_name": {
+        "need_label": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "need_name": {
+          "type": "string"
         },
         "package_value": {
           "format": "double",
@@ -341,7 +341,7 @@
         }
       },
       "required": [
-        "need_id",
+        "need_name",
         "package_value",
         "goods"
       ],
@@ -353,18 +353,18 @@
           "format": "double",
           "type": "number"
         },
-        "profession_id": {
-          "type": "string"
-        },
-        "profession_name": {
+        "profession_label": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "profession_name": {
+          "type": "string"
         }
       },
       "required": [
-        "profession_id",
+        "profession_name",
         "count"
       ],
       "type": "object"
@@ -522,14 +522,14 @@
           },
           "type": "array"
         },
-        "need_id": {
-          "type": "string"
-        },
-        "need_name": {
+        "need_label": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "need_name": {
+          "type": "string"
         },
         "package_value": {
           "format": "double",
@@ -543,7 +543,7 @@
       },
       "required": [
         "state_id",
-        "need_id",
+        "need_name",
         "package_value",
         "goods"
       ],
@@ -551,7 +551,7 @@
     },
     "StatePop": {
       "properties": {
-        "culture_id": {
+        "culture_label": {
           "type": [
             "string",
             "null"
@@ -598,7 +598,7 @@
           },
           "type": "array"
         },
-        "profession_id": {
+        "profession_label": {
           "type": [
             "string",
             "null"
@@ -673,14 +673,14 @@
             "null"
           ]
         },
-        "profession_id": {
-          "type": "string"
-        },
-        "profession_name": {
+        "profession_label": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "profession_name": {
+          "type": "string"
         },
         "qualified": {
           "format": "double",
@@ -698,7 +698,7 @@
       },
       "required": [
         "state_id",
-        "profession_id",
+        "profession_name",
         "qualified",
         "employed",
         "jobs",

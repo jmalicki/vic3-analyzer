@@ -237,8 +237,8 @@ describe('AlertsPane', () => {
                   level: 8,
                   professions: [
                     {
-                      profession_id: 'machinists',
-                      profession_name: 'Machinists',
+                      profession_name: 'machinists',
+                      profession_label: 'Machinists',
                       employed_here: 200,
                       jobs_here: 240,
                       missing_here: 40,
@@ -347,8 +347,8 @@ describe('LocalRecommendations', () => {
                 level: 8,
                 professions: [
                   {
-                    profession_id: 'laborers',
-                    profession_name: 'Laborers',
+                    profession_name: 'laborers',
+                    profession_label: 'Laborers',
                     employed_here: 400,
                     jobs_here: 400,
                     missing_here: 0,
@@ -357,8 +357,8 @@ describe('LocalRecommendations', () => {
                     state_shortage: 0,
                   },
                   {
-                    profession_id: 'machinists',
-                    profession_name: 'Machinists',
+                    profession_name: 'machinists',
+                    profession_label: 'Machinists',
                     employed_here: 200,
                     jobs_here: 240,
                     missing_here: 40,
@@ -376,8 +376,8 @@ describe('LocalRecommendations', () => {
                 level: 2,
                 professions: [
                   {
-                    profession_id: 'machinists',
-                    profession_name: 'Machinists',
+                    profession_name: 'machinists',
+                    profession_label: 'Machinists',
                     employed_here: 50,
                     jobs_here: 100,
                     missing_here: 50,

@@ -94,21 +94,20 @@ impl BuildingStaffingProvider {
                     row.count
                 };
                 let missing = (jobs - row.count).max(0.0);
-                let qual =
-                    self.binding.prices.state_qualifications.iter().find(|q| {
-                        q.state_id == self.state_id && q.profession_id == row.profession_id
-                    });
+                let qual = self.binding.prices.state_qualifications.iter().find(|q| {
+                    q.state_id == self.state_id && q.profession_name == row.profession_name
+                });
 
                 building_id.append_value(building.id);
                 building_name.append_value(&name);
                 type_id.append_value(&building.type_id);
                 staffing.append_value(building.staffing);
                 level.append_value(building.level);
-                profession_id.append_value(&row.profession_id);
+                profession_id.append_value(&row.profession_name);
                 match row
-                    .profession_name
+                    .profession_label
                     .as_deref()
-                    .or_else(|| self.binding.label(&row.profession_id))
+                    .or_else(|| self.binding.label(&row.profession_name))
                 {
                     Some(n) => profession_name.append_value(n),
                     None => profession_name.append_null(),

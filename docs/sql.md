@@ -448,7 +448,7 @@ One row per building×profession gap for buildings in that state (same professio
 | `building_name` | text | Localized type label when available |
 | `type_id` | text | |
 | `staffing` / `level` | float | |
-| `profession_id` | text nullable | Null only when the building has no employee rows |
+| `profession_name` | text nullable | Null only when the building has no employee rows |
 | `profession_name` | text nullable | |
 | `employed_here` / `jobs_here` / `missing_here` | float nullable | |
 | `state_jobs` / `state_stock` / `state_shortage` | float nullable | From `state_qualifications` |

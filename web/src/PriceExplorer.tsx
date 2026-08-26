@@ -125,8 +125,8 @@ export function NeedBaskets({
   return (
     <div className="need-baskets">
       {needs.map((need) => (
-        <article key={need.need_id} className="need-basket">
-          <h4>{need.need_name || displayId(need.need_id)}</h4>
+        <article key={need.need_name} className="need-basket">
+          <h4>{need.need_label || displayId(need.need_name)}</h4>
           {need.goods.length ? (
             <table>
               <thead>
@@ -622,8 +622,8 @@ function StatePops({
   const [open, setOpen] = useState<number | null>(null)
   const sorted = useMemo(
     () => sortRows(pops, sort, (pop, key) => {
-      if (key === 'profession') return pop.profession_name || displayId(pop.profession_id || 'unknown')
-      if (key === 'culture') return pop.culture_name || displayId(pop.culture_id || 'unknown')
+      if (key === 'profession') return pop.profession_label || displayId(pop.profession_name || 'unknown')
+      if (key === 'culture') return pop.culture_label || displayId(pop.culture_name || 'unknown')
       if (key === 'workforce') return pop.workforce ?? pop.demand_size ?? 0
       if (key === 'dependents') return pop.dependents ?? 0
       return pop.wealth ?? 0
@@ -640,8 +640,8 @@ function StatePops({
           <h3>State needs</h3>
           <NeedBaskets
             needs={stateNeeds.map((need) => ({
-              need_id: need.need_id,
               need_name: need.need_name,
+              need_label: need.need_label,
               package_value: need.package_value,
               goods: need.goods,
             }))}
@@ -675,7 +675,7 @@ function StatePops({
                 ? `${((pop.literate / pop.workforce) * 100).toFixed(0)}%`
                 : '—'
               return (
-                <Fragment key={`${pop.profession_id}-${pop.culture_id}-${index}`}>
+                <Fragment key={`${pop.profession_name}-${pop.culture_name}-${index}`}>
                   <tr>
                     <th>
                       <button
@@ -684,17 +684,17 @@ function StatePops({
                         aria-expanded={open === index}
                         onClick={() => setOpen(open === index ? null : index)}
                       >
-                        {pop.profession_id ? (
-                          <GameIcon kind="pop" id={pop.profession_id} icons={icons} />
+                        {pop.profession_name ? (
+                          <GameIcon kind="pop" id={pop.profession_name} icons={icons} />
                         ) : null}
-                        {pop.profession_name || displayId(pop.profession_id || 'unknown')}
+                        {pop.profession_label || displayId(pop.profession_name || 'unknown')}
                       </button>
                     </th>
                     <td>{pop.workforce?.toLocaleString() ?? '—'}</td>
                     <td>{pop.dependents?.toLocaleString() ?? '—'}</td>
                     <td>{literacy}</td>
                     <td>{pop.wealth ?? '—'}</td>
-                    <td>{pop.culture_name || displayId(pop.culture_id || 'unknown')}</td>
+                    <td>{pop.culture_label || displayId(pop.culture_name || 'unknown')}</td>
                   </tr>
                   {open === index && (
                     <tr className="pop-detail">
@@ -730,8 +730,8 @@ export function QualificationsTable({ rows }: { rows: StateQualification[] }) {
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.profession_id}>
-              <th>{row.profession_name || displayId(row.profession_id)}</th>
+            <tr key={row.profession_name}>
+              <th>{row.profession_label || displayId(row.profession_name)}</th>
               <td>{row.employed.toLocaleString()}</td>
               <td>{row.jobs.toLocaleString()}</td>
               <td>{row.qualified.toLocaleString()}</td>
@@ -793,8 +793,8 @@ function StateOverview({
           <h3>State needs</h3>
           <NeedBaskets
             needs={stateNeeds.map((need) => ({
-              need_id: need.need_id,
               need_name: need.need_name,
+              need_label: need.need_label,
               package_value: need.package_value,
               goods: need.goods,
             }))}
@@ -1066,8 +1066,8 @@ function EmployeesTable({ employees }: { employees: ProfessionCount[] }) {
         </thead>
         <tbody>
           {employees.map((row) => (
-            <tr key={row.profession_id}>
-              <th>{row.profession_name || displayId(row.profession_id)}</th>
+            <tr key={row.profession_name}>
+              <th>{row.profession_label || displayId(row.profession_name)}</th>
               <td>{row.count.toLocaleString()}</td>
             </tr>
           ))}

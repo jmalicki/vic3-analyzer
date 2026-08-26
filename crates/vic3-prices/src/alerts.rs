@@ -1097,7 +1097,7 @@ fn collect_needs_unmet(args: &mut AlertCollectArgs<'_>) {
         for need in &needs {
             for trip in need_trips(need, prices, defs, ceiling_factor) {
                 evidence.push(Evidence {
-                    label: format!("{}: {}", trip.need_name, trip.good_label),
+                    label: format!("{}: {}", trip.need_label, trip.good_label),
                     value: trip.value,
                 });
                 if !goods.iter().any(|(id, _)| id == &trip.good_name) {
@@ -1132,7 +1132,7 @@ fn collect_needs_unmet(args: &mut AlertCollectArgs<'_>) {
 }
 
 struct NeedTrip {
-    need_name: String,
+    need_label: String,
     good_name: String,
     good_label: String,
     value: String,
@@ -1148,11 +1148,11 @@ fn need_trips(
         return Vec::new();
     }
     let need_name = need
-        .need_name
+        .need_label
         .as_deref()
         .filter(|name| !name.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| script_label(defs, &need.need_id));
+        .unwrap_or_else(|| script_label(defs, &need.need_name));
     let mut trips = Vec::new();
     for flow in &need.goods {
         if flow.quantity <= ORDER_EPS {
@@ -1197,7 +1197,7 @@ fn need_trips(
             format!("{} / {} (max)", format_num(price), format_num(base))
         };
         trips.push(NeedTrip {
-            need_name: need_name.clone(),
+            need_label: need_name.clone(),
             good_name: flow.name.clone(),
             good_label,
             value,
@@ -1350,7 +1350,7 @@ fn collect_education(args: &mut AlertCollectArgs<'_>) {
         if row.shortage <= ORDER_EPS {
             continue;
         }
-        let target = row.profession_id.as_str();
+        let target = row.profession_name.as_str();
         let mix = state_mix(prices, row.state_id);
         let alert_id = format!("unfilled_education:{}:{target}", row.state_id);
         let mitigations = if opts.wants_mitigations(&alert_id) {
@@ -1530,9 +1530,9 @@ fn push_state_employment_alert(args: &mut PushEmploymentAlertArgs<'_>) {
     let totals = state_profession_totals(&staffing);
     let blocker = blocking_profession(&staffing);
     let blocker_name = blocker.map(|row| {
-        row.profession_name
+        row.profession_label
             .clone()
-            .unwrap_or_else(|| pretty_id(&row.profession_id))
+            .unwrap_or_else(|| pretty_id(&row.profession_name))
     });
     let building_count = staffing.len();
     let title = if qual_short {
@@ -1548,9 +1548,9 @@ fn push_state_employment_alert(args: &mut PushEmploymentAlertArgs<'_>) {
             Some(row) => format!(
                 "{place} is short {} {}. {} building{} below full staffing. Extra levels add more empty jobs; the qualification shortage for this state has the next steps.",
                 format_num(row.state_shortage.max(row.missing_here)),
-                row.profession_name
+                row.profession_label
                     .as_deref()
-                    .unwrap_or(&row.profession_id),
+                    .unwrap_or(&row.profession_name),
                 building_count,
                 if building_count == 1 { "" } else { "s" }
             ),
@@ -1583,7 +1583,10 @@ fn push_state_employment_alert(args: &mut PushEmploymentAlertArgs<'_>) {
         .iter()
         .filter(|row| row.missing_here > ORDER_EPS || row.state_shortage > ORDER_EPS)
     {
-        let name = row.profession_name.as_deref().unwrap_or(&row.profession_id);
+        let name = row
+            .profession_label
+            .as_deref()
+            .unwrap_or(&row.profession_name);
         evidence.push(Evidence {
             label: format!("{name} to finish these buildings"),
             value: format_num(row.missing_here),
@@ -1823,7 +1826,7 @@ fn has_employee_qual_shortage(prices: &PricesResult, building: &BuildingEconomic
     building.employees.iter().any(|employee| {
         prices.state_qualifications.iter().any(|row| {
             row.state_id == state_id
-                && row.profession_id == employee.profession_id
+                && row.profession_name == employee.profession_name
                 && row.shortage > ORDER_EPS
         })
     })
@@ -1928,7 +1931,7 @@ fn economics_from_world(building: &WorldBuilding) -> BuildingEconomics {
 }
 
 fn display_prof(defs: &GameDefs, row: &crate::StateQualification) -> String {
-    profession_label(defs, &row.profession_id, row.profession_name.as_deref())
+    profession_label(defs, &row.profession_name, row.profession_label.as_deref())
 }
 
 fn state_label(prices: &PricesResult, world: &World, defs: &GameDefs, state_id: u32) -> String {
@@ -1958,12 +1961,16 @@ fn building_label(prices: &PricesResult, defs: &GameDefs, type_id: &str) -> Stri
         .unwrap_or_else(|| pretty_id(type_id))
 }
 
-fn profession_label(defs: &GameDefs, profession_id: &str, profession_name: Option<&str>) -> String {
-    profession_name
+fn profession_label(
+    defs: &GameDefs,
+    profession_name: &str,
+    profession_label: Option<&str>,
+) -> String {
+    profession_label
         .filter(|name| !name.is_empty())
         .map(str::to_string)
-        .or_else(|| defs.labels.get(profession_id).cloned())
-        .unwrap_or_else(|| pretty_id(profession_id))
+        .or_else(|| defs.labels.get(profession_name).cloned())
+        .unwrap_or_else(|| pretty_id(profession_name))
 }
 
 fn kind_id(kind: AlertKind) -> &'static str {
@@ -2132,8 +2139,8 @@ mod tests {
             employees: employees
                 .iter()
                 .map(|(prof, count)| ProfessionCount {
-                    profession_id: (*prof).into(),
-                    profession_name: None,
+                    profession_name: (*prof).into(),
+                    profession_label: None,
                     count: *count,
                 })
                 .collect(),
@@ -2275,14 +2282,14 @@ mod tests {
                 StatePop {
                     state_id: 1,
                     id: Some(1),
-                    profession_id: Some("peasants".into()),
-                    profession_name: Some("Peasants".into()),
+                    profession_name: Some("peasants".into()),
+                    profession_label: Some("Peasants".into()),
                     demand_size: Some(20_000.0),
                     workforce: Some(12_000.0),
                     dependents: Some(8_000.0),
                     wealth: Some(8),
-                    culture_id: None,
                     culture_name: None,
+                    culture_label: None,
                     literate: Some(1_000.0),
                     workplace_id: None,
                     qualifications: Vec::new(),
@@ -2291,14 +2298,14 @@ mod tests {
                 StatePop {
                     state_id: 1,
                     id: Some(2),
-                    profession_id: Some("farmers".into()),
-                    profession_name: Some("Farmers".into()),
+                    profession_name: Some("farmers".into()),
+                    profession_label: Some("Farmers".into()),
                     demand_size: Some(4_000.0),
                     workforce: Some(4_000.0),
                     dependents: Some(0.0),
                     wealth: Some(10),
-                    culture_id: None,
                     culture_name: None,
+                    culture_label: None,
                     literate: Some(400.0),
                     workplace_id: Some(3),
                     qualifications: Vec::new(),
@@ -2308,8 +2315,8 @@ mod tests {
             .into(),
             state_qualifications: vec![StateQualification {
                 state_id: 1,
-                profession_id: "machinists".into(),
-                profession_name: Some("Machinists".into()),
+                profession_name: "machinists".into(),
+                profession_label: Some("Machinists".into()),
                 qualified: 800.0,
                 employable: Some(800.0),
                 employed: 800.0,
@@ -2319,8 +2326,8 @@ mod tests {
             }],
             state_needs: vec![StateNeed {
                 state_id: 1,
-                need_id: "popneed_clothing".into(),
-                need_name: Some("Clothing".into()),
+                need_name: "popneed_clothing".into(),
+                need_label: Some("Clothing".into()),
                 package_value: 80.0,
                 goods: vec![GoodFlow {
                     name: "clothes".into(),
@@ -2464,22 +2471,22 @@ mod tests {
         prices.state_pops = vec![crate::StatePop {
             state_id: 1,
             id: Some(1),
-            profession_id: Some("peasants".into()),
-            profession_name: Some("Peasants".into()),
+            profession_name: Some("peasants".into()),
+            profession_label: Some("Peasants".into()),
             demand_size: Some(20_000.0),
             workforce: Some(12_000.0),
             dependents: Some(8_000.0),
             wealth: Some(8),
-            culture_id: None,
             culture_name: None,
+            culture_label: None,
             literate: Some(1_000.0),
             workplace_id: None,
             qualifications: Vec::new(),
             needs: Vec::new(),
         }]
         .into();
-        prices.state_qualifications[0].profession_id = "aristocrats".into();
-        prices.state_qualifications[0].profession_name = Some("Aristocrats".into());
+        prices.state_qualifications[0].profession_name = "aristocrats".into();
+        prices.state_qualifications[0].profession_label = Some("Aristocrats".into());
         let result = alerts(&world, &defs, &prices);
         let edu = result
             .alerts
@@ -2518,22 +2525,22 @@ mod tests {
         prices.state_pops = vec![StatePop {
             state_id: 1,
             id: Some(1),
-            profession_id: Some("machinists".into()),
-            profession_name: Some("Machinists".into()),
+            profession_name: Some("machinists".into()),
+            profession_label: Some("Machinists".into()),
             demand_size: Some(20_000.0),
             workforce: Some(12_000.0),
             dependents: Some(8_000.0),
             wealth: Some(12),
-            culture_id: None,
             culture_name: None,
+            culture_label: None,
             literate: Some(16_000.0),
             workplace_id: Some(4),
             qualifications: Vec::new(),
             needs: Vec::new(),
         }]
         .into();
-        prices.state_qualifications[0].profession_id = "engineers".into();
-        prices.state_qualifications[0].profession_name = Some("Engineers".into());
+        prices.state_qualifications[0].profession_name = "engineers".into();
+        prices.state_qualifications[0].profession_label = Some("Engineers".into());
         let result = alerts(&world, &defs, &prices);
         let edu = result
             .alerts
@@ -2561,22 +2568,22 @@ mod tests {
         prices.state_pops = vec![crate::StatePop {
             state_id: 1,
             id: Some(1),
-            profession_id: Some("farmers".into()),
-            profession_name: Some("Farmers".into()),
+            profession_name: Some("farmers".into()),
+            profession_label: Some("Farmers".into()),
             demand_size: Some(20_000.0),
             workforce: Some(12_000.0),
             dependents: Some(8_000.0),
             wealth: Some(12),
-            culture_id: None,
             culture_name: None,
+            culture_label: None,
             literate: Some(12_000.0),
             workplace_id: Some(3),
             qualifications: Vec::new(),
             needs: Vec::new(),
         }]
         .into();
-        prices.state_qualifications[0].profession_id = "aristocrats".into();
-        prices.state_qualifications[0].profession_name = Some("Aristocrats".into());
+        prices.state_qualifications[0].profession_name = "aristocrats".into();
+        prices.state_qualifications[0].profession_label = Some("Aristocrats".into());
         let result = alerts(&world, &defs, &prices);
         let edu = result
             .alerts
@@ -2656,7 +2663,7 @@ mod tests {
             farm_under.staffing.iter().any(|row| row
                 .professions
                 .iter()
-                .any(|gap| gap.profession_id == "machinists" && gap.missing_here > 0.0)),
+                .any(|gap| gap.profession_name == "machinists" && gap.missing_here > 0.0)),
             "workshop should show how many more machinists it needs"
         );
         let needs = result

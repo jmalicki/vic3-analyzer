@@ -364,14 +364,14 @@
           "format": "double",
           "type": "number"
         },
-        "profession_id": {
-          "type": "string"
-        },
-        "profession_name": {
+        "profession_label": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "profession_name": {
+          "type": "string"
         },
         "state_jobs": {
           "format": "double",
@@ -387,7 +387,7 @@
         }
       },
       "required": [
-        "profession_id",
+        "profession_name",
         "employed_here",
         "jobs_here",
         "missing_here",

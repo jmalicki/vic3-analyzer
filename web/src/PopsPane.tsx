@@ -33,15 +33,15 @@ type ProfessionGroup = {
 }
 
 function professionId(pop: StatePop): string {
-  return pop.profession_id || 'unknown'
+  return pop.profession_name || 'unknown'
 }
 
 function professionName(pop: StatePop): string {
-  return pop.profession_name || displayId(pop.profession_id || 'unknown')
+  return pop.profession_label || displayId(pop.profession_name || 'unknown')
 }
 
 function cultureName(pop: StatePop): string {
-  return pop.culture_name || displayId(pop.culture_id || 'unknown')
+  return pop.culture_label || displayId(pop.culture_name || 'unknown')
 }
 
 function literacyLabel(pop: StatePop): string {
@@ -94,8 +94,8 @@ function needsForState(stateId: number, stateNeeds: StateNeed[]) {
   return stateNeeds
     .filter((need) => need.state_id === stateId)
     .map((need) => ({
-      need_id: need.need_id,
       need_name: need.need_name,
+      need_label: need.need_label,
       package_value: need.package_value,
       goods: need.goods,
     }))
@@ -258,7 +258,7 @@ export function PopsPane({
                       </thead>
                       <tbody>
                         {group.pops.map((pop, index) => {
-                          const popKey = `${group.id}-${pop.state_id}-${pop.culture_id ?? index}-${index}`
+                          const popKey = `${group.id}-${pop.state_id}-${pop.culture_name ?? index}-${index}`
                           const popOpen = openPop === popKey
                           const workplace = workplaceLabel(pop, buildingsById, typesById)
                           const popNeeds = pop.needs ?? []
@@ -273,8 +273,8 @@ export function PopsPane({
                                     aria-expanded={popOpen}
                                     onClick={() => setOpenPop(popOpen ? null : popKey)}
                                   >
-                                    {pop.profession_id ? (
-                                      <GameIcon kind="pop" id={pop.profession_id} icons={icons} />
+                                    {pop.profession_name ? (
+                                      <GameIcon kind="pop" id={pop.profession_name} icons={icons} />
                                     ) : null}
                                     {professionName(pop)}
                                   </button>

@@ -117,9 +117,9 @@ function ShortageBadges({
     <ul className="shortage-badges">
       <li className="shortage-badge">{row.shortageCount}</li>
       {row.jobShortages.map((job) => (
-        <li key={`job-${job.profession_id}`} className="shortage-badge" title={job.profession_name || job.profession_id}>
-          <GameIcon kind="pop" id={job.profession_id} icons={icons} />
-          {job.profession_name || displayId(job.profession_id)}
+        <li key={`job-${job.profession_name}`} className="shortage-badge" title={job.profession_label || job.profession_name}>
+          <GameIcon kind="pop" id={job.profession_name} icons={icons} />
+          {job.profession_label || displayId(job.profession_name)}
         </li>
       ))}
       {row.shortBuildings.flatMap((building) =>

@@ -29,7 +29,7 @@ function buildingStaffingSummary(row: BuildingStaffing): string {
     .sort((left, right) => right.missing_here - left.missing_here)
   if (missing.length === 0) return staffed
   const parts = missing.map((gap) => {
-    const name = gap.profession_name || gap.profession_id
+    const name = gap.profession_label || gap.profession_name
     return `${formatStaffing(gap.missing_here)} more ${name}`
   })
   return `${staffed} — needs ${parts.join(', ')}`
@@ -414,11 +414,11 @@ function LocalAlertCard({
                 ) : (
                   <ul className="alert-profession-gaps">
                     {row.professions.map((gap) => {
-                      const name = gap.profession_name || gap.profession_id
+                      const name = gap.profession_label || gap.profession_name
                       const blocking = gap.state_shortage > 0 && gap.missing_here > 0
                       return (
-                        <li key={gap.profession_id} className={blocking ? 'blocking' : undefined}>
-                          <GameIcon kind="pop" id={gap.profession_id} icons={icons} />
+                        <li key={gap.profession_name} className={blocking ? 'blocking' : undefined}>
+                          <GameIcon kind="pop" id={gap.profession_name} icons={icons} />
                           <span>
                             <strong>{name}</strong>
                             {blocking ? ' — this is blocking' : ''}
