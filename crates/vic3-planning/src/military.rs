@@ -6,6 +6,7 @@
 //! (crews).
 
 use serde::{Deserialize, Serialize};
+use vic3_defs::{BuildingTypeIdx, GameDefs};
 
 /// Standing army barracks (not conscription centers).
 pub const BUILDING_BARRACKS: &str = "building_barracks";
@@ -30,10 +31,41 @@ pub const STAFFING_EPS: f64 = 1e-6;
 /// Model input-price factor: above `base_price * this`, queue producers.
 pub const MIL_INPUT_PRICE_FACTOR: f64 = 1.25;
 
+/// Classification captured when a mil building is pushed (avoids defs at goal eval).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MilBuildingKind {
+    Barracks,
+    Shipyard,
+    NavalAdmin,
+    Other,
+}
+
+impl MilBuildingKind {
+    pub fn from_script_id(id: &str) -> Self {
+        if is_barracks_building(id) {
+            Self::Barracks
+        } else if is_shipyard_building(id) {
+            Self::Shipyard
+        } else if is_naval_admin_building(id) {
+            Self::NavalAdmin
+        } else {
+            Self::Other
+        }
+    }
+
+    pub fn from_idx(idx: BuildingTypeIdx, defs: &GameDefs) -> Self {
+        defs.building_by_index(idx)
+            .map(Self::from_script_id)
+            .unwrap_or(Self::Other)
+    }
+}
+
 /// One military (or navy support) building aggregate on a planning branch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModeledMilBuilding {
-    pub building_type_id: String,
+    pub building_type_id: BuildingTypeIdx,
+    pub kind: MilBuildingKind,
     /// Built levels (capacity).
     pub levels: f64,
     /// Employed level-equivalents (same units as [`vic3_prices::WorldBuilding::staffing`]).
@@ -45,6 +77,7 @@ impl Eq for ModeledMilBuilding {}
 impl std::hash::Hash for ModeledMilBuilding {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.building_type_id.hash(state);
+        self.kind.hash(state);
         self.levels.to_bits().hash(state);
         self.staffing.to_bits().hash(state);
     }
@@ -127,6 +160,30 @@ pub fn is_military_planning_building(id: &str) -> bool {
     is_barracks_building(id) || is_shipyard_building(id) || is_naval_admin_building(id)
 }
 
+/// Resolve `idx` through `defs` and classify as shipyard.
+pub fn is_shipyard_building_idx(idx: BuildingTypeIdx, defs: &GameDefs) -> bool {
+    defs.building_by_index(idx)
+        .is_some_and(is_shipyard_building)
+}
+
+/// Resolve `idx` through `defs` and classify as barracks.
+pub fn is_barracks_building_idx(idx: BuildingTypeIdx, defs: &GameDefs) -> bool {
+    defs.building_by_index(idx)
+        .is_some_and(is_barracks_building)
+}
+
+/// Resolve `idx` through `defs` and classify as naval administration.
+pub fn is_naval_admin_building_idx(idx: BuildingTypeIdx, defs: &GameDefs) -> bool {
+    defs.building_by_index(idx)
+        .is_some_and(is_naval_admin_building)
+}
+
+/// Resolve `idx` through `defs` and classify as any military planning building.
+pub fn is_military_planning_building_idx(idx: BuildingTypeIdx, defs: &GameDefs) -> bool {
+    defs.building_by_index(idx)
+        .is_some_and(is_military_planning_building)
+}
+
 fn building_key(id: &str) -> String {
     id.trim()
         .trim_start_matches("building_")
@@ -137,7 +194,7 @@ fn building_key(id: &str) -> String {
 pub fn army_pp_from_buildings(buildings: &[ModeledMilBuilding], unit: UnitCombatStats) -> f64 {
     buildings
         .iter()
-        .filter(|b| is_barracks_building(&b.building_type_id))
+        .filter(|b| b.kind == MilBuildingKind::Barracks)
         .map(|b| b.effective_levels() * unit.full_power_projection())
         .sum()
 }
@@ -146,12 +203,12 @@ pub fn army_pp_from_buildings(buildings: &[ModeledMilBuilding], unit: UnitCombat
 pub fn navy_pp_from_buildings(buildings: &[ModeledMilBuilding], unit: UnitCombatStats) -> f64 {
     let shipyard = buildings
         .iter()
-        .filter(|b| is_shipyard_building(&b.building_type_id))
+        .filter(|b| b.kind == MilBuildingKind::Shipyard)
         .map(ModeledMilBuilding::effective_levels)
         .sum::<f64>();
     let admin = buildings
         .iter()
-        .filter(|b| is_naval_admin_building(&b.building_type_id))
+        .filter(|b| b.kind == MilBuildingKind::NavalAdmin)
         .map(ModeledMilBuilding::effective_levels)
         .sum::<f64>();
     shipyard.min(admin) * unit.full_power_projection()
@@ -161,7 +218,7 @@ pub fn navy_pp_from_buildings(buildings: &[ModeledMilBuilding], unit: UnitCombat
 pub fn army_buildings_fully_staffed(buildings: &[ModeledMilBuilding]) -> bool {
     buildings
         .iter()
-        .filter(|b| is_barracks_building(&b.building_type_id) && b.levels > 0.0)
+        .filter(|b| b.kind == MilBuildingKind::Barracks && b.levels > 0.0)
         .all(ModeledMilBuilding::is_fully_staffed)
 }
 
@@ -170,9 +227,10 @@ pub fn navy_buildings_fully_staffed(buildings: &[ModeledMilBuilding]) -> bool {
     buildings
         .iter()
         .filter(|b| {
-            (is_shipyard_building(&b.building_type_id)
-                || is_naval_admin_building(&b.building_type_id))
-                && b.levels > 0.0
+            matches!(
+                b.kind,
+                MilBuildingKind::Shipyard | MilBuildingKind::NavalAdmin
+            ) && b.levels > 0.0
         })
         .all(ModeledMilBuilding::is_fully_staffed)
 }
@@ -206,6 +264,18 @@ pub fn recompute_navy_pp(
 mod tests {
     use super::*;
 
+    fn mil_defs(ids: &[&str]) -> GameDefs {
+        let mut defs = GameDefs::default();
+        for id in ids {
+            defs.ensure_building_type(id);
+        }
+        defs
+    }
+
+    fn mil_idx(defs: &GameDefs, id: &str) -> BuildingTypeIdx {
+        defs.building_index_of(id).unwrap()
+    }
+
     #[test]
     fn unit_formula_matches_wiki() {
         let stats = UnitCombatStats {
@@ -219,13 +289,17 @@ mod tests {
 
     #[test]
     fn underemployed_barracks_cut_army_pp() {
+        let defs = mil_defs(&[BUILDING_BARRACKS]);
+        let barracks = mil_idx(&defs, BUILDING_BARRACKS);
         let full = ModeledMilBuilding {
-            building_type_id: BUILDING_BARRACKS.into(),
+            building_type_id: barracks,
+            kind: MilBuildingKind::Barracks,
             levels: 2.0,
             staffing: 2.0,
         };
         let half = ModeledMilBuilding {
-            building_type_id: BUILDING_BARRACKS.into(),
+            building_type_id: barracks,
+            kind: MilBuildingKind::Barracks,
             levels: 2.0,
             staffing: 1.0,
         };
@@ -241,14 +315,17 @@ mod tests {
 
     #[test]
     fn navy_limited_by_min_shipyard_and_admin() {
+        let defs = mil_defs(&[BUILDING_SHIPYARD, BUILDING_NAVAL_ADMIN]);
         let buildings = vec![
             ModeledMilBuilding {
-                building_type_id: BUILDING_SHIPYARD.into(),
+                building_type_id: mil_idx(&defs, BUILDING_SHIPYARD),
+                kind: MilBuildingKind::Shipyard,
                 levels: 4.0,
                 staffing: 4.0,
             },
             ModeledMilBuilding {
-                building_type_id: BUILDING_NAVAL_ADMIN.into(),
+                building_type_id: mil_idx(&defs, BUILDING_NAVAL_ADMIN),
+                kind: MilBuildingKind::NavalAdmin,
                 levels: 2.0,
                 staffing: 2.0,
             },
@@ -262,8 +339,10 @@ mod tests {
 
     #[test]
     fn underemployed_blocks_full_staffed_check() {
+        let defs = mil_defs(&[BUILDING_BARRACKS]);
         let buildings = vec![ModeledMilBuilding {
-            building_type_id: BUILDING_BARRACKS.into(),
+            building_type_id: mil_idx(&defs, BUILDING_BARRACKS),
+            kind: MilBuildingKind::Barracks,
             levels: 1.0,
             staffing: 0.5,
         }];

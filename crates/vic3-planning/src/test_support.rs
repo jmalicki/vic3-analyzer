@@ -11,7 +11,9 @@
 
 #![allow(dead_code)] // fixtures unused until later planner-test PRs migrate call sites
 
-use vic3_defs::{BuildingType, GameDefs, Good, GoodIdx, GoodsVec, ProductionMethod};
+use vic3_defs::{
+    BuildingType, BuildingTypeIdx, GameDefs, Good, GoodIdx, GoodsVec, ProductionMethod,
+};
 use vic3_prices::{SolveOpts, World, WorldBuilding, WorldCountry, WorldState};
 
 use crate::construction::BUILDING_CONSTRUCTION_SECTOR;
@@ -22,6 +24,11 @@ use crate::world::{ConstructionQueueKind, PlanningConstruction, PlanningParts, P
 const DEFAULT_FROZEN_BUY: f64 = 15.0;
 /// Default traded_quantity on registered goods (matches historical fixture).
 const DEFAULT_TRADED_QUANTITY: f64 = 10.0;
+
+fn alone(id: &str) -> BuildingTypeIdx {
+    let mut defs = GameDefs::default();
+    defs.ensure_building_type(id)
+}
 
 pub(crate) struct MiniEconomy {
     pub economy: EconomyContext,
@@ -77,7 +84,7 @@ fn register_output_building(
         .unwrap_or_else(|| panic!("good `{good_id}` must be registered before output_building"));
     let pmg = auto_pmg_id(building);
     let pm = auto_pm_id(building);
-    defs.buildings.insert(
+    defs.building_types.insert(
         building.into(),
         BuildingType {
             id: building.into(),
@@ -96,10 +103,12 @@ fn register_output_building(
             ..ProductionMethod::default()
         },
     );
+    defs.rebuild_building_types_order();
+    let type_id = defs.building_index_of(building).expect(building);
     world.buildings.push(WorldBuilding {
         id: next_building_id(world),
         state: Some(state_id),
-        type_id: building.into(),
+        type_id,
         level: 1.0,
         staffing: 1.0,
         production_methods: vec![pm],
@@ -118,7 +127,7 @@ fn register_construction_sector(
 ) {
     let pmg = "pmg_base_building_construction_sector";
     let pm = "pm_iron_frame_buildings";
-    defs.buildings.insert(
+    defs.building_types.insert(
         BUILDING_CONSTRUCTION_SECTOR.into(),
         BuildingType {
             id: BUILDING_CONSTRUCTION_SECTOR.into(),
@@ -138,10 +147,14 @@ fn register_construction_sector(
             ..ProductionMethod::default()
         },
     );
+    defs.rebuild_building_types_order();
+    let type_id = defs
+        .building_index_of(BUILDING_CONSTRUCTION_SECTOR)
+        .expect(BUILDING_CONSTRUCTION_SECTOR);
     world.buildings.push(WorldBuilding {
         id: next_building_id(world),
         state: Some(state_id),
-        type_id: BUILDING_CONSTRUCTION_SECTOR.into(),
+        type_id,
         level: 0.0,
         staffing: 0.0,
         production_methods: vec![pm.into()],
@@ -258,7 +271,7 @@ impl MiniEconomy {
     pub(crate) fn building_cost(self, building: &str, required_construction: f64) -> Self {
         self.remap(|defs, _world, _| {
             let bt = defs
-                .buildings
+                .building_types
                 .get_mut(building)
                 .unwrap_or_else(|| panic!("building `{building}` must exist before building_cost"));
             bt.required_construction = Some(required_construction);
@@ -330,16 +343,19 @@ impl GerStateBuilder {
 
     pub(crate) fn get(self) -> PlanningState {
         let (queued_building, constructions) = match self.cs_in_flight {
-            Some(remaining) => (
-                Some(BUILDING_CONSTRUCTION_SECTOR.into()),
-                vec![PlanningConstruction {
-                    order_id: 1,
-                    queue: ConstructionQueueKind::Government,
-                    state_id: Some(1),
-                    building_type_id: BUILDING_CONSTRUCTION_SECTOR.into(),
-                    remaining: Some(remaining),
-                }],
-            ),
+            Some(remaining) => {
+                let cs = alone(BUILDING_CONSTRUCTION_SECTOR);
+                (
+                    Some(cs),
+                    vec![PlanningConstruction {
+                        order_id: 1,
+                        queue: ConstructionQueueKind::Government,
+                        state_id: Some(1),
+                        building_type_id: cs,
+                        remaining: Some(remaining),
+                    }],
+                )
+            }
             None => (None, Vec::new()),
         };
         PlanningState::from_parts(PlanningParts {

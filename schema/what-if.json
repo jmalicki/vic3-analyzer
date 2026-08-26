@@ -4,8 +4,11 @@
   "description": "Extra building levels applied before a re-solve. Employment stays frozen.",
   "properties": {
     "building_type_id": {
-      "description": "Building type script id (matches [`crate::WorldBuilding::type_id`]).",
-      "type": "string"
+      "description": "Building type index (matches [`crate::WorldBuilding::type_id`]).",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
     },
     "extra_levels": {
       "description": "Non-negative extra levels added to matching buildings.",

@@ -16,7 +16,7 @@ use std::sync::OnceLock;
 use schemars::JsonSchema;
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use vic3_defs::{GameDefs, GoodIdx, NeedIdx};
+use vic3_defs::{BuildingTypeIdx, GameDefs, GoodIdx, NeedIdx};
 
 use crate::world::Intern;
 
@@ -68,8 +68,9 @@ impl Default for SolveOpts {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WhatIfOpts {
-    /// Building type script id (matches [`crate::WorldBuilding::type_id`]).
-    pub building_type_id: String,
+    /// Building type index (matches [`crate::WorldBuilding::type_id`]).
+    #[schemars(with = "u16")]
+    pub building_type_id: BuildingTypeIdx,
     /// Non-negative extra levels added to matching buildings.
     #[schemars(range(min = 0))]
     pub extra_levels: u32,
@@ -110,7 +111,8 @@ pub struct ProductionMethodDelta {
 #[serde(deny_unknown_fields)]
 pub struct ExtraLevelsDelta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub building_type_id: Option<String>,
+    #[schemars(with = "Option<u16>")]
+    pub building_type_id: Option<BuildingTypeIdx>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub building_id: Option<u32>,
     #[schemars(range(min = 0))]

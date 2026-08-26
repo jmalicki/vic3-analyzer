@@ -79,7 +79,8 @@ pub fn load_from_path(root: impl AsRef<Path>) -> Result<GameDefs, DefsError> {
     defs.production_methods = load_production_methods(&data_root)?;
     defs.production_method_groups = load_production_method_groups(&data_root)?;
     defs.script_values = load_script_values(&data_root)?;
-    defs.buildings = load_buildings(&data_root, &mut defs.building_construction_refs)?;
+    (defs.building_types_order, defs.building_types) =
+        load_building_types(&data_root, &mut defs.building_construction_refs)?;
     defs.building_groups = load_building_groups(&data_root)?;
     defs.technologies = load_technologies(&data_root)?;
     defs.pop_types = load_pop_types(&data_root)?;
@@ -266,7 +267,13 @@ impl DefsBuilder {
                 .and_then(icon_stem)
                 .unwrap_or_else(|| good.id.to_lowercase())
         }));
-        names.extend(parsed.defs.buildings.keys().map(|id| id.to_lowercase()));
+        names.extend(
+            parsed
+                .defs
+                .building_types
+                .keys()
+                .map(|id| id.to_lowercase()),
+        );
         names.extend(parsed.defs.production_methods.values().filter_map(|pm| {
             pm.texture
                 .as_deref()
@@ -324,6 +331,11 @@ fn absorb_text_file(
             defs.goods_order.push(id.clone());
         }
     }
+    for id in &file.defs.building_types_order {
+        if !defs.building_types_order.contains(id) {
+            defs.building_types_order.push(id.clone());
+        }
+    }
     for id in &file.defs.needs_order {
         if !defs.needs_order.contains(id) {
             defs.needs_order.push(id.clone());
@@ -335,12 +347,12 @@ fn absorb_text_file(
         .extend(file.defs.production_methods.clone());
     defs.production_method_groups
         .extend(file.defs.production_method_groups.clone());
-    for (id, building) in &file.defs.buildings {
+    for (id, building) in &file.defs.building_types {
         if building.required_construction.is_some() {
             defs.building_construction_refs.remove(id);
         }
     }
-    defs.buildings.extend(file.defs.buildings.clone());
+    defs.building_types.extend(file.defs.building_types.clone());
     defs.building_construction_refs
         .extend(file.defs.building_construction_refs.clone());
     defs.script_values.extend(file.defs.script_values.clone());
@@ -394,26 +406,24 @@ fn parse_defs_text(
             defs.script_values
                 .extend(parse_script_values_bytes(path, bytes)?);
         } else if relative.starts_with("common/buildings/") {
-            let raw: BTreeMap<String, RawBuilding> = parse_bytes(path, bytes)?;
-            for (id, building) in raw {
-                let (required_construction, construction_ref) =
-                    resolve_raw_construction(&building.required_construction);
-                if let Some(name) = construction_ref {
-                    defs.building_construction_refs.insert(id.clone(), name);
-                } else {
-                    defs.building_construction_refs.remove(&id);
+            let (file_order, file_buildings, construction_updates) =
+                parse_building_types_bytes(path, bytes)?;
+            for id in file_order {
+                if !defs.building_types_order.contains(&id) {
+                    defs.building_types_order.push(id);
                 }
-                defs.buildings.insert(
-                    id.clone(),
-                    BuildingType {
-                        id,
-                        group: building.building_group,
-                        city_type: building.city_type,
-                        production_method_groups: building.production_method_groups,
-                        required_construction,
-                    },
-                );
             }
+            for (id, construction_ref) in construction_updates {
+                match construction_ref {
+                    Some(name) => {
+                        defs.building_construction_refs.insert(id, name);
+                    }
+                    None => {
+                        defs.building_construction_refs.remove(&id);
+                    }
+                }
+            }
+            defs.building_types.extend(file_buildings);
         } else if relative.starts_with("common/technology/technologies/") {
             defs.technologies
                 .extend(parse_technologies_bytes(path, bytes)?);
@@ -562,7 +572,7 @@ fn attach_extra_icons(defs: &mut StagingDefs, decoded: BTreeMap<String, Vec<u8>>
     }
     defs.extra_icons.extend(decoded);
     let mut aliases = Vec::new();
-    for id in defs.buildings.keys() {
+    for id in defs.building_types.keys() {
         let key = format!("building:{id}");
         if defs.extra_icons.contains_key(&key) {
             continue;
@@ -923,34 +933,83 @@ fn parse_script_values_bytes(
     Ok(out)
 }
 
-fn load_buildings(
+fn load_building_types(
     data_root: &Path,
     construction_refs: &mut BTreeMap<String, String>,
-) -> Result<BTreeMap<String, BuildingType>, DefsError> {
+) -> Result<(Vec<String>, BTreeMap<String, BuildingType>), DefsError> {
+    let mut order = Vec::new();
     let mut buildings = BTreeMap::new();
     for path in txt_files(&data_root.join("common/buildings"))? {
-        let file: BTreeMap<String, RawBuilding> = parse_file(&path)?;
-        for (id, raw) in file {
-            let (required_construction, construction_ref) =
-                resolve_raw_construction(&raw.required_construction);
-            if let Some(name) = construction_ref {
-                construction_refs.insert(id.clone(), name);
-            } else {
-                construction_refs.remove(&id);
+        let bytes = std::fs::read(&path).map_err(|source| DefsError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let (file_order, file_buildings, construction_updates) =
+            parse_building_types_bytes(&path, &bytes)?;
+        for id in file_order {
+            if !order.contains(&id) {
+                order.push(id);
             }
-            buildings.insert(
-                id.clone(),
-                BuildingType {
-                    id,
-                    group: raw.building_group,
-                    city_type: raw.city_type,
-                    production_method_groups: raw.production_method_groups,
-                    required_construction,
-                },
-            );
         }
+        for (id, construction_ref) in construction_updates {
+            match construction_ref {
+                Some(name) => {
+                    construction_refs.insert(id, name);
+                }
+                None => {
+                    construction_refs.remove(&id);
+                }
+            }
+        }
+        buildings.extend(file_buildings);
     }
-    Ok(buildings)
+    Ok((order, buildings))
+}
+
+type ParsedBuildingTypes = (
+    Vec<String>,
+    BTreeMap<String, BuildingType>,
+    BTreeMap<String, Option<String>>,
+);
+
+fn parse_building_types_bytes(path: &Path, bytes: &[u8]) -> Result<ParsedBuildingTypes, DefsError> {
+    let bytes = strip_bom(bytes);
+    if looks_empty(bytes) {
+        return Ok((Vec::new(), BTreeMap::new(), BTreeMap::new()));
+    }
+    let tape = TextTape::from_slice(bytes).map_err(|source| DefsError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let source_order = tape
+        .utf8_reader()
+        .fields()
+        .map(|(key, _, _)| key.read_str().to_string())
+        .collect::<Vec<_>>();
+    let mut raw: BTreeMap<String, RawBuilding> = parse_bytes(path, bytes)?;
+    let mut order = Vec::new();
+    let mut buildings = BTreeMap::new();
+    let mut construction_updates = BTreeMap::new();
+    for id in source_order {
+        let Some(raw_building) = raw.remove(&id) else {
+            continue;
+        };
+        let (required_construction, construction_ref) =
+            resolve_raw_construction(&raw_building.required_construction);
+        construction_updates.insert(id.clone(), construction_ref);
+        order.push(id.clone());
+        buildings.insert(
+            id.clone(),
+            BuildingType {
+                id,
+                group: raw_building.building_group,
+                city_type: raw_building.city_type,
+                production_method_groups: raw_building.production_method_groups,
+                required_construction,
+            },
+        );
+    }
+    Ok((order, buildings, construction_updates))
 }
 
 fn resolve_raw_construction(raw: &Option<NumberOrIdent>) -> (Option<f64>, Option<String>) {

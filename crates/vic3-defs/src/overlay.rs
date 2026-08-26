@@ -27,7 +27,7 @@
 //! use vic3_defs::{apply_overlay, load_overlay_json, BuildingType, GameDefs};
 //!
 //! let mut defs = GameDefs::default();
-//! defs.buildings.insert(
+//! defs.building_types.insert(
 //!     "building_rye_farm".into(),
 //!     BuildingType {
 //!         id: "building_rye_farm".into(),
@@ -44,7 +44,7 @@
 //! .expect("valid overlay JSON");
 //! apply_overlay(&mut defs, &overlay);
 //! assert_eq!(
-//!     defs.buildings["building_rye_farm"].required_construction,
+//!     defs.building_types["building_rye_farm"].required_construction,
 //!     Some(999.0)
 //! );
 //! ```
@@ -96,7 +96,7 @@ pub fn load_overlay_json(json: &str) -> Result<DefsOverlay, DefsError> {
 /// overlay are never touched.
 pub fn apply_overlay(defs: &mut GameDefs, overlay: &DefsOverlay) {
     for (id, building_overlay) in &overlay.buildings {
-        let Some(building) = defs.buildings.get_mut(id) else {
+        let Some(building) = defs.building_types.get_mut(id) else {
             continue;
         };
         if let Some(required_construction) = building_overlay.required_construction {
@@ -112,7 +112,7 @@ mod tests {
 
     fn farm_defs(required_construction: Option<f64>) -> GameDefs {
         let mut defs = GameDefs::default();
-        defs.buildings.insert(
+        defs.building_types.insert(
             "building_rye_farm".into(),
             BuildingType {
                 id: "building_rye_farm".into(),
@@ -122,6 +122,7 @@ mod tests {
                 required_construction,
             },
         );
+        defs.rebuild_building_types_order();
         defs
     }
 
@@ -138,7 +139,7 @@ mod tests {
         .expect("overlay JSON");
         apply_overlay(&mut defs, &overlay);
         assert_eq!(
-            defs.buildings["building_rye_farm"].required_construction,
+            defs.building_types["building_rye_farm"].required_construction,
             Some(42.0)
         );
     }
@@ -147,7 +148,7 @@ mod tests {
     fn without_overlay_required_construction_unchanged() {
         let defs = farm_defs(Some(200.0));
         assert_eq!(
-            defs.buildings["building_rye_farm"].required_construction,
+            defs.building_types["building_rye_farm"].required_construction,
             Some(200.0)
         );
     }
@@ -172,10 +173,10 @@ mod tests {
         .expect("overlay JSON with unknowns");
         apply_overlay(&mut defs, &overlay);
         assert_eq!(
-            defs.buildings["building_rye_farm"].required_construction,
+            defs.building_types["building_rye_farm"].required_construction,
             Some(77.0)
         );
-        assert!(!defs.buildings.contains_key("building_does_not_exist"));
+        assert!(!defs.building_types.contains_key("building_does_not_exist"));
     }
 
     #[test]
@@ -185,7 +186,7 @@ mod tests {
             .expect("empty building overlay");
         apply_overlay(&mut defs, &overlay);
         assert_eq!(
-            defs.buildings["building_rye_farm"].required_construction,
+            defs.building_types["building_rye_farm"].required_construction,
             Some(200.0)
         );
     }

@@ -21,6 +21,12 @@ pub struct GameDefs {
     pub price_range: f64,
     /// Good ids in deterministic `common/goods` source-file order.
     pub goods_order: Vec<String>,
+    /// Building type script ids in first-seen `common/buildings` source-file order.
+    ///
+    /// Dense [`crate::BuildingTypeIdx`] values index this table (same idea as
+    /// [`Self::goods_order`]), not BTreeMap key order.
+    #[serde(default)]
+    pub building_types_order: Vec<String>,
     /// Need ids in deterministic first-seen load order.
     pub needs_order: Vec<String>,
     pub goods: BTreeMap<String, Good>,
@@ -45,7 +51,7 @@ pub struct GameDefs {
     pub flag_defs: BTreeMap<String, Vec<FlagDefinition>>,
     pub production_methods: BTreeMap<String, ProductionMethod>,
     /// Building type id → state-panel metadata.
-    pub buildings: BTreeMap<String, BuildingType>,
+    pub building_types: BTreeMap<String, BuildingType>,
     /// Building group id → grouping and slot-capacity metadata.
     pub building_groups: BTreeMap<String, BuildingGroup>,
     /// Pop needs aligned with [`Self::needs_order`].
@@ -76,6 +82,7 @@ impl Default for GameDefs {
         Self {
             price_range: DEFAULT_PRICE_RANGE,
             goods_order: Vec::new(),
+            building_types_order: Vec::new(),
             needs_order: Vec::new(),
             goods: BTreeMap::new(),
             labels: BTreeMap::new(),
@@ -84,7 +91,7 @@ impl Default for GameDefs {
             flags: BTreeMap::new(),
             flag_defs: BTreeMap::new(),
             production_methods: BTreeMap::new(),
-            buildings: BTreeMap::new(),
+            building_types: BTreeMap::new(),
             building_groups: BTreeMap::new(),
             pop_needs: Vec::new(),
             buy_packages: BTreeMap::new(),
@@ -104,6 +111,27 @@ impl GameDefs {
             .iter()
             .position(|id| id == good_id)
             .map(GoodIdx::from_usize)
+    }
+
+    /// Index of `building_type_id` in [`Self::building_types_order`], if known.
+    pub fn building_index_of(&self, building_type_id: &str) -> Option<crate::BuildingTypeIdx> {
+        self.building_types_order
+            .iter()
+            .position(|id| id == building_type_id)
+            .map(crate::BuildingTypeIdx::from_usize)
+    }
+
+    /// Building type script id at `index`.
+    pub fn building_by_index(&self, index: crate::BuildingTypeIdx) -> Option<&str> {
+        self.building_types_order
+            .get(index.as_usize())
+            .map(String::as_str)
+    }
+
+    /// Building type definition at `index`.
+    pub fn building_type(&self, index: crate::BuildingTypeIdx) -> Option<&BuildingType> {
+        self.building_by_index(index)
+            .and_then(|id| self.building_types.get(id))
     }
 
     /// Index of `need_id` in [`Self::needs_order`], if known.
@@ -157,6 +185,37 @@ impl GameDefs {
     /// Call after manually assembling packages in tests.
     pub fn rebuild_package_ladder(&mut self) {
         self.package_ladder = build_package_ladder(&self.buy_packages, self.needs_order.len());
+    }
+
+    /// Rebuild [`Self::building_types_order`] from [`Self::building_types`] keys.
+    ///
+    /// Prefer recording ids as they are first inserted during load. This helper
+    /// is for tests that assemble a `building_types` map after the fact.
+    pub fn rebuild_building_types_order(&mut self) {
+        self.building_types_order = self.building_types.keys().cloned().collect();
+    }
+
+    /// Insert a minimal building type if missing, then return its dense index.
+    ///
+    /// Idempotent. Appends to [`Self::building_types_order`] so previously returned
+    /// indices stay valid (unlike a full [`Self::rebuild_building_types_order`]).
+    /// Intended for tests and synthetic worlds.
+    pub fn ensure_building_type(&mut self, building_type_id: &str) -> crate::BuildingTypeIdx {
+        if let Some(idx) = self.building_index_of(building_type_id) {
+            return idx;
+        }
+        self.building_types.insert(
+            building_type_id.to_string(),
+            BuildingType {
+                id: building_type_id.to_string(),
+                group: None,
+                city_type: None,
+                production_method_groups: Vec::new(),
+                required_construction: None,
+            },
+        );
+        self.building_types_order.push(building_type_id.to_string());
+        crate::BuildingTypeIdx::from_usize(self.building_types_order.len() - 1)
     }
 }
 

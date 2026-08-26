@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use datafusion::arrow::array::{Array, BooleanArray, Float64Array, StringArray, UInt32Array};
+use datafusion::arrow::array::{
+    Array, BooleanArray, Float64Array, StringArray, UInt16Array, UInt32Array,
+};
 use vic3_defs::{decode_blob, encode_blob, load_from_path};
 use vic3_load::{empty_tokens, load_slice};
 use vic3_prices::{solve, SolveOpts, World};
@@ -1066,7 +1068,9 @@ async fn gaps_army_power_unknown_not_silent_zero() {
 async fn constructions_table_lists_private_and_government() {
     use vic3_prices::{ConstructionQueueKind, WorldConstruction};
 
-    let defs = decode_blob(&defs_blob()).expect("decode defs");
+    let mut defs = decode_blob(&defs_blob()).expect("decode defs");
+    let logging = defs.ensure_building_type("building_logging_camp");
+    let cs = defs.ensure_building_type("building_construction_sector");
     let save = load_slice(&save_bytes(), empty_tokens()).expect("load save");
     let mut world = World::from_save(&save, &defs);
     let country_id = world
@@ -1080,7 +1084,7 @@ async fn constructions_table_lists_private_and_government() {
             queue: ConstructionQueueKind::Private,
             country_id,
             state_id: Some(1),
-            building_type_id: "building_logging_camp".into(),
+            building_type_id: logging,
             remaining: Some(5.0),
         },
         WorldConstruction {
@@ -1088,7 +1092,7 @@ async fn constructions_table_lists_private_and_government() {
             queue: ConstructionQueueKind::Government,
             country_id,
             state_id: Some(1),
-            building_type_id: "building_construction_sector".into(),
+            building_type_id: cs,
             remaining: Some(40.0),
         },
     ];
@@ -1118,8 +1122,8 @@ async fn constructions_table_lists_private_and_government() {
     let buildings = gov[0]
         .column(0)
         .as_any()
-        .downcast_ref::<StringArray>()
-        .expect("building");
+        .downcast_ref::<UInt16Array>()
+        .expect("building_type_id u16");
     assert_eq!(gov[0].num_rows(), 1);
-    assert_eq!(buildings.value(0), "building_construction_sector");
+    assert_eq!(buildings.value(0), cs.raw());
 }

@@ -34,7 +34,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
-use vic3_defs::GameDefs;
+use vic3_defs::{BuildingTypeIdx, GameDefs};
 use vic3_prices::{PricesResult, World, WorldCountry};
 
 use crate::construction::{
@@ -92,7 +92,7 @@ pub struct PlanningConstruction {
     pub order_id: u32,
     pub queue: ConstructionQueueKind,
     pub state_id: Option<u32>,
-    pub building_type_id: String,
+    pub building_type_id: BuildingTypeIdx,
     pub remaining: Option<f64>,
 }
 
@@ -118,15 +118,20 @@ impl Hash for PlanningConstruction {
     }
 }
 
-impl From<&vic3_load::ConstructionQueueEntry> for PlanningConstruction {
-    fn from(entry: &vic3_load::ConstructionQueueEntry) -> Self {
-        Self {
+impl PlanningConstruction {
+    /// Resolve a save construction row against `defs` building_types_order.
+    pub fn try_from_entry(
+        entry: &vic3_load::ConstructionQueueEntry,
+        defs: &GameDefs,
+    ) -> Option<Self> {
+        let building_type_id = defs.building_index_of(&entry.building)?;
+        Some(Self {
             order_id: entry.order_id,
             queue: entry.queue,
             state_id: entry.state_id,
-            building_type_id: entry.building.clone(),
+            building_type_id,
             remaining: entry.remaining,
-        }
+        })
     }
 }
 
@@ -139,7 +144,7 @@ impl From<&vic3_prices::WorldConstruction> for PlanningConstruction {
                 vic3_prices::ConstructionQueueKind::Government => ConstructionQueueKind::Government,
             },
             state_id: entry.state_id,
-            building_type_id: entry.building_type_id.clone(),
+            building_type_id: entry.building_type_id,
             remaining: entry.remaining,
         }
     }
@@ -174,13 +179,13 @@ pub struct PlanningParts {
     pub credit_limit: Option<f64>,
     pub credit_headroom: Option<f64>,
     /// `(building_type, state_id)` → added levels on this branch.
-    pub building_level_deltas: BTreeMap<(String, u32), u32>,
-    pub queued_building: Option<String>,
+    pub building_level_deltas: BTreeMap<(BuildingTypeIdx, u32), u32>,
+    pub queued_building: Option<BuildingTypeIdx>,
     /// Full private then government queue for this country (exposure / sim sync).
     pub constructions: Vec<PlanningConstruction>,
     pub queued_interest: Option<QueuedInterest>,
     /// Building type currently hiring toward full employment (sim branch).
-    pub queued_hire: Option<String>,
+    pub queued_hire: Option<BuildingTypeIdx>,
     /// Sim-added barracks / shipyards / naval administrations.
     pub mil_buildings: Vec<ModeledMilBuilding>,
     /// Active law script ids (`law_autocracy`, …).
@@ -300,12 +305,12 @@ pub struct PlanningState {
     /// Added levels by `(building_type, state_id)` on this branch (empty at load).
     ///
     /// Matches Vic3 construction placement: a level is always queued in a state.
-    pub building_level_deltas: BTreeMap<(String, u32), u32>,
+    pub building_level_deltas: BTreeMap<(BuildingTypeIdx, u32), u32>,
     /// Construction queue head from save, or sim `QueueBuildingLevel`.
     ///
     /// Prefer private over government at load. Kept in sync with
     /// [`Self::constructions`] when sim queues or completes a building.
-    pub queued_building: Option<String>,
+    pub queued_building: Option<BuildingTypeIdx>,
     /// Full ordered construction queue for this country (private then government).
     ///
     /// Exposed for SQL / UI / future goals. Sim push/pops entries alongside
@@ -314,7 +319,7 @@ pub struct PlanningState {
     /// Interest in flight — sim-only (`None` at load).
     pub queued_interest: Option<QueuedInterest>,
     /// Hire-to-full in flight for a mil building type — sim-only.
-    pub queued_hire: Option<String>,
+    pub queued_hire: Option<BuildingTypeIdx>,
     /// Sim-added barracks / shipyards / naval administrations.
     pub mil_buildings: Vec<ModeledMilBuilding>,
     /// Active law script ids from save / completed enactments.
@@ -676,7 +681,8 @@ impl PlanningState {
     }
 
     /// Add one underemployed level of a military building type.
-    pub fn push_mil_building_level(&mut self, building: &str) {
+    pub fn push_mil_building_level(&mut self, building: BuildingTypeIdx, defs: &GameDefs) {
+        let kind = crate::military::MilBuildingKind::from_idx(building, defs);
         if let Some(row) = self
             .mil_buildings
             .iter_mut()
@@ -685,7 +691,8 @@ impl PlanningState {
             row.levels += 1.0;
         } else {
             self.mil_buildings.push(ModeledMilBuilding {
-                building_type_id: building.to_string(),
+                building_type_id: building,
+                kind,
                 levels: 1.0,
                 staffing: 0.0,
             });
@@ -694,7 +701,7 @@ impl PlanningState {
     }
 
     /// Raise staffing for `building` up to its levels (full hire).
-    pub fn complete_mil_hire(&mut self, building: &str) {
+    pub fn complete_mil_hire(&mut self, building: BuildingTypeIdx) {
         if let Some(row) = self
             .mil_buildings
             .iter_mut()
@@ -753,7 +760,7 @@ impl PlanningState {
         self.queued_building = self
             .constructions
             .first()
-            .map(|entry| entry.building_type_id.clone());
+            .map(|entry| entry.building_type_id);
     }
 
     /// Append a government construction (sim `QueueBuildingLevel`).
@@ -766,7 +773,12 @@ impl PlanningState {
     /// stays the first queue entry (`sync_queued_building_from_constructions`).
     ///
     /// `state_id` is the Vic3 placement state (required for planner enqueues).
-    pub fn push_construction(&mut self, building: String, state_id: u32, remaining: Option<f64>) {
+    pub fn push_construction(
+        &mut self,
+        building: BuildingTypeIdx,
+        state_id: u32,
+        remaining: Option<f64>,
+    ) {
         let order_id = self
             .constructions
             .iter()
@@ -789,7 +801,7 @@ impl PlanningState {
     /// Prefers a finished row (`remaining <= 0`) when several share the type so
     /// parallel completions pop the right job. When `state_id` is [`Some`], only
     /// that placement matches; [`None`] matches any state (save rows).
-    pub fn complete_construction(&mut self, building: &str, state_id: Option<u32>) {
+    pub fn complete_construction(&mut self, building: BuildingTypeIdx, state_id: Option<u32>) {
         let matches = |entry: &PlanningConstruction| {
             entry.building_type_id == building
                 && state_id
@@ -897,10 +909,12 @@ impl PlanningState {
             credit_limit,
             credit_headroom,
             building_level_deltas: BTreeMap::new(),
-            queued_building: save.queued_building_for(country_id),
+            queued_building: save
+                .queued_building_for(country_id)
+                .and_then(|id| defs.building_index_of(&id)),
             constructions: vic3_load::constructions_for(save, country_id)
                 .iter()
-                .map(PlanningConstruction::from)
+                .filter_map(|entry| PlanningConstruction::try_from_entry(entry, defs))
                 .collect(),
             // Interest/hire/law queues and PM/tax deltas are sim-only.
             queued_interest: None,
@@ -1001,7 +1015,10 @@ impl PlanningState {
             credit_limit: country.credit_limit,
             credit_headroom: country.credit_headroom,
             building_level_deltas: BTreeMap::new(),
-            queued_building: country.queued_building.clone(),
+            queued_building: country
+                .queued_building
+                .as_deref()
+                .and_then(|id| defs.building_index_of(id)),
             constructions: world
                 .constructions
                 .iter()
@@ -1141,6 +1158,12 @@ pub fn version() -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use vic3_defs::{BuildingTypeIdx, GameDefs};
+    fn alone(id: &str) -> BuildingTypeIdx {
+        let mut defs = GameDefs::default();
+        defs.ensure_building_type(id)
+    }
+
     use super::*;
     use std::collections::BTreeMap;
     use vic3_load::{Budget, Country, Manager, Meta, Pop, Save, State};
@@ -1300,26 +1323,19 @@ mod tests {
             }),
         );
 
-        let state =
-            PlanningState::from_save(&save, "GER", BTreeMap::new(), &GameDefs::default()).unwrap();
+        let mut defs = GameDefs::default();
+        let cs = defs.ensure_building_type("building_construction_sector");
+        let state = PlanningState::from_save(&save, "GER", BTreeMap::new(), &defs).unwrap();
         assert!(state.has_tech("railways"));
         assert!(state.has_tech("nitroglycerin"));
         assert!(state.has_tech("urban_planning"));
         assert_eq!(state.queued_tech.as_deref(), Some("atmospheric_engine"));
-        assert_eq!(
-            state.queued_building.as_deref(),
-            Some("building_construction_sector")
-        );
+        assert_eq!(state.queued_building, Some(cs));
         assert_eq!(state.constructions.len(), 1);
-        assert_eq!(
-            state.constructions[0].building_type_id,
-            "building_construction_sector"
-        );
+        assert_eq!(state.constructions[0].building_type_id, cs);
 
-        let world = World::from_save(&save, &vic3_defs::GameDefs::default());
-        let from_world =
-            PlanningState::from_world(&world, "GER", BTreeMap::new(), &GameDefs::default())
-                .unwrap();
+        let world = World::from_save(&save, &defs);
+        let from_world = PlanningState::from_world(&world, "GER", BTreeMap::new(), &defs).unwrap();
         assert_eq!(from_world.techs, state.techs);
         assert_eq!(from_world.queued_tech, state.queued_tech);
         assert_eq!(from_world.queued_building, state.queued_building);
@@ -1678,7 +1694,7 @@ mod tests {
     fn fingerprint_ignores_good_prices_and_gdp_by_default() {
         let a = PlanningState::from_parts(PlanningParts {
             country: "GER".into(),
-            building_level_deltas: [(("building_rye_farm".into(), 1), 1)].into_iter().collect(),
+            building_level_deltas: [((alone("building_rye_farm"), 1), 1)].into_iter().collect(),
             good_prices: vec![("grain".into(), 20.0)],
             gdp: 1.0e6,
             ..PlanningParts::default()

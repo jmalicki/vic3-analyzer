@@ -38,19 +38,28 @@ pub const DEFAULT_PEA_BEAM: usize = 16;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct CandidateDeps {
     state_id: Option<u32>,
+    /// Dense building-type idx when the action names one (`QueueBuildingLevel` / hire).
+    building_type_id: Option<vic3_defs::BuildingTypeIdx>,
     building_id: Option<u32>,
 }
 
 impl CandidateDeps {
     fn from_action(action: &Action) -> Self {
         match action {
-            Action::QueueBuildingLevel { state_id, .. } => Self {
+            Action::QueueBuildingLevel { building, state_id } => Self {
                 state_id: Some(*state_id),
+                building_type_id: Some(*building),
                 building_id: None,
             },
             Action::SwitchPm { building_id, .. } => Self {
                 state_id: None,
+                building_type_id: None,
                 building_id: Some(*building_id),
+            },
+            Action::QueueHireMilitary { building } => Self {
+                state_id: None,
+                building_type_id: Some(*building),
+                building_id: None,
             },
             _ => Self::default(),
         }
@@ -66,13 +75,19 @@ struct Candidate {
     f_minus_g: u32,
     #[allow(dead_code)] // reserved for live-rescore / dirty sets
     deps: CandidateDeps,
-    /// Deterministic tie-break when `f_minus_g` matches (child fingerprint).
+    /// Deterministic last-resort tie-break (child fingerprint) after score / deps.
     tie: u64,
 }
 
 fn candidate_cmp(a: &Candidate, b: &Candidate) -> Ordering {
+    // Score first; then stable geographic / building-type keys so equal-cost
+    // ties do not depend on fingerprint or bag insertion order. `select_top_k`
+    // only fully sorts the beam prefix after `select_nth`.
     a.f_minus_g
         .cmp(&b.f_minus_g)
+        .then_with(|| a.deps.state_id.cmp(&b.deps.state_id))
+        .then_with(|| a.deps.building_type_id.cmp(&b.deps.building_type_id))
+        .then_with(|| a.deps.building_id.cmp(&b.deps.building_id))
         .then_with(|| a.tie.cmp(&b.tie))
 }
 
@@ -168,12 +183,12 @@ impl PeaNode {
         mut bag: Vec<Candidate>,
         already_emitted: usize,
     ) -> Vec<(Self, u32)> {
-        let beam = DEFAULT_PEA_BEAM.max(1);
+        let beam_width: usize = std::cmp::max(DEFAULT_PEA_BEAM, 1);
         if bag.is_empty() {
             return Vec::new();
         }
-        select_top_k(&mut bag, beam);
-        let take = beam.min(bag.len());
+        select_top_k(&mut bag, beam_width);
+        let take: usize = std::cmp::min(beam_width, bag.len());
         let mut out = Vec::with_capacity(take.saturating_add(1));
         for candidate in &bag[..take] {
             if let Some(edge) = Self::emit_candidate(domain, candidate) {
@@ -274,6 +289,11 @@ impl SearchNode for PeaNode {
 
 #[cfg(test)]
 mod tests {
+    use vic3_defs::{BuildingTypeIdx, GameDefs};
+    fn alone(defs: &GameDefs, id: &str) -> BuildingTypeIdx {
+        defs.building_index_of(id).expect(id)
+    }
+
     use super::*;
     use crate::goals::compile;
     use crate::plan::pathfinding::shortest_path;
@@ -324,6 +344,8 @@ mod tests {
     #[test]
     fn spotcheck_pea_agrees_with_full_astar_on_branching_fixtures() {
         use crate::military::{ModeledMilBuilding, UnitCombatStats, BUILDING_BARRACKS};
+        let mut defs = GameDefs::default();
+        defs.ensure_building_type(BUILDING_BARRACKS);
         use crate::plan::plan;
 
         let cases: Vec<(&str, Vic3Node)> = vec![
@@ -400,7 +422,8 @@ mod tests {
                         army_power_projection: Some(0.0),
                         army_pp_baseline: Some(0.0),
                         mil_buildings: vec![ModeledMilBuilding {
-                            building_type_id: BUILDING_BARRACKS.into(),
+                            building_type_id: alone(&defs, BUILDING_BARRACKS),
+                            kind: crate::military::MilBuildingKind::Barracks,
                             levels,
                             staffing: 0.0,
                         }],

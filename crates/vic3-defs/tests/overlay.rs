@@ -17,7 +17,7 @@ fn overlay_path(name: &str) -> PathBuf {
 fn overlay_overrides_fixture_building_required_construction() {
     let mut defs = load_from_path(fixture_root()).expect("fixture defs");
     assert_eq!(
-        defs.buildings["building_rye_farm"].required_construction,
+        defs.building_types["building_rye_farm"].required_construction,
         Some(200.0)
     );
 
@@ -26,12 +26,12 @@ fn overlay_overrides_fixture_building_required_construction() {
     apply_overlay(&mut defs, &overlay);
 
     assert_eq!(
-        defs.buildings["building_rye_farm"].required_construction,
+        defs.building_types["building_rye_farm"].required_construction,
         Some(999.0)
     );
     // Unmentioned buildings stay at install values.
     assert_eq!(
-        defs.buildings["building_coal_mine"].required_construction,
+        defs.building_types["building_coal_mine"].required_construction,
         Some(300.0)
     );
 }
@@ -40,11 +40,11 @@ fn overlay_overrides_fixture_building_required_construction() {
 fn without_overlay_fixture_required_construction_unchanged() {
     let defs = load_from_path(fixture_root()).expect("fixture defs");
     assert_eq!(
-        defs.buildings["building_rye_farm"].required_construction,
+        defs.building_types["building_rye_farm"].required_construction,
         Some(200.0)
     );
     assert_eq!(
-        defs.buildings["building_coal_mine"].required_construction,
+        defs.building_types["building_coal_mine"].required_construction,
         Some(300.0)
     );
 }

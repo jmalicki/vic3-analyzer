@@ -25,19 +25,19 @@ fn toy_economy_loads_goods_buildings_and_mill_pms() {
         "building_trade_center",
     ] {
         assert!(
-            defs.buildings.contains_key(building),
+            defs.building_types.contains_key(building),
             "missing building type {building}"
         );
     }
 
-    let mill_group = &defs.buildings["building_flour_mill"].production_method_groups;
+    let mill_group = &defs.building_types["building_flour_mill"].production_method_groups;
     assert_eq!(mill_group, &["pmg_base_building_flour_mill".to_string()]);
     assert_eq!(
-        defs.buildings["building_flour_mill"].required_construction,
+        defs.building_types["building_flour_mill"].required_construction,
         Some(400.0)
     );
     assert_eq!(
-        defs.buildings["building_wheat_farm"].required_construction,
+        defs.building_types["building_wheat_farm"].required_construction,
         Some(200.0)
     );
     assert_eq!(

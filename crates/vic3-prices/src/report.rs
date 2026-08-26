@@ -64,7 +64,7 @@ pub(crate) fn report_from_solve(
 
 /// Def catalog rows for [`PricesResult::building_types`].
 fn building_type_infos(defs: &GameDefs) -> Vec<BuildingTypeInfo> {
-    defs.buildings
+    defs.building_types
         .values()
         .map(|building| BuildingTypeInfo {
             id: building.id.clone(),
@@ -215,7 +215,10 @@ fn detail_rows(
         buildings.push(BuildingEconomics {
             id: building.id,
             state_id: building.state,
-            type_id: building.type_id.clone(),
+            type_id: defs
+                .building_by_index(building.type_id)
+                .unwrap_or("")
+                .to_string(),
             level: building.level,
             staffing: building.staffing,
             production_method_ids: building.production_methods.clone(),

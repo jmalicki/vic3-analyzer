@@ -381,7 +381,7 @@ fn building_for_lever(
         lever_matches_building(key, &building.type_id, defs).then(|| building.type_id.clone())
     });
     from_state.or_else(|| {
-        defs.buildings.keys().find_map(|id| {
+        defs.building_types.keys().find_map(|id| {
             if is_subsistence(id, defs) {
                 return None;
             }
@@ -397,7 +397,7 @@ fn lever_matches_building(key: LeverKey, type_id: &str, defs: &GameDefs) -> bool
         }
         return true;
     }
-    let Some(building) = defs.buildings.get(type_id) else {
+    let Some(building) = defs.building_types.get(type_id) else {
         return false;
     };
     if key == LeverKey::Farm
@@ -415,14 +415,14 @@ pub(crate) fn is_subsistence(type_id: &str, defs: &GameDefs) -> bool {
     if id_has(type_id, "subsistence") {
         return true;
     }
-    defs.buildings
+    defs.building_types
         .get(type_id)
         .and_then(|building| building.group.as_deref())
         .is_some_and(|group| id_has(group, "subsistence"))
 }
 
 pub(crate) fn professions_employed(defs: &GameDefs, type_id: &str) -> Vec<String> {
-    let Some(building) = defs.buildings.get(type_id) else {
+    let Some(building) = defs.building_types.get(type_id) else {
         return Vec::new();
     };
     let mut counts: BTreeMap<String, f64> = BTreeMap::new();

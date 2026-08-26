@@ -3,12 +3,17 @@
 //! Rows come from [`vic3_prices::World::constructions`], not the planning head
 //! `queued_building`. Use `queue = 'private'|'government'` and `position` for
 //! display order within a country (matching the in-game build queue UI).
+//!
+//! `building_type_id` is the dense [`vic3_defs::BuildingTypeIdx`] (`UInt16`);
+//! `building_type_name` is the localized label when known.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use datafusion::arrow::array::{Float64Builder, RecordBatch, StringBuilder, UInt32Builder};
+use datafusion::arrow::array::{
+    Float64Builder, RecordBatch, StringBuilder, UInt16Builder, UInt32Builder,
+};
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::catalog::Session;
 use datafusion::datasource::{TableProvider, TableType};
@@ -26,7 +31,7 @@ use super::pushdown::{matches_str, matches_u32, PushSupport};
 const PUSH: PushSupport = PushSupport {
     eq_u32: &["order_id", "country_id", "state_id"],
     eq_i32: &[],
-    eq_str: &["queue", "building_type_id"],
+    eq_str: &["queue"],
     range_str: &[],
 };
 
@@ -53,7 +58,7 @@ impl ConstructionsProvider {
         let mut position = UInt32Builder::new();
         let mut country_id = UInt32Builder::new();
         let mut state_id = UInt32Builder::new();
-        let mut building_type_id = StringBuilder::new();
+        let mut building_type_id = UInt16Builder::new();
         let mut building_type_name = StringBuilder::new();
         let mut remaining = Float64Builder::new();
 
@@ -111,9 +116,12 @@ impl ConstructionsProvider {
                 }
                 _ => {}
             }
-            if !matches_str(&preds, "building_type_id", &row.building_type_id) {
-                continue;
-            }
+
+            let script_id = self
+                .binding
+                .defs
+                .building_by_index(row.building_type_id)
+                .unwrap_or("");
 
             order_id.append_value(row.id);
             queue.append_value(queue_str);
@@ -126,8 +134,8 @@ impl ConstructionsProvider {
                 Some(id) => state_id.append_value(id),
                 None => state_id.append_null(),
             }
-            building_type_id.append_value(&row.building_type_id);
-            match self.binding.label(&row.building_type_id) {
+            building_type_id.append_value(row.building_type_id.raw());
+            match self.binding.label(script_id) {
                 Some(name) => building_type_name.append_value(name),
                 None => building_type_name.append_null(),
             }

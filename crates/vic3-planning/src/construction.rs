@@ -53,10 +53,10 @@
 //!
 //! See [`docs/planning.md`](../../../docs/planning.md).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::num::NonZeroUsize;
 
-use vic3_defs::GameDefs;
+use vic3_defs::{BuildingTypeIdx, GameDefs};
 use vic3_load::{Save, WorldSnapshot};
 use vic3_prices::World;
 
@@ -280,10 +280,13 @@ pub fn construction_points_per_day_from_save(
             continue;
         }
         let methods = building.active_production_methods();
+        let Some(type_id) = defs.building_index_of(BUILDING_CONSTRUCTION_SECTOR) else {
+            continue;
+        };
         let world_building = vic3_prices::WorldBuilding {
             id,
             state: building.state,
-            type_id: building.building.clone(),
+            type_id,
             level,
             staffing: building.staffing.max(0.0),
             production_methods: methods,
@@ -316,8 +319,9 @@ pub fn construction_points_per_day_from_world(
         .iter()
         .filter_map(|state| (state.country == Some(country_id)).then_some(state.id))
         .collect();
+    let cs_idx = defs.building_index_of(BUILDING_CONSTRUCTION_SECTOR);
     let cs = world.buildings.iter().filter(|building| {
-        building.type_id == BUILDING_CONSTRUCTION_SECTOR
+        Some(building.type_id) == cs_idx
             && building
                 .state
                 .is_some_and(|state_id| owned_states.contains(&state_id))
@@ -369,7 +373,7 @@ pub fn construction_sector_levels(state: &PlanningState, economy: &EconomyContex
         .apply_planning_to_world(state)
         .buildings
         .iter()
-        .filter(|b| b.type_id == BUILDING_CONSTRUCTION_SECTOR)
+        .filter(|b| Some(b.type_id) == economy.defs.building_index_of(BUILDING_CONSTRUCTION_SECTOR))
         .map(|b| b.level.max(0.0))
         .sum()
 }
@@ -389,7 +393,7 @@ pub fn national_construction_points_per_day(
     for building in world
         .buildings
         .iter()
-        .filter(|b| b.type_id == BUILDING_CONSTRUCTION_SECTOR)
+        .filter(|b| Some(b.type_id) == economy.defs.building_index_of(BUILDING_CONSTRUCTION_SECTOR))
     {
         let level = building.level.max(0.0);
         if level <= 0.0 {
@@ -474,7 +478,7 @@ fn max_weekly_progress_add_for_tech(tech: &str) -> f64 {
 pub fn allocation_cap_points_per_day(
     state: &PlanningState,
     config: SimConfig,
-    _building: Option<&str>,
+    _building: Option<BuildingTypeIdx>,
 ) -> f64 {
     if let Some(override_cap) = config.max_construction_allocation {
         return f64::from(override_cap.max(1));
@@ -555,7 +559,7 @@ pub fn construction_points_per_day_per_job(state: &PlanningState, config: SimCon
         if fed >= max_jobs || remaining <= 0.0 {
             break;
         }
-        let cap = allocation_cap_points_per_day(state, config, Some(job.building_type_id.as_str()));
+        let cap = allocation_cap_points_per_day(state, config, None);
         let take = cap.min(remaining);
         out[idx] = take;
         remaining -= take;
@@ -591,9 +595,9 @@ pub fn unused_government_construction_points_per_day(
 pub fn construction_wait_target(
     state: &PlanningState,
     config: SimConfig,
-) -> Option<(u16, String, Option<u32>)> {
+) -> Option<(u16, BuildingTypeIdx, Option<u32>)> {
     let feeds = construction_points_per_day_per_job(state, config);
-    let mut best: Option<(u16, String, Option<u32>)> = None;
+    let mut best: Option<(u16, BuildingTypeIdx, Option<u32>)> = None;
     for (job, points_per_day) in state.constructions.iter().zip(feeds.iter().copied()) {
         if points_per_day <= 0.0 {
             continue;
@@ -616,7 +620,7 @@ pub fn construction_wait_target(
             }
         };
         if replace {
-            best = Some((days, job.building_type_id.clone(), job.state_id));
+            best = Some((days, job.building_type_id, job.state_id));
         }
     }
     best
@@ -682,7 +686,7 @@ pub fn construction_eta_days(
 /// prior tick drained the job.
 pub fn construction_work_complete(
     state: &PlanningState,
-    building: &str,
+    building: BuildingTypeIdx,
     state_id: Option<u32>,
 ) -> bool {
     state.constructions.iter().any(|row| {
@@ -717,13 +721,16 @@ pub fn ensure_construction_work_points(state: &mut PlanningState, config: SimCon
 /// applied when expanding types to placement states.
 pub fn maybe_add_construction_sector_candidate(
     _state: &PlanningState,
-    candidates: &mut BTreeSet<String>,
+    candidates: &mut HashSet<BuildingTypeIdx>,
+    defs: &GameDefs,
     _cap: u16,
 ) {
     if candidates.is_empty() {
         return;
     }
-    candidates.insert(BUILDING_CONSTRUCTION_SECTOR.to_string());
+    if let Some(idx) = defs.building_index_of(BUILDING_CONSTRUCTION_SECTOR) {
+        candidates.insert(idx);
+    }
 }
 
 /// Construction points to store when enqueueing a building level.
@@ -731,14 +738,13 @@ pub fn maybe_add_construction_sector_candidate(
 /// Prefers defs [`vic3_defs::BuildingType::required_construction`] when finite
 /// and non-negative; otherwise [`SimConfig::default_construction_cost`].
 pub fn construction_work_points_for_enqueue(
-    building: &str,
+    building: BuildingTypeIdx,
     economy: &EconomyContext,
     config: SimConfig,
 ) -> Option<f64> {
     economy
         .defs
-        .buildings
-        .get(building)
+        .building_type(building)
         .and_then(|b| b.required_construction)
         .filter(|c| c.is_finite() && *c >= 0.0)
         .or(Some(f64::from(config.default_construction_cost)))
@@ -747,10 +753,14 @@ pub fn construction_work_points_for_enqueue(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn alone(defs: &mut GameDefs, id: &str) -> BuildingTypeIdx {
+        defs.ensure_building_type(id)
+    }
     use crate::sim::SimConfig;
     use crate::world::{ConstructionQueueKind, PlanningConstruction, PlanningParts, PlanningState};
     use std::collections::BTreeMap;
-    use vic3_defs::{BuildingType, GameDefs, GoodsVec, ProductionMethod};
+    use vic3_defs::{BuildingType, BuildingTypeIdx, GameDefs, GoodsVec, ProductionMethod};
     use vic3_prices::{SolveOpts, WorldBuilding, WorldCountry, WorldState};
 
     #[test]
@@ -779,10 +789,11 @@ mod tests {
                 ..ProductionMethod::default()
             },
         );
+        let cs = alone(&mut defs, BUILDING_CONSTRUCTION_SECTOR);
         let building = WorldBuilding {
             id: 7,
             state: Some(1),
-            type_id: BUILDING_CONSTRUCTION_SECTOR.into(),
+            type_id: cs,
             level: 1.0,
             staffing: 1.0,
             production_methods: vec!["pm_not_construction".into()],
@@ -796,22 +807,24 @@ mod tests {
 
     #[test]
     fn higher_points_per_day_shortens_wait() {
+        let mut defs = GameDefs::default();
+        let logging = alone(&mut defs, "building_logging_camp");
         let job = || PlanningConstruction {
             order_id: 1,
             queue: ConstructionQueueKind::Government,
             state_id: None,
-            building_type_id: "building_logging_camp".into(),
+            building_type_id: logging,
             remaining: Some(100.0),
         };
         let slow = PlanningState::from_parts(PlanningParts {
             constructions: vec![job()],
-            queued_building: Some("building_logging_camp".into()),
+            queued_building: Some(logging),
             construction_points_per_day: 5.0,
             ..PlanningParts::default()
         });
         let fast = PlanningState::from_parts(PlanningParts {
             constructions: vec![job()],
-            queued_building: Some("building_logging_camp".into()),
+            queued_building: Some(logging),
             construction_points_per_day: 20.0,
             ..PlanningParts::default()
         });
@@ -825,24 +838,27 @@ mod tests {
 
     #[test]
     fn parallel_allocation_splits_points_per_day() {
+        let mut defs = GameDefs::default();
+        let a = alone(&mut defs, "building_a");
+        let b = alone(&mut defs, "building_b");
         let state = PlanningState::from_parts(PlanningParts {
             constructions: vec![
                 PlanningConstruction {
                     order_id: 1,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building_type_id: "building_a".into(),
+                    building_type_id: a,
                     remaining: Some(50.0),
                 },
                 PlanningConstruction {
                     order_id: 2,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building_type_id: "building_b".into(),
+                    building_type_id: b,
                     remaining: Some(50.0),
                 },
             ],
-            queued_building: Some("building_a".into()),
+            queued_building: Some(a),
             construction_points_per_day: 10.0,
             ..PlanningParts::default()
         });
@@ -866,20 +882,23 @@ mod tests {
 
     #[test]
     fn private_jobs_do_not_consume_government_pool() {
+        let mut defs = GameDefs::default();
+        let private = alone(&mut defs, "building_private");
+        let govt = alone(&mut defs, "building_govt");
         let state = PlanningState::from_parts(PlanningParts {
             constructions: vec![
                 PlanningConstruction {
                     order_id: 1,
                     queue: ConstructionQueueKind::Private,
                     state_id: None,
-                    building_type_id: "building_private".into(),
+                    building_type_id: private,
                     remaining: Some(50.0),
                 },
                 PlanningConstruction {
                     order_id: 2,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building_type_id: "building_govt".into(),
+                    building_type_id: govt,
                     remaining: Some(50.0),
                 },
             ],
@@ -940,20 +959,23 @@ mod tests {
 
     #[test]
     fn capacity_eta_uses_next_finish_when_slots_full() {
+        let mut defs = GameDefs::default();
+        let a = alone(&mut defs, "building_a");
+        let b = alone(&mut defs, "building_b");
         let state = PlanningState::from_parts(PlanningParts {
             constructions: vec![
                 PlanningConstruction {
                     order_id: 1,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building_type_id: "building_a".into(),
+                    building_type_id: a,
                     remaining: Some(20.0),
                 },
                 PlanningConstruction {
                     order_id: 2,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building_type_id: "building_b".into(),
+                    building_type_id: b,
                     remaining: Some(100.0),
                 },
             ],
@@ -980,19 +1002,22 @@ mod tests {
     #[test]
     fn maybe_add_sector_requires_existing_build_path() {
         let state = PlanningState::default();
-        let mut empty = BTreeSet::new();
-        maybe_add_construction_sector_candidate(&state, &mut empty, 10);
+        let mut empty = HashSet::new();
+        maybe_add_construction_sector_candidate(&state, &mut empty, &GameDefs::default(), 10);
         assert!(empty.is_empty(), "no CS without another candidate");
 
-        let mut with_logging = BTreeSet::from(["building_logging_camp".into()]);
-        maybe_add_construction_sector_candidate(&state, &mut with_logging, 10);
-        assert!(with_logging.contains(BUILDING_CONSTRUCTION_SECTOR));
+        let mut defs = GameDefs::default();
+        let logging = defs.ensure_building_type("building_logging_camp");
+        let cs = defs.ensure_building_type(BUILDING_CONSTRUCTION_SECTOR);
+        let mut with_logging = HashSet::from([logging]);
+        maybe_add_construction_sector_candidate(&state, &mut with_logging, &defs, 10);
+        assert!(with_logging.contains(&cs));
     }
 
     #[test]
     fn sync_points_per_day_after_cs_level_applies_government_share() {
         let mut defs = GameDefs::default();
-        defs.buildings.insert(
+        defs.building_types.insert(
             BUILDING_CONSTRUCTION_SECTOR.into(),
             BuildingType {
                 id: BUILDING_CONSTRUCTION_SECTOR.into(),
@@ -1002,6 +1027,7 @@ mod tests {
                 required_construction: Some(10.0),
             },
         );
+        defs.rebuild_building_types_order();
         defs.production_methods.insert(
             "pm_iron_frame_buildings".into(),
             ProductionMethod {
@@ -1024,7 +1050,9 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                type_id: BUILDING_CONSTRUCTION_SECTOR.into(),
+                type_id: defs
+                    .building_index_of(BUILDING_CONSTRUCTION_SECTOR)
+                    .unwrap(),
                 level: 0.0,
                 staffing: 0.0,
                 production_methods: vec!["pm_iron_frame_buildings".into()],
@@ -1034,6 +1062,7 @@ mod tests {
             frozen_buy: GoodsVec::from_vec(vec![]),
             ..World::default()
         };
+        let cs = alone(&mut defs, BUILDING_CONSTRUCTION_SECTOR);
         let economy = EconomyContext::new(world, defs, SolveOpts::default());
         let config = SimConfig {
             base_construction_capacity: 1,
@@ -1042,7 +1071,7 @@ mod tests {
         let mut state = PlanningState::from_parts(PlanningParts {
             country: "GER".into(),
             construction_points_per_day: 1.0,
-            building_level_deltas: BTreeMap::from([((BUILDING_CONSTRUCTION_SECTOR.into(), 1), 1)]),
+            building_level_deltas: BTreeMap::from([((cs, 1), 1)]),
             // laissez-faire → 25% government
             laws: ["law_laissez_faire".into()].into_iter().collect(),
             ..PlanningParts::default()

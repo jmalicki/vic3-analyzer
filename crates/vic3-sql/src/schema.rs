@@ -141,7 +141,7 @@ pub fn constructions_schema() -> SchemaRef {
         Field::new("position", DataType::UInt32, false),
         Field::new("country_id", DataType::UInt32, true),
         Field::new("state_id", DataType::UInt32, true),
-        Field::new("building_type_id", DataType::Utf8, false),
+        Field::new("building_type_id", DataType::UInt16, false),
         Field::new("building_type_name", DataType::Utf8, true),
         Field::new("remaining", DataType::Float64, true),
     ]))

@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 
-use vic3_defs::{GameDefs, GoodIdx, GoodsVec, ProductionMethod};
+use vic3_defs::{BuildingTypeIdx, GameDefs, GoodIdx, GoodsVec, ProductionMethod};
 use vic3_load::{Building, Vic3Date, WorldSnapshot};
 
 /// Pop size unit for buy packages (Vic3: package values are per 10k working pops).
@@ -146,7 +146,8 @@ pub struct WorldConstruction {
     pub queue: ConstructionQueueKind,
     pub country_id: Option<u32>,
     pub state_id: Option<u32>,
-    pub building_type_id: String,
+    /// Dense index into [`GameDefs::building_types_order`].
+    pub building_type_id: BuildingTypeIdx,
     pub remaining: Option<f64>,
 }
 
@@ -263,7 +264,8 @@ impl WorldStatePop {
 pub struct WorldBuilding {
     pub id: u32,
     pub state: Option<u32>,
-    pub type_id: String,
+    /// Dense index into [`GameDefs::building_types_order`].
+    pub type_id: BuildingTypeIdx,
     pub level: f64,
     /// Staffed levels. Frozen except that what-if does not touch it.
     pub staffing: f64,
@@ -483,13 +485,16 @@ impl World {
             buildings,
             constructions: vic3_load::all_constructions(save)
                 .into_iter()
-                .map(|entry| WorldConstruction {
-                    id: entry.order_id,
-                    queue: entry.queue.into(),
-                    country_id: entry.country_id,
-                    state_id: entry.state_id,
-                    building_type_id: entry.building,
-                    remaining: entry.remaining,
+                .filter_map(|entry| {
+                    let building_type_id = defs.building_index_of(&entry.building)?;
+                    Some(WorldConstruction {
+                        id: entry.order_id,
+                        queue: entry.queue.into(),
+                        country_id: entry.country_id,
+                        state_id: entry.state_id,
+                        building_type_id,
+                        remaining: entry.remaining,
+                    })
                 })
                 .collect(),
             frozen_buy: GoodsVec::zeros(defs.goods_order.len()),
@@ -505,7 +510,7 @@ impl World {
     /// The saved staffing ratio and absolute saved goods IO are held constant
     /// per level, so explicit level additions scale both proportionally. Other
     /// employment, wages, and trade volumes remain frozen.
-    pub fn with_extra_levels(&self, type_id: &str, extra_levels: u32) -> Self {
+    pub fn with_extra_levels(&self, type_id: BuildingTypeIdx, extra_levels: u32) -> Self {
         let mut next = self.clone();
         for b in &mut next.buildings {
             if b.type_id == type_id {
@@ -521,7 +526,7 @@ impl World {
     /// no-op clone (callers that need greenfield insert a row themselves).
     pub fn with_extra_levels_in_state(
         &self,
-        type_id: &str,
+        type_id: BuildingTypeIdx,
         state_id: u32,
         extra_levels: u32,
     ) -> Self {
@@ -560,6 +565,11 @@ impl World {
 }
 
 impl WorldBuilding {
+    /// Script id for [`Self::type_id`], or `""` when unknown in `defs`.
+    pub fn type_script_id<'a>(&self, defs: &'a GameDefs) -> &'a str {
+        defs.building_by_index(self.type_id).unwrap_or("")
+    }
+
     /// Scale level, staffing, and saved IO by `extra_levels` (see [`World::with_extra_levels`]).
     pub fn add_extra_levels(&mut self, extra_levels: u32) {
         let extra = f64::from(extra_levels);
@@ -600,10 +610,11 @@ impl WorldBuilding {
         if building.building.is_empty() {
             return None;
         }
+        let type_id = defs.building_index_of(&building.building)?;
         Some(Self {
             id,
             state: building.state,
-            type_id: building.building.clone(),
+            type_id,
             level: f64::from(building.level.max(0)),
             staffing: building.staffing.max(0.0),
             production_methods: building.active_production_methods(),
@@ -803,6 +814,13 @@ mod tests {
     use std::collections::BTreeMap;
     use vic3_load::{Building, BuildingGoods, ConstructionOrder, Country, Pop, Save, State};
 
+    /// Dense index for a script id in a throwaway one-entry defs table (tests only).
+    /// Prefer sharing one `GameDefs` when a test has multiple building types.
+    fn alone(id: &str) -> BuildingTypeIdx {
+        let mut defs = GameDefs::default();
+        defs.ensure_building_type(id)
+    }
+
     fn defs_with_goods(ids: &[&str]) -> GameDefs {
         GameDefs {
             goods_order: ids.iter().map(|id| (*id).to_string()).collect(),
@@ -859,12 +877,15 @@ mod tests {
             }),
         );
 
-        let world = World::from_save(&save, &defs_with_goods(&[]));
+        let mut defs = defs_with_goods(&[]);
+        defs.ensure_building_type("building_logging_camp");
+        defs.ensure_building_type("building_construction_sector");
+        let world = World::from_save(&save, &defs);
         assert_eq!(world.constructions.len(), 2);
         assert_eq!(world.constructions[0].queue, ConstructionQueueKind::Private);
         assert_eq!(
             world.constructions[0].building_type_id,
-            "building_logging_camp"
+            defs.building_index_of("building_logging_camp").unwrap()
         );
         assert_eq!(
             world.constructions[1].queue,
@@ -949,6 +970,8 @@ mod tests {
         );
 
         let mut defs = defs_with_goods(&["grain", "wood"]);
+        defs.ensure_building_type("building_rye_farm");
+        // Unknown building type in the save remains skipped.
         defs.goods
             .get_mut("grain")
             .expect("grain definition")
@@ -962,7 +985,10 @@ mod tests {
         assert_eq!(weighted_pop.size, 10_000.0);
         assert_eq!(weighted_pop.wealth, 8);
         assert_eq!(world.buildings.len(), 1);
-        assert_eq!(world.buildings[0].type_id, "building_rye_farm");
+        assert_eq!(
+            world.buildings[0].type_id,
+            defs.building_index_of("building_rye_farm").unwrap()
+        );
         assert_eq!(world.buildings[0].level, 2.0);
         assert_eq!(world.buildings[0].production_methods, ["pm_simple_farming"]);
         assert_eq!(world.frozen_buy.as_slice(), &[0.0, 0.0]);
@@ -994,7 +1020,8 @@ mod tests {
             }),
         );
 
-        let defs = defs_with_goods(&[]);
+        let mut defs = defs_with_goods(&[]);
+        defs.ensure_building_type("building_rye_farm");
         let world = World::from_save(&save, &defs);
         assert_eq!(
             world.buildings[0].production_methods,
@@ -1021,7 +1048,8 @@ mod tests {
                 ..Building::default()
             }),
         );
-        let defs = defs_with_goods(&["wood", "tools"]);
+        let mut defs = defs_with_goods(&["wood", "tools"]);
+        defs.ensure_building_type("building_logging_camp");
         let world = World::from_save(&save, &defs);
         let (buy, sell) = reconstruct_non_pop_orders(&world, &defs);
         assert_eq!(buy[defs.index_of("tools").unwrap()], 2.0);
@@ -1040,7 +1068,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(7),
-                type_id: "building_logging_camp".into(),
+                type_id: alone("building_logging_camp"),
                 level: 2.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_unknown_modded".into()],
@@ -1050,7 +1078,7 @@ mod tests {
             ..World::default()
         };
 
-        let bumped = world.with_extra_levels("building_logging_camp", 2);
+        let bumped = world.with_extra_levels(alone("building_logging_camp"), 2);
         assert_eq!(world.buildings[0].level, 2.0, "source world is immutable");
         assert_eq!(world.buildings[0].staffing, 1.0);
         assert_eq!(bumped.buildings[0].level, 4.0);
@@ -1067,7 +1095,7 @@ mod tests {
                 WorldBuilding {
                     id: 1,
                     state: Some(7),
-                    type_id: "building_logging_camp".into(),
+                    type_id: alone("building_logging_camp"),
                     level: 2.0,
                     staffing: 1.0,
                     production_methods: Vec::new(),
@@ -1077,7 +1105,7 @@ mod tests {
                 WorldBuilding {
                     id: 2,
                     state: Some(7),
-                    type_id: "building_logging_camp".into(),
+                    type_id: alone("building_logging_camp"),
                     level: 2.0,
                     staffing: 1.0,
                     production_methods: Vec::new(),
@@ -1124,7 +1152,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: None,
-                type_id: "building_tooling_workshops".into(),
+                type_id: alone("building_tooling_workshops"),
                 level: 2.0,
                 staffing: 2.0,
                 production_methods: vec!["pm_smithy".into(), "pm_steam".into()],
@@ -1156,7 +1184,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                type_id: "building_iron_mine".into(),
+                type_id: alone("building_iron_mine"),
                 level: 10.0,
                 staffing: 5.0,
                 production_methods: vec!["pm_mine".into()],
@@ -1196,12 +1224,14 @@ mod tests {
                 },
             ),
         ]);
+        let farm = defs.ensure_building_type("building_farm");
+        let logging = defs.ensure_building_type("building_logging_camp");
         let world = World {
             buildings: vec![
                 WorldBuilding {
                     id: 1,
                     state: Some(1),
-                    type_id: "building_farm".into(),
+                    type_id: farm,
                     level: 2.0,
                     staffing: 2.0,
                     production_methods: vec!["pm_wood".into()],
@@ -1211,7 +1241,7 @@ mod tests {
                 WorldBuilding {
                     id: 2,
                     state: Some(1),
-                    type_id: "building_logging_camp".into(),
+                    type_id: logging,
                     level: 1.0,
                     staffing: 1.0,
                     production_methods: vec!["pm_wood".into()],
@@ -1260,7 +1290,10 @@ mod tests {
         assert_eq!(world.states[0].market, Some(1));
         assert_eq!(world.countries[0].laws, ["law_autocracy"]);
         assert_eq!(world.buildings.len(), 1);
-        assert_eq!(world.buildings[0].type_id, "building_rye_farm");
+        assert_eq!(
+            world.buildings[0].type_id,
+            defs.building_index_of("building_rye_farm").unwrap()
+        );
         assert_eq!(world.name_opt(pops[0].profession), Some("farmers"));
         assert_eq!(world.name_opt(pops[0].culture), Some("north_german"));
         assert!(

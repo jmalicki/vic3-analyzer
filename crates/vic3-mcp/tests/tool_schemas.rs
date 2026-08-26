@@ -304,9 +304,16 @@ async fn preview_delta_rye_drops_wood_price() {
         .await
         .expect("use_save");
 
+    let rye = {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../vic3-defs/tests/fixtures");
+        let defs = vic3_defs::load_from_path(&root).expect("defs");
+        defs.building_index_of("building_rye_farm")
+            .expect("rye farm")
+    };
     let delta = WorldDelta {
         extra_levels: vec![ExtraLevelsDelta {
-            building_type_id: Some("building_rye_farm".into()),
+            building_type_id: Some(rye),
             building_id: None,
             extra_levels: 1,
         }],

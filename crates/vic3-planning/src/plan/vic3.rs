@@ -543,6 +543,11 @@ impl SearchNode for Vic3Node {
 
 #[cfg(test)]
 mod tests {
+    use vic3_defs::{BuildingTypeIdx, GameDefs};
+    fn alone(defs: &GameDefs, id: &str) -> BuildingTypeIdx {
+        defs.building_index_of(id).expect(id)
+    }
+
     use super::*;
     use crate::goals::compile;
     use crate::plan::pathfinding::{shortest_path, shortest_path_lazy};
@@ -607,6 +612,8 @@ mod tests {
     #[test]
     fn army_only_plan_hires_staffed_barracks() {
         use crate::military::{ModeledMilBuilding, UnitCombatStats, BUILDING_BARRACKS};
+        let mut defs = GameDefs::default();
+        defs.ensure_building_type(BUILDING_BARRACKS);
         let per = UnitCombatStats::army_default().full_power_projection();
         let levels = (100.0 / per).ceil();
         let start = Vic3Node::new(
@@ -615,7 +622,8 @@ mod tests {
                 army_power_projection: Some(0.0),
                 army_pp_baseline: Some(0.0),
                 mil_buildings: vec![ModeledMilBuilding {
-                    building_type_id: BUILDING_BARRACKS.into(),
+                    building_type_id: alone(&defs, BUILDING_BARRACKS),
+                    kind: crate::military::MilBuildingKind::Barracks,
                     levels,
                     staffing: 0.0,
                 }],
@@ -905,13 +913,15 @@ mod tests {
         use crate::world::{ConstructionQueueKind, PlanningConstruction};
         use vic3_prices::{SolveOpts, World};
 
-        let economy = EconomyContext::new(World::default(), tech_tree_defs(), SolveOpts::default());
+        let mut defs = tech_tree_defs();
+        let rye = defs.ensure_building_type("building_rye_farm");
+        let economy = EconomyContext::new(World::default(), defs, SolveOpts::default());
         let state = PlanningState::from_parts(PlanningParts {
             constructions: vec![PlanningConstruction {
                 order_id: 1,
                 queue: ConstructionQueueKind::Government,
                 state_id: None,
-                building_type_id: "building_rye_farm".into(),
+                building_type_id: rye,
                 remaining: Some(30.0),
             }],
             construction_points_per_day: 1.0,

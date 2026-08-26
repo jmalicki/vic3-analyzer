@@ -1077,8 +1077,13 @@ fn constructions_snapshot(
             country_id: row.country_id,
             state_id: row.state_id,
             state_name: state_name(row.state_id),
-            building_type_id: row.building_type_id.clone(),
-            building_type_name: defs.labels.get(&row.building_type_id).cloned(),
+            building_type_id: defs
+                .building_by_index(row.building_type_id)
+                .unwrap_or("")
+                .to_string(),
+            building_type_name: defs
+                .building_by_index(row.building_type_id)
+                .and_then(|id| defs.labels.get(id).cloned()),
             remaining: row.remaining,
         };
         match row.queue {
@@ -1362,6 +1367,15 @@ mod tests {
         .expect("barren fixture")
     }
 
+    fn rye_farm_building_type_id() -> u16 {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../vic3-defs/tests/fixtures");
+        let defs = vic3_defs::load_from_path(&root).expect("defs");
+        defs.building_index_of("building_rye_farm")
+            .expect("rye farm")
+            .raw()
+    }
+
     fn defs_blob() -> Vec<u8> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vic3-defs/tests/fixtures");
         let defs = load_from_path(&root).expect("defs fixture");
@@ -1484,8 +1498,11 @@ mod tests {
                 .expect("PricesResult");
         assert!(!baseline.goods.is_empty());
         let changed: PricesResult = serde_json::from_str(
-            &loaded_what_if_json(r#"{"building_type_id":"building_rye_farm","extra_levels":5}"#)
-                .expect("cached what-if"),
+            &loaded_what_if_json(&format!(
+                r#"{{"building_type_id":{},"extra_levels":5}}"#,
+                rye_farm_building_type_id()
+            ))
+            .expect("cached what-if"),
         )
         .expect("PricesResult");
         assert!(changed.residual.is_finite());
@@ -1517,9 +1534,10 @@ mod tests {
         clear_analysis();
         load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
         let baseline = loaded_prices_json().expect("cached prices");
-        let previewed = loaded_apply_delta_json(
-            r#"{"extra_levels":[{"building_type_id":"building_rye_farm","extra_levels":5}]}"#,
-        )
+        let previewed = loaded_apply_delta_json(&format!(
+            r#"{{"extra_levels":[{{"building_type_id":{},"extra_levels":5}}]}}"#,
+            rye_farm_building_type_id()
+        ))
         .expect("preview delta");
         let after = loaded_prices_json().expect("prices after preview");
         assert_eq!(after, baseline, "preview must not commit loaded prices");
@@ -1694,7 +1712,10 @@ mod tests {
             None,
             &defs_blob(),
             "{}",
-            r#"{"building_type_id":"building_rye_farm","extra_levels":5}"#,
+            &format!(
+                r#"{{"building_type_id":{},"extra_levels":5}}"#,
+                rye_farm_building_type_id()
+            ),
         )
         .expect("what-if");
         let result: PricesResult = serde_json::from_str(&json).expect("PricesResult");

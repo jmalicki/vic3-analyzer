@@ -758,12 +758,10 @@ impl<'a> MitigationIndex<'a> {
         let mut by_good_io = vec![Vec::new(); defs.goods_order.len()];
 
         for (i, building) in world.buildings.iter().enumerate() {
-            by_type
-                .entry(building.type_id.as_str())
-                .or_default()
-                .push(i);
+            let type_id = building.type_script_id(defs);
+            by_type.entry(type_id).or_default().push(i);
             by_type_state
-                .entry((building.type_id.as_str(), building.state))
+                .entry((type_id, building.state))
                 .or_default()
                 .push(i);
             by_state.entry(building.state).or_default().push(i);
@@ -860,7 +858,7 @@ impl<'a> MitigationIndex<'a> {
             if state_id.is_some_and(|sid| row.state != Some(sid)) {
                 continue;
             }
-            return Some(row.type_id.clone());
+            return Some(row.type_script_id(self.defs).to_string());
         }
         None
     }
@@ -885,7 +883,7 @@ impl<'a> MitigationIndex<'a> {
             if current.is_empty() {
                 continue;
             }
-            let candidates = self.type_pm_candidates(&building.type_id);
+            let candidates = self.type_pm_candidates(building.type_script_id(self.defs));
             if candidates.len() < 2 {
                 continue;
             }
@@ -904,7 +902,7 @@ impl<'a> MitigationIndex<'a> {
                         best_score = score;
                         best = Some(PmPick {
                             building_id: building.id,
-                            type_id: building.type_id.clone(),
+                            type_id: building.type_script_id(self.defs).to_string(),
                             from: current.clone(),
                             to: methods,
                             new_pm: candidate.clone(),
@@ -941,7 +939,9 @@ impl ShortageEffect<'_> {
     }
 
     fn extra_levels(&self, type_id: &str, state_id: Option<u32>, extra: u32) -> String {
-        self.effect_from_delta(&extra_levels_on_type(self.world, type_id, state_id, extra))
+        self.effect_from_delta(&extra_levels_on_type(
+            self.world, self.defs, type_id, state_id, extra,
+        ))
     }
 
     fn effect_from_staffing(&self, building_id: u32) -> String {
@@ -979,15 +979,17 @@ impl ShortageEffect<'_> {
 
 fn extra_levels_on_type(
     world: &World,
+    defs: &GameDefs,
     type_id: &str,
     state_id: Option<u32>,
     extra: u32,
 ) -> WorldDelta {
+    let want = defs.building_index_of(type_id);
     let extra_levels = world
         .buildings
         .iter()
         .filter(|building| {
-            building.type_id == type_id && state_id.is_none_or(|sid| building.state == Some(sid))
+            want == Some(building.type_id) && state_id.is_none_or(|sid| building.state == Some(sid))
         })
         .map(|building| ExtraLevelsDelta {
             building_type_id: None,
@@ -1355,7 +1357,7 @@ fn collect_education(args: &mut AlertCollectArgs<'_>) {
         let mitigations = if opts.wants_mitigations(&alert_id) {
             let mut items = qualification_levers(prices, defs, row.state_id, target, &mix);
             let wants_university = items.iter().any(is_university_build);
-            if wants_university && has_unstaffed_university(prices, world, row.state_id) {
+            if wants_university && has_unstaffed_university(prices, world, defs, row.state_id) {
                 items.retain(|item| !is_university_build(item));
                 items.push(plain(
                     format!("edu:{}:staff-uni", row.state_id),
@@ -1433,7 +1435,7 @@ fn collect_pop_and_underemployed(args: &mut AlertCollectArgs<'_>) {
         world
             .buildings
             .iter()
-            .map(economics_from_world)
+            .map(|b| economics_from_world(b, defs))
             .collect::<Vec<_>>()
     } else {
         prices.buildings.clone()
@@ -1828,14 +1830,19 @@ fn has_employee_qual_shortage(prices: &PricesResult, building: &BuildingEconomic
     })
 }
 
-fn has_unstaffed_university(prices: &PricesResult, world: &World, state_id: u32) -> bool {
+fn has_unstaffed_university(
+    prices: &PricesResult,
+    world: &World,
+    defs: &GameDefs,
+    state_id: u32,
+) -> bool {
     prices.buildings.iter().any(|building| {
         building.state_id == Some(state_id)
             && id_has(&building.type_id, "university")
             && building.staffing + ORDER_EPS < building.level
     }) || world.buildings.iter().any(|building| {
         building.state == Some(state_id)
-            && id_has(&building.type_id, "university")
+            && id_has(building.type_script_id(defs), "university")
             && building.staffing + ORDER_EPS < building.level
     })
 }
@@ -1908,11 +1915,11 @@ fn state_imports(world: &World, defs: &GameDefs, state_id: u32, good_id: &str) -
         .any(|trade| trade.state == state_id && trade.good == idx && trade.quantity > ORDER_EPS)
 }
 
-fn economics_from_world(building: &WorldBuilding) -> BuildingEconomics {
+fn economics_from_world(building: &WorldBuilding, defs: &GameDefs) -> BuildingEconomics {
     BuildingEconomics {
         id: building.id,
         state_id: building.state,
-        type_id: building.type_id.clone(),
+        type_id: building.type_script_id(defs).to_string(),
         level: building.level,
         staffing: building.staffing,
         production_method_ids: building.production_methods.clone(),
@@ -2090,6 +2097,14 @@ mod tests {
             "pm_soil_enriching_farming".into(),
             "Soil Enriching Farming".into(),
         );
+        for id in [
+            "building_trade_center",
+            "building_university",
+            "building_rye_farm",
+            "building_tooling_workshop",
+        ] {
+            defs.ensure_building_type(id);
+        }
         defs
     }
 
@@ -2140,16 +2155,18 @@ mod tests {
     }
 
     fn world_building(
+        defs: &GameDefs,
         id: u32,
         state: u32,
         type_id: &str,
         level: f64,
         staffing: f64,
     ) -> WorldBuilding {
-        world_building_pm(id, state, type_id, level, staffing, &["pm_default"])
+        world_building_pm(defs, id, state, type_id, level, staffing, &["pm_default"])
     }
 
     fn world_building_pm(
+        defs: &GameDefs,
         id: u32,
         state: u32,
         kind: &str,
@@ -2160,7 +2177,7 @@ mod tests {
         WorldBuilding {
             id,
             state: Some(state),
-            type_id: kind.into(),
+            type_id: defs.building_index_of(kind).expect(kind),
             level,
             staffing,
             production_methods: methods.iter().map(|id| (*id).to_string()).collect(),
@@ -2181,11 +2198,20 @@ mod tests {
                 ..WorldState::default()
             }],
             buildings: vec![
-                world_building(1, 1, "building_trade_center", 2.0, 2.0),
-                world_building(2, 1, "building_university", 1.0, 0.0),
-                world_building_pm(3, 1, "building_rye_farm", 3.0, 1.0, &["pm_simple_farming"]),
-                world_building(4, 1, "building_tooling_workshop", 2.0, 0.5),
+                world_building(&defs, 1, 1, "building_trade_center", 2.0, 2.0),
+                world_building(&defs, 2, 1, "building_university", 1.0, 0.0),
                 world_building_pm(
+                    &defs,
+                    3,
+                    1,
+                    "building_rye_farm",
+                    3.0,
+                    1.0,
+                    &["pm_simple_farming"],
+                ),
+                world_building(&defs, 4, 1, "building_tooling_workshop", 2.0, 0.5),
+                world_building_pm(
+                    &defs,
                     5,
                     1,
                     "building_rye_farm",
@@ -2958,10 +2984,11 @@ mod tests {
     }
 
     /// Naive full-world scan (pre-index semantics) for equivalence checks.
-    fn naive_type_pm_candidates(world: &World, type_id: &str) -> Vec<String> {
+    fn naive_type_pm_candidates(world: &World, defs: &GameDefs, type_id: &str) -> Vec<String> {
+        let want = defs.building_index_of(type_id);
         let mut ids = BTreeSet::new();
         for building in &world.buildings {
-            if building.type_id == type_id {
+            if Some(building.type_id) == want {
                 ids.extend(building.production_methods.iter().cloned());
             }
         }
@@ -2985,7 +3012,8 @@ mod tests {
             if current.is_empty() {
                 continue;
             }
-            let candidates = naive_type_pm_candidates(world, &building.type_id);
+            let type_id = building.type_script_id(defs);
+            let candidates = naive_type_pm_candidates(world, defs, type_id);
             if candidates.len() < 2 {
                 continue;
             }
@@ -3004,7 +3032,7 @@ mod tests {
                         best_score = score;
                         best = Some(PmPick {
                             building_id: building.id,
-                            type_id: building.type_id.clone(),
+                            type_id: type_id.to_string(),
                             from: current.clone(),
                             to: methods,
                             new_pm: candidate.clone(),
@@ -3036,7 +3064,8 @@ mod tests {
             }
             let idx = defs.index_of(good_id)?;
             let (inputs, outputs) = row.goods_io(defs);
-            (outputs[idx] > ORDER_EPS || inputs[idx] > ORDER_EPS).then(|| row.type_id.clone())
+            (outputs[idx] > ORDER_EPS || inputs[idx] > ORDER_EPS)
+                .then(|| row.type_script_id(defs).to_string())
         })
     }
 
@@ -3052,7 +3081,7 @@ mod tests {
         );
         assert_eq!(
             index.type_pm_candidates("building_rye_farm"),
-            naive_type_pm_candidates(&world, "building_rye_farm")
+            naive_type_pm_candidates(&world, &defs, "building_rye_farm")
         );
         assert_eq!(
             index.type_pm_candidates("building_rye_farm"),

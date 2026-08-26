@@ -13,8 +13,11 @@
           ]
         },
         "building_type_id": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
           "type": [
-            "string",
+            "integer",
             "null"
           ]
         },

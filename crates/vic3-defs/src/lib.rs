@@ -31,9 +31,9 @@
 //! | In-memory allowlisted files | [`load_from_files`] / [`DefsBuilder`] | Browser file picker; batched CoA art |
 //! | Postcard snapshot | [`encode_blob`] / [`decode_blob`] | wasm: no filesystem; UI ships bytes |
 //!
-//! `goods_order` follows deterministic `common/goods` source-file order so
-//! saved building IO indices line up with vanilla. Dense [`GoodIdx`] /
-//! [`NeedIdx`] vectors are preferred over string keys in hot paths.
+//! `goods_order` / `building_types_order` follow deterministic source order so
+//! dense [`GoodIdx`] / [`BuildingTypeIdx`] / [`NeedIdx`] vectors are preferred
+//! over string keys in hot paths.
 //!
 //! # Path allowlist
 //!
@@ -50,6 +50,7 @@
 //! compatible.
 
 mod blob;
+mod building_types;
 mod coa;
 mod error;
 mod goods;
@@ -64,6 +65,7 @@ mod substitution;
 mod types;
 
 pub use blob::{decode_blob, encode_blob, BLOB_VERSION};
+pub use building_types::BuildingTypeIdx;
 pub use coa::{select_coa, select_flag_coa};
 pub use error::DefsError;
 pub use goods::{GoodIdx, GoodsVec};

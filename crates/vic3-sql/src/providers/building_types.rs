@@ -20,7 +20,7 @@ const PUSH: PushSupport = PushSupport {
     eq_u32: &[],
     eq_i32: &[],
     eq_str: &["type_id", "type_name", "group_id"],
-    // defs.buildings is a BTreeMap — Exact range on type_id.
+    // defs.building_types is a BTreeMap — Exact range on type_id.
     range_str: &["type_id"],
 };
 
@@ -46,7 +46,7 @@ impl BuildingTypesProvider {
         let mut city_type = StringBuilder::new();
         let mut groups: Vec<Vec<String>> = Vec::new();
 
-        for (id, bt) in &self.binding.defs.buildings {
+        for (id, bt) in &self.binding.defs.building_types {
             if !matches_str(&preds, "type_id", id) {
                 continue;
             }
