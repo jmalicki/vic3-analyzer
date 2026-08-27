@@ -38,7 +38,7 @@ const result: PricesResult = {
     {
       id: 1,
       region_name: 'STATE_ALPACA',
-      state_label: 'Alpaca',
+      label: 'Alpaca',
       market_id: 1,
       arable_land: 10,
       infrastructure: 22,
@@ -133,11 +133,11 @@ const result: PricesResult = {
 const scopedResult: PricesResult = {
   ...result,
   countries: [
-    { id: 10, country_name: 'ALP', country_label: 'Alpacania' },
+    { id: 10, name: 'ALP', label: 'Alpacania' },
     {
       id: 20,
-      country_name: 'BDG',
-      country_label: 'Badgeria',
+      name: 'BDG',
+      label: 'Badgeria',
       flag_coa: 'BDG',
       flag_data_url: 'data:image/png;base64,FLAGBDG',
     },

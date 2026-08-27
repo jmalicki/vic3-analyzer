@@ -1053,7 +1053,7 @@ fn constructions_snapshot(
             .states
             .iter()
             .find(|s| s.id == id)
-            .and_then(|s| s.state_label.clone())
+            .and_then(|s| s.label.clone())
         {
             return Some(name);
         }

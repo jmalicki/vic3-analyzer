@@ -56,7 +56,7 @@ async fn selects_states_and_countries() {
     }
 
     let countries = eng
-        .query("SELECT country_name FROM countries")
+        .query("SELECT name FROM countries")
         .await
         .expect("countries");
     let tags = countries[0]
@@ -69,7 +69,7 @@ async fn selects_states_and_countries() {
 
     // world_* is registered even when the plaintext fixture is single-country.
     let world = eng
-        .query("SELECT country_name FROM world_countries ORDER BY country_name")
+        .query("SELECT name FROM world_countries ORDER BY name")
         .await
         .expect("world_countries");
     assert!(world[0].num_rows() >= 1);
@@ -119,7 +119,7 @@ async fn world_tables_include_foreign_when_present() {
     });
     let prices = solve(&world, &defs, SolveOpts::default());
     assert!(
-        prices.countries.iter().any(|c| c.country_name == "FRA"),
+        prices.countries.iter().any(|c| c.name == "FRA"),
         "solve should emit FRA"
     );
     assert!(
@@ -246,7 +246,7 @@ async fn join_example_from_docs() {
     // Exact docs example shape (`docs/sql.md`); fixture may have zero shortages.
     let batches = eng
         .query(
-            "SELECT s.state_label, g.good_name, g.shortage, g.price \
+            "SELECT s.label, g.good_name, g.shortage, g.price \
              FROM states s \
              JOIN goods_by_state g USING (state_id) \
              WHERE g.shortage > 0 \
@@ -347,17 +347,17 @@ async fn state_label_non_null_when_region_name_set() {
     let batches = eng
         .query(
             "SELECT count(*) AS n FROM states \
-             WHERE region_name IS NOT NULL AND state_label IS NULL",
+             WHERE region_name IS NOT NULL AND label IS NULL",
         )
         .await
-        .expect("null state_label");
+        .expect("null label");
     let count = batches[0]
         .column(0)
         .as_any()
         .downcast_ref::<datafusion::arrow::array::Int64Array>()
         .expect("count")
         .value(0);
-    assert_eq!(count, 0, "state_label must be set when region_name is set");
+    assert_eq!(count, 0, "label must be set when region_name is set");
 }
 
 #[tokio::test]

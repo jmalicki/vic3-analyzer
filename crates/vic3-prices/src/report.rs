@@ -279,7 +279,7 @@ fn detail_rows(
                 .region
                 .as_ref()
                 .map(|id| crate::label::script_label(defs, id)),
-            state_label: state
+            label: state
                 .region
                 .as_ref()
                 .map(|id| crate::label::script_label(defs, id)),
@@ -737,8 +737,8 @@ fn country_rows(world: &World, defs: &GameDefs) -> Vec<CountryInfo> {
             });
             CountryInfo {
                 id: country.id,
-                country_name: country.tag.clone(),
-                country_label: defs.labels.get(&country.tag).cloned(),
+                name: country.tag.clone(),
+                label: defs.labels.get(&country.tag).cloned(),
                 adjective: crate::label::country_adjective(defs, &country.tag),
                 flag_coa,
                 flag_data_url,

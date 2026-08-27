@@ -11,7 +11,7 @@ export interface StateInfo {
   id: number
   region_name?: string
   region_label?: string
-  state_label?: string
+  label?: string
   country_id?: number
   market_id?: number
   arable_land?: number
@@ -144,8 +144,8 @@ export interface MarketInputs {
 
 export interface CountryInfo {
   id: number
-  country_name: string
-  country_label?: string
+  name: string
+  label?: string
   adjective?: string
   flag_coa?: string
   flag_data_url?: string

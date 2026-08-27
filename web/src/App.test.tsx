@@ -20,7 +20,7 @@ const result = JSON.stringify({
     {
       id: 1,
       region_name: 'STATE_ILE_DE_FRANCE',
-      state_label: 'Ile-de-France',
+      label: 'Ile-de-France',
       country_id: 16777216,
       market_id: 1,
     },

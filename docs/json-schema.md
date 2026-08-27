@@ -129,21 +129,21 @@ Preview mutation applied to a cloned world (extra levels, then production method
     },
     "countries": {
       "type": "array",
-      "description": "Save countries with country_name (tag), localized country_label, demonym, and optional current-flag CoA / PNG data URL.",
+      "description": "Save countries with name (tag), localized label, demonym, and optional current-flag CoA / PNG data URL.",
       "items": {
         "type": "object",
-        "required": ["id", "country_name"],
+        "required": ["id", "name"],
         "properties": {
           "id": { "type": "integer" },
-          "country_name": { "type": "string" },
-          "country_label": { "type": ["string", "null"] },
+          "name": { "type": "string" },
+          "label": { "type": ["string", "null"] },
           "adjective": { "type": ["string", "null"], "description": "Localized demonym from {TAG}_ADJ (e.g. Prussian for PRU)." },
           "flag_coa": { "type": ["string", "null"] },
           "flag_data_url": { "type": ["string", "null"] }
         }
       }
     },
-    "states": { "type": "array", "description": "Parsed save state identity (`region_name`, `region_label`, demonym-aware `state_label`), owner/market links, arable land, and infrastructure." },
+    "states": { "type": "array", "description": "Parsed save state identity (`region_name`, `region_label`, demonym-aware `label`), owner/market links, arable land, and infrastructure." },
     "state_goods": {
       "type": "array",
       "description": "State-attributed buy/sell orders with the shared synthetic market price."
@@ -504,13 +504,13 @@ Player-scoped build queues from `loaded_constructions` / Buildings → Queues. S
     "ConstructionOrderSnapshot": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "queue", "building", "country_id", "state_id", "state_label", "building_name", "remaining"],
+      "required": ["id", "queue", "building", "country_id", "state_id", "label", "building_name", "remaining"],
       "properties": {
         "id": { "type": "integer" },
         "queue": { "type": "string", "enum": ["private", "government"] },
         "country_id": { "type": ["integer", "null"] },
         "state_id": { "type": ["integer", "null"] },
-        "state_label": { "type": ["string", "null"] },
+        "label": { "type": ["string", "null"] },
         "building": { "type": "string" },
         "building_name": { "type": ["string", "null"] },
         "remaining": { "type": ["number", "null"] }

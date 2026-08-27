@@ -20,7 +20,7 @@ use super::pushdown::{matches_str, matches_u32, PushSupport};
 const PUSH: PushSupport = PushSupport {
     eq_u32: &["state_id"],
     eq_i32: &[],
-    eq_str: &["region_name", "region_label", "state_label", "owner_tag"],
+    eq_str: &["region_name", "region_label", "label", "owner_tag"],
     range_str: &[],
 };
 
@@ -49,7 +49,7 @@ impl StatesProvider {
             if let Some(r) = &s.region_label {
                 by_region_label.entry(r.clone()).or_default().push(i);
             }
-            if let Some(n) = &s.state_label {
+            if let Some(n) = &s.label {
                 by_state_label.entry(n.clone()).or_default().push(i);
             }
         }
@@ -71,7 +71,7 @@ impl StatesProvider {
             .countries
             .iter()
             .find(|c| c.id == id)
-            .map(|c| c.country_name.as_str())
+            .map(|c| c.name.as_str())
     }
 
     fn batch(&self, filters: &[Expr]) -> DfResult<RecordBatch> {
@@ -79,7 +79,7 @@ impl StatesProvider {
         let mut ids = UInt32Builder::new();
         let mut region_name = StringBuilder::new();
         let mut region_label = StringBuilder::new();
-        let mut state_label = StringBuilder::new();
+        let mut label = StringBuilder::new();
         let mut owner_tag = StringBuilder::new();
         let mut market_id = UInt32Builder::new();
         let mut infrastructure = Float64Builder::new();
@@ -116,9 +116,10 @@ impl StatesProvider {
                 .get(value)
                 .map(|ix| ix.iter().map(|&i| &self.binding.prices.states[i]).collect())
                 .unwrap_or_default()
-        } else if let Some(crate::filter::Pred::EqStr { column, value }) = preds.iter().find(
-            |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "state_label"),
-        ) {
+        } else if let Some(crate::filter::Pred::EqStr { column, value }) = preds
+            .iter()
+            .find(|p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "label"))
+        {
             let _ = column;
             self.by_state_label
                 .get(value)
@@ -154,13 +155,13 @@ impl StatesProvider {
             }) {
                 continue;
             }
-            if let Some(n) = &s.state_label {
-                if !matches_str(&preds, "state_label", n) {
+            if let Some(n) = &s.label {
+                if !matches_str(&preds, "label", n) {
                     continue;
                 }
-            } else if preds.iter().any(|p| {
-                matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "state_label")
-            }) {
+            } else if preds.iter().any(
+                |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "label"),
+            ) {
                 continue;
             }
             if let Some(t) = tag {
@@ -176,7 +177,7 @@ impl StatesProvider {
             ids.append_value(s.id);
             append_opt_str(&mut region_name, s.region_name.as_deref());
             append_opt_str(&mut region_label, s.region_label.as_deref());
-            append_opt_str(&mut state_label, s.state_label.as_deref());
+            append_opt_str(&mut label, s.label.as_deref());
             append_opt_str(&mut owner_tag, tag);
             append_opt_u32(&mut market_id, s.market_id);
             append_opt_f64(&mut infrastructure, s.infrastructure);
@@ -189,7 +190,7 @@ impl StatesProvider {
                 Arc::new(ids.finish()),
                 Arc::new(region_name.finish()),
                 Arc::new(region_label.finish()),
-                Arc::new(state_label.finish()),
+                Arc::new(label.finish()),
                 Arc::new(owner_tag.finish()),
                 Arc::new(market_id.finish()),
                 Arc::new(infrastructure.finish()),

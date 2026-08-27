@@ -25,7 +25,7 @@ pub(crate) fn campaign_brief_json(session: &ActiveSessionInfo, binding: &Session
         .iter()
         .map(|s| {
             let name = s
-                .state_label
+                .label
                 .clone()
                 .or_else(|| s.region_name.clone())
                 .unwrap_or_else(|| format!("state {}", s.id));

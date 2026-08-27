@@ -167,15 +167,6 @@
             "null"
           ]
         },
-        "country_label": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "country_name": {
-          "type": "string"
-        },
         "flag_coa": {
           "description": "Selected coat-of-arms id when a current flag could be determined.",
           "type": [
@@ -194,11 +185,20 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
         }
       },
       "required": [
         "id",
-        "country_name"
+        "name"
       ],
       "type": "object"
     },
@@ -487,6 +487,13 @@
             "null"
           ]
         },
+        "label": {
+          "description": "Display label for this owned slice (bare region, or demonym-prefixed when minority).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "market_id": {
           "format": "uint32",
           "minimum": 0,
@@ -503,13 +510,6 @@
           ]
         },
         "region_name": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "state_label": {
-          "description": "Display label for this owned slice (bare region, or demonym-prefixed when minority).",
           "type": [
             "string",
             "null"
