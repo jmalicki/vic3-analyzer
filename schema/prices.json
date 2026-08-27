@@ -186,19 +186,19 @@
           "minimum": 0,
           "type": "integer"
         },
-        "name": {
+        "label": {
           "type": [
             "string",
             "null"
           ]
         },
-        "tag": {
+        "name": {
           "type": "string"
         }
       },
       "required": [
         "id",
-        "tag"
+        "name"
       ],
       "type": "object"
     },
@@ -487,6 +487,13 @@
             "null"
           ]
         },
+        "label": {
+          "description": "Display label for this owned slice (bare region, or demonym-prefixed when minority).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "market_id": {
           "format": "uint32",
           "minimum": 0,
@@ -495,14 +502,14 @@
             "null"
           ]
         },
-        "region_id": {
+        "region_label": {
+          "description": "Bare geographic label from defs (same for co-owners of a split region).",
           "type": [
             "string",
             "null"
           ]
         },
-        "state_name": {
-          "description": "Display label for this owned slice (bare region, or demonym-prefixed when minority).",
+        "region_name": {
           "type": [
             "string",
             "null"

@@ -19,7 +19,7 @@ use super::pushdown::{matches_str, matches_u32, PushSupport};
 const PUSH: PushSupport = PushSupport {
     eq_u32: &["country_id"],
     eq_i32: &[],
-    eq_str: &["tag"],
+    eq_str: &["name", "label"],
     range_str: &[],
 };
 
@@ -42,24 +42,33 @@ impl CountriesProvider {
     fn batch(&self, filters: &[Expr]) -> DfResult<RecordBatch> {
         let preds = PUSH.collect_preds(filters);
         let mut country_id = UInt32Builder::new();
-        let mut tag = StringBuilder::new();
         let mut name = StringBuilder::new();
+        let mut label = StringBuilder::new();
 
         for c in &self.binding.prices.countries {
-            if !country_tag_in_scope(self.scope, self.binding.world.as_ref(), &c.tag) {
+            if !country_tag_in_scope(self.scope, self.binding.world.as_ref(), &c.name) {
                 continue;
             }
             if !matches_u32(&preds, "country_id", c.id) {
                 continue;
             }
-            if !matches_str(&preds, "tag", &c.tag) {
+            if !matches_str(&preds, "name", &c.name) {
+                continue;
+            }
+            if let Some(n) = &c.label {
+                if !matches_str(&preds, "label", n) {
+                    continue;
+                }
+            } else if preds.iter().any(
+                |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "label"),
+            ) {
                 continue;
             }
             country_id.append_value(c.id);
-            tag.append_value(&c.tag);
-            match &c.name {
-                Some(n) => name.append_value(n),
-                None => name.append_null(),
+            name.append_value(&c.name);
+            match &c.label {
+                Some(n) => label.append_value(n),
+                None => label.append_null(),
             }
         }
 
@@ -67,8 +76,8 @@ impl CountriesProvider {
             Arc::clone(&self.schema),
             vec![
                 Arc::new(country_id.finish()),
-                Arc::new(tag.finish()),
                 Arc::new(name.finish()),
+                Arc::new(label.finish()),
             ],
         )
         .map_err(Into::into)

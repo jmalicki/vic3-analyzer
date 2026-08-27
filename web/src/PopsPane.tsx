@@ -53,7 +53,7 @@ function literacyLabel(pop: StatePop): string {
 
 function stateName(state?: StateInfo, stateId?: number): string {
   if (!state) return stateId != null ? `State ${stateId}` : 'State'
-  return state.state_name || displayId(state.region_id || `State ${state.id}`)
+  return state.label || displayId(state.region_name || `State ${state.id}`)
 }
 
 function workplaceLabel(

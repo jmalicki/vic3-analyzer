@@ -217,7 +217,7 @@ async fn query_and_use_save_tools_end_to_end() {
     assert!(brief["alert_kinds"].is_object());
 
     let countries = runtime
-        .query("SELECT tag FROM countries WHERE tag = 'GER'")
+        .query("SELECT name FROM countries WHERE name = 'GER'")
         .await
         .expect("countries");
     assert_eq!(countries[0].num_rows(), 1);

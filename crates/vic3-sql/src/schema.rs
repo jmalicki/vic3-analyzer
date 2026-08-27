@@ -32,9 +32,9 @@ pub fn text_list_type() -> DataType {
 pub fn states_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
         Field::new("state_id", DataType::UInt32, false),
-        Field::new("region_id", DataType::Utf8, true),
         Field::new("region_name", DataType::Utf8, true),
-        Field::new("state_name", DataType::Utf8, true),
+        Field::new("region_label", DataType::Utf8, true),
+        Field::new("label", DataType::Utf8, true),
         Field::new("owner_tag", DataType::Utf8, true),
         Field::new("market_id", DataType::UInt32, true),
         Field::new("infrastructure", DataType::Float64, true),
@@ -126,8 +126,8 @@ pub fn state_qualifications_schema() -> SchemaRef {
 pub fn countries_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
         Field::new("country_id", DataType::UInt32, false),
-        Field::new("tag", DataType::Utf8, false),
-        Field::new("name", DataType::Utf8, true),
+        Field::new("name", DataType::Utf8, false),
+        Field::new("label", DataType::Utf8, true),
     ]))
 }
 

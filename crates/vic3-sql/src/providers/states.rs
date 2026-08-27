@@ -9,7 +9,6 @@ use datafusion::datasource::{TableProvider, TableType};
 use datafusion::error::Result as DfResult;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
-use vic3_prices::script_label;
 
 use crate::binding::SessionBinding;
 use crate::exec::memory_exec;
@@ -21,7 +20,7 @@ use super::pushdown::{matches_str, matches_u32, PushSupport};
 const PUSH: PushSupport = PushSupport {
     eq_u32: &["state_id"],
     eq_i32: &[],
-    eq_str: &["region_id", "region_name", "state_name", "owner_tag"],
+    eq_str: &["region_name", "region_label", "label", "owner_tag"],
     range_str: &[],
 };
 
@@ -31,26 +30,27 @@ pub struct StatesProvider {
     scope: TableScope,
     schema: SchemaRef,
     by_id: HashMap<u32, usize>,
-    by_region_id: HashMap<String, Vec<usize>>,
     by_region_name: HashMap<String, Vec<usize>>,
-    by_state_name: HashMap<String, Vec<usize>>,
+    by_region_label: HashMap<String, Vec<usize>>,
+    by_state_label: HashMap<String, Vec<usize>>,
 }
 
 impl StatesProvider {
     pub fn new(binding: Arc<SessionBinding>, scope: TableScope) -> Self {
         let mut by_id = HashMap::new();
-        let mut by_region_id: HashMap<String, Vec<usize>> = HashMap::new();
         let mut by_region_name: HashMap<String, Vec<usize>> = HashMap::new();
-        let mut by_state_name: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut by_region_label: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut by_state_label: HashMap<String, Vec<usize>> = HashMap::new();
         for (i, s) in binding.prices.states.iter().enumerate() {
             by_id.insert(s.id, i);
-            if let Some(r) = &s.region_id {
-                by_region_id.entry(r.clone()).or_default().push(i);
-                let rname = script_label(binding.defs.as_ref(), r);
-                by_region_name.entry(rname).or_default().push(i);
+            if let Some(r) = &s.region_name {
+                by_region_name.entry(r.clone()).or_default().push(i);
             }
-            if let Some(n) = &s.state_name {
-                by_state_name.entry(n.clone()).or_default().push(i);
+            if let Some(r) = &s.region_label {
+                by_region_label.entry(r.clone()).or_default().push(i);
+            }
+            if let Some(n) = &s.label {
+                by_state_label.entry(n.clone()).or_default().push(i);
             }
         }
         Self {
@@ -58,9 +58,9 @@ impl StatesProvider {
             scope,
             schema: states_schema(),
             by_id,
-            by_region_id,
             by_region_name,
-            by_state_name,
+            by_region_label,
+            by_state_label,
         }
     }
 
@@ -71,19 +71,15 @@ impl StatesProvider {
             .countries
             .iter()
             .find(|c| c.id == id)
-            .map(|c| c.tag.as_str())
-    }
-
-    fn region_name(&self, region_id: Option<&str>) -> Option<String> {
-        region_id.map(|id| script_label(self.binding.defs.as_ref(), id))
+            .map(|c| c.name.as_str())
     }
 
     fn batch(&self, filters: &[Expr]) -> DfResult<RecordBatch> {
         let preds = PUSH.collect_preds(filters);
         let mut ids = UInt32Builder::new();
-        let mut region_id = StringBuilder::new();
         let mut region_name = StringBuilder::new();
-        let mut state_name = StringBuilder::new();
+        let mut region_label = StringBuilder::new();
+        let mut label = StringBuilder::new();
         let mut owner_tag = StringBuilder::new();
         let mut market_id = UInt32Builder::new();
         let mut infrastructure = Float64Builder::new();
@@ -105,14 +101,6 @@ impl StatesProvider {
                 None => Vec::new(),
             }
         } else if let Some(crate::filter::Pred::EqStr { column, value }) = preds.iter().find(
-            |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "region_id"),
-        ) {
-            let _ = column;
-            self.by_region_id
-                .get(value)
-                .map(|ix| ix.iter().map(|&i| &self.binding.prices.states[i]).collect())
-                .unwrap_or_default()
-        } else if let Some(crate::filter::Pred::EqStr { column, value }) = preds.iter().find(
             |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "region_name"),
         ) {
             let _ = column;
@@ -121,10 +109,19 @@ impl StatesProvider {
                 .map(|ix| ix.iter().map(|&i| &self.binding.prices.states[i]).collect())
                 .unwrap_or_default()
         } else if let Some(crate::filter::Pred::EqStr { column, value }) = preds.iter().find(
-            |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "state_name"),
+            |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "region_label"),
         ) {
             let _ = column;
-            self.by_state_name
+            self.by_region_label
+                .get(value)
+                .map(|ix| ix.iter().map(|&i| &self.binding.prices.states[i]).collect())
+                .unwrap_or_default()
+        } else if let Some(crate::filter::Pred::EqStr { column, value }) = preds
+            .iter()
+            .find(|p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "label"))
+        {
+            let _ = column;
+            self.by_state_label
                 .get(value)
                 .map(|ix| ix.iter().map(|&i| &self.binding.prices.states[i]).collect())
                 .unwrap_or_default()
@@ -137,20 +134,10 @@ impl StatesProvider {
                 continue;
             }
             let tag = self.owner_tag(s.country_id);
-            let rname = self.region_name(s.region_id.as_deref());
             if !matches_u32(&preds, "state_id", s.id) {
                 continue;
             }
-            if let Some(r) = &s.region_id {
-                if !matches_str(&preds, "region_id", r) {
-                    continue;
-                }
-            } else if preds.iter().any(
-                |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "region_id"),
-            ) {
-                continue;
-            }
-            if let Some(r) = &rname {
+            if let Some(r) = &s.region_name {
                 if !matches_str(&preds, "region_name", r) {
                     continue;
                 }
@@ -159,13 +146,22 @@ impl StatesProvider {
             }) {
                 continue;
             }
-            if let Some(n) = &s.state_name {
-                if !matches_str(&preds, "state_name", n) {
+            if let Some(r) = &s.region_label {
+                if !matches_str(&preds, "region_label", r) {
                     continue;
                 }
             } else if preds.iter().any(|p| {
-                matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "state_name")
+                matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "region_label")
             }) {
+                continue;
+            }
+            if let Some(n) = &s.label {
+                if !matches_str(&preds, "label", n) {
+                    continue;
+                }
+            } else if preds.iter().any(
+                |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "label"),
+            ) {
                 continue;
             }
             if let Some(t) = tag {
@@ -179,9 +175,9 @@ impl StatesProvider {
             }
 
             ids.append_value(s.id);
-            append_opt_str(&mut region_id, s.region_id.as_deref());
-            append_opt_str(&mut region_name, rname.as_deref());
-            append_opt_str(&mut state_name, s.state_name.as_deref());
+            append_opt_str(&mut region_name, s.region_name.as_deref());
+            append_opt_str(&mut region_label, s.region_label.as_deref());
+            append_opt_str(&mut label, s.label.as_deref());
             append_opt_str(&mut owner_tag, tag);
             append_opt_u32(&mut market_id, s.market_id);
             append_opt_f64(&mut infrastructure, s.infrastructure);
@@ -192,9 +188,9 @@ impl StatesProvider {
             Arc::clone(&self.schema),
             vec![
                 Arc::new(ids.finish()),
-                Arc::new(region_id.finish()),
                 Arc::new(region_name.finish()),
-                Arc::new(state_name.finish()),
+                Arc::new(region_label.finish()),
+                Arc::new(label.finish()),
                 Arc::new(owner_tag.finish()),
                 Arc::new(market_id.finish()),
                 Arc::new(infrastructure.finish()),

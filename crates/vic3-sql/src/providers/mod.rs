@@ -24,7 +24,7 @@
 //!
 //! | Table | Exact `=` | Exact range |
 //! | --- | --- | --- |
-//! | `states` | `state_id`, `region_id`, `region_name`, `state_name`, `owner_tag` | — |
+//! | `states` | `state_id`, `region_name`, `region_label`, `label`, `owner_tag` | — |
 //! | `goods` | `name`, `label` | — (hash / order index) |
 //! | `goods_by_state` | `state_id`, `good` | — |
 //! | `buildings` | `building_id`, `state_id`, `type_id` | — |
@@ -32,7 +32,7 @@
 //! | `production_methods` | `pm`, `pm_name` | `pm` (defs `BTreeMap`) |
 //! | `pops` | `state_id`, `profession` | — |
 //! | `state_qualifications` | `state_id`, `profession` | — |
-//! | `countries` | `country_id`, `tag` | — |
+//! | `countries` | `country_id`, `name`, `label` | — |
 //! | `constructions` | `order_id`, `country_id`, `state_id`, `queue`, `building` | — |
 //!
 //! Exact means the provider filters rows itself; Unsupported predicates are

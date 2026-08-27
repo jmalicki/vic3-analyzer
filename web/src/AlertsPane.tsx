@@ -90,8 +90,8 @@ function stateIdsForAlert(
 }
 
 function stateLabel(state?: StateInfo, stateId?: number): string {
-  if (state?.state_name) return state.state_name
-  const region = state?.region_id
+  if (state?.label) return state.label
+  const region = state?.region_name
   if (region) {
     return region
       .replace(/^STATE_/, '')

@@ -1027,7 +1027,7 @@ struct ConstructionSnap {
     country_id: Option<u32>,
     state_id: Option<u32>,
     /// Localized state display label when known (demonym-prefixed for minority splits).
-    state_name: Option<String>,
+    state_label: Option<String>,
     building: String,
     building_name: Option<String>,
     remaining: Option<f64>,
@@ -1053,7 +1053,7 @@ fn constructions_snapshot(
             .states
             .iter()
             .find(|s| s.id == id)
-            .and_then(|s| s.state_name.clone())
+            .and_then(|s| s.label.clone())
         {
             return Some(name);
         }
@@ -1076,7 +1076,7 @@ fn constructions_snapshot(
             queue: row.queue.as_str(),
             country_id: row.country_id,
             state_id: row.state_id,
-            state_name: state_name(row.state_id),
+            state_label: state_name(row.state_id),
             building: row.building.clone(),
             building_name: defs.labels.get(&row.building).cloned(),
             remaining: row.remaining,
@@ -1092,11 +1092,11 @@ fn constructions_snapshot(
     }
 }
 
-fn humanize_region(region_id: &str) -> String {
-    let trimmed = region_id
+fn humanize_region(region_name: &str) -> String {
+    let trimmed = region_name
         .strip_prefix("STATE_")
-        .or_else(|| region_id.strip_prefix("state_"))
-        .unwrap_or(region_id);
+        .or_else(|| region_name.strip_prefix("state_"))
+        .unwrap_or(region_name);
     trimmed
         .split('_')
         .filter(|part| !part.is_empty())

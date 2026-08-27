@@ -34,11 +34,11 @@ const result: PricesResult = {
     { name: 'apples', label: 'Apples', base: 20, price: 15, buy: 5, sell: 7 },
   ],
   states: [
-    { id: 2, region_id: 'STATE_ZEBRA', market_id: 1 },
+    { id: 2, region_name: 'STATE_ZEBRA', market_id: 1 },
     {
       id: 1,
-      region_id: 'STATE_ALPACA',
-      state_name: 'Alpaca',
+      region_name: 'STATE_ALPACA',
+      label: 'Alpaca Coast',
       market_id: 1,
       arable_land: 10,
       infrastructure: 22,
@@ -133,20 +133,20 @@ const result: PricesResult = {
 const scopedResult: PricesResult = {
   ...result,
   countries: [
-    { id: 10, tag: 'ALP', name: 'Alpacania' },
+    { id: 10, name: 'ALP', label: 'Alpacania' },
     {
       id: 20,
-      tag: 'BDG',
-      name: 'Badgeria',
+      name: 'BDG',
+      label: 'Badgeria',
       flag_coa: 'BDG',
       flag_data_url: 'data:image/png;base64,FLAGBDG',
     },
   ],
   states: [
-    { id: 1, region_id: 'STATE_ALPACA', country_id: 10, market_id: 1 },
-    { id: 2, region_id: 'STATE_ZEBRA', country_id: 10, market_id: 2 },
-    { id: 3, region_id: 'STATE_BADGER', country_id: 20, market_id: 1 },
-    { id: 4, region_id: 'STATE_YAK', country_id: 20, market_id: 3 },
+    { id: 1, region_name: 'STATE_ALPACA', country_id: 10, market_id: 1 },
+    { id: 2, region_name: 'STATE_ZEBRA', country_id: 10, market_id: 2 },
+    { id: 3, region_name: 'STATE_BADGER', country_id: 20, market_id: 1 },
+    { id: 4, region_name: 'STATE_YAK', country_id: 20, market_id: 3 },
   ],
   state_goods: [
     stateGood(1, 35, 2, 7),
@@ -248,8 +248,8 @@ describe('PriceExplorer', () => {
     expect(screen.getByText(/base MAPI 75%/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Sort by State' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('link', { name: 'Alpaca' }))
-    expect(await screen.findByRole('heading', { name: 'Alpaca' })).toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: 'Alpaca Coast' }))
+    expect(await screen.findByRole('heading', { name: 'Alpaca Coast' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
     for (const tab of ['Overview', 'Buildings', 'Population', 'Local Prices', 'Information']) {
       expect(screen.getByRole('tab', { name: tab })).toBeInTheDocument()
@@ -277,9 +277,11 @@ describe('PriceExplorer', () => {
 
     expect(screen.getByRole('button', { name: 'Sort by State price' })).toBeInTheDocument()
     const zebra = screen.getByRole('link', { name: 'Zebra' }).closest('tr')
-    const alpaca = screen.getByRole('link', { name: 'Alpaca' }).closest('tr')
+    const alpaca = screen.getByRole('link', { name: 'Alpaca Coast' }).closest('tr')
     expect(zebra).toHaveTextContent('55.00')
     expect(alpaca).toHaveTextContent('45.00')
+    // label differs from displayId(region_name) ("Alpaca"); table must prefer label
+    expect(screen.queryByRole('link', { name: 'Alpaca' })).not.toBeInTheDocument()
   })
 
   it('applies scope to global order-weighted average prices and orders', async () => {
@@ -354,7 +356,7 @@ describe('PriceExplorer', () => {
     await user.click(screen.getByRole('tab', { name: 'Buildings' }))
     await user.click(screen.getByRole('link', { name: 'Silly Hammer Factory' }))
     expect(await screen.findByRole('heading', { name: 'Silly Hammer Factory' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Alpaca' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Alpaca Coast' })).toBeInTheDocument()
     expect(screen.getByText('Workforce')).toBeInTheDocument()
     expect(screen.getByText('Machinists')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Zany Tools 3\.0/ })).toBeInTheDocument()
@@ -386,7 +388,7 @@ describe('PriceExplorer', () => {
     window.location.hash = '#/states/1'
     render(<PriceExplorer result={result} />)
 
-    expect(screen.getByRole('heading', { name: 'Alpaca' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Alpaca Coast' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'States' })).toHaveAttribute('href', '#/states')
     expect(screen.queryByRole('link', { name: 'Goods' })).not.toBeInTheDocument()
   })

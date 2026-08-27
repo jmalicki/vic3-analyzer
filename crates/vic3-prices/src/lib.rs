@@ -584,7 +584,7 @@ mod tests {
         let result = solve(&world, &defs, SolveOpts::default());
         assert_eq!(result.scope, "whole_save_synthetic");
         assert_eq!(
-            result.states[0].region_id.as_deref(),
+            result.states[0].region_name.as_deref(),
             Some("STATE_TESTOPIA")
         );
         assert_eq!(

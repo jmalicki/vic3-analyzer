@@ -1932,10 +1932,10 @@ fn display_prof(defs: &GameDefs, row: &crate::StateQualification) -> String {
 
 fn state_label(prices: &PricesResult, world: &World, defs: &GameDefs, state_id: u32) -> String {
     if let Some(state) = prices.states.iter().find(|state| state.id == state_id) {
-        if let Some(name) = state.state_name.as_deref().filter(|name| !name.is_empty()) {
+        if let Some(name) = state.label.as_deref().filter(|name| !name.is_empty()) {
             return name.to_string();
         }
-        if let Some(region) = state.region_id.as_deref() {
+        if let Some(region) = state.region_name.as_deref() {
             return script_label(defs, region);
         }
     }
@@ -2211,8 +2211,9 @@ mod tests {
             countries: Vec::new(),
             states: vec![StateInfo {
                 id: 1,
-                region_id: Some("STATE_TEST".into()),
-                state_name: Some("Test".into()),
+                region_name: Some("STATE_TEST".into()),
+                region_label: Some("Test".into()),
+                label: Some("Test".into()),
                 country_id: Some(1),
                 market_id: Some(1),
                 arable_land: None,
