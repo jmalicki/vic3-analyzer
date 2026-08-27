@@ -54,11 +54,11 @@ impl StateQualificationsProvider {
             if !matches_u32(&preds, "state_id", q.state_id) {
                 continue;
             }
-            if !matches_str(&preds, "profession", &q.profession_id) {
+            if !matches_str(&preds, "profession", &q.name) {
                 continue;
             }
             state_id.append_value(q.state_id);
-            profession.append_value(&q.profession_id);
+            profession.append_value(&q.name);
             // `stock` mirrors alert staffing vocabulary (`qualified` stock).
             stock.append_value(q.qualified);
             jobs.append_value(q.jobs);

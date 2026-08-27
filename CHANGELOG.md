@@ -8,10 +8,17 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### 🌟 Added / Changed
-- **Goods naming:** Public goods DTOs (`GoodPrice` / `GoodFlow` / `StateGood`) use bare `name` (script) / `label`
-  (localized); SQL `goods` table uses `name`/`label`; mixed IO lists keep `{good_name, good_label, qty}`. Alert /
-  mitigation good script keys are `good_name`. **Breaking** for JSON, SQL, and
-  web types.
+- **Pop / need / profession naming:** Rows that are only about one profession or
+  need (`ProfessionCount`, `PopNeedBasket`, `StateNeed`, `StateQualification`,
+  `ProfessionGap`) now use `name` (script key) and `label` (display text). Rows
+  that mix several things keep prefixes (`StatePop.profession_*` /
+  `culture_*`; SQL `building_staffing` keeps `profession_name` /
+  `profession_label`). **Breaking** for JSON, SQL, and web.
+
+- **Goods naming:** Goods rows (`GoodPrice` / `GoodFlow` / `StateGood`) use
+  `name` (script key) / `label` (display text); SQL `goods` uses the same.
+  Mixed IO lists still use `{good_name, good_label, qty}`. Alert and mitigation
+  good script keys are `good_name`. **Breaking** for JSON, SQL, and web.
 
 - **Dense identity types:** Renamed `GoodIdx` → `GoodId` and `NeedIdx` → `NeedId`
   across defs, prices, planning, and SQL. **Breaking** for Rust callers of those

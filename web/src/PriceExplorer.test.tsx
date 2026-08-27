@@ -63,7 +63,7 @@ const result: PricesResult = {
       cost: 80,
       profit: 70,
       short_inputs: ['iron'],
-      employees: [{ profession_id: 'machinists', profession_name: 'Machinists', count: 8000 }],
+      employees: [{ name: 'machinists', label: 'Machinists', count: 8000 }],
     },
   ],
   building_types: [
@@ -84,20 +84,20 @@ const result: PricesResult = {
   state_pops: [
     {
       state_id: 1,
-      profession_id: 'machinists',
-      profession_name: 'Machinists',
+      profession_name: 'machinists',
+      profession_label: 'Machinists',
       demand_size: 12000,
       workforce: 8000,
       dependents: 4000,
       literate: 2400,
       wealth: 14,
-      culture_id: 'north_german',
-      culture_name: 'North German',
+      culture_name: 'north_german',
+      culture_label: 'North German',
       workplace_id: 7,
       needs: [
         {
-          need_id: 'popneed_staple_foods',
-          need_name: 'Staple foods',
+          name: 'popneed_staple_foods',
+          label: 'Staple foods',
           package_value: 10,
           goods: [{ name: 'apples', quantity: 4, value: 60 }],
         },
@@ -107,8 +107,8 @@ const result: PricesResult = {
   state_qualifications: [
     {
       state_id: 1,
-      profession_id: 'machinists',
-      profession_name: 'Machinists',
+      name: 'machinists',
+      label: 'Machinists',
       qualified: 9000,
       employable: 8500,
       employed: 8000,
@@ -119,8 +119,8 @@ const result: PricesResult = {
   state_needs: [
     {
       state_id: 1,
-      need_id: 'popneed_staple_foods',
-      need_name: 'Staple foods',
+      name: 'popneed_staple_foods',
+      label: 'Staple foods',
       package_value: 10,
       goods: [{ name: 'apples', quantity: 4, value: 60 }],
     },

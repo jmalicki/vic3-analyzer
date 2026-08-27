@@ -1280,7 +1280,7 @@ mod tests {
         assert_eq!(result.states[0].infrastructure, Some(32.5));
         assert_eq!(result.state_pops.len(), 1);
         assert_eq!(
-            result.state_pops[0].profession_id.as_deref(),
+            result.state_pops[0].profession_name.as_deref(),
             Some("farmers")
         );
         assert_eq!(result.state_pops[0].demand_size, Some(10_000.0));
@@ -1289,24 +1289,22 @@ mod tests {
         assert_eq!(result.state_pops[0].literate, Some(1_200.0));
         assert_eq!(result.state_pops[0].workplace_id, Some(1));
         assert_eq!(
-            result.state_pops[0].culture_id.as_deref(),
+            result.state_pops[0].culture_name.as_deref(),
             Some("north_german")
         );
         assert!(
             result.state_pops[0]
                 .qualifications
                 .iter()
-                .any(|row| row.profession_id == "academics" && (row.count - 1.5).abs() < 1e-9),
+                .any(|row| row.name == "academics" && (row.count - 1.5).abs() < 1e-9),
             "index 0 should map to academics"
         );
-        assert_eq!(result.buildings[0].employees[0].profession_id, "farmers");
+        assert_eq!(result.buildings[0].employees[0].name, "farmers");
         assert_eq!(result.buildings[0].employees[0].count, 6_000.0);
         assert!(result
             .state_qualifications
             .iter()
-            .any(|row| row.state_id == 1
-                && row.profession_id == "farmers"
-                && row.employed == 6_000.0));
+            .any(|row| row.state_id == 1 && row.name == "farmers" && row.employed == 6_000.0));
         assert!(!result.state_pops[0].needs.is_empty());
         assert!(!result.state_needs.is_empty());
         assert!(

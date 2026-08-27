@@ -26,7 +26,7 @@ const result: PricesResult = {
   state_pops: [
     {
       state_id: 1,
-      profession_id: 'machinists',
+      profession_name: 'machinists',
       workforce: 8000,
       dependents: 4000,
       wealth: 14,

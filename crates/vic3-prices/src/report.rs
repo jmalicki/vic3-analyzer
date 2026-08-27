@@ -316,10 +316,10 @@ where
         .into_iter()
         .filter(|(_, count)| *count > 0.0)
         .filter_map(|(id, count)| {
-            let profession_id = world.name(id)?.to_string();
+            let profession_name = world.name(id)?.to_string();
             Some(ProfessionCount {
-                profession_name: defs.labels.get(&profession_id).cloned(),
-                profession_id,
+                name: profession_name.clone(),
+                label: defs.labels.get(&profession_name).cloned(),
                 count,
             })
         })
@@ -581,12 +581,12 @@ fn aggregate_state_needs(pops: &[CompactStatePop], tables: &EmitTables) -> Vec<S
     rows.sort_unstable_by_key(|row| (row.state_id, row.need_id));
     rows.into_iter()
         .filter_map(|mut row| {
-            let need_id = tables.need(row.need_id)?.to_string();
+            let need_name = tables.need(row.need_id)?.to_string();
             row.goods.sort_unstable_by_key(|(idx, _, _)| *idx);
             Some(StateNeed {
                 state_id: row.state_id,
-                need_name: tables.label(&need_id).map(str::to_string),
-                need_id,
+                name: need_name.clone(),
+                label: tables.label(&need_name).map(str::to_string),
                 package_value: row.package_value,
                 goods: row
                     .goods
@@ -620,7 +620,7 @@ fn state_qualification_rows(
             continue;
         };
         for employee in employees {
-            let Some(profession) = world.names.id_of(&employee.profession_id) else {
+            let Some(profession) = world.names.id_of(&employee.name) else {
                 continue;
             };
             *jobs_by_state.entry((*state_id, profession)).or_default() += employee.count;
@@ -701,8 +701,8 @@ fn state_qualification_rows(
             let stock = employable.unwrap_or(qualified);
             rows.push(StateQualification {
                 state_id: state.id,
-                profession_name: defs.labels.get(&profession_id).cloned(),
-                profession_id,
+                name: profession_id.clone(),
+                label: defs.labels.get(&profession_id).cloned(),
                 qualified,
                 employable,
                 employed,

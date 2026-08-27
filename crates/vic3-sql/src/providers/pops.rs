@@ -54,7 +54,7 @@ impl PopsProvider {
             if !matches_u32(&preds, "state_id", pop.state_id) {
                 continue;
             }
-            if let Some(p) = &pop.profession_id {
+            if let Some(p) = &pop.profession_name {
                 if !matches_str(&preds, "profession", p) {
                     continue;
                 }
@@ -65,7 +65,7 @@ impl PopsProvider {
             }
 
             state_id.append_value(pop.state_id);
-            match &pop.profession_id {
+            match &pop.profession_name {
                 Some(p) => profession.append_value(p),
                 None => profession.append_null(),
             }

@@ -203,16 +203,16 @@ pub struct StatePop {
     pub state_id: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<u32>,
-    pub profession_id: Option<String>,
     pub profession_name: Option<String>,
+    pub profession_label: Option<String>,
     pub demand_size: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workforce: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dependents: Option<f64>,
     pub wealth: Option<i32>,
-    pub culture_id: Option<String>,
     pub culture_name: Option<String>,
+    pub culture_label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub literate: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -225,15 +225,15 @@ pub struct StatePop {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfessionCount {
-    pub profession_id: String,
-    pub profession_name: Option<String>,
+    pub name: String,
+    pub label: Option<String>,
     pub count: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PopNeedBasket {
-    pub need_id: String,
-    pub need_name: Option<String>,
+    pub name: String,
+    pub label: Option<String>,
     pub package_value: f64,
     pub goods: Vec<GoodFlow>,
 }
@@ -241,8 +241,8 @@ pub struct PopNeedBasket {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateNeed {
     pub state_id: u32,
-    pub need_id: String,
-    pub need_name: Option<String>,
+    pub name: String,
+    pub label: Option<String>,
     pub package_value: f64,
     pub goods: Vec<GoodFlow>,
 }
@@ -250,8 +250,8 @@ pub struct StateNeed {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateQualification {
     pub state_id: u32,
-    pub profession_id: String,
-    pub profession_name: Option<String>,
+    pub name: String,
+    pub label: Option<String>,
     pub qualified: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub employable: Option<f64>,
@@ -557,16 +557,16 @@ struct StatePopSer<'a> {
     state_id: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<u32>,
-    profession_id: Option<&'a str>,
     profession_name: Option<&'a str>,
+    profession_label: Option<&'a str>,
     demand_size: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     workforce: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     dependents: Option<f64>,
     wealth: Option<i32>,
-    culture_id: Option<&'a str>,
     culture_name: Option<&'a str>,
+    culture_label: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     literate: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -579,15 +579,15 @@ struct StatePopSer<'a> {
 
 #[derive(Serialize)]
 struct ProfessionCountSer<'a> {
-    profession_id: &'a str,
-    profession_name: Option<&'a str>,
+    name: &'a str,
+    label: Option<&'a str>,
     count: f64,
 }
 
 #[derive(Serialize)]
 struct NeedSer<'a> {
-    need_id: &'a str,
-    need_name: Option<&'a str>,
+    name: &'a str,
+    label: Option<&'a str>,
     package_value: f64,
     goods: Vec<GoodFlowSer<'a>>,
 }
@@ -604,14 +604,14 @@ impl<'a> StatePopSer<'a> {
         Self {
             state_id: row.state_id,
             id: row.id,
-            profession_id: tables.name(row.profession),
-            profession_name: tables.name(row.profession).and_then(|id| tables.label(id)),
+            profession_name: tables.name(row.profession),
+            profession_label: tables.name(row.profession).and_then(|id| tables.label(id)),
             demand_size: row.demand_size,
             workforce: row.workforce,
             dependents: row.dependents,
             wealth: row.wealth,
-            culture_id: tables.name(row.culture),
-            culture_name: tables.name(row.culture).and_then(|id| tables.label(id)),
+            culture_name: tables.name(row.culture),
+            culture_label: tables.name(row.culture).and_then(|id| tables.label(id)),
             literate: row.literate,
             workplace_id: row.workplace_id,
             qualifications: row
@@ -619,10 +619,10 @@ impl<'a> StatePopSer<'a> {
                 .iter()
                 .filter(|(_, count)| *count > 0.0)
                 .filter_map(|&(id, count)| {
-                    let profession_id = tables.names.get(id)?;
+                    let name = tables.names.get(id)?;
                     Some(ProfessionCountSer {
-                        profession_id,
-                        profession_name: tables.label(profession_id),
+                        name,
+                        label: tables.label(name),
                         count,
                     })
                 })
@@ -631,10 +631,10 @@ impl<'a> StatePopSer<'a> {
                 .needs
                 .iter()
                 .filter_map(|need| {
-                    let need_id = tables.need(need.need_id)?;
+                    let name = tables.need(need.need_id)?;
                     Some(NeedSer {
-                        need_id,
-                        need_name: tables.label(need_id),
+                        name,
+                        label: tables.label(name),
                         package_value: need.package_value,
                         goods: need
                             .goods
@@ -659,22 +659,22 @@ fn materialize_state_pop(tables: &EmitTables, row: &CompactStatePop) -> StatePop
     StatePop {
         state_id: ser.state_id,
         id: ser.id,
-        profession_id: ser.profession_id.map(str::to_string),
         profession_name: ser.profession_name.map(str::to_string),
+        profession_label: ser.profession_label.map(str::to_string),
         demand_size: ser.demand_size,
         workforce: ser.workforce,
         dependents: ser.dependents,
         wealth: ser.wealth,
-        culture_id: ser.culture_id.map(str::to_string),
         culture_name: ser.culture_name.map(str::to_string),
+        culture_label: ser.culture_label.map(str::to_string),
         literate: ser.literate,
         workplace_id: ser.workplace_id,
         qualifications: ser
             .qualifications
             .into_iter()
             .map(|row| ProfessionCount {
-                profession_id: row.profession_id.to_string(),
-                profession_name: row.profession_name.map(str::to_string),
+                name: row.name.to_string(),
+                label: row.label.map(str::to_string),
                 count: row.count,
             })
             .collect(),
@@ -682,8 +682,8 @@ fn materialize_state_pop(tables: &EmitTables, row: &CompactStatePop) -> StatePop
             .needs
             .into_iter()
             .map(|need| PopNeedBasket {
-                need_id: need.need_id.to_string(),
-                need_name: need.need_name.map(str::to_string),
+                name: need.name.to_string(),
+                label: need.label.map(str::to_string),
                 package_value: need.package_value,
                 goods: need
                     .goods

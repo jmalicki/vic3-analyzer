@@ -360,18 +360,18 @@
           "format": "double",
           "type": "number"
         },
-        "missing_here": {
-          "format": "double",
-          "type": "number"
-        },
-        "profession_id": {
-          "type": "string"
-        },
-        "profession_name": {
+        "label": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "missing_here": {
+          "format": "double",
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
         },
         "state_jobs": {
           "format": "double",
@@ -387,7 +387,7 @@
         }
       },
       "required": [
-        "profession_id",
+        "name",
         "employed_here",
         "jobs_here",
         "missing_here",

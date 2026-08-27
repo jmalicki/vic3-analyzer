@@ -157,7 +157,7 @@ pub(crate) fn state_mix(prices: &PricesResult, state_id: u32) -> StateMix {
         let n = pop.workforce.or(pop.demand_size).unwrap_or(0.0);
         size += pop.demand_size.unwrap_or(n);
         literate += pop.literate.unwrap_or(0.0);
-        if let Some(prof) = pop.profession_id.as_deref() {
+        if let Some(prof) = pop.profession_name.as_deref() {
             *mix.by_profession.entry(prof.to_string()).or_insert(0.0) += n;
         }
     }
@@ -626,9 +626,12 @@ pub(crate) fn is_fully_staffed(staffing: f64, level: f64) -> bool {
 /// Per-profession shortfall on one building vs the whole state stock.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ProfessionGap {
-    pub profession_id: String,
+    pub name: String,
+    // FIXME: `label` should always be present (at least a humanized script key).
+    // Optional/null is a leftover from the old dialect; fixing emitters is out of
+    // scope for the name/label rename wave.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub profession_name: Option<String>,
+    pub label: Option<String>,
     pub employed_here: f64,
     pub jobs_here: f64,
     pub missing_here: f64,
@@ -692,14 +695,14 @@ fn profession_gap(
         prices
             .state_qualifications
             .iter()
-            .find(|item| item.state_id == id && item.profession_id == row.profession_id)
+            .find(|item| item.state_id == id && item.name == row.name)
     });
     ProfessionGap {
-        profession_id: row.profession_id.clone(),
-        profession_name: row
-            .profession_name
+        name: row.name.clone(),
+        label: row
+            .label
             .clone()
-            .or_else(|| defs.labels.get(&row.profession_id).cloned()),
+            .or_else(|| defs.labels.get(&row.name).cloned()),
         employed_here: row.count,
         jobs_here,
         missing_here,
@@ -735,18 +738,16 @@ pub(crate) fn state_profession_totals(staffing: &[BuildingStaffing]) -> Vec<Prof
     let mut by_id: BTreeMap<String, ProfessionGap> = BTreeMap::new();
     for building in staffing {
         for row in &building.professions {
-            let entry = by_id
-                .entry(row.profession_id.clone())
-                .or_insert(ProfessionGap {
-                    profession_id: row.profession_id.clone(),
-                    profession_name: row.profession_name.clone(),
-                    employed_here: 0.0,
-                    jobs_here: 0.0,
-                    missing_here: 0.0,
-                    state_jobs: row.state_jobs,
-                    state_stock: row.state_stock,
-                    state_shortage: row.state_shortage,
-                });
+            let entry = by_id.entry(row.name.clone()).or_insert(ProfessionGap {
+                name: row.name.clone(),
+                label: row.label.clone(),
+                employed_here: 0.0,
+                jobs_here: 0.0,
+                missing_here: 0.0,
+                state_jobs: row.state_jobs,
+                state_stock: row.state_stock,
+                state_shortage: row.state_shortage,
+            });
             entry.employed_here += row.employed_here;
             entry.jobs_here += row.jobs_here;
             entry.missing_here += row.missing_here;
@@ -776,10 +777,8 @@ pub(crate) fn shortage_target<'a>(
             .state_qualifications
             .iter()
             .find(|row| {
-                row.state_id == state_id
-                    && row.profession_id == employee.profession_id
-                    && row.shortage > ORDER_EPS
+                row.state_id == state_id && row.name == employee.name && row.shortage > ORDER_EPS
             })
-            .map(|row| row.profession_id.as_str())
+            .map(|row| row.name.as_str())
     })
 }

@@ -13,6 +13,12 @@ Game entities use three roles. Do not overload them.
 | `name` / `*_name` | Internal / script key | `building_logging`, `wood`, culture key `prussian`, country tag-class keys |
 | `label` / `*_label` | Localized or display string | `Logging`, `Wood`, `Prussian` |
 
+These roles apply **everywhere**: public DTOs, SQL columns, TypeScript types, **and**
+private helpers / locals / evidence builders. Do not name a display string
+`*_name` or a script key `*_id` “just because it is internal.” `label` is for
+UI-facing text (including alert evidence and mitigation titles); `name` is for
+lookups, join keys, and action wiring.
+
 ### Prefix rule
 
 **Omit the entity prefix when the field lives on a similarly named struct.** The

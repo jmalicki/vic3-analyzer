@@ -21,14 +21,14 @@ export interface StateInfo {
 export interface StatePop {
   state_id: number
   id?: number
-  profession_id?: string
   profession_name?: string
+  profession_label?: string
   demand_size?: number
   workforce?: number
   dependents?: number
   wealth?: number
-  culture_id?: string
   culture_name?: string
+  culture_label?: string
   literate?: number
   workplace_id?: number
   qualifications?: ProfessionCount[]
@@ -36,30 +36,30 @@ export interface StatePop {
 }
 
 export interface ProfessionCount {
-  profession_id: string
-  profession_name?: string
+  name: string
+  label?: string
   count: number
 }
 
 export interface PopNeedBasket {
-  need_id: string
-  need_name?: string
+  name: string
+  label?: string
   package_value: number
   goods: GoodFlow[]
 }
 
 export interface StateNeed {
   state_id: number
-  need_id: string
-  need_name?: string
+  name: string
+  label?: string
   package_value: number
   goods: GoodFlow[]
 }
 
 export interface StateQualification {
   state_id: number
-  profession_id: string
-  profession_name?: string
+  name: string
+  label?: string
   qualified: number
   employable?: number
   employed: number
@@ -308,8 +308,10 @@ export interface AlertMitigation {
 }
 
 export interface ProfessionGap {
-  profession_id: string
-  profession_name?: string
+  name: string
+  // FIXME: label should always be present; optional/null is broken leftover.
+  // Making emitters always fill a display string is out of scope for this rename.
+  label?: string
   employed_here: number
   jobs_here: number
   missing_here: number

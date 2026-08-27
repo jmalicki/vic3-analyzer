@@ -63,8 +63,8 @@ impl BuildingStaffingProvider {
         let mut type_id = StringBuilder::new();
         let mut staffing = Float64Builder::new();
         let mut level = Float64Builder::new();
-        let mut profession_id = StringBuilder::new();
         let mut profession_name = StringBuilder::new();
+        let mut profession_label = StringBuilder::new();
         let mut employed_here = Float64Builder::new();
         let mut jobs_here = Float64Builder::new();
         let mut missing_here = Float64Builder::new();
@@ -94,24 +94,27 @@ impl BuildingStaffingProvider {
                     row.count
                 };
                 let missing = (jobs - row.count).max(0.0);
-                let qual =
-                    self.binding.prices.state_qualifications.iter().find(|q| {
-                        q.state_id == self.state_id && q.profession_id == row.profession_id
-                    });
+                let qual = self
+                    .binding
+                    .prices
+                    .state_qualifications
+                    .iter()
+                    .find(|q| q.state_id == self.state_id && q.name == row.name);
 
                 building_id.append_value(building.id);
                 building_name.append_value(&name);
                 type_id.append_value(&building.type_id);
                 staffing.append_value(building.staffing);
                 level.append_value(building.level);
-                profession_id.append_value(&row.profession_id);
+                profession_name.append_value(&row.name);
                 match row
-                    .profession_name
+                    .label
                     .as_deref()
-                    .or_else(|| self.binding.label(&row.profession_id))
+                    .filter(|label| !label.is_empty())
+                    .or_else(|| self.binding.label(&row.name))
                 {
-                    Some(n) => profession_name.append_value(n),
-                    None => profession_name.append_null(),
+                    Some(n) => profession_label.append_value(n),
+                    None => profession_label.append_null(),
                 }
                 employed_here.append_value(row.count);
                 jobs_here.append_value(jobs);
@@ -132,8 +135,8 @@ impl BuildingStaffingProvider {
                 type_id.append_value(&building.type_id);
                 staffing.append_value(building.staffing);
                 level.append_value(building.level);
-                profession_id.append_null();
                 profession_name.append_null();
+                profession_label.append_null();
                 employed_here.append_null();
                 jobs_here.append_null();
                 missing_here.append_null();
@@ -151,8 +154,8 @@ impl BuildingStaffingProvider {
                 Arc::new(type_id.finish()),
                 Arc::new(staffing.finish()),
                 Arc::new(level.finish()),
-                Arc::new(profession_id.finish()),
                 Arc::new(profession_name.finish()),
+                Arc::new(profession_label.finish()),
                 Arc::new(employed_here.finish()),
                 Arc::new(jobs_here.finish()),
                 Arc::new(missing_here.finish()),

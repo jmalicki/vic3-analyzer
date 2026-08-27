@@ -440,7 +440,7 @@ Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent;
                   "items": {
                     "type": "object",
                     "required": [
-                      "profession_id",
+                      "name",
                       "employed_here",
                       "jobs_here",
                       "missing_here",
@@ -449,8 +449,8 @@ Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent;
                       "state_shortage"
                     ],
                     "properties": {
-                      "profession_id": { "type": "string" },
-                      "profession_name": { "type": "string" },
+                      "name": { "type": "string" },
+                      "label": { "type": "string" },
                       "employed_here": { "type": "number" },
                       "jobs_here": { "type": "number" },
                       "missing_here": { "type": "number" },

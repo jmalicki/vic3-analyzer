@@ -900,7 +900,7 @@ async fn building_staffing_for_state() {
         .unwrap()
         .value(0);
     let sql = format!(
-        "SELECT building_id, type_id, profession_id, employed_here, jobs_here \
+        "SELECT building_id, type_id, profession_name, employed_here, jobs_here \
          FROM building_staffing({sid})"
     );
     let batches = eng.query(&sql).await.expect("staffing");
