@@ -59,7 +59,7 @@ pub struct Alert {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub building_id: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub good_id: Option<String>,
+    pub good_name: Option<String>,
     pub evidence: Vec<Evidence>,
     pub mitigations: Vec<Mitigation>,
     /// Buildings under a state-level employment alert. Empty elsewhere.
@@ -130,7 +130,7 @@ pub enum MitigationAction {
     },
     TradeAlloc {
         state_id: u32,
-        good_id: String,
+        good_name: String,
     },
     FeederJob {
         building: String,
@@ -139,7 +139,7 @@ pub enum MitigationAction {
         state_id: Option<u32>,
     },
     SolGoods {
-        good_id: String,
+        good_name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         state_id: Option<u32>,
     },
@@ -313,7 +313,10 @@ fn collect_goods_alerts(args: &mut AlertCollectArgs<'_>) {
 
     for row in &prices.goods {
         if good_is_short(row, defs) {
-            short_goods.insert(row.id.clone(), GoodsShortageHint::from_row(row, None, None));
+            short_goods.insert(
+                row.name.clone(),
+                GoodsShortageHint::from_row(row, None, None),
+            );
         }
     }
     for building in &prices.buildings {
@@ -325,13 +328,13 @@ fn collect_goods_alerts(args: &mut AlertCollectArgs<'_>) {
                     hint.state_id = building.state_id;
                 })
                 .or_insert_with(|| {
-                    let row = prices.goods.iter().find(|good| good.id == *good_id);
+                    let row = prices.goods.iter().find(|good| good.name == *good_id);
                     GoodsShortageHint {
                         buy: row.map(|g| g.buy).unwrap_or(0.0),
                         sell: row.map(|g| g.sell).unwrap_or(0.0),
                         price: row.map(|g| g.price).unwrap_or(0.0),
                         base: row.map(|g| g.base).unwrap_or(0.0),
-                        name: row.and_then(|g| g.name.clone()),
+                        name: row.and_then(|g| g.label.clone()),
                         building_id: Some(building.id),
                         state_id: building.state_id,
                         from_short_inputs: true,
@@ -392,7 +395,7 @@ fn collect_goods_alerts(args: &mut AlertCollectArgs<'_>) {
                     defs,
                     prices,
                     index,
-                    good_id: &good_id,
+                    good_name: &good_id,
                     buy: hint.buy,
                     sell: hint.sell,
                     base: hint.base,
@@ -411,7 +414,7 @@ fn collect_goods_alerts(args: &mut AlertCollectArgs<'_>) {
             summary: goods_summary(kind, tradeable, &hint),
             state_id: hint.state_id,
             building_id: hint.building_id,
-            good_id: Some(good_id),
+            good_name: Some(good_id),
             evidence,
             mitigations,
             staffing: Vec::new(),
@@ -437,7 +440,7 @@ impl GoodsShortageHint {
             sell: row.sell,
             price: row.price,
             base: row.base,
-            name: row.name.clone(),
+            name: row.label.clone(),
             building_id,
             state_id,
             from_short_inputs: false,
@@ -505,7 +508,7 @@ fn goods_mitigations(
     let world = ctx.world;
     let defs = ctx.defs;
     let prices = ctx.prices;
-    let good_id = ctx.good_id;
+    let good_id = ctx.good_name;
     let mut items = Vec::new();
     let alert_id = format!("goods:{good_id}");
     if !tradeable {
@@ -622,12 +625,12 @@ fn goods_mitigations(
                         ),
                         MitigationAction::TradeAlloc {
                             state_id: state,
-                            good_id: good_id.into(),
+                            good_name: good_id.into(),
                         },
                     ),
                     format!(
                         "0 extra {} in this model (trade volumes are frozen).",
-                        ctx.good_id
+                        ctx.good_name
                     ),
                 ));
             }
@@ -645,15 +648,15 @@ fn push_local_producer(
 ) {
     let building = ctx
         .index
-        .local_producer_type(ctx.good_id, state_id)
-        .unwrap_or_else(|| format!("building_{}_producer", ctx.good_id));
+        .local_producer_type(ctx.good_name, state_id)
+        .unwrap_or_else(|| format!("building_{}_producer", ctx.good_name));
     items.push(with_effect(
         action_mit(
             format!("{alert_id}:local-producer"),
             "Expand a local producer",
             format!(
                 "Raise local {} output as an alternative to trade.",
-                ctx.good_id
+                ctx.good_name
             ),
             MitigationAction::Build {
                 building: building.clone(),
@@ -671,7 +674,7 @@ fn push_best_pm(
     state_id: Option<u32>,
     alert_id: &str,
 ) {
-    let Some(pick) = ctx.index.best_pm_upgrade(ctx.good_id, state_id) else {
+    let Some(pick) = ctx.index.best_pm_upgrade(ctx.good_name, state_id) else {
         return;
     };
     let label = pm_label(ctx.defs, &pick.new_pm);
@@ -787,9 +790,7 @@ impl<'a> MitigationIndex<'a> {
         let mut price_output_by_good: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
         for (i, building) in prices.buildings.iter().enumerate() {
             for flow in &building.outputs {
-                let list = price_output_by_good
-                    .entry(flow.good_id.as_str())
-                    .or_default();
+                let list = price_output_by_good.entry(flow.name.as_str()).or_default();
                 if list.last().copied() != Some(i) {
                     list.push(i);
                 }
@@ -929,7 +930,7 @@ struct ShortageEffect<'a> {
     defs: &'a GameDefs,
     prices: &'a PricesResult,
     index: &'a MitigationIndex<'a>,
-    good_id: &'a str,
+    good_name: &'a str,
     buy: f64,
     sell: f64,
     base: f64,
@@ -957,8 +958,8 @@ impl ShortageEffect<'_> {
     }
 
     fn effect_from_world(&self, next: &World) -> String {
-        let (buy0, sell0) = good_io_total(self.world, self.defs, self.good_id);
-        let (buy1, sell1) = good_io_total(next, self.defs, self.good_id);
+        let (buy0, sell0) = good_io_total(self.world, self.defs, self.good_name);
+        let (buy1, sell1) = good_io_total(next, self.defs, self.good_name);
         let dbuy = buy1 - buy0;
         let dsell = sell1 - sell0;
         let new_buy = (self.buy + dbuy).max(0.0);
@@ -966,7 +967,7 @@ impl ShortageEffect<'_> {
         let old_price = price(self.base, self.buy, self.sell, self.defs.price_range);
         let new_price = price(self.base, new_buy, new_sell, self.defs.price_range);
         format_local_effect(
-            self.good_id,
+            self.good_name,
             dsell,
             dbuy,
             old_price,
@@ -1016,7 +1017,7 @@ fn good_io_total(world: &World, defs: &GameDefs, good_id: &str) -> (f64, f64) {
 }
 
 fn format_local_effect(
-    good_id: &str,
+    good_name: &str,
     dsell: f64,
     dbuy: f64,
     old_price: f64,
@@ -1025,10 +1026,10 @@ fn format_local_effect(
     new_gap: f64,
 ) -> String {
     let orders = if dsell.abs() <= ORDER_EPS && dbuy.abs() <= ORDER_EPS {
-        format!("0 change to {good_id} building orders")
+        format!("0 change to {good_name} building orders")
     } else {
         format!(
-            "{} {good_id} sell, {} {good_id} buy",
+            "{} {good_name} sell, {} {good_name} buy",
             signed(dsell),
             signed(dbuy)
         )
@@ -1096,11 +1097,11 @@ fn collect_needs_unmet(args: &mut AlertCollectArgs<'_>) {
         for need in &needs {
             for trip in need_trips(need, prices, defs, ceiling_factor) {
                 evidence.push(Evidence {
-                    label: format!("{}: {}", trip.need_name, trip.good_name),
+                    label: format!("{}: {}", trip.need_name, trip.good_label),
                     value: trip.value,
                 });
-                if !goods.iter().any(|(id, _)| id == &trip.good_id) {
-                    goods.push((trip.good_id, trip.good_name));
+                if !goods.iter().any(|(id, _)| id == &trip.good_name) {
+                    goods.push((trip.good_name, trip.good_label));
                 }
             }
         }
@@ -1122,7 +1123,7 @@ fn collect_needs_unmet(args: &mut AlertCollectArgs<'_>) {
             summary: "Need goods exceed local sell, or sit at the max price.".into(),
             state_id: Some(state_id),
             building_id: None,
-            good_id,
+            good_name: good_id,
             evidence,
             mitigations,
             staffing: Vec::new(),
@@ -1132,8 +1133,8 @@ fn collect_needs_unmet(args: &mut AlertCollectArgs<'_>) {
 
 struct NeedTrip {
     need_name: String,
-    good_id: String,
     good_name: String,
+    good_label: String,
     value: String,
 }
 
@@ -1160,8 +1161,8 @@ fn need_trips(
         let local = prices
             .state_goods
             .iter()
-            .find(|row| row.state_id == need.state_id && row.good_id == flow.good_id);
-        let market = prices.goods.iter().find(|good| good.id == flow.good_id);
+            .find(|row| row.state_id == need.state_id && row.name == flow.name);
+        let market = prices.goods.iter().find(|good| good.name == flow.name);
         let amount_short = match local {
             Some(local) => local.sell + ORDER_EPS < flow.quantity,
             None => true,
@@ -1175,7 +1176,7 @@ fn need_trips(
         if !amount_short && !at_max {
             continue;
         }
-        let good_name = good_label(prices, defs, &flow.good_id);
+        let good_label = good_label(prices, defs, &flow.name);
         let value = if amount_short {
             let sell = local.map(|row| row.sell).unwrap_or(0.0);
             format!("{} vs sell {}", format_num(flow.quantity), format_num(sell))
@@ -1197,8 +1198,8 @@ fn need_trips(
         };
         trips.push(NeedTrip {
             need_name: need_name.clone(),
-            good_id: flow.good_id.clone(),
-            good_name,
+            good_name: flow.name.clone(),
+            good_label,
             value,
         });
     }
@@ -1209,8 +1210,8 @@ fn good_label(prices: &PricesResult, defs: &GameDefs, good_id: &str) -> String {
     prices
         .goods
         .iter()
-        .find(|good| good.id == good_id)
-        .and_then(|good| good.name.clone())
+        .find(|good| good.name == good_id)
+        .and_then(|good| good.label.clone())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| script_label(defs, good_id))
 }
@@ -1223,7 +1224,7 @@ fn need_mitigations(state_id: u32, goods: &[(String, String)]) -> Vec<Mitigation
             format!("Cheapen {good_name}"),
             format!("Lower the local price of {good_name} (produce more or import) to cover the need basket."),
             MitigationAction::SolGoods {
-                good_id: good_id.clone(),
+                good_name: good_id.clone(),
                 state_id: Some(state_id),
             },
         ));
@@ -1233,7 +1234,7 @@ fn need_mitigations(state_id: u32, goods: &[(String, String)]) -> Vec<Mitigation
             format!("Trade-center imports of pop goods can fill the {good_name} basket."),
             MitigationAction::TradeAlloc {
                 state_id,
-                good_id: good_id.clone(),
+                good_name: good_id.clone(),
             },
         ));
     }
@@ -1309,7 +1310,7 @@ fn collect_market_access(args: &mut AlertCollectArgs<'_>) {
             ),
             state_id: Some(state.id),
             building_id: None,
-            good_id: None,
+            good_name: None,
             evidence: vec![
                 Evidence {
                     label: "Infrastructure".into(),
@@ -1383,7 +1384,7 @@ fn collect_education(args: &mut AlertCollectArgs<'_>) {
             ),
             state_id: Some(row.state_id),
             building_id: None,
-            good_id: None,
+            good_name: None,
             evidence: vec![
                 Evidence {
                     label: "State".into(),
@@ -1622,7 +1623,7 @@ fn push_state_employment_alert(args: &mut PushEmploymentAlertArgs<'_>) {
         summary,
         state_id: Some(state_id),
         building_id: None,
-        good_id: None,
+        good_name: None,
         evidence,
         mitigations: rank(mitigations),
         staffing,
@@ -1649,7 +1650,7 @@ fn pop_shortage_mitigations(
                 "Pops buy {good_name} as a need. A lower price raises their standard of living, which can keep workers in this state. Adding empty building levels does not hire anyone."
             ),
             MitigationAction::SolGoods {
-                good_id: good_id.clone(),
+                good_name: good_id.clone(),
                 state_id: state,
             },
         ));
@@ -1662,7 +1663,7 @@ fn pop_shortage_mitigations(
                 ),
                 MitigationAction::TradeAlloc {
                     state_id,
-                    good_id: good_id.clone(),
+                    good_name: good_id.clone(),
                 },
             ));
         }
@@ -1744,7 +1745,7 @@ fn qualification_levers(
                         lever.title,
                         lever.detail,
                         MitigationAction::SolGoods {
-                            good_id: good,
+                            good_name: good,
                             state_id: Some(state_id),
                         },
                     )
@@ -1786,7 +1787,7 @@ fn expensive_pop_goods(
             let price = prices
                 .goods
                 .iter()
-                .find(|good| good.id == flow.good_id)
+                .find(|good| good.name == flow.name)
                 .map(|good| {
                     if good.base > 0.0 {
                         good.price / good.base
@@ -1795,7 +1796,7 @@ fn expensive_pop_goods(
                     }
                 })
                 .unwrap_or(0.0);
-            scored.push((flow.good_id.clone(), price));
+            scored.push((flow.name.clone(), price));
         }
     }
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -1805,7 +1806,7 @@ fn expensive_pop_goods(
             .goods
             .iter()
             .filter(|good| good.price + ORDER_EPS >= good.base * ceiling)
-            .map(|good| good.id.clone())
+            .map(|good| good.name.clone())
             .collect()
     } else {
         scored.into_iter().map(|(id, _)| id).collect()
@@ -2095,8 +2096,8 @@ mod tests {
 
     fn good(id: &str, base: f64, price: f64, buy: f64, sell: f64) -> GoodPrice {
         GoodPrice {
-            id: id.into(),
-            name: Some(id.into()),
+            name: id.into(),
+            label: Some(id.into()),
             base,
             price,
             buy,
@@ -2217,7 +2218,7 @@ mod tests {
             }],
             state_goods: vec![StateGood {
                 state_id: 1,
-                good_id: "clothes".into(),
+                name: "clothes".into(),
                 buy: 12.0,
                 sell: 0.0,
                 price: 52.5,
@@ -2251,7 +2252,7 @@ mod tests {
                         5.0,
                     );
                     farm.outputs.push(GoodFlow {
-                        good_id: "grain".into(),
+                        name: "grain".into(),
                         quantity: 30.0,
                         value: 600.0,
                     });
@@ -2322,7 +2323,7 @@ mod tests {
                 need_name: Some("Clothing".into()),
                 package_value: 80.0,
                 goods: vec![GoodFlow {
-                    good_id: "clothes".into(),
+                    name: "clothes".into(),
                     quantity: 12.0,
                     value: 80.0,
                 }],
@@ -2377,7 +2378,8 @@ mod tests {
             .alerts
             .iter()
             .find(|alert| {
-                alert.kind == AlertKind::GoodsShortage && alert.good_id.as_deref() == Some("grain")
+                alert.kind == AlertKind::GoodsShortage
+                    && alert.good_name.as_deref() == Some("grain")
             })
             .expect("grain shortage");
         assert!(
@@ -2713,7 +2715,8 @@ mod tests {
             .alerts
             .iter()
             .find(|alert| {
-                alert.kind == AlertKind::GoodsShortage && alert.good_id.as_deref() == Some("grain")
+                alert.kind == AlertKind::GoodsShortage
+                    && alert.good_name.as_deref() == Some("grain")
             })
             .expect("grain shortage");
         assert!(
@@ -2806,8 +2809,8 @@ mod tests {
     }
 
     fn name_clothes(prices: &mut PricesResult, name: &str) {
-        if let Some(good) = prices.goods.iter_mut().find(|good| good.id == "clothes") {
-            good.name = Some(name.into());
+        if let Some(good) = prices.goods.iter_mut().find(|good| good.name == "clothes") {
+            good.label = Some(name.into());
         }
     }
 
@@ -2859,7 +2862,7 @@ mod tests {
         let local = prices
             .state_goods
             .iter_mut()
-            .find(|row| row.good_id == "clothes")
+            .find(|row| row.name == "clothes")
             .expect("clothes state good");
         local.sell = 20.0;
         local.price = 52.5;
@@ -2965,10 +2968,10 @@ mod tests {
     fn naive_best_pm_upgrade(
         world: &World,
         defs: &GameDefs,
-        good_id: &str,
+        good_name: &str,
         state_id: Option<u32>,
     ) -> Option<PmPick> {
-        let idx = defs.index_of(good_id)?;
+        let idx = defs.index_of(good_name)?;
         let mut best: Option<PmPick> = None;
         let mut best_score = ORDER_EPS;
         for building in &world.buildings {
@@ -3014,12 +3017,12 @@ mod tests {
         world: &World,
         defs: &GameDefs,
         prices: &PricesResult,
-        good_id: &str,
+        good_name: &str,
         state_id: Option<u32>,
     ) -> Option<String> {
         let producer = prices.buildings.iter().find(|building| {
             state_id.is_none_or(|sid| building.state_id == Some(sid))
-                && building.outputs.iter().any(|flow| flow.good_id == good_id)
+                && building.outputs.iter().any(|flow| flow.name == good_name)
         });
         if let Some(row) = producer {
             return Some(row.type_id.clone());
@@ -3028,7 +3031,7 @@ mod tests {
             if state_id.is_some_and(|sid| row.state != Some(sid)) {
                 return None;
             }
-            let idx = defs.index_of(good_id)?;
+            let idx = defs.index_of(good_name)?;
             let (inputs, outputs) = row.goods_io(defs);
             (outputs[idx] > ORDER_EPS || inputs[idx] > ORDER_EPS).then(|| row.building.clone())
         })

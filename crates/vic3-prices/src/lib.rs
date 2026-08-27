@@ -453,7 +453,7 @@ mod tests {
         let wood = result
             .goods
             .iter()
-            .find(|good| good.id == "wood")
+            .find(|good| good.name == "wood")
             .expect("wood price");
         assert_eq!(wood.sell, 60.0);
         assert_ne!(wood.price, wood.base);
@@ -524,7 +524,7 @@ mod tests {
             assert!(
                 (left.price - right.price).abs() < 1e-4,
                 "{} cold {} vs warm {}",
-                left.id,
+                left.name,
                 left.price,
                 right.price
             );
@@ -534,14 +534,14 @@ mod tests {
             assert!(
                 (row.price - row.base).abs() < scale * 50.0,
                 "{} price {} vs base {}",
-                row.id,
+                row.name,
                 row.price,
                 row.base
             );
             assert!(
                 (row.buy - row.sell).abs() < 1e-4 * (1.0 + row.buy.abs()),
                 "{} buy {} vs sell {}",
-                row.id,
+                row.name,
                 row.buy,
                 row.sell
             );
@@ -591,9 +591,9 @@ mod tests {
             result
                 .goods
                 .iter()
-                .find(|good| good.id == "wood")
+                .find(|good| good.name == "wood")
                 .unwrap()
-                .name
+                .label
                 .as_deref(),
             Some("Wood")
         );
@@ -605,7 +605,7 @@ mod tests {
         assert!(result
             .state_goods
             .iter()
-            .any(|row| row.state_id == 7 && row.good_id == "wood" && row.sell == 3.0));
+            .any(|row| row.state_id == 7 && row.name == "wood" && row.sell == 3.0));
     }
 
     #[test]
@@ -660,7 +660,7 @@ mod tests {
         let market_wood = result
             .goods
             .iter()
-            .find(|row| row.id == "wood")
+            .find(|row| row.name == "wood")
             .expect("market wood row");
         assert_eq!(market_wood.buy, 5.0);
         assert_eq!(market_wood.sell, 10.0);
@@ -668,7 +668,7 @@ mod tests {
             result
                 .state_goods
                 .iter()
-                .find(|row| row.state_id == state_id && row.good_id == "wood")
+                .find(|row| row.state_id == state_id && row.name == "wood")
                 .expect("wood state row")
         };
         assert!(wood(1).price > wood(1).base);
@@ -771,7 +771,7 @@ mod tests {
             result
                 .state_goods
                 .iter()
-                .find(|row| row.state_id == state_id && row.good_id == "wood")
+                .find(|row| row.state_id == state_id && row.name == "wood")
                 .expect("state wood")
         };
         let pop_wood_1 = wood_row(1).buy - 10.0;
@@ -789,9 +789,9 @@ mod tests {
         let local_wood = result
             .state_goods
             .iter()
-            .find(|row| row.state_id == 1 && row.good_id == "wood")
+            .find(|row| row.state_id == 1 && row.name == "wood")
             .expect("local wood");
-        assert_eq!(buyer.inputs[0].good_id, "wood");
+        assert_eq!(buyer.inputs[0].name, "wood");
         assert!(
             (buyer.inputs[0].value / buyer.inputs[0].quantity - local_wood.price).abs() < 1e-9,
             "building IO is valued at the state's local price"
@@ -831,7 +831,7 @@ mod tests {
         let market_wood = result
             .goods
             .iter()
-            .find(|row| row.id == "wood")
+            .find(|row| row.name == "wood")
             .expect("market wood row");
         assert_eq!(market_wood.buy, 8.0);
         assert_eq!(market_wood.sell, 5.0);
@@ -839,7 +839,7 @@ mod tests {
             result
                 .state_goods
                 .iter()
-                .find(|row| row.state_id == state_id && row.good_id == "wood")
+                .find(|row| row.state_id == state_id && row.name == "wood")
                 .expect("state wood row")
         };
         assert_eq!(local(1).buy, 0.0);
@@ -867,9 +867,13 @@ mod tests {
         let wood0 = baseline
             .goods
             .iter()
-            .find(|g| g.id == "wood")
+            .find(|g| g.name == "wood")
             .expect("wood");
-        let wood1 = bumped.goods.iter().find(|g| g.id == "wood").expect("wood");
+        let wood1 = bumped
+            .goods
+            .iter()
+            .find(|g| g.name == "wood")
+            .expect("wood");
         assert!(
             wood1.sell > wood0.sell + 1.0,
             "extra forestry should add wood sell ({} vs {})",
@@ -938,22 +942,22 @@ mod tests {
         let wood0 = baseline
             .goods
             .iter()
-            .find(|g| g.id == "wood")
+            .find(|g| g.name == "wood")
             .expect("wood");
         let wood1 = previewed
             .goods
             .iter()
-            .find(|g| g.id == "wood")
+            .find(|g| g.name == "wood")
             .expect("wood");
         let grain0 = baseline
             .goods
             .iter()
-            .find(|g| g.id == "grain")
+            .find(|g| g.name == "grain")
             .expect("grain");
         let grain1 = previewed
             .goods
             .iter()
-            .find(|g| g.id == "grain")
+            .find(|g| g.name == "grain")
             .expect("grain");
         assert!(
             wood1.sell < wood0.sell,
@@ -1139,7 +1143,7 @@ mod tests {
                 prop_assert!(
                     (left.price - right.price).abs() < tol,
                     "{} cold {} vs warm {}",
-                    left.id,
+                    left.name,
                     left.price,
                     right.price
                 );
@@ -1157,7 +1161,7 @@ mod tests {
                 prop_assert!(
                     (left.price - right.price).abs() < tol,
                     "length-mismatch warm_rel should cold-start: {} {} vs {}",
-                    left.id,
+                    left.name,
                     left.price,
                     right.price
                 );

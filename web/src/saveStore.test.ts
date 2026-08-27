@@ -24,7 +24,7 @@ const summary: SaveSummary = {
 }
 
 const prices: PricesResult = {
-  goods: [{ id: 'iron', base: 40, price: 42, buy: 1, sell: 1 }],
+  goods: [{ name: 'iron', base: 40, price: 42, buy: 1, sell: 1 }],
   residual: 0,
   status: 'converged',
   limitations: [],
@@ -57,7 +57,7 @@ describe('save store', () => {
     await storeSaveAnalysis(summary, prices)
     const stored = await loadStoredSave()
     expect(stored?.summary).toEqual(summary)
-    expect(stored?.prices?.goods[0]?.id).toBe('iron')
+    expect(stored?.prices?.goods[0]?.name).toBe('iron')
   })
 
   it('ignores a prices solve from another cache version', async () => {

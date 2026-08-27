@@ -8,6 +8,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### 🌟 Added / Changed
+- **Goods naming:** Public goods DTOs (`GoodPrice` / `GoodFlow` / `StateGood`) use bare `name` (script) / `label`
+  (localized); SQL `goods` table uses `name`/`label`; mixed IO lists keep `{good_name, good_label, qty}`. Alert /
+  mitigation good script keys are `good_name`. **Breaking** for JSON, SQL, and
+  web types.
+
 - **Dense identity types:** Renamed `GoodIdx` → `GoodId` and `NeedIdx` → `NeedId`
   across defs, prices, planning, and SQL. **Breaking** for Rust callers of those
   newtypes (transparent `u16`; postcard layout unchanged).

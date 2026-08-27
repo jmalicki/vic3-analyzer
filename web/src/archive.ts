@@ -73,6 +73,14 @@ function toBytes(value: Uint8Array): Uint8Array {
   return new Uint8Array(Object.values(value as unknown as Record<string, number>))
 }
 
+function goodScriptKey(good: {
+  name?: string
+  good_name?: string
+  id?: string
+}): string | undefined {
+  return good.name ?? good.good_name ?? good.id
+}
+
 export function compareAnalyses(left: AnalysisRecord, right: AnalysisRecord): CompareResult {
   const comparison: CompareResult = {
     left: left.id,
@@ -90,11 +98,14 @@ export function compareAnalyses(left: AnalysisRecord, right: AnalysisRecord): Co
     (left.kind === 'prices' || left.kind === 'what_if') &&
     (right.kind === 'prices' || right.kind === 'what_if')
   ) {
-    const rightGoods = new Map((right.result as PricesResult).goods.map((good) => [good.id, good]))
+    const rightGoods = new Map(
+      (right.result as PricesResult).goods.map((good) => [goodScriptKey(good), good]),
+    )
     const prices = (left.result as PricesResult).goods.flatMap((good) => {
-      const other = rightGoods.get(good.id)
+      const key = goodScriptKey(good)
+      const other = key ? rightGoods.get(key) : undefined
       const delta = other ? other.price - good.price : 0
-      return other && delta !== 0 ? [{ good: good.id, delta }] : []
+      return other && delta !== 0 ? [{ good: key!, delta }] : []
     })
     if (prices.length) comparison.prices = prices
   } else if (

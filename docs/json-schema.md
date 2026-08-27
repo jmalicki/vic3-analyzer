@@ -389,7 +389,7 @@ Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent;
           "summary": { "type": "string" },
           "state_id": { "type": "integer", "minimum": 0 },
           "building_id": { "type": "integer", "minimum": 0 },
-          "good_id": { "type": "string" },
+          "good_name": { "type": "string" },
           "evidence": {
             "type": "array",
             "items": {

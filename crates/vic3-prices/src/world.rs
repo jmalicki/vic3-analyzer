@@ -1024,7 +1024,11 @@ mod tests {
         assert_eq!(buy[defs.index_of("tools").unwrap()], 2.0);
         assert_eq!(sell[defs.index_of("wood").unwrap()], 40.0);
         let result = crate::solve(&world, &defs, crate::SolveOpts::default());
-        let wood = result.goods.iter().find(|g| g.id == "wood").expect("wood");
+        let wood = result
+            .goods
+            .iter()
+            .find(|g| g.name == "wood")
+            .expect("wood");
         assert!(wood.price < wood.base);
         assert!(result.inputs.goods_with_orders > 0);
     }

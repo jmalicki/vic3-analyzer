@@ -47,12 +47,12 @@ pub(crate) fn campaign_brief_json(session: &ActiveSessionInfo, binding: &Session
         if shortage <= 0.0 {
             continue;
         }
-        *good_sums.entry(g.good_id.clone()).or_insert(0.0) += shortage;
+        *good_sums.entry(g.name.clone()).or_insert(0.0) += shortage;
         let region = region_by_id
             .get(&g.state_id)
             .cloned()
             .unwrap_or_else(|| format!("state {}", g.state_id));
-        hotspots.push((region, g.good_id.clone(), shortage));
+        hotspots.push((region, g.name.clone(), shortage));
     }
 
     let mut top_goods: Vec<(String, f64)> = good_sums.into_iter().collect();

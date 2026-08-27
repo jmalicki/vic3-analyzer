@@ -25,7 +25,7 @@
 //! | Table | Exact `=` | Exact range |
 //! | --- | --- | --- |
 //! | `states` | `state_id`, `region_id`, `region_name`, `state_name`, `owner_tag` | — |
-//! | `goods` | `good`, `good_name` | — (hash / order index) |
+//! | `goods` | `name`, `label` | — (hash / order index) |
 //! | `goods_by_state` | `state_id`, `good` | — |
 //! | `buildings` | `building_id`, `state_id`, `type_id` | — |
 //! | `building_types` | `type_id`, `type_name`, `group_id` | `type_id` (defs `BTreeMap`) |

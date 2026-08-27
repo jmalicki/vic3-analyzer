@@ -5,7 +5,7 @@ import { StatesPane } from './StatesPane'
 import type { PricesResult } from './types'
 
 const result: PricesResult = {
-  goods: [{ id: 'iron', name: 'Iron', base: 40, price: 50, buy: 2, sell: 1 }],
+  goods: [{ name: 'iron', label: 'Iron', base: 40, price: 50, buy: 2, sell: 1 }],
   countries: [
     { id: 10, tag: 'ALP', name: 'Alpacania' },
     { id: 20, tag: 'BDG', name: 'Badgeria' },

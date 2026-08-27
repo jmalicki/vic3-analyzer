@@ -128,7 +128,7 @@ struct MitigationColumns {
     rank: UInt32Builder,
     action: StringBuilder,
     building: StringBuilder,
-    good_id: StringBuilder,
+    good_name: StringBuilder,
     extra_levels: UInt32Builder,
     title: StringBuilder,
     detail: StringBuilder,
@@ -158,7 +158,7 @@ impl MitigationColumns {
                         ..
                     } => {
                         self.building.append_value(b);
-                        self.good_id.append_null();
+                        self.good_name.append_null();
                         match levels {
                             Some(n) => self.extra_levels.append_value(*n),
                             None => self.extra_levels.append_null(),
@@ -166,18 +166,18 @@ impl MitigationColumns {
                     }
                     MitigationAction::FeederJob { building: b, .. } => {
                         self.building.append_value(b);
-                        self.good_id.append_null();
+                        self.good_name.append_null();
                         self.extra_levels.append_null();
                     }
-                    MitigationAction::TradeAlloc { good_id: g, .. }
-                    | MitigationAction::SolGoods { good_id: g, .. } => {
+                    MitigationAction::TradeAlloc { good_name: g, .. }
+                    | MitigationAction::SolGoods { good_name: g, .. } => {
                         self.building.append_null();
-                        self.good_id.append_value(g);
+                        self.good_name.append_value(g);
                         self.extra_levels.append_null();
                     }
                     MitigationAction::Pm { .. } | MitigationAction::Subsidize { .. } => {
                         self.building.append_null();
-                        self.good_id.append_null();
+                        self.good_name.append_null();
                         self.extra_levels.append_null();
                     }
                 }
@@ -185,7 +185,7 @@ impl MitigationColumns {
             None => {
                 self.action.append_null();
                 self.building.append_null();
-                self.good_id.append_null();
+                self.good_name.append_null();
                 self.extra_levels.append_null();
             }
         }
@@ -200,7 +200,7 @@ impl MitigationColumns {
             Arc::new(self.rank.finish()),
             Arc::new(self.action.finish()),
             Arc::new(self.building.finish()),
-            Arc::new(self.good_id.finish()),
+            Arc::new(self.good_name.finish()),
             Arc::new(self.extra_levels.finish()),
             Arc::new(self.title.finish()),
             Arc::new(self.detail.finish()),

@@ -204,7 +204,7 @@
     },
     "GoodFlow": {
       "properties": {
-        "good_id": {
+        "name": {
           "type": "string"
         },
         "quantity": {
@@ -217,7 +217,7 @@
         }
       },
       "required": [
-        "good_id",
+        "name",
         "quantity",
         "value"
       ],
@@ -234,14 +234,14 @@
           "format": "double",
           "type": "number"
         },
-        "id": {
-          "type": "string"
-        },
-        "name": {
+        "label": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "name": {
+          "type": "string"
         },
         "price": {
           "format": "double",
@@ -253,7 +253,7 @@
         }
       },
       "required": [
-        "id",
+        "name",
         "base",
         "price",
         "buy",
@@ -404,9 +404,6 @@
           "format": "double",
           "type": "number"
         },
-        "good_id": {
-          "type": "string"
-        },
         "market_access": {
           "description": "Infrastructure-only state market access in `[0, 1]`.",
           "format": "double",
@@ -416,6 +413,9 @@
           "description": "Solved whole-save market price (Milestone 1; per-market solves follow).",
           "format": "double",
           "type": "number"
+        },
+        "name": {
+          "type": "string"
         },
         "price": {
           "description": "Final local price after blending market and pure state prices.",
@@ -439,7 +439,7 @@
       },
       "required": [
         "state_id",
-        "good_id",
+        "name",
         "buy",
         "sell",
         "price",

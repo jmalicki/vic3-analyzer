@@ -10,8 +10,8 @@ import type { BuildingEconomics, PricesResult, WorldDelta } from './types'
 
 const current: PricesResult = {
   goods: [
-    { id: 'iron', name: 'Iron', base: 40, price: 43.5, buy: 120, sell: 100 },
-    { id: 'grain', name: 'Grain', base: 20, price: 18, buy: 4, sell: 8 },
+    { name: 'iron', label: 'Iron', base: 40, price: 43.5, buy: 120, sell: 100 },
+    { name: 'grain', label: 'Grain', base: 20, price: 18, buy: 4, sell: 8 },
   ],
   residual: 0.02,
   status: 'converged',
@@ -20,8 +20,8 @@ const current: PricesResult = {
 
 const preview: PricesResult = {
   goods: [
-    { id: 'iron', name: 'Iron', base: 40, price: 41, buy: 120, sell: 110 },
-    { id: 'grain', name: 'Grain', base: 20, price: 19.25, buy: 4, sell: 8 },
+    { name: 'iron', label: 'Iron', base: 40, price: 41, buy: 120, sell: 110 },
+    { name: 'grain', label: 'Grain', base: 20, price: 19.25, buy: 4, sell: 8 },
   ],
   residual: 0.001,
   status: 'converged',
@@ -40,7 +40,7 @@ const rye: BuildingEconomics = {
   staffing: 3,
   production_method_ids: ['pm_simple_farming'],
   inputs: [],
-  outputs: [{ good_id: 'grain', quantity: 10, value: 200 }],
+  outputs: [{ name: 'grain', quantity: 10, value: 200 }],
   revenue: 200,
   cost: 50,
   profit: 150,
@@ -100,9 +100,9 @@ describe('ConfirmApply', () => {
       ),
     ).toEqual({ extra_levels: [{ building_id: 9, extra_levels: 1 }] })
     expect(
-      deltaForMitigation({ type: 'sol_goods', good_id: 'grain', state_id: 1 }, [rye]),
+      deltaForMitigation({ type: 'sol_goods', good_name: 'grain', state_id: 1 }, [rye]),
     ).toEqual({ extra_levels: [{ building_id: 9, extra_levels: 1 }] })
-    expect(deltaForMitigation({ type: 'trade_alloc', state_id: 1, good_id: 'grain' }, [rye])).toBeUndefined()
+    expect(deltaForMitigation({ type: 'trade_alloc', state_id: 1, good_name: 'grain' }, [rye])).toBeUndefined()
     expect(deltaForMitigation({ type: 'build', building: 'building_missing' }, [rye])).toBeUndefined()
   })
 

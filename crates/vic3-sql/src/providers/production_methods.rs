@@ -88,7 +88,7 @@ fn flows_from_idx(binding: &SessionBinding, rows: &[(vic3_defs::GoodId, f64)]) -
         .filter_map(|(idx, qty)| {
             let good_id = binding.defs.good_by_index(*idx)?.to_string();
             Some(GoodFlow {
-                good_id,
+                name: good_id,
                 quantity: *qty,
                 value: 0.0,
             })

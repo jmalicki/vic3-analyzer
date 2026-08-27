@@ -182,8 +182,8 @@ describe('wasm wrapper (real wasm-pack build)', () => {
     expect(
       result.goods.some((good: { base: number; price: number }) => good.price !== good.base),
     ).toBe(true)
-    const wood = result.goods.find((good: { id: string }) => good.id === 'wood')
-    expect(wood?.name).toBe('Wood')
+    const wood = result.goods.find((good: { name: string }) => good.name === 'wood')
+    expect(wood?.label).toBe('Wood')
     expect(wood?.sell).toBe(40)
     expect(wood?.price).toBeLessThan(wood?.base)
   })

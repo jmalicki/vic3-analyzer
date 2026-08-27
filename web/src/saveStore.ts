@@ -112,9 +112,7 @@ const db = () =>
             hashed = undefined
           }
         }
-        await transaction.objectStore('origins').put({
-          id: originId,
-          name: current.name,
+        await transaction.objectStore('origins').put({ id: originId, name: current.name,
           bytes: current.bytes,
           blob: current.blob,
           tokens: current.tokens,
@@ -207,9 +205,7 @@ export async function storeSave(save: File, tokens?: File): Promise<void> {
     const timelineId = newId()
     const stepId = newId()
     const database = await db()
-    await database.put('origins', {
-      id: originId,
-      name: save.name,
+    await database.put('origins', { id: originId, name: save.name,
       bytes,
       tokens: tokenBytes,
       tokens_name: tokens?.name,

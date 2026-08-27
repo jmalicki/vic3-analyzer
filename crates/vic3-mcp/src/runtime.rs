@@ -240,12 +240,15 @@ fn compact_preview(binding: &SessionBinding, delta: &WorldDelta) -> Value {
     }
     let after = preview(binding.world.as_ref(), binding.defs.as_ref(), delta, opts);
 
-    let before_by_id: std::collections::BTreeMap<&str, &GoodPrice> =
-        baseline.goods.iter().map(|g| (g.id.as_str(), g)).collect();
+    let before_by_id: std::collections::BTreeMap<&str, &GoodPrice> = baseline
+        .goods
+        .iter()
+        .map(|g| (g.name.as_str(), g))
+        .collect();
 
     let mut goods = Vec::new();
     for g_after in &after.goods {
-        let (price_before, shortage_before) = match before_by_id.get(g_after.id.as_str()) {
+        let (price_before, shortage_before) = match before_by_id.get(g_after.name.as_str()) {
             Some(g) => (g.price, shortage(g)),
             None => (g_after.base, 0.0),
         };
@@ -257,7 +260,7 @@ fn compact_preview(binding: &SessionBinding, delta: &WorldDelta) -> Value {
             continue;
         }
         goods.push(json!({
-            "id": g_after.id,
+            "name": g_after.name,
             "price_before": price_before,
             "price_after": price_after,
             "d_price": d_price,

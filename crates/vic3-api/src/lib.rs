@@ -1873,9 +1873,9 @@ mod tests {
         let prices = loaded_prices_json().expect("prices");
         let parsed: PricesResult = serde_json::from_str(&prices).expect("PricesResult");
         assert!(
-            parsed.goods.iter().any(|g| g.id == "mock_lumber"),
+            parsed.goods.iter().any(|g| g.name == "mock_lumber"),
             "expected mock_lumber in goods: {:?}",
-            parsed.goods.iter().map(|g| &g.id).collect::<Vec<_>>()
+            parsed.goods.iter().map(|g| &g.name).collect::<Vec<_>>()
         );
         clear_analysis();
     }

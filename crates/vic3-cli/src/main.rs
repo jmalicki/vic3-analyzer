@@ -741,13 +741,13 @@ fn print_table(result: &PricesResult) -> Result<()> {
     writeln!(
         out,
         "{:<16} {:>10} {:>10} {:>12} {:>12}",
-        "id", "base", "price", "buy", "sell"
+        "name", "base", "price", "buy", "sell"
     )?;
     for row in &result.goods {
         writeln!(
             out,
             "{:<16} {:>10.4} {:>10.4} {:>12.4} {:>12.4}",
-            row.id, row.base, row.price, row.buy, row.sell
+            row.name, row.base, row.price, row.buy, row.sell
         )?;
     }
     writeln!(

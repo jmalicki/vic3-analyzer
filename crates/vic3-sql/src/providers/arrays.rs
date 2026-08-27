@@ -1,7 +1,7 @@
 //! Arrow List builders for `TEXT[]` and goods-IO structs.
 //!
-//! [`good_io_list_column`] projects `GoodFlow` → `List<Struct{good, good_name, qty}>`
-//! using [`SessionBinding::good_name`] for labels.
+//! [`good_io_list_column`] projects `GoodFlow` → `List<Struct{good_name, good_label, qty}>`
+//! using [`SessionBinding::good_label`] for labels.
 
 use std::sync::Arc;
 
@@ -28,17 +28,17 @@ pub fn good_io_list_column(binding: &SessionBinding, rows: &[Vec<GoodFlow>]) -> 
         DataType::Struct(f) => f,
         _ => unreachable!(),
     };
-    let mut good = StringBuilder::new();
     let mut good_name = StringBuilder::new();
+    let mut good_label = StringBuilder::new();
     let mut qty = Float64Builder::new();
     let mut offsets = vec![0i32];
     let mut len = 0i32;
     for row in rows {
         for flow in row {
-            good.append_value(&flow.good_id);
-            match binding.good_name(&flow.good_id) {
-                Some(n) => good_name.append_value(n),
-                None => good_name.append_null(),
+            good_name.append_value(&flow.name);
+            match binding.good_label(&flow.name) {
+                Some(n) => good_label.append_value(n),
+                None => good_label.append_null(),
             }
             qty.append_value(flow.quantity);
             len += 1;
@@ -48,8 +48,8 @@ pub fn good_io_list_column(binding: &SessionBinding, rows: &[Vec<GoodFlow>]) -> 
     let struct_array = StructArray::new(
         fields,
         vec![
-            Arc::new(good.finish()) as ArrayRef,
             Arc::new(good_name.finish()) as ArrayRef,
+            Arc::new(good_label.finish()) as ArrayRef,
             Arc::new(qty.finish()) as ArrayRef,
         ],
         None,

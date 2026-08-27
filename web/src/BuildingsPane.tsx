@@ -147,7 +147,7 @@ function previewFlows(
     }
   }
   const toFlows = (map: Map<string, number>): GoodFlow[] =>
-    [...map.entries()].map(([good_id, quantity]) => ({ good_id, quantity, value: 0 }))
+    [...map.entries()].map(([name, quantity]) => ({ name, quantity, value: 0 }))
   return { inputs: toFlows(inputs), outputs: toFlows(outputs) }
 }
 
@@ -162,9 +162,9 @@ function FlowList({
   return (
     <ul className="good-chips">
       {flows.map((flow) => (
-        <li key={flow.good_id}>
-          <GameIcon kind="good" id={flow.good_id} icons={icons} />
-          {displayId(flow.good_id)} {flow.quantity.toFixed(1)}
+        <li key={flow.name}>
+          <GameIcon kind="good" id={flow.name} icons={icons} />
+          {displayId(flow.name)} {flow.quantity.toFixed(1)}
         </li>
       ))}
     </ul>
