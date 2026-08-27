@@ -591,11 +591,11 @@ mod tests {
         assert!(alerts.contains("\"alerts\""));
 
         let query = session
-            .sql_query("SELECT tag FROM countries WHERE tag = 'GER'")
+            .sql_query("SELECT name FROM countries WHERE name = 'GER'")
             .unwrap();
         let q: serde_json::Value = serde_json::from_str(&query).unwrap();
         assert_eq!(q["row_count"], 1);
-        assert_eq!(q["columns"][0], "tag");
+        assert_eq!(q["columns"][0], "name");
         assert_eq!(q["rows"][0][0], "GER");
 
         let saves_q = session
