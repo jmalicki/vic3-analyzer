@@ -125,8 +125,8 @@ Market-level goods from `PricesResult.goods` / `GameDefs`.
 
 | Column | Notes |
 | --- | --- |
-| `good_name` | Script id; **key** — `goods_order` + `index_of` (Exact `=`). Defs also keep a `BTreeMap` by script id → if that map is the scan source, Exact **range** on `good` is allowed |
-| `good_label` | Localized (`labels`); Exact `=` via inverse hash if built — **no** range Exact unless a btree of labels exists |
+| `name` | Script id; **key** — `goods_order` + `index_of` (Exact `=`). Defs also keep a `BTreeMap` by script id → if that map is the scan source, Exact **range** on `good` is allowed |
+| `label` | Localized (`labels`); Exact `=` via inverse hash if built — **no** range Exact unless a btree of labels exists |
 | `base` / `price` / `buy` / `sell` / `shortage` | As modeled; document shortage formula in implementation |
 
 ### `goods_by_state`

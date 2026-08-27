@@ -747,7 +747,7 @@ fn print_table(result: &PricesResult) -> Result<()> {
         writeln!(
             out,
             "{:<16} {:>10.4} {:>10.4} {:>12.4} {:>12.4}",
-            row.good_name, row.base, row.price, row.buy, row.sell
+            row.name, row.base, row.price, row.buy, row.sell
         )?;
     }
     writeln!(

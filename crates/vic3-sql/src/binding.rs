@@ -61,13 +61,13 @@ impl SessionBinding {
     }
 
     /// Display label for a good script name (defs labels, else prices row label).
-    pub fn good_name(&self, good_name: &str) -> Option<String> {
-        self.defs.labels.get(good_name).cloned().or_else(|| {
+    pub fn good_label(&self, name: &str) -> Option<String> {
+        self.defs.labels.get(name).cloned().or_else(|| {
             self.prices
                 .goods
                 .iter()
-                .find(|g| g.good_name == good_name)
-                .and_then(|g| g.good_label.clone())
+                .find(|g| g.name == name)
+                .and_then(|g| g.label.clone())
         })
     }
 

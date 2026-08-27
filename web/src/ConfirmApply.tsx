@@ -50,7 +50,7 @@ function findProducer(
   stateId?: number,
 ): BuildingEconomics | undefined {
   const produces = (building: BuildingEconomics) =>
-    building.outputs.some((flow) => flow.good_name === goodId)
+    building.outputs.some((flow) => flow.name === goodId)
   if (stateId != null) {
     const local = buildings.find((building) => building.state_id === stateId && produces(building))
     if (local) return local
@@ -162,12 +162,12 @@ export function deltasFromSteps(steps: Step[], currentId?: string): WorldDelta[]
 }
 
 function pickGoods(current: PricesResult, preview: PricesResult) {
-  const afterById = new Map(preview.goods.map((good) => [good.good_name, good]))
+  const afterById = new Map(preview.goods.map((good) => [good.name, good]))
   const rows = current.goods.flatMap((good) => {
-    const after = afterById.get(good.good_name)
+    const after = afterById.get(good.name)
     if (!after) return []
     return [
-      { good_name: good.good_name, good_label: good.good_label ?? good.good_name.replaceAll('_', ' '),
+      { good_name: good.name, good_label: good.label ?? good.name.replaceAll('_', ' '),
         before: good.price,
         after: after.price,
       },

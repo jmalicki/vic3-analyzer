@@ -139,7 +139,7 @@ fn detail_rows(
     let mut base_prices = GoodsVec::zeros(defs.goods_order.len());
     let mut sell_orders = GoodsVec::zeros(defs.goods_order.len());
     for good in goods {
-        if let Some(idx) = defs.index_of(&good.good_name) {
+        if let Some(idx) = defs.index_of(&good.name) {
             prices[idx] = good.price;
             base_prices[idx] = good.base;
             sell_orders[idx] = good.sell;
@@ -147,7 +147,7 @@ fn detail_rows(
     }
     let rows = goods
         .iter()
-        .filter_map(|good| Some((defs.index_of(&good.good_name)?, good)))
+        .filter_map(|good| Some((defs.index_of(&good.name)?, good)))
         .collect::<BTreeMap<_, _>>();
     let frozen_sell = world.frozen_sell.aligned(defs.goods_order.len());
     let shares = NeedShares::from_sell(defs, &sell_orders);
@@ -202,7 +202,7 @@ fn detail_rows(
         let short_inputs = inputs
             .iter()
             .filter(|flow| {
-                defs.index_of(&flow.good_name)
+                defs.index_of(&flow.name)
                     .and_then(|idx| rows.get(&idx).copied())
                     .is_none_or(|row| {
                         row.sell <= crate::ORDER_EPS
@@ -210,7 +210,7 @@ fn detail_rows(
                                 >= row.base * (1.0 + defs.price_range.max(0.0)) - crate::ORDER_EPS
                     })
             })
-            .map(|flow| flow.good_name.clone())
+            .map(|flow| flow.name.clone())
             .collect();
         buildings.push(BuildingEconomics {
             id: building.id,
@@ -257,7 +257,7 @@ fn detail_rows(
                 .unwrap_or_else(|| local_price(effective_mapi, row.price, state_price));
             Some(StateGood {
                 state_id: state.id,
-                good_name: good_id,
+                name: good_id,
                 buy,
                 sell,
                 price,
@@ -593,7 +593,7 @@ fn aggregate_state_needs(pops: &[CompactStatePop], tables: &EmitTables) -> Vec<S
                     .into_iter()
                     .filter_map(|(idx, quantity, value)| {
                         Some(GoodFlow {
-                            good_name: tables.good(idx)?.to_string(),
+                            name: tables.good(idx)?.to_string(),
                             quantity,
                             value,
                         })
@@ -785,7 +785,7 @@ fn priced_flows(
             }
             Some(GoodFlow {
                 value: prices[good] * quantity,
-                good_name: defs.good_by_index(good)?.to_string(),
+                name: defs.good_by_index(good)?.to_string(),
                 quantity,
             })
         })
@@ -810,7 +810,7 @@ pub fn building_revenues(
 ) -> Vec<crate::result::BuildingRevenue> {
     let mut prices = GoodsVec::zeros(defs.goods_order.len());
     for good in goods {
-        if let Some(idx) = defs.index_of(&good.good_name) {
+        if let Some(idx) = defs.index_of(&good.name) {
             prices[idx] = good.price;
         }
     }
@@ -850,7 +850,7 @@ pub fn building_revenues_from_cache(
 ) -> Vec<crate::result::BuildingRevenue> {
     let mut prices = GoodsVec::zeros(defs.goods_order.len());
     for good in goods {
-        if let Some(idx) = defs.index_of(&good.good_name) {
+        if let Some(idx) = defs.index_of(&good.name) {
             prices[idx] = good.price;
         }
     }

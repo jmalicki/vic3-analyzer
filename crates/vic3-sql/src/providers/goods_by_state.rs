@@ -49,11 +49,7 @@ impl GoodsByStateProvider {
         let mut shortage = Float64Builder::new();
 
         let mut rows = self.binding.prices.state_goods.clone();
-        rows.sort_by(|a, b| {
-            a.state_id
-                .cmp(&b.state_id)
-                .then(a.good_name.cmp(&b.good_name))
-        });
+        rows.sort_by(|a, b| a.state_id.cmp(&b.state_id).then(a.name.cmp(&b.name)));
 
         for g in &rows {
             if !state_in_scope(self.scope, self.binding.world.as_ref(), Some(g.state_id)) {
@@ -62,11 +58,11 @@ impl GoodsByStateProvider {
             if !matches_u32(&preds, "state_id", g.state_id) {
                 continue;
             }
-            if !matches_str(&preds, "good_name", &g.good_name) {
+            if !matches_str(&preds, "good_name", &g.name) {
                 continue;
             }
             state_id.append_value(g.state_id);
-            good.append_value(&g.good_name);
+            good.append_value(&g.name);
             price.append_value(g.price);
             buy.append_value(g.buy);
             sell.append_value(g.sell);

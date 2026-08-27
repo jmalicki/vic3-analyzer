@@ -1,7 +1,7 @@
 //! Arrow List builders for `TEXT[]` and goods-IO structs.
 //!
 //! [`good_io_list_column`] projects `GoodFlow` → `List<Struct{good_name, good_label, qty}>`
-//! using [`SessionBinding::good_name`] for labels.
+//! using [`SessionBinding::good_label`] for labels.
 
 use std::sync::Arc;
 
@@ -35,8 +35,8 @@ pub fn good_io_list_column(binding: &SessionBinding, rows: &[Vec<GoodFlow>]) -> 
     let mut len = 0i32;
     for row in rows {
         for flow in row {
-            good_name.append_value(&flow.good_name);
-            match binding.good_name(&flow.good_name) {
+            good_name.append_value(&flow.name);
+            match binding.good_label(&flow.name) {
                 Some(n) => good_label.append_value(n),
                 None => good_label.append_null(),
             }

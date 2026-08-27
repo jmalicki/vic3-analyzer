@@ -163,12 +163,7 @@ impl ShortageAnalysisProvider {
 
         for alert in alerts {
             let good_id = alert.good_name.as_deref().unwrap_or("");
-            let market = self
-                .binding
-                .prices
-                .goods
-                .iter()
-                .find(|g| g.good_name == good_id);
+            let market = self.binding.prices.goods.iter().find(|g| g.name == good_id);
 
             good_col.append_value(good_id);
             alert_id.append_value(&alert.id);

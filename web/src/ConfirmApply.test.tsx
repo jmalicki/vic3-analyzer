@@ -10,8 +10,8 @@ import type { BuildingEconomics, PricesResult, WorldDelta } from './types'
 
 const current: PricesResult = {
   goods: [
-    { good_name: 'iron', good_label: 'Iron', base: 40, price: 43.5, buy: 120, sell: 100 },
-    { good_name: 'grain', good_label: 'Grain', base: 20, price: 18, buy: 4, sell: 8 },
+    { name: 'iron', label: 'Iron', base: 40, price: 43.5, buy: 120, sell: 100 },
+    { name: 'grain', label: 'Grain', base: 20, price: 18, buy: 4, sell: 8 },
   ],
   residual: 0.02,
   status: 'converged',
@@ -20,8 +20,8 @@ const current: PricesResult = {
 
 const preview: PricesResult = {
   goods: [
-    { good_name: 'iron', good_label: 'Iron', base: 40, price: 41, buy: 120, sell: 110 },
-    { good_name: 'grain', good_label: 'Grain', base: 20, price: 19.25, buy: 4, sell: 8 },
+    { name: 'iron', label: 'Iron', base: 40, price: 41, buy: 120, sell: 110 },
+    { name: 'grain', label: 'Grain', base: 20, price: 19.25, buy: 4, sell: 8 },
   ],
   residual: 0.001,
   status: 'converged',
@@ -40,7 +40,7 @@ const rye: BuildingEconomics = {
   staffing: 3,
   production_method_ids: ['pm_simple_farming'],
   inputs: [],
-  outputs: [{ good_name: 'grain', quantity: 10, value: 200 }],
+  outputs: [{ name: 'grain', quantity: 10, value: 200 }],
   revenue: 200,
   cost: 50,
   profit: 150,

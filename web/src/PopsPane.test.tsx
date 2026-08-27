@@ -5,7 +5,7 @@ import { PopsPane } from './PopsPane'
 import type { PricesResult } from './types'
 
 const result: PricesResult = {
-  goods: [{ good_name: 'apples', good_label: 'Apples', base: 20, price: 15, buy: 5, sell: 7 }],
+  goods: [{ name: 'apples', label: 'Apples', base: 20, price: 15, buy: 5, sell: 7 }],
   countries: [
     { id: 10, tag: 'ALP', name: 'Alpacania' },
     { id: 20, tag: 'BDG', name: 'Badgeria' },
@@ -56,7 +56,7 @@ const result: PricesResult = {
           need_id: 'popneed_staple_foods',
           need_name: 'Staple foods',
           package_value: 10,
-          goods: [{ good_name: 'apples', quantity: 4, value: 60 }],
+          goods: [{ name: 'apples', quantity: 4, value: 60 }],
         },
       ],
     },
@@ -89,7 +89,7 @@ const result: PricesResult = {
       need_id: 'popneed_staple_foods',
       need_name: 'Staple foods',
       package_value: 10,
-      goods: [{ good_name: 'apples', quantity: 4, value: 60 }],
+      goods: [{ name: 'apples', quantity: 4, value: 60 }],
     },
   ],
   residual: 0,

@@ -326,7 +326,7 @@ async fn preview_delta_rye_drops_wood_price() {
     let goods = body["goods"].as_array().expect("goods");
     let wood = goods
         .iter()
-        .find(|g| g["good_name"] == "wood")
+        .find(|g| g["name"] == "wood")
         .expect("wood row among changed goods");
     let before = wood["price_before"].as_f64().unwrap();
     let after = wood["price_after"].as_f64().unwrap();

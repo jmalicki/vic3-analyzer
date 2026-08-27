@@ -121,7 +121,7 @@ fn lookup_price(binding: &SessionBinding, good: &str) -> Option<f64> {
         .prices
         .goods
         .iter()
-        .find(|g| g.good_name == good)
+        .find(|g| g.name == good)
         .map(|g| g.price)
 }
 

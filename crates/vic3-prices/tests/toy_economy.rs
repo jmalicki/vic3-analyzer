@@ -32,7 +32,7 @@ fn good<'a>(result: &'a PricesResult, id: &str) -> &'a GoodPrice {
     result
         .goods
         .iter()
-        .find(|row| row.good_name == id)
+        .find(|row| row.name == id)
         .unwrap_or_else(|| panic!("missing good {id}"))
 }
 
@@ -84,9 +84,9 @@ fn toy_economy_solve_converges() {
     if result.status == SolveStatus::Converged {
         assert!(result.residual < SolveOpts::default().residual_eps);
     }
-    assert!(result.goods.iter().any(|g| g.good_name == "wheat"));
-    assert!(result.goods.iter().any(|g| g.good_name == "flour"));
-    assert!(result.goods.iter().any(|g| g.good_name == "bread"));
+    assert!(result.goods.iter().any(|g| g.name == "wheat"));
+    assert!(result.goods.iter().any(|g| g.name == "flour"));
+    assert!(result.goods.iter().any(|g| g.name == "bread"));
 }
 
 #[test]

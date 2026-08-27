@@ -155,7 +155,7 @@ fn time_sql_shape(label: &str, result: &AlertsResult) -> Vec<u8> {
         summary: &'a str,
         state_id: Option<u32>,
         building_id: Option<u32>,
-        good_name: Option<&'a str>,
+        name: Option<&'a str>,
         evidence: String,
         mitigations: String,
     }
@@ -171,7 +171,7 @@ fn time_sql_shape(label: &str, result: &AlertsResult) -> Vec<u8> {
             summary: &a.summary,
             state_id: a.state_id,
             building_id: a.building_id,
-            good_name: a.good_name.as_deref(),
+            name: a.good_name.as_deref(),
             evidence: serde_json::to_string(&a.evidence).unwrap_or_else(|_| "[]".into()),
             mitigations: serde_json::to_string(&a.mitigations).unwrap_or_else(|_| "[]".into()),
         })

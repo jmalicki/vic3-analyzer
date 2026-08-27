@@ -15,7 +15,7 @@ function stateGood(
   const effective_mapi = 0.75 * market_access
   return {
     state_id,
-    good_name: 'zany_tools',
+    name: 'zany_tools',
     base: 40,
     buy,
     sell,
@@ -30,8 +30,8 @@ function stateGood(
 const result: PricesResult = {
   scope: 'whole_save_synthetic',
   goods: [
-    { good_name: 'zany_tools', good_label: 'Zany Tools', base: 40, price: 50, buy: 10, sell: 8 },
-    { good_name: 'apples', good_label: 'Apples', base: 20, price: 15, buy: 5, sell: 7 },
+    { name: 'zany_tools', label: 'Zany Tools', base: 40, price: 50, buy: 10, sell: 8 },
+    { name: 'apples', label: 'Apples', base: 20, price: 15, buy: 5, sell: 7 },
   ],
   states: [
     { id: 2, region_id: 'STATE_ZEBRA', market_id: 1 },
@@ -57,8 +57,8 @@ const result: PricesResult = {
       level: 3,
       staffing: 2.4,
       production_method_ids: ['pm_goofy_hammers'],
-      inputs: [{ good_name: 'iron', quantity: 2, value: 80 }],
-      outputs: [{ good_name: 'zany_tools', quantity: 3, value: 150 }],
+      inputs: [{ name: 'iron', quantity: 2, value: 80 }],
+      outputs: [{ name: 'zany_tools', quantity: 3, value: 150 }],
       revenue: 150,
       cost: 80,
       profit: 70,
@@ -99,7 +99,7 @@ const result: PricesResult = {
           need_id: 'popneed_staple_foods',
           need_name: 'Staple foods',
           package_value: 10,
-          goods: [{ good_name: 'apples', quantity: 4, value: 60 }],
+          goods: [{ name: 'apples', quantity: 4, value: 60 }],
         },
       ],
     },
@@ -122,7 +122,7 @@ const result: PricesResult = {
       need_id: 'popneed_staple_foods',
       need_name: 'Staple foods',
       package_value: 10,
-      goods: [{ good_name: 'apples', quantity: 4, value: 60 }],
+      goods: [{ name: 'apples', quantity: 4, value: 60 }],
     },
   ],
   residual: 0,
@@ -226,8 +226,8 @@ describe('PriceExplorer', () => {
         result={{
           ...result,
           goods: [
-            { good_name: 'cheap', good_label: 'Cheap', base: 10, price: 17, buy: 1, sell: 1 },
-            { good_name: 'dear', good_label: 'Dear', base: 200, price: 220, buy: 1, sell: 1 },
+            { name: 'cheap', label: 'Cheap', base: 10, price: 17, buy: 1, sell: 1 },
+            { name: 'dear', label: 'Dear', base: 200, price: 220, buy: 1, sell: 1 },
           ],
         }}
       />,

@@ -11,7 +11,7 @@ const rye: BuildingEconomics = {
   level: 4,
   staffing: 3,
   inputs: [],
-  outputs: [{ good_name: 'grain', quantity: 10, value: 200 }],
+  outputs: [{ name: 'grain', quantity: 10, value: 200 }],
   revenue: 200,
   cost: 50,
   profit: 150,

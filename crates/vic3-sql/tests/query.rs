@@ -177,7 +177,7 @@ async fn world_tables_include_foreign_when_present() {
 async fn goods_shortage_and_equality_filter() {
     let eng = engine().await;
     let batches = eng
-        .query("SELECT good_name, buy, sell, shortage FROM goods WHERE good_name = 'grain'")
+        .query("SELECT name, buy, sell, shortage FROM goods WHERE name = 'grain'")
         .await
         .expect("goods");
     assert_eq!(batches[0].num_rows(), 1);
@@ -246,7 +246,7 @@ async fn join_example_from_docs() {
     // Exact docs example shape (`docs/sql.md`); fixture may have zero shortages.
     let batches = eng
         .query(
-            "SELECT s.state_name, g.good_name, g.shortage, g.price \
+            "SELECT s.state_name, g.name, g.shortage, g.price \
              FROM states s \
              JOIN goods_by_state g USING (state_id) \
              WHERE g.shortage > 0 \

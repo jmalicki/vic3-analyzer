@@ -1027,7 +1027,7 @@ mod tests {
         let wood = result
             .goods
             .iter()
-            .find(|g| g.good_name == "wood")
+            .find(|g| g.name == "wood")
             .expect("wood");
         assert!(wood.price < wood.base);
         assert!(result.inputs.goods_with_orders > 0);

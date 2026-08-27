@@ -44,8 +44,8 @@ pub fn states_schema() -> SchemaRef {
 
 pub fn goods_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
-        Field::new("good_name", DataType::Utf8, false),
-        Field::new("good_label", DataType::Utf8, true),
+        Field::new("name", DataType::Utf8, false),
+        Field::new("label", DataType::Utf8, true),
         Field::new("base", DataType::Float64, false),
         Field::new("price", DataType::Float64, false),
         Field::new("buy", DataType::Float64, false),

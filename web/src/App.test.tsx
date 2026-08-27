@@ -15,7 +15,7 @@ vi.mock('./wasmClient', () => ({
 
 /** Test-only blobs; silly names so they never look like a real install export. */
 const result = JSON.stringify({
-  goods: [{ good_name: 'iron', base: 40, price: 43.5, buy: 120, sell: 100 }],
+  goods: [{ name: 'iron', base: 40, price: 43.5, buy: 120, sell: 100 }],
   states: [
     {
       id: 1,
@@ -35,7 +35,7 @@ const result = JSON.stringify({
       staffing: 3.2,
       production_method_ids: ['pm_simple_farming'],
       inputs: [],
-      outputs: [{ good_name: 'grain', quantity: 10, value: 200 }],
+      outputs: [{ name: 'grain', quantity: 10, value: 200 }],
       revenue: 200,
       cost: 50,
       profit: 150,
@@ -600,7 +600,7 @@ describe('prices UI', () => {
     await storeSaveAnalysis(saveSummary, JSON.parse(result) as PricesResult)
     const cached = await loadStoredSave()
     expect(cached?.summary?.tag).toBe('FRA')
-    expect(cached?.prices?.goods[0]?.good_name).toBe('iron')
+    expect(cached?.prices?.goods[0]?.name).toBe('iron')
     const api = mockApi()
     api.load_analysis = vi.fn(() => new Promise<string>(() => {}))
     api.loaded_alerts = vi.fn(() => {
@@ -960,7 +960,7 @@ describe('prices UI', () => {
       JSON.stringify({
         ...JSON.parse(result),
         residual: 0.4,
-        goods: [{ good_name: 'iron', base: 40, price: 40, buy: 120, sell: 100 }],
+        goods: [{ name: 'iron', base: 40, price: 40, buy: 120, sell: 100 }],
       }),
     )
     render(<App wasmApi={api} />)

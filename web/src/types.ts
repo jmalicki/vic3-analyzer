@@ -1,6 +1,6 @@
 export interface GoodPrice {
-  good_name: string
-  good_label?: string
+  name: string
+  label?: string
   base: number
   price: number
   buy: number
@@ -87,7 +87,7 @@ export interface BuildingGroupInfo {
 
 export interface StateGood {
   state_id: number
-  good_name: string
+  name: string
   buy: number
   sell: number
   price: number
@@ -99,7 +99,7 @@ export interface StateGood {
 }
 
 export interface GoodFlow {
-  good_name: string
+  name: string
   quantity: number
   value: number
 }

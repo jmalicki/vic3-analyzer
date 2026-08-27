@@ -10,8 +10,8 @@ const dummyName =
 
 const result: PricesResult = {
   goods: [
-    { good_name: 'iron', good_label: 'Iron', base: 40, price: 50, buy: 2, sell: 1 },
-    { good_name: 'grain', good_label: 'Grain', base: 20, price: 18, buy: 4, sell: 8 },
+    { name: 'iron', label: 'Iron', base: 40, price: 50, buy: 2, sell: 1 },
+    { name: 'grain', label: 'Grain', base: 20, price: 18, buy: 4, sell: 8 },
   ],
   states: [
     { id: 1, region_id: 'STATE_ALPACA', state_name: 'Alpaca', country_id: 10, market_id: 1 },
@@ -26,8 +26,8 @@ const result: PricesResult = {
       level: 3,
       staffing: 2.4,
       production_method_ids: ['pm_goofy_hammers'],
-      inputs: [{ good_name: 'iron', quantity: 2, value: 80 }],
-      outputs: [{ good_name: 'zany_tools', quantity: 3, value: 150 }],
+      inputs: [{ name: 'iron', quantity: 2, value: 80 }],
+      outputs: [{ name: 'zany_tools', quantity: 3, value: 150 }],
       revenue: 150,
       cost: 80,
       profit: 70,
@@ -55,7 +55,7 @@ const result: PricesResult = {
       staffing: 8,
       production_method_ids: ['pm_simple_farming'],
       inputs: [],
-      outputs: [{ good_name: 'grain', quantity: 20, value: 200 }],
+      outputs: [{ name: 'grain', quantity: 20, value: 200 }],
       revenue: 200,
       cost: 20,
       profit: 180,
@@ -82,8 +82,8 @@ const result: PricesResult = {
       level: 2,
       staffing: 2,
       production_method_ids: ['pm_goofy_hammers'],
-      inputs: [{ good_name: 'iron', quantity: 1, value: 40 }],
-      outputs: [{ good_name: 'zany_tools', quantity: 1, value: 50 }],
+      inputs: [{ name: 'iron', quantity: 1, value: 40 }],
+      outputs: [{ name: 'zany_tools', quantity: 1, value: 50 }],
       revenue: 50,
       cost: 40,
       profit: 10,

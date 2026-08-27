@@ -21,7 +21,7 @@ const PUSH: PushSupport = PushSupport {
     eq_u32: &[],
     eq_i32: &[],
     // goods_order / index_of / label hash — Exact equality only (no range).
-    eq_str: &["good_name", "good_label"],
+    eq_str: &["name", "label"],
     range_str: &[],
 };
 
@@ -38,8 +38,8 @@ impl GoodsProvider {
         let mut by_good = HashMap::new();
         let mut by_label: HashMap<String, Vec<usize>> = HashMap::new();
         for (i, g) in binding.prices.goods.iter().enumerate() {
-            by_good.insert(g.good_name.clone(), i);
-            if let Some(n) = &g.good_label {
+            by_good.insert(g.name.clone(), i);
+            if let Some(n) = &g.label {
                 by_label.entry(n.clone()).or_default().push(i);
             }
         }
@@ -55,13 +55,13 @@ impl GoodsProvider {
         let preds = PUSH.collect_preds(filters);
         let indices: Vec<usize> = if let Some(Pred::EqStr { column, value }) = preds
             .iter()
-            .find(|p| matches!(p, Pred::EqStr { column, .. } if column == "good_name"))
+            .find(|p| matches!(p, Pred::EqStr { column, .. } if column == "name"))
         {
             let _ = column;
             self.by_good.get(value).copied().into_iter().collect()
         } else if let Some(Pred::EqStr { column, value }) = preds
             .iter()
-            .find(|p| matches!(p, Pred::EqStr { column, .. } if column == "good_label"))
+            .find(|p| matches!(p, Pred::EqStr { column, .. } if column == "label"))
         {
             let _ = column;
             self.by_label.get(value).cloned().unwrap_or_default()
@@ -69,8 +69,8 @@ impl GoodsProvider {
             (0..self.binding.prices.goods.len()).collect()
         };
 
-        let mut good_name = StringBuilder::new();
-        let mut good_label = StringBuilder::new();
+        let mut name = StringBuilder::new();
+        let mut label = StringBuilder::new();
         let mut base = Float64Builder::new();
         let mut price = Float64Builder::new();
         let mut buy = Float64Builder::new();
@@ -79,23 +79,23 @@ impl GoodsProvider {
 
         for i in indices {
             let g = &self.binding.prices.goods[i];
-            if !matches_str(&preds, "good_name", &g.good_name) {
+            if !matches_str(&preds, "name", &g.name) {
                 continue;
             }
-            if let Some(n) = &g.good_label {
-                if !matches_str(&preds, "good_label", n) {
+            if let Some(n) = &g.label {
+                if !matches_str(&preds, "label", n) {
                     continue;
                 }
             } else if preds
                 .iter()
-                .any(|p| matches!(p, Pred::EqStr { column, .. } if column == "good_label"))
+                .any(|p| matches!(p, Pred::EqStr { column, .. } if column == "label"))
             {
                 continue;
             }
-            good_name.append_value(&g.good_name);
-            match &g.good_label {
-                Some(n) => good_label.append_value(n),
-                None => good_label.append_null(),
+            name.append_value(&g.name);
+            match &g.label {
+                Some(n) => label.append_value(n),
+                None => label.append_null(),
             }
             base.append_value(g.base);
             price.append_value(g.price);
@@ -107,8 +107,8 @@ impl GoodsProvider {
         RecordBatch::try_new(
             Arc::clone(&self.schema),
             vec![
-                Arc::new(good_name.finish()),
-                Arc::new(good_label.finish()),
+                Arc::new(name.finish()),
+                Arc::new(label.finish()),
                 Arc::new(base.finish()),
                 Arc::new(price.finish()),
                 Arc::new(buy.finish()),

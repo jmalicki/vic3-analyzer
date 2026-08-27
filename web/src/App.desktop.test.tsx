@@ -48,7 +48,7 @@ const FLAG_PNG = 'data:image/png;base64,FLAGBDG'
 const IRON_ICON = 'data:image/png;base64,IRONICON'
 
 const desktopPrices = {
-  goods: [{ good_name: 'iron', good_label: 'Iron', base: 40, price: 43.5, buy: 120, sell: 100 }],
+  goods: [{ name: 'iron', label: 'Iron', base: 40, price: 43.5, buy: 120, sell: 100 }],
   countries: [
     { id: 10, tag: 'ALP', name: 'Alpacania', flag_data_url: 'data:image/png;base64,FLAGALP' },
     { id: 20, tag: 'BDG', name: 'Badgeria', flag_data_url: FLAG_PNG },

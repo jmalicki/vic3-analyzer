@@ -133,7 +133,7 @@ struct StoredPricesResult {
 
 #[derive(Deserialize)]
 struct StoredGoodPrice {
-    good_name: String,
+    name: String,
     price: f64,
 }
 
@@ -169,12 +169,12 @@ pub fn compare(left: &AnalysisRecord, right: &AnalysisRecord) -> CompareResult {
                 if let Some(right_good) = right_prices
                     .goods
                     .iter()
-                    .find(|good| good.good_name == left_good.good_name)
+                    .find(|good| good.name == left_good.name)
                 {
                     let delta = right_good.price - left_good.price;
                     if delta != 0.0 {
                         result.prices.push(PriceDelta {
-                            good: left_good.good_name,
+                            good: left_good.name,
                             delta,
                         });
                     }

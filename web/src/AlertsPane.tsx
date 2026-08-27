@@ -171,8 +171,8 @@ export function hrefForAlert(alert: Alert): string {
 export function alertsForBuilding(alerts: Alert[], building: BuildingEconomics): Alert[] {
   const goods = new Set([
     ...(building.short_inputs ?? []),
-    ...(building.inputs ?? []).map((flow) => flow.good_name),
-    ...(building.outputs ?? []).map((flow) => flow.good_name),
+    ...(building.inputs ?? []).map((flow) => flow.name),
+    ...(building.outputs ?? []).map((flow) => flow.name),
   ])
   return alerts.filter((alert) => {
     if (alert.building_id === building.id) return true
