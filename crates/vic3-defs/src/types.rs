@@ -130,6 +130,22 @@ impl GameDefs {
             .map(BuildingTypeId::from_usize)
     }
 
+    /// Resolve a building type script key, including known Paradox aliases.
+    pub fn resolve_building_type_index(&self, building_type: &str) -> Option<BuildingTypeId> {
+        self.building_index_of(building_type).or_else(|| {
+            const ALIASES: &[(&str, &str)] = &[
+                ("building_shipyard", "building_shipyards"),
+                ("building_shipyards", "building_shipyard"),
+            ];
+            for (from, to) in ALIASES {
+                if building_type == *from {
+                    return self.building_index_of(to);
+                }
+            }
+            None
+        })
+    }
+
     /// Building type script key at `index`.
     ///
     /// # Panics
@@ -222,6 +238,10 @@ impl GameDefs {
     pub fn ensure_building_type(&mut self, building_type: &str) -> BuildingTypeId {
         if let Some(idx) = self.building_index_of(building_type) {
             return idx;
+        }
+        if self.building_types.contains_key(building_type) {
+            self.building_types_order.push(building_type.to_string());
+            return BuildingTypeId::from_usize(self.building_types_order.len() - 1);
         }
         self.building_types.insert(
             building_type.to_string(),

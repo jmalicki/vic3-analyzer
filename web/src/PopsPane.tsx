@@ -65,7 +65,7 @@ function workplaceLabel(
   const building = buildingsById.get(pop.workplace_id)
   if (!building) return `Building ${pop.workplace_id}`
   const type = typesById.get(building.building_type_name)
-  return type?.label || type?.name || displayId(building.building_type_name)
+  return type?.label || displayId(type?.name || building.building_type_name)
 }
 
 function groupPops(pops: StatePop[]): ProfessionGroup[] {

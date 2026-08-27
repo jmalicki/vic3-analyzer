@@ -32,7 +32,7 @@ Core option structs never contain `PathBuf` or OS-specific filesystem fields.
   "required": ["building_type_id", "extra_levels"],
   "additionalProperties": false,
   "properties": {
-    "building_type_id": { "type": "integer", "minimum": 0 },
+    "building_type_id": { "type": "integer", "minimum": 0, "maximum": 65535 },
     "extra_levels": { "type": "integer", "minimum": 0 }
   }
 }
@@ -66,8 +66,8 @@ Preview mutation applied to a cloned world (extra levels, then production method
         "required": ["extra_levels"],
         "additionalProperties": false,
         "properties": {
-          "building_type_id": { "type": "integer", "minimum": 0, "description": "Building type index; used when building_id is omitted." },
-          "building_id": { "type": "integer", "minimum": 0, "description": "Single instance; wins over building when both are set." },
+          "building_type_id": { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Building type index; used when building_id is omitted." },
+          "building_id": { "type": "integer", "minimum": 0, "description": "Single instance; wins over building_type_id when both are set." },
           "extra_levels": { "type": "integer", "minimum": 0 }
         }
       }

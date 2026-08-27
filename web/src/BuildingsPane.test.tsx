@@ -336,4 +336,23 @@ describe('BuildingsPane', () => {
       production_methods: [{ building_id: 7, methods: ['pm_goofy_hammers', 'pm_steam_hammers'] }],
     })
   })
+
+  it('applies extra levels when building_types metadata is missing', async () => {
+    const user = userEvent.setup()
+    const onApply = vi.fn()
+    const sparseResult: PricesResult = {
+      ...result,
+      building_types: [],
+      buildings: (result.buildings ?? []).map((building) => ({
+        ...building,
+        building_type_id: building.building_type_name === 'building_rye_farm' ? 1 : 0,
+      })),
+    }
+    renderBuildings({ result: sparseResult, onApply })
+
+    await user.click(screen.getByRole('button', { name: 'Apply extra levels for Rye Farm' }))
+    expect(onApply).toHaveBeenCalledWith({
+      extra_levels: [{ building_type_id: 1, extra_levels: 1 }],
+    })
+  })
 })

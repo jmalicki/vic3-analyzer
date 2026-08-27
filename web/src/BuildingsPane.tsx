@@ -46,6 +46,13 @@ function employmentRatio(staffing: number, level: number): number {
   return Math.max(0, Math.min(1, staffing / level))
 }
 
+function resolveBuildingTypeId(row: TypeRow, result?: PricesResult): number | undefined {
+  return (
+    result?.building_types?.find((type) => type.name === row.typeId)?.id ??
+    row.buildings[0]?.building_type_id
+  )
+}
+
 function uniqueIds(ids: string[]): string[] {
   return [...new Set(ids)]
 }
@@ -67,7 +74,7 @@ function buildRows(result: PricesResult, buildings: BuildingEconomics[]): TypeRo
   const rows: TypeRow[] = []
   for (const [typeId, groupedBuildings] of grouped) {
     const type: BuildingTypeInfo | undefined = types.get(typeId)
-    const name = type?.label || type?.name || displayId(typeId)
+    const name = type?.label || displayId(type?.name || typeId)
     if (isHiddenFromUi(type?.name) || isHiddenFromUi(name)) continue
     const levels = groupedBuildings.reduce((sum, building) => sum + building.level, 0)
     const staffing = groupedBuildings.reduce((sum, building) => sum + building.staffing, 0)
@@ -339,7 +346,7 @@ export function BuildingsPane({
 
   const typeName = (typeId: string): string => {
     const type = result?.building_types?.find((row) => row.name === typeId)
-    return type?.label || type?.name || displayId(typeId)
+    return type?.label || displayId(type?.name || typeId)
   }
 
   const content = (
@@ -521,11 +528,9 @@ function TypeBlock({
             <button
               type="button"
               aria-label={`Apply extra levels for ${row.name}`}
-              disabled={!onApply || extra < 1}
+              disabled={!onApply || extra < 1 || resolveBuildingTypeId(row, result) == null}
               onClick={() => {
-                const building_type_id = result?.building_types?.find(
-                  (type) => type.name === row.typeId,
-                )?.id
+                const building_type_id = resolveBuildingTypeId(row, result)
                 if (building_type_id == null) return
                 onApply?.({ extra_levels: [{ building_type_id, extra_levels: extra }] })
               }}

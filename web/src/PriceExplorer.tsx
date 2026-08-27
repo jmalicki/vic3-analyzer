@@ -552,9 +552,9 @@ function StateBuildings({
                     <div>
                       <strong>
                         <GameIcon kind="building" id={row.type.name} icons={icons} />
-                        {row.type.label || row.type.name || displayId(row.type.name)}
+                        {row.type.label || displayId(row.type.name)}
                       </strong>
-                      <span>{row.group.label || row.group.name || displayId(row.group.name)}</span>
+                      <span>{row.group.label || displayId(row.group.name)}</span>
                     </div>
                     <b>0 levels · constructable placeholder</b>
                   </article>
@@ -564,7 +564,7 @@ function StateBuildings({
               const employment = building.level > 0
                 ? Math.max(0, Math.min(1, building.staffing / building.level))
                 : 0
-              const name = type?.label || type?.name || displayId(building.building_type_name)
+              const name = type?.label || displayId(type?.name || building.building_type_name)
               return (
                 <article className="state-building-card" key={`${building.id}-${index}`}>
                   <div className="state-building-title">
@@ -1100,7 +1100,7 @@ export function BuildingPage({
   const building = buildings.find((row) => row.id === buildingId)
   const state = states.find((row) => row.id === building?.state_id)
   const type = buildingTypes.find((row) => row.name === building?.building_type_name)
-  const name = type?.label || type?.name || displayId(building?.building_type_name || `Building ${buildingId}`)
+  const name = type?.label || displayId(type?.name || building?.building_type_name || `Building ${buildingId}`)
   const stateName = state?.label || displayId(state?.region_name || (state ? `State ${state.id}` : 'State'))
   const employment = building && building.level > 0
     ? Math.max(0, Math.min(1, building.staffing / building.level))

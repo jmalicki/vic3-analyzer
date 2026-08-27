@@ -3613,8 +3613,6 @@ mod tests {
         );
         defs.building_types_order
             .push(BUILDING_CONSTRUCTION_SECTOR.into());
-        defs.building_types_order
-            .push(BUILDING_CONSTRUCTION_SECTOR.into());
         defs.production_method_groups.insert(
             "pmg_base_building_construction_sector".into(),
             vec!["pm_iron_frame_buildings".into()],

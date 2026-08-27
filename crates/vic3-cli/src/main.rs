@@ -200,7 +200,7 @@ struct WhatIfArgs {
 impl WhatIfArgs {
     fn resolve(self, defs: &vic3_defs::GameDefs) -> Result<WhatIfOpts> {
         let building_type_id = defs
-            .building_index_of(&self.building)
+            .resolve_building_type_index(&self.building)
             .ok_or_else(|| anyhow::anyhow!("unknown building type `{}`", self.building))?;
         Ok(WhatIfOpts {
             building_type_id,

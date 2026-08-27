@@ -290,7 +290,7 @@ Full private + government construction queues from save IR (`World.constructions
 | `position` | Dense 0-based index within `(country_id, queue)` (scan order) |
 | `country_id` | Owner resolved from the order's state; nullable if unknown |
 | `state_id` | Target state; nullable if missing on the order |
-| `building` | Building type script id; FK → `building_types.type_id` |
+| `building` | Building type script id; FK → `building_types.name` |
 | `building_name` | Localized label when defs provide one |
 | `remaining` | Remaining construction points when present |
 
