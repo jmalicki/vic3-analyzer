@@ -504,13 +504,13 @@ Player-scoped build queues from `loaded_constructions` / Buildings → Queues. S
     "ConstructionOrderSnapshot": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "queue", "building", "country_id", "state_id", "label", "building_name", "remaining"],
+      "required": ["id", "queue", "building", "country_id", "state_id", "state_label", "building_name", "remaining"],
       "properties": {
         "id": { "type": "integer" },
         "queue": { "type": "string", "enum": ["private", "government"] },
         "country_id": { "type": ["integer", "null"] },
         "state_id": { "type": ["integer", "null"] },
-        "label": { "type": ["string", "null"] },
+        "state_label": { "type": ["string", "null"] },
         "building": { "type": "string" },
         "building_name": { "type": ["string", "null"] },
         "remaining": { "type": ["number", "null"] }

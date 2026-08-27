@@ -410,7 +410,9 @@ function StatesTable({
   const sorted = useMemo(
     () =>
       sortRows(rows, sort, (row, key) => {
-        if (key === 'name') return displayId(row.state?.region_name || `State ${row.state_id}`)
+        if (key === 'name') {
+          return row.state?.label || displayId(row.state?.region_name || `State ${row.state_id}`)
+        }
         if (key === 'delta') return percentFromBase(row.price, row.base)
         return row[key]
       }),
@@ -438,7 +440,7 @@ function StatesTable({
                     playerCountryId={playerCountryId}
                     countries={countries}
                   />
-                  {displayId(row.state?.region_name || `State ${row.state_id}`)}
+                  {row.state?.label || displayId(row.state?.region_name || `State ${row.state_id}`)}
                 </a>
               </th>
               <td>{row.price.toFixed(2)}</td>

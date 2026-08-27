@@ -38,7 +38,7 @@ const result: PricesResult = {
     {
       id: 1,
       region_name: 'STATE_ALPACA',
-      label: 'Alpaca',
+      label: 'Alpaca Coast',
       market_id: 1,
       arable_land: 10,
       infrastructure: 22,
@@ -248,8 +248,8 @@ describe('PriceExplorer', () => {
     expect(screen.getByText(/base MAPI 75%/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Sort by State' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('link', { name: 'Alpaca' }))
-    expect(await screen.findByRole('heading', { name: 'Alpaca' })).toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: 'Alpaca Coast' }))
+    expect(await screen.findByRole('heading', { name: 'Alpaca Coast' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
     for (const tab of ['Overview', 'Buildings', 'Population', 'Local Prices', 'Information']) {
       expect(screen.getByRole('tab', { name: tab })).toBeInTheDocument()
@@ -277,9 +277,11 @@ describe('PriceExplorer', () => {
 
     expect(screen.getByRole('button', { name: 'Sort by State price' })).toBeInTheDocument()
     const zebra = screen.getByRole('link', { name: 'Zebra' }).closest('tr')
-    const alpaca = screen.getByRole('link', { name: 'Alpaca' }).closest('tr')
+    const alpaca = screen.getByRole('link', { name: 'Alpaca Coast' }).closest('tr')
     expect(zebra).toHaveTextContent('55.00')
     expect(alpaca).toHaveTextContent('45.00')
+    // label differs from displayId(region_name) ("Alpaca"); table must prefer label
+    expect(screen.queryByRole('link', { name: 'Alpaca' })).not.toBeInTheDocument()
   })
 
   it('applies scope to global order-weighted average prices and orders', async () => {
@@ -354,7 +356,7 @@ describe('PriceExplorer', () => {
     await user.click(screen.getByRole('tab', { name: 'Buildings' }))
     await user.click(screen.getByRole('link', { name: 'Silly Hammer Factory' }))
     expect(await screen.findByRole('heading', { name: 'Silly Hammer Factory' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Alpaca' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Alpaca Coast' })).toBeInTheDocument()
     expect(screen.getByText('Workforce')).toBeInTheDocument()
     expect(screen.getByText('Machinists')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Zany Tools 3\.0/ })).toBeInTheDocument()
@@ -386,7 +388,7 @@ describe('PriceExplorer', () => {
     window.location.hash = '#/states/1'
     render(<PriceExplorer result={result} />)
 
-    expect(screen.getByRole('heading', { name: 'Alpaca' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Alpaca Coast' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'States' })).toHaveAttribute('href', '#/states')
     expect(screen.queryByRole('link', { name: 'Goods' })).not.toBeInTheDocument()
   })

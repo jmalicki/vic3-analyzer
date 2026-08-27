@@ -19,7 +19,7 @@ use super::pushdown::{matches_str, matches_u32, PushSupport};
 const PUSH: PushSupport = PushSupport {
     eq_u32: &["country_id"],
     eq_i32: &[],
-    eq_str: &["name"],
+    eq_str: &["name", "label"],
     range_str: &[],
 };
 
@@ -53,6 +53,15 @@ impl CountriesProvider {
                 continue;
             }
             if !matches_str(&preds, "name", &c.name) {
+                continue;
+            }
+            if let Some(n) = &c.label {
+                if !matches_str(&preds, "label", n) {
+                    continue;
+                }
+            } else if preds.iter().any(
+                |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "label"),
+            ) {
                 continue;
             }
             country_id.append_value(c.id);
