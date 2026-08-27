@@ -125,8 +125,8 @@ export function NeedBaskets({
   return (
     <div className="need-baskets">
       {needs.map((need) => (
-        <article key={need.need_name} className="need-basket">
-          <h4>{need.need_label || displayId(need.need_name)}</h4>
+        <article key={need.name} className="need-basket">
+          <h4>{need.label || displayId(need.name)}</h4>
           {need.goods.length ? (
             <table>
               <thead>
@@ -640,8 +640,8 @@ function StatePops({
           <h3>State needs</h3>
           <NeedBaskets
             needs={stateNeeds.map((need) => ({
-              need_name: need.need_name,
-              need_label: need.need_label,
+              name: need.name,
+              label: need.label,
               package_value: need.package_value,
               goods: need.goods,
             }))}
@@ -730,8 +730,8 @@ export function QualificationsTable({ rows }: { rows: StateQualification[] }) {
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.profession_name}>
-              <th>{row.profession_label || displayId(row.profession_name)}</th>
+            <tr key={row.name}>
+              <th>{row.label || displayId(row.name)}</th>
               <td>{row.employed.toLocaleString()}</td>
               <td>{row.jobs.toLocaleString()}</td>
               <td>{row.qualified.toLocaleString()}</td>
@@ -793,8 +793,8 @@ function StateOverview({
           <h3>State needs</h3>
           <NeedBaskets
             needs={stateNeeds.map((need) => ({
-              need_name: need.need_name,
-              need_label: need.need_label,
+              name: need.name,
+              label: need.label,
               package_value: need.package_value,
               goods: need.goods,
             }))}
@@ -1066,8 +1066,8 @@ function EmployeesTable({ employees }: { employees: ProfessionCount[] }) {
         </thead>
         <tbody>
           {employees.map((row) => (
-            <tr key={row.profession_name}>
-              <th>{row.profession_label || displayId(row.profession_name)}</th>
+            <tr key={row.name}>
+              <th>{row.label || displayId(row.name)}</th>
               <td>{row.count.toLocaleString()}</td>
             </tr>
           ))}

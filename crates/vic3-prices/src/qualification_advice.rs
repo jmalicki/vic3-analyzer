@@ -626,9 +626,9 @@ pub(crate) fn is_fully_staffed(staffing: f64, level: f64) -> bool {
 /// Per-profession shortfall on one building vs the whole state stock.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ProfessionGap {
-    pub profession_name: String,
+    pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub profession_label: Option<String>,
+    pub label: Option<String>,
     pub employed_here: f64,
     pub jobs_here: f64,
     pub missing_here: f64,
@@ -692,14 +692,14 @@ fn profession_gap(
         prices
             .state_qualifications
             .iter()
-            .find(|item| item.state_id == id && item.profession_name == row.profession_name)
+            .find(|item| item.state_id == id && item.name == row.name)
     });
     ProfessionGap {
-        profession_name: row.profession_name.clone(),
-        profession_label: row
-            .profession_label
+        name: row.name.clone(),
+        label: row
+            .label
             .clone()
-            .or_else(|| defs.labels.get(&row.profession_name).cloned()),
+            .or_else(|| defs.labels.get(&row.name).cloned()),
         employed_here: row.count,
         jobs_here,
         missing_here,
@@ -735,18 +735,16 @@ pub(crate) fn state_profession_totals(staffing: &[BuildingStaffing]) -> Vec<Prof
     let mut by_id: BTreeMap<String, ProfessionGap> = BTreeMap::new();
     for building in staffing {
         for row in &building.professions {
-            let entry = by_id
-                .entry(row.profession_name.clone())
-                .or_insert(ProfessionGap {
-                    profession_name: row.profession_name.clone(),
-                    profession_label: row.profession_label.clone(),
-                    employed_here: 0.0,
-                    jobs_here: 0.0,
-                    missing_here: 0.0,
-                    state_jobs: row.state_jobs,
-                    state_stock: row.state_stock,
-                    state_shortage: row.state_shortage,
-                });
+            let entry = by_id.entry(row.name.clone()).or_insert(ProfessionGap {
+                name: row.name.clone(),
+                label: row.label.clone(),
+                employed_here: 0.0,
+                jobs_here: 0.0,
+                missing_here: 0.0,
+                state_jobs: row.state_jobs,
+                state_stock: row.state_stock,
+                state_shortage: row.state_shortage,
+            });
             entry.employed_here += row.employed_here;
             entry.jobs_here += row.jobs_here;
             entry.missing_here += row.missing_here;
@@ -776,10 +774,8 @@ pub(crate) fn shortage_target<'a>(
             .state_qualifications
             .iter()
             .find(|row| {
-                row.state_id == state_id
-                    && row.profession_name == employee.profession_name
-                    && row.shortage > ORDER_EPS
+                row.state_id == state_id && row.name == employee.name && row.shortage > ORDER_EPS
             })
-            .map(|row| row.profession_name.as_str())
+            .map(|row| row.name.as_str())
     })
 }

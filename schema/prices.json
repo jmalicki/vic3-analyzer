@@ -326,13 +326,13 @@
           },
           "type": "array"
         },
-        "need_label": {
+        "label": {
           "type": [
             "string",
             "null"
           ]
         },
-        "need_name": {
+        "name": {
           "type": "string"
         },
         "package_value": {
@@ -341,7 +341,7 @@
         }
       },
       "required": [
-        "need_name",
+        "name",
         "package_value",
         "goods"
       ],
@@ -353,18 +353,18 @@
           "format": "double",
           "type": "number"
         },
-        "profession_label": {
+        "label": {
           "type": [
             "string",
             "null"
           ]
         },
-        "profession_name": {
+        "name": {
           "type": "string"
         }
       },
       "required": [
-        "profession_name",
+        "name",
         "count"
       ],
       "type": "object"
@@ -522,13 +522,13 @@
           },
           "type": "array"
         },
-        "need_label": {
+        "label": {
           "type": [
             "string",
             "null"
           ]
         },
-        "need_name": {
+        "name": {
           "type": "string"
         },
         "package_value": {
@@ -543,7 +543,7 @@
       },
       "required": [
         "state_id",
-        "need_name",
+        "name",
         "package_value",
         "goods"
       ],
@@ -666,6 +666,12 @@
           "format": "double",
           "type": "number"
         },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "monthly_change": {
           "format": "double",
           "type": [
@@ -673,13 +679,7 @@
             "null"
           ]
         },
-        "profession_label": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "profession_name": {
+        "name": {
           "type": "string"
         },
         "qualified": {
@@ -698,7 +698,7 @@
       },
       "required": [
         "state_id",
-        "profession_name",
+        "name",
         "qualified",
         "employed",
         "jobs",

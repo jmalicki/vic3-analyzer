@@ -8,8 +8,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### 🌟 Added / Changed
-- **Pop facet naming:** `profession_*` / `culture_*` / `need_*` public fields use
-  `*_name` (script) and `*_label` (localized). **Breaking** for JSON, SQL, and web.
+- **Pop facet naming:** Profession-/need-scoped DTOs (`ProfessionCount`,
+  `PopNeedBasket`, `StateNeed`, `StateQualification`, `ProfessionGap`) use bare
+  `name` (script) / `label` (localized). Mixed rows keep prefixes
+  (`StatePop.profession_*` / `culture_*`; SQL `building_staffing` columns
+  `profession_name` / `profession_label`). **Breaking** for JSON, SQL, and web.
 
 - **Goods naming:** Public goods DTOs (`GoodPrice` / `GoodFlow` / `StateGood`) use bare `name` (script) / `label`
   (localized); SQL `goods` table uses `name`/`label`; mixed IO lists keep `{good_name, good_label, qty}`. Alert /

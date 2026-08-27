@@ -94,8 +94,8 @@ function needsForState(stateId: number, stateNeeds: StateNeed[]) {
   return stateNeeds
     .filter((need) => need.state_id === stateId)
     .map((need) => ({
-      need_name: need.need_name,
-      need_label: need.need_label,
+      name: need.name,
+      label: need.label,
       package_value: need.package_value,
       goods: need.goods,
     }))

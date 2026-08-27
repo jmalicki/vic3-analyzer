@@ -36,30 +36,30 @@ export interface StatePop {
 }
 
 export interface ProfessionCount {
-  profession_name: string
-  profession_label?: string
+  name: string
+  label?: string
   count: number
 }
 
 export interface PopNeedBasket {
-  need_name: string
-  need_label?: string
+  name: string
+  label?: string
   package_value: number
   goods: GoodFlow[]
 }
 
 export interface StateNeed {
   state_id: number
-  need_name: string
-  need_label?: string
+  name: string
+  label?: string
   package_value: number
   goods: GoodFlow[]
 }
 
 export interface StateQualification {
   state_id: number
-  profession_name: string
-  profession_label?: string
+  name: string
+  label?: string
   qualified: number
   employable?: number
   employed: number
@@ -308,8 +308,8 @@ export interface AlertMitigation {
 }
 
 export interface ProfessionGap {
-  profession_name: string
-  profession_label?: string
+  name: string
+  label?: string
   employed_here: number
   jobs_here: number
   missing_here: number

@@ -1296,17 +1296,15 @@ mod tests {
             result.state_pops[0]
                 .qualifications
                 .iter()
-                .any(|row| row.profession_name == "academics" && (row.count - 1.5).abs() < 1e-9),
+                .any(|row| row.name == "academics" && (row.count - 1.5).abs() < 1e-9),
             "index 0 should map to academics"
         );
-        assert_eq!(result.buildings[0].employees[0].profession_name, "farmers");
+        assert_eq!(result.buildings[0].employees[0].name, "farmers");
         assert_eq!(result.buildings[0].employees[0].count, 6_000.0);
         assert!(result
             .state_qualifications
             .iter()
-            .any(|row| row.state_id == 1
-                && row.profession_name == "farmers"
-                && row.employed == 6_000.0));
+            .any(|row| row.state_id == 1 && row.name == "farmers" && row.employed == 6_000.0));
         assert!(!result.state_pops[0].needs.is_empty());
         assert!(!result.state_needs.is_empty());
         assert!(

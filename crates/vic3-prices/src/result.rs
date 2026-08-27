@@ -225,15 +225,15 @@ pub struct StatePop {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfessionCount {
-    pub profession_name: String,
-    pub profession_label: Option<String>,
+    pub name: String,
+    pub label: Option<String>,
     pub count: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PopNeedBasket {
-    pub need_name: String,
-    pub need_label: Option<String>,
+    pub name: String,
+    pub label: Option<String>,
     pub package_value: f64,
     pub goods: Vec<GoodFlow>,
 }
@@ -241,8 +241,8 @@ pub struct PopNeedBasket {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateNeed {
     pub state_id: u32,
-    pub need_name: String,
-    pub need_label: Option<String>,
+    pub name: String,
+    pub label: Option<String>,
     pub package_value: f64,
     pub goods: Vec<GoodFlow>,
 }
@@ -250,8 +250,8 @@ pub struct StateNeed {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateQualification {
     pub state_id: u32,
-    pub profession_name: String,
-    pub profession_label: Option<String>,
+    pub name: String,
+    pub label: Option<String>,
     pub qualified: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub employable: Option<f64>,
@@ -579,15 +579,15 @@ struct StatePopSer<'a> {
 
 #[derive(Serialize)]
 struct ProfessionCountSer<'a> {
-    profession_name: &'a str,
-    profession_label: Option<&'a str>,
+    name: &'a str,
+    label: Option<&'a str>,
     count: f64,
 }
 
 #[derive(Serialize)]
 struct NeedSer<'a> {
-    need_name: &'a str,
-    need_label: Option<&'a str>,
+    name: &'a str,
+    label: Option<&'a str>,
     package_value: f64,
     goods: Vec<GoodFlowSer<'a>>,
 }
@@ -619,10 +619,10 @@ impl<'a> StatePopSer<'a> {
                 .iter()
                 .filter(|(_, count)| *count > 0.0)
                 .filter_map(|&(id, count)| {
-                    let profession_name = tables.names.get(id)?;
+                    let name = tables.names.get(id)?;
                     Some(ProfessionCountSer {
-                        profession_name,
-                        profession_label: tables.label(profession_name),
+                        name,
+                        label: tables.label(name),
                         count,
                     })
                 })
@@ -631,10 +631,10 @@ impl<'a> StatePopSer<'a> {
                 .needs
                 .iter()
                 .filter_map(|need| {
-                    let need_name = tables.need(need.need_id)?;
+                    let name = tables.need(need.need_id)?;
                     Some(NeedSer {
-                        need_name,
-                        need_label: tables.label(need_name),
+                        name,
+                        label: tables.label(name),
                         package_value: need.package_value,
                         goods: need
                             .goods
@@ -673,8 +673,8 @@ fn materialize_state_pop(tables: &EmitTables, row: &CompactStatePop) -> StatePop
             .qualifications
             .into_iter()
             .map(|row| ProfessionCount {
-                profession_name: row.profession_name.to_string(),
-                profession_label: row.profession_label.map(str::to_string),
+                name: row.name.to_string(),
+                label: row.label.map(str::to_string),
                 count: row.count,
             })
             .collect(),
@@ -682,8 +682,8 @@ fn materialize_state_pop(tables: &EmitTables, row: &CompactStatePop) -> StatePop
             .needs
             .into_iter()
             .map(|need| PopNeedBasket {
-                need_name: need.need_name.to_string(),
-                need_label: need.need_label.map(str::to_string),
+                name: need.name.to_string(),
+                label: need.label.map(str::to_string),
                 package_value: need.package_value,
                 goods: need
                     .goods
