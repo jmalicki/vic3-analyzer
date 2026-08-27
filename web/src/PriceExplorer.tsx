@@ -464,8 +464,8 @@ function inheritedGroupValue(
 ): string | undefined {
   const seen = new Set<string>()
   let current = group
-  while (current && !seen.has(current.id)) {
-    seen.add(current.id)
+  while (current && !seen.has(current.name)) {
+    seen.add(current.name)
     if (current[key]) return current[key]
     current = current.parent_group ? groups.get(current.parent_group) : undefined
   }
@@ -492,8 +492,8 @@ function StateBuildings({
   goods: GoodPrice[]
   icons: Icons
 }) {
-  const types = new Map(buildingTypes.map((building) => [building.id, building]))
-  const groups = new Map(buildingGroups.map((group) => [group.id, group]))
+  const types = new Map(buildingTypes.map((building) => [building.name, building]))
+  const groups = new Map(buildingGroups.map((group) => [group.name, group]))
   const rows = new Map<string, StateBuildingRow[]>()
   const add = (category: string | undefined, row: StateBuildingRow) => {
     const normalized = category && STATE_CATEGORIES.includes(category.toLowerCase())
@@ -503,13 +503,13 @@ function StateBuildings({
   }
 
   for (const building of buildings) {
-    const type = types.get(building.type_id)
+    const type = types.get(building.building_type_name)
     const group = type?.group_id ? groups.get(type.group_id) : undefined
     add(inheritedGroupValue(group, groups, 'category'), { kind: 'building', building, type, group })
   }
 
   const ruralLevels = buildings.reduce((total, building) => {
-    const type = types.get(building.type_id)
+    const type = types.get(building.building_type_name)
     const group = type?.group_id ? groups.get(type.group_id) : undefined
     return inheritedGroupValue(group, groups, 'land_usage') === 'rural'
       ? total + building.level
@@ -520,7 +520,7 @@ function StateBuildings({
 
   for (const group of buildingGroups) {
     if (!group.always_possible || !group.default_building) continue
-    const hasGroup = buildings.some((building) => types.get(building.type_id)?.group_id === group.id)
+    const hasGroup = buildings.some((building) => types.get(building.building_type_name)?.group_id === group.name)
     const type = types.get(group.default_building)
     if (!hasGroup && type) {
       add(inheritedGroupValue(group, groups, 'category'), { kind: 'constructable', type, group })
@@ -548,13 +548,13 @@ function StateBuildings({
               }
               if (row.kind === 'constructable') {
                 return (
-                  <article className="state-building-card empty-slot" key={`empty-${row.group.id}`}>
+                  <article className="state-building-card empty-slot" key={`empty-${row.group.name}`}>
                     <div>
                       <strong>
-                        <GameIcon kind="building" id={row.type.id} icons={icons} />
-                        {row.type.name || displayId(row.type.id)}
+                        <GameIcon kind="building" id={row.type.name} icons={icons} />
+                        {row.type.label || row.type.name || displayId(row.type.name)}
                       </strong>
-                      <span>{row.group.name || displayId(row.group.id)}</span>
+                      <span>{row.group.label || row.group.name || displayId(row.group.name)}</span>
                     </div>
                     <b>0 levels · constructable placeholder</b>
                   </article>
@@ -564,16 +564,16 @@ function StateBuildings({
               const employment = building.level > 0
                 ? Math.max(0, Math.min(1, building.staffing / building.level))
                 : 0
-              const name = type?.name || displayId(building.type_id)
+              const name = type?.label || type?.name || displayId(building.building_type_name)
               return (
                 <article className="state-building-card" key={`${building.id}-${index}`}>
                   <div className="state-building-title">
                     <div>
                       <a className="building-link" href={`#/prices/building/${building.id}`}>
-                        <GameIcon kind="building" id={building.type_id} icons={icons} />
+                        <GameIcon kind="building" id={building.building_type_name} icons={icons} />
                         <strong>{name}</strong>
                       </a>
-                      <span>{group?.name || (group ? displayId(group.id) : 'Other')}</span>
+                      <span>{group?.label || group?.name || (group ? displayId(group.name) : 'Other')}</span>
                     </div>
                     <b>{building.level.toLocaleString()} levels</b>
                   </div>
@@ -1099,8 +1099,8 @@ export function BuildingPage({
   const buildingTypes = result.building_types ?? []
   const building = buildings.find((row) => row.id === buildingId)
   const state = states.find((row) => row.id === building?.state_id)
-  const type = buildingTypes.find((row) => row.id === building?.type_id)
-  const name = type?.name || displayId(building?.type_id || `Building ${buildingId}`)
+  const type = buildingTypes.find((row) => row.name === building?.building_type_name)
+  const name = type?.label || type?.name || displayId(building?.building_type_name || `Building ${buildingId}`)
   const stateName = state?.label || displayId(state?.region_name || (state ? `State ${state.id}` : 'State'))
   const employment = building && building.level > 0
     ? Math.max(0, Math.min(1, building.staffing / building.level))

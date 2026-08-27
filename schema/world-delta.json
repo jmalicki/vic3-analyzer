@@ -2,16 +2,19 @@
   "$defs": {
     "ExtraLevelsDelta": {
       "additionalProperties": false,
-      "description": "Extra levels on a building type and/or a single instance.\n\nWhen `building_id` is set it wins; otherwise `building` matches\n[`crate::WorldBuilding::building`]. Neither set is a no-op.",
+      "description": "Extra levels on a building type and/or a single instance.\n\nWhen `building_id` is set it wins; otherwise `building_type_id` matches\n[`crate::WorldBuilding::building_type_id`]. Neither set is a no-op.",
       "properties": {
-        "building": {
+        "building_id": {
+          "format": "uint32",
+          "minimum": 0,
           "type": [
-            "string",
+            "integer",
             "null"
           ]
         },
-        "building_id": {
-          "format": "uint32",
+        "building_type_id": {
+          "format": "uint16",
+          "maximum": 65535,
           "minimum": 0,
           "type": [
             "integer",

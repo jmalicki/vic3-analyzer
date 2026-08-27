@@ -29,13 +29,14 @@ const preview: PricesResult = {
 }
 
 const delta: WorldDelta = {
-  extra_levels: [{ building: 'building_rye_farm', extra_levels: 2 }],
+  extra_levels: [{ building_type_id: 0, extra_levels: 2 }],
 }
 
 const rye: BuildingEconomics = {
   id: 9,
   state_id: 1,
-  type_id: 'building_rye_farm',
+  building_type_id: 0,
+  building_type_name: 'building_rye_farm',
   level: 4,
   staffing: 3,
   production_method_ids: ['pm_simple_farming'],
@@ -64,7 +65,7 @@ describe('ConfirmApply', () => {
     )
 
     expect(screen.getByRole('dialog', { name: 'Confirm apply' })).toBeInTheDocument()
-    expect(screen.getByText('+2 levels on building rye farm')).toBeInTheDocument()
+    expect(screen.getByText('+2 levels on building type #0')).toBeInTheDocument()
     expect(screen.getByText('0.02')).toBeInTheDocument()
     expect(screen.getByText('0.001')).toBeInTheDocument()
     expect(screen.getByText('43.50')).toBeInTheDocument()

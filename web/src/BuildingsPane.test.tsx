@@ -22,7 +22,7 @@ const result: PricesResult = {
     {
       id: 7,
       state_id: 1,
-      type_id: 'building_silly_hammer_factory',
+      building_type_name: 'building_silly_hammer_factory',
       level: 3,
       staffing: 2.4,
       production_method_ids: ['pm_goofy_hammers'],
@@ -36,7 +36,7 @@ const result: PricesResult = {
     {
       id: 8,
       state_id: 2,
-      type_id: 'building_silly_hammer_factory',
+      building_type_name: 'building_silly_hammer_factory',
       level: 1,
       staffing: 1,
       production_method_ids: ['pm_steam_hammers'],
@@ -50,7 +50,7 @@ const result: PricesResult = {
     {
       id: 9,
       state_id: 1,
-      type_id: 'building_rye_farm',
+      building_type_name: 'building_rye_farm',
       level: 10,
       staffing: 8,
       production_method_ids: ['pm_simple_farming'],
@@ -64,7 +64,7 @@ const result: PricesResult = {
     {
       id: 10,
       state_id: 1,
-      type_id: 'building_city_hub_dummy',
+      building_type_name: 'building_city_hub_dummy',
       level: 1,
       staffing: 0,
       production_method_ids: [],
@@ -78,7 +78,7 @@ const result: PricesResult = {
     {
       id: 11,
       state_id: 3,
-      type_id: 'building_badger_mill',
+      building_type_name: 'building_badger_mill',
       level: 2,
       staffing: 2,
       production_method_ids: ['pm_goofy_hammers'],
@@ -91,10 +91,10 @@ const result: PricesResult = {
     },
   ],
   building_types: [
-    { id: 'building_silly_hammer_factory', name: 'Silly Hammer Factory' },
-    { id: 'building_rye_farm', name: 'Rye Farms' },
-    { id: 'building_city_hub_dummy', name: dummyName },
-    { id: 'building_badger_mill', name: 'Badger Mill' },
+    { id: 0, name: 'building_silly_hammer_factory', label: 'Silly Hammer Factory' },
+    { id: 1, name: 'building_rye_farm', label: 'Rye Farms' },
+    { id: 2, name: 'building_city_hub_dummy', label: dummyName },
+    { id: 3, name: 'building_badger_mill', label: 'Badger Mill' },
   ],
   residual: 0,
   status: 'converged',
@@ -325,7 +325,7 @@ describe('BuildingsPane', () => {
 
     await user.click(screen.getByRole('button', { name: 'Apply extra levels for Rye Farms' }))
     expect(onApply).toHaveBeenCalledWith({
-      extra_levels: [{ building: 'building_rye_farm', extra_levels: 1 }],
+      extra_levels: [{ building_type_id: 1, extra_levels: 1 }],
     })
 
     await user.click(screen.getByRole('button', { name: 'Expand Silly Hammer Factory' }))

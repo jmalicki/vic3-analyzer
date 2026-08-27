@@ -398,8 +398,8 @@ function LocalAlertCard({
             <li key={row.building_id}>
               <details open>
                 <summary>
-                  <GameIcon kind="building" id={row.type_id} icons={icons} />
-                  <strong>{row.building_name}</strong>
+                  <GameIcon kind="building" id={row.building_type_name} icons={icons} />
+                  <strong>{row.building_type_label}</strong>
                   <span>{buildingStaffingSummary(row)}</span>
                 </summary>
                 <p className="alert-staffing-link">

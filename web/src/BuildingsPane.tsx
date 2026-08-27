@@ -57,17 +57,17 @@ function isHiddenFromUi(name?: string): boolean {
 }
 
 function buildRows(result: PricesResult, buildings: BuildingEconomics[]): TypeRow[] {
-  const types = new Map((result.building_types ?? []).map((type) => [type.id, type]))
+  const types = new Map((result.building_types ?? []).map((type) => [type.name, type]))
   const grouped = new Map<string, BuildingEconomics[]>()
   for (const building of buildings) {
-    const rows = grouped.get(building.type_id)
+    const rows = grouped.get(building.building_type_name)
     if (rows) rows.push(building)
-    else grouped.set(building.type_id, [building])
+    else grouped.set(building.building_type_name, [building])
   }
   const rows: TypeRow[] = []
   for (const [typeId, groupedBuildings] of grouped) {
     const type: BuildingTypeInfo | undefined = types.get(typeId)
-    const name = type?.name || displayId(typeId)
+    const name = type?.label || type?.name || displayId(typeId)
     if (isHiddenFromUi(type?.name) || isHiddenFromUi(name)) continue
     const levels = groupedBuildings.reduce((sum, building) => sum + building.level, 0)
     const staffing = groupedBuildings.reduce((sum, building) => sum + building.staffing, 0)
@@ -337,8 +337,10 @@ export function BuildingsPane({
     })
   }
 
-  const typeName = (typeId: string): string =>
-    result?.building_types?.find((type) => type.id === typeId)?.name || displayId(typeId)
+  const typeName = (typeId: string): string => {
+    const type = result?.building_types?.find((row) => row.name === typeId)
+    return type?.label || type?.name || displayId(typeId)
+  }
 
   const content = (
     <>
@@ -520,9 +522,13 @@ function TypeBlock({
               type="button"
               aria-label={`Apply extra levels for ${row.name}`}
               disabled={!onApply || extra < 1}
-              onClick={() =>
-                onApply?.({ extra_levels: [{ building: row.typeId, extra_levels: extra }] })
-              }
+              onClick={() => {
+                const building_type_id = result?.building_types?.find(
+                  (type) => type.name === row.typeId,
+                )?.id
+                if (building_type_id == null) return
+                onApply?.({ extra_levels: [{ building_type_id, extra_levels: extra }] })
+              }}
             >
               Apply
             </button>

@@ -29,10 +29,10 @@ Core option structs never contain `PathBuf` or OS-specific filesystem fields.
 ```json
 {
   "type": "object",
-  "required": ["building", "extra_levels"],
+  "required": ["building_type_id", "extra_levels"],
   "additionalProperties": false,
   "properties": {
-    "building": { "type": "string" },
+    "building_type_id": { "type": "integer", "minimum": 0 },
     "extra_levels": { "type": "integer", "minimum": 0 }
   }
 }
@@ -66,7 +66,7 @@ Preview mutation applied to a cloned world (extra levels, then production method
         "required": ["extra_levels"],
         "additionalProperties": false,
         "properties": {
-          "building": { "type": "string", "description": "Building type id; used when building_id is omitted." },
+          "building_type_id": { "type": "integer", "minimum": 0, "description": "Building type index; used when building_id is omitted." },
           "building_id": { "type": "integer", "minimum": 0, "description": "Single instance; wins over building when both are set." },
           "extra_levels": { "type": "integer", "minimum": 0 }
         }
@@ -423,16 +423,16 @@ Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent;
               "type": "object",
               "required": [
                 "building_id",
-                "building_name",
-                "type_id",
+                "building_type_label",
+                "building_type_name",
                 "staffing",
                 "level",
                 "professions"
               ],
               "properties": {
                 "building_id": { "type": "integer" },
-                "building_name": { "type": "string" },
-                "type_id": { "type": "string" },
+                "building_type_label": { "type": "string" },
+                "building_type_name": { "type": "string" },
                 "staffing": { "type": "number" },
                 "level": { "type": "number" },
                 "professions": {

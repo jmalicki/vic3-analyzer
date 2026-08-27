@@ -26,7 +26,16 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   Mixed IO lists still use `{good_name, good_label, qty}`. Alert and mitigation
   good script keys are `good_name`. **Breaking** for JSON, SQL, and web.
 
-- **Dense identity types:** Renamed `GoodIdx` → `GoodId` and `NeedIdx` → `NeedId`
+- **Building type naming:** `GameDefs.buildings` → `building_types` with
+  `building_types_order` and `BuildingTypeId`. `WorldBuilding` stores
+  `building_type_id` internally; resolve script keys via `type_script_id(defs)`.
+  DTOs: `BuildingTypeInfo` (`id`/`name`/`label`), `BuildingGroupInfo` (`name`/`label`),
+  `BuildingEconomics` (`building_type_id`/`building_type_name`/`building_type_label`).
+  SQL `building_types` uses `name`/`label`; `buildings` uses `building_type_name`/
+  `building_type_label`. `WhatIfOpts` / `ExtraLevelsDelta` use `building_type_id`.
+  **Breaking** for JSON, SQL, and web. Construction queue snapshot fields remain
+  `building`/`building_name` (W2e).
+
   across defs, prices, planning, and SQL. **Breaking** for Rust callers of those
   newtypes (transparent `u16`; postcard layout unchanged).
 

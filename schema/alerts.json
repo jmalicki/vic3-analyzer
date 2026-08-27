@@ -97,7 +97,10 @@
           "minimum": 0,
           "type": "integer"
         },
-        "building_name": {
+        "building_type_label": {
+          "type": "string"
+        },
+        "building_type_name": {
           "type": "string"
         },
         "level": {
@@ -113,15 +116,12 @@
         "staffing": {
           "format": "double",
           "type": "number"
-        },
-        "type_id": {
-          "type": "string"
         }
       },
       "required": [
         "building_id",
-        "building_name",
-        "type_id",
+        "building_type_label",
+        "building_type_name",
         "staffing",
         "level",
         "professions"

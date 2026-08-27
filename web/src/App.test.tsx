@@ -30,7 +30,7 @@ const result = JSON.stringify({
     {
       id: 9,
       state_id: 1,
-      type_id: 'building_rye_farm',
+      building_type_name: 'building_rye_farm',
       level: 4,
       staffing: 3.2,
       production_method_ids: ['pm_simple_farming'],
@@ -42,7 +42,7 @@ const result = JSON.stringify({
       short_inputs: [],
     },
   ],
-  building_types: [{ id: 'building_rye_farm', name: 'Rye Farms' }],
+  building_types: [{ id: 0, name: 'building_rye_farm', label: 'Rye Farms' }],
   residual: 0.00001,
   status: 'converged',
   limitations: ['Employment and production methods stay frozen.'],
