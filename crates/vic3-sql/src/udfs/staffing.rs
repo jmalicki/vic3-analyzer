@@ -110,6 +110,7 @@ impl BuildingStaffingProvider {
                 match row
                     .label
                     .as_deref()
+                    .filter(|label| !label.is_empty())
                     .or_else(|| self.binding.label(&row.name))
                 {
                     Some(n) => profession_label.append_value(n),

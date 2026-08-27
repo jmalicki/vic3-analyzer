@@ -309,6 +309,8 @@ export interface AlertMitigation {
 
 export interface ProfessionGap {
   name: string
+  // FIXME: label should always be present; optional/null is broken leftover.
+  // Making emitters always fill a display string is out of scope for this rename.
   label?: string
   employed_here: number
   jobs_here: number

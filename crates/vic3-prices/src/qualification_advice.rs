@@ -627,6 +627,9 @@ pub(crate) fn is_fully_staffed(staffing: f64, level: f64) -> bool {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ProfessionGap {
     pub name: String,
+    // FIXME: `label` should always be present (at least a humanized script key).
+    // Optional/null is a leftover from the old dialect; fixing emitters is out of
+    // scope for the name/label rename wave.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub employed_here: f64,
