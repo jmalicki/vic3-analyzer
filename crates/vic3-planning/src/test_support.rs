@@ -11,7 +11,7 @@
 
 #![allow(dead_code)] // fixtures unused until later planner-test PRs migrate call sites
 
-use vic3_defs::{BuildingType, GameDefs, Good, GoodIdx, GoodsVec, ProductionMethod};
+use vic3_defs::{BuildingType, GameDefs, Good, GoodId, GoodsVec, ProductionMethod};
 use vic3_prices::{SolveOpts, World, WorldBuilding, WorldCountry, WorldState};
 
 use crate::construction::BUILDING_CONSTRUCTION_SECTOR;
@@ -33,8 +33,8 @@ pub(crate) struct MiniEconomy {
 }
 
 /// Register a good in `defs.goods_order` / `defs.goods`. Returns its dense index.
-fn register_good(defs: &mut GameDefs, id: &str, base_price: f64) -> GoodIdx {
-    let idx = GoodIdx::from_usize(defs.goods_order.len());
+fn register_good(defs: &mut GameDefs, id: &str, base_price: f64) -> GoodId {
+    let idx = GoodId::from_usize(defs.goods_order.len());
     defs.goods_order.push(id.into());
     defs.goods.insert(
         id.into(),

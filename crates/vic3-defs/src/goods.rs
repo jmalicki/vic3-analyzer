@@ -1,7 +1,7 @@
 //! Dense good indices aligned with [`crate::GameDefs::goods_order`].
 //!
 //! Saved building IO and sell-order vectors use these indices so hot paths
-//! avoid string lookups. Prefer [`GoodIdx`] over raw `usize` so wealth levels
+//! avoid string lookups. Prefer [`GoodId`] over raw `usize` so wealth levels
 //! and need slots cannot be passed where a good is required.
 
 use std::fmt;
@@ -15,9 +15,9 @@ use serde::{Deserialize, Serialize};
 /// passed where a good is required.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct GoodIdx(u16);
+pub struct GoodId(u16);
 
-impl GoodIdx {
+impl GoodId {
     /// Construct from a position when it fits the compact representation.
     #[inline]
     pub fn try_from_usize(index: usize) -> Option<Self> {
@@ -47,13 +47,13 @@ impl GoodIdx {
     }
 }
 
-impl fmt::Debug for GoodIdx {
+impl fmt::Debug for GoodId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "GoodIdx({})", self.0)
+        write!(f, "GoodId({})", self.0)
     }
 }
 
-impl fmt::Display for GoodIdx {
+impl fmt::Display for GoodId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -105,16 +105,16 @@ impl GoodsVec {
     }
 
     /// `(index, value)` pairs in order.
-    pub fn iter_indexed(&self) -> impl Iterator<Item = (GoodIdx, f64)> + '_ {
+    pub fn iter_indexed(&self) -> impl Iterator<Item = (GoodId, f64)> + '_ {
         self.data
             .iter()
             .enumerate()
-            .map(|(i, &v)| (GoodIdx::from_usize(i), v))
+            .map(|(i, &v)| (GoodId::from_usize(i), v))
     }
 
     /// Add `qty` into slot `idx` (no-op-safe for callers that already validated).
     #[inline]
-    pub fn add(&mut self, idx: GoodIdx, qty: f64) {
+    pub fn add(&mut self, idx: GoodId, qty: f64) {
         self.data[idx.as_usize()] += qty;
     }
 
@@ -138,18 +138,18 @@ impl GoodsVec {
     }
 }
 
-impl Index<GoodIdx> for GoodsVec {
+impl Index<GoodId> for GoodsVec {
     type Output = f64;
 
     #[inline]
-    fn index(&self, index: GoodIdx) -> &Self::Output {
+    fn index(&self, index: GoodId) -> &Self::Output {
         &self.data[index.as_usize()]
     }
 }
 
-impl IndexMut<GoodIdx> for GoodsVec {
+impl IndexMut<GoodId> for GoodsVec {
     #[inline]
-    fn index_mut(&mut self, index: GoodIdx) -> &mut Self::Output {
+    fn index_mut(&mut self, index: GoodId) -> &mut Self::Output {
         &mut self.data[index.as_usize()]
     }
 }

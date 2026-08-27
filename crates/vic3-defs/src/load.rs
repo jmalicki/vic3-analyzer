@@ -278,7 +278,7 @@ impl DefsBuilder {
     }
 
     /// Merge parses, render remaining coats, and resolve string ids into
-    /// dense [`crate::GoodIdx`] / [`crate::NeedIdx`] indices.
+    /// dense [`crate::GoodId`] / [`crate::NeedId`] indices.
     ///
     /// # Errors
     ///

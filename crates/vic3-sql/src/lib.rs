@@ -62,7 +62,7 @@
 //!
 //! **IO columns:** `buildings.input_goods` / `output_goods` and
 //! `production_methods.inputs` / `outputs` are
-//! `List<Struct{good, good_name, qty}>` (script id, not bare `GoodIdx`).
+//! `List<Struct{good, good_name, qty}>` (script id, not bare `GoodId`).
 //! Explode with SELECT-list `unnest(unnest(col))` — lateral `FROM … UNNEST`
 //! is not supported in this DataFusion version.
 //!

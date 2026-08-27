@@ -32,8 +32,8 @@
 //! | Postcard snapshot | [`encode_blob`] / [`decode_blob`] | wasm: no filesystem; UI ships bytes |
 //!
 //! `goods_order` follows deterministic `common/goods` source-file order so
-//! saved building IO indices line up with vanilla. Dense [`GoodIdx`] /
-//! [`NeedIdx`] vectors are preferred over string keys in hot paths.
+//! saved building IO indices line up with vanilla. Dense [`GoodId`] /
+//! [`NeedId`] vectors are preferred over string keys in hot paths.
 //!
 //! # Path allowlist
 //!
@@ -66,9 +66,9 @@ mod types;
 pub use blob::{decode_blob, encode_blob, BLOB_VERSION};
 pub use coa::{select_coa, select_flag_coa};
 pub use error::DefsError;
-pub use goods::{GoodIdx, GoodsVec};
+pub use goods::{GoodId, GoodsVec};
 pub use load::{load_from_files, load_from_path, DefsBuilder};
-pub use needs::{NeedIdx, NeedsVec};
+pub use needs::{NeedId, NeedsVec};
 pub use overlay::{apply_overlay, load_overlay_json, BuildingOverlay, DefsOverlay};
 pub use path_rules::{classify_defs_path, DefsPathClass, COMMON_DIRS};
 pub use substitution::{clamp_supply_share, substitution_shares, substitution_weight};

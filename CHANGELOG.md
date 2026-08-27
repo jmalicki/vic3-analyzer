@@ -8,6 +8,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### 🌟 Added / Changed
+- **Dense identity types:** Renamed `GoodIdx` → `GoodId` and `NeedIdx` → `NeedId`
+  across defs, prices, planning, and SQL. **Breaking** for Rust callers of those
+  newtypes (transparent `u16`; postcard layout unchanged).
+
 - **Planning `SimpleSubgoal`:** Renamed goal leaf type `Atom` → `SimpleSubgoal`,
   `Goal::Atom` → `Goal::Simple`, `atoms()` → `simple_subgoals()`, and related
   helpers (`AtomStatus` → `SimpleSubgoalStatus`, `has_*_atom` →

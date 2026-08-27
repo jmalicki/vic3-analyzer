@@ -12,7 +12,7 @@
 //! per group was the old cost; after the cache, `finished` is grouping and
 //! those copies.
 
-use vic3_defs::{substitution_shares, GameDefs, GoodIdx, GoodsVec, NeedIdx, NeedsVec, PopNeed};
+use vic3_defs::{substitution_shares, GameDefs, GoodId, GoodsVec, NeedId, NeedsVec, PopNeed};
 
 use crate::result::CompactNeed;
 use crate::world::{WorldPop, POP_SCALE};
@@ -20,22 +20,22 @@ use crate::world::{WorldPop, POP_SCALE};
 /// One need's goods after package interpolation and substitution.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NeedBasket {
-    pub need_idx: NeedIdx,
+    pub need_id: NeedId,
     pub package_value: f64,
-    pub goods: Vec<(GoodIdx, f64)>,
+    pub goods: Vec<(GoodId, f64)>,
 }
 
 /// Substitution shares for every need, computed once from frozen world sell.
 #[derive(Debug, Clone)]
 pub(crate) struct NeedShares {
-    by_need: Vec<Vec<(GoodIdx, f64)>>,
+    by_need: Vec<Vec<(GoodId, f64)>>,
 }
 
 impl NeedShares {
     pub(crate) fn from_sell(defs: &GameDefs, sell_orders: &GoodsVec) -> Self {
         let by_need = (0..defs.needs_order.len())
             .map(|i| {
-                defs.need_by_index(NeedIdx::from_usize(i))
+                defs.need_by_index(NeedId::from_usize(i))
                     .map(|need| substitution_shares(need, sell_orders))
                     .unwrap_or_default()
             })
@@ -43,7 +43,7 @@ impl NeedShares {
         Self { by_need }
     }
 
-    fn get(&self, idx: NeedIdx) -> &[(GoodIdx, f64)] {
+    fn get(&self, idx: NeedId) -> &[(GoodId, f64)] {
         self.by_need
             .get(idx.as_usize())
             .map(Vec::as_slice)
@@ -381,11 +381,11 @@ fn need_baskets_at(
 ) -> Vec<NeedBasket> {
     let needs = package_needs(wealth, defs);
     let mut baskets = Vec::new();
-    for (need_idx, package_value) in needs.iter_indexed() {
+    for (need_id, package_value) in needs.iter_indexed() {
         if package_value == 0.0 {
             continue;
         }
-        let Some(need) = defs.need_by_index(need_idx) else {
+        let Some(need) = defs.need_by_index(need_id) else {
             continue;
         };
         let Some(qty) = need_quantity(need, package_value, scale, base_prices) else {
@@ -395,10 +395,10 @@ fn need_baskets_at(
             continue;
         }
         let mut goods = Vec::new();
-        apply_need_shares_into(&mut goods, need, qty, shares.get(need_idx));
+        apply_need_shares_into(&mut goods, need, qty, shares.get(need_id));
         if !goods.is_empty() {
             baskets.push(NeedBasket {
-                need_idx,
+                need_id,
                 package_value,
                 goods,
             });
@@ -420,7 +420,7 @@ fn scale_need_baskets(unit: &[NeedBasket], scale: f64) -> Vec<NeedBasket> {
 #[cfg(test)]
 fn scale_need_basket(basket: &NeedBasket, scale: f64) -> NeedBasket {
     NeedBasket {
-        need_idx: basket.need_idx,
+        need_id: basket.need_id,
         package_value: basket.package_value,
         goods: basket
             .goods
@@ -437,12 +437,12 @@ fn lerp_need_baskets(lo: &[NeedBasket], hi: &[NeedBasket], t: f64, scale: f64) -
     let mut j = 0;
     while i < lo.len() || j < hi.len() {
         match (lo.get(i), hi.get(j)) {
-            (Some(a), Some(b)) if a.need_idx == b.need_idx => {
+            (Some(a), Some(b)) if a.need_id == b.need_id => {
                 out.push(lerp_need_basket(a, b, t, scale));
                 i += 1;
                 j += 1;
             }
-            (Some(a), Some(b)) if a.need_idx < b.need_idx => {
+            (Some(a), Some(b)) if a.need_id < b.need_id => {
                 out.push(scale_need_basket(a, scale * (1.0 - t)));
                 i += 1;
             }
@@ -467,7 +467,7 @@ fn lerp_need_baskets(lo: &[NeedBasket], hi: &[NeedBasket], t: f64, scale: f64) -
 #[cfg(test)]
 fn lerp_need_basket(lo: &NeedBasket, hi: &NeedBasket, t: f64, scale: f64) -> NeedBasket {
     NeedBasket {
-        need_idx: lo.need_idx,
+        need_id: lo.need_id,
         package_value: (1.0 - t) * lo.package_value + t * hi.package_value,
         goods: lerp_need_goods(&lo.goods, &hi.goods, t, scale),
     }
@@ -481,7 +481,7 @@ fn compact_need_baskets(unit: &[NeedBasket], scale: f64, prices: &GoodsVec) -> V
 
 fn compact_need_basket(basket: &NeedBasket, scale: f64, prices: &GoodsVec) -> CompactNeed {
     CompactNeed {
-        need_idx: basket.need_idx,
+        need_id: basket.need_id,
         package_value: basket.package_value,
         goods: basket
             .goods
@@ -506,12 +506,12 @@ fn compact_lerp_need_baskets(
     let mut j = 0;
     while i < lo.len() || j < hi.len() {
         match (lo.get(i), hi.get(j)) {
-            (Some(a), Some(b)) if a.need_idx == b.need_idx => {
+            (Some(a), Some(b)) if a.need_id == b.need_id => {
                 out.push(compact_lerp_need_basket(a, b, t, scale, prices));
                 i += 1;
                 j += 1;
             }
-            (Some(a), Some(b)) if a.need_idx < b.need_idx => {
+            (Some(a), Some(b)) if a.need_id < b.need_id => {
                 out.push(compact_need_basket(a, scale * (1.0 - t), prices));
                 i += 1;
             }
@@ -541,19 +541,19 @@ fn compact_lerp_need_basket(
     prices: &GoodsVec,
 ) -> CompactNeed {
     CompactNeed {
-        need_idx: lo.need_idx,
+        need_id: lo.need_id,
         package_value: (1.0 - t) * lo.package_value + t * hi.package_value,
         goods: compact_lerp_need_goods(&lo.goods, &hi.goods, t, scale, prices),
     }
 }
 
 fn compact_lerp_need_goods(
-    lo: &[(GoodIdx, f64)],
-    hi: &[(GoodIdx, f64)],
+    lo: &[(GoodId, f64)],
+    hi: &[(GoodId, f64)],
     t: f64,
     scale: f64,
     prices: &GoodsVec,
-) -> Vec<(GoodIdx, f64, f64)> {
+) -> Vec<(GoodId, f64, f64)> {
     if lo.len() == hi.len() && lo.iter().zip(hi).all(|(a, b)| a.0 == b.0) {
         return lo
             .iter()
@@ -571,11 +571,11 @@ fn compact_lerp_need_goods(
 }
 
 fn lerp_need_goods(
-    lo: &[(GoodIdx, f64)],
-    hi: &[(GoodIdx, f64)],
+    lo: &[(GoodId, f64)],
+    hi: &[(GoodId, f64)],
     t: f64,
     scale: f64,
-) -> Vec<(GoodIdx, f64)> {
+) -> Vec<(GoodId, f64)> {
     if lo.len() == hi.len() && lo.iter().zip(hi).all(|(a, b)| a.0 == b.0) {
         return lo
             .iter()
@@ -616,10 +616,10 @@ fn lerp_need_goods(
 }
 
 fn apply_need_shares_into(
-    goods: &mut Vec<(GoodIdx, f64)>,
+    goods: &mut Vec<(GoodId, f64)>,
     need: &PopNeed,
     qty: f64,
-    shares: &[(GoodIdx, f64)],
+    shares: &[(GoodId, f64)],
 ) {
     let share_sum: f64 = shares.iter().map(|(_, share)| *share).sum();
     if share_sum <= 0.0 {
@@ -646,22 +646,22 @@ fn unit_basket_at(
 ) -> GoodsVec {
     let mut buy = GoodsVec::zeros(defs.goods_order.len());
     let needs = package_needs(wealth, defs);
-    for (need_idx, package_value) in needs.iter_indexed() {
+    for (need_id, package_value) in needs.iter_indexed() {
         if package_value == 0.0 {
             continue;
         }
-        let Some(need) = defs.need_by_index(need_idx) else {
+        let Some(need) = defs.need_by_index(need_id) else {
             continue;
         };
         let Some(qty) = need_quantity(need, package_value, 1.0, base_prices) else {
             continue;
         };
-        apply_need_shares(&mut buy, need, qty, shares.get(need_idx));
+        apply_need_shares(&mut buy, need, qty, shares.get(need_id));
     }
     buy
 }
 
-fn apply_need_shares(buy: &mut GoodsVec, need: &PopNeed, qty: f64, shares: &[(GoodIdx, f64)]) {
+fn apply_need_shares(buy: &mut GoodsVec, need: &PopNeed, qty: f64, shares: &[(GoodId, f64)]) {
     let share_sum: f64 = shares.iter().map(|(_, share)| *share).sum();
     if share_sum <= 0.0 {
         if let Some(default) = need
@@ -723,23 +723,23 @@ mod tests {
     use vic3_defs::{BuyPackage, GameDefs, Good, NeedEntry, PopNeed};
 
     fn heating_defs() -> GameDefs {
-        let heat = NeedIdx::from_usize(0);
+        let heat = NeedId::from_usize(0);
         let mut defs = GameDefs {
             price_range: 0.75,
             goods_order: vec!["grain".into(), "wood".into(), "coal".into()],
             needs_order: vec!["popneed_heating".into()],
             pop_needs: vec![PopNeed {
                 id: "popneed_heating".into(),
-                default_good: Some(GoodIdx::from_usize(1)),
+                default_good: Some(GoodId::from_usize(1)),
                 entries: vec![
                     NeedEntry {
-                        good: GoodIdx::from_usize(1),
+                        good: GoodId::from_usize(1),
                         weight: 1.0,
                         min_supply_share: 0.0,
                         max_supply_share: 0.5,
                     },
                     NeedEntry {
-                        good: GoodIdx::from_usize(2),
+                        good: GoodId::from_usize(2),
                         weight: 2.0,
                         min_supply_share: 0.1,
                         max_supply_share: 1.0,
@@ -850,7 +850,7 @@ mod tests {
     fn assert_baskets_close(left: &[NeedBasket], right: &[NeedBasket]) {
         assert_eq!(left.len(), right.len());
         for (a, b) in left.iter().zip(right) {
-            assert_eq!(a.need_idx, b.need_idx);
+            assert_eq!(a.need_id, b.need_id);
             assert!((a.package_value - b.package_value).abs() < 1e-9);
             assert_eq!(a.goods.len(), b.goods.len());
             for ((g0, q0), (g1, q1)) in a.goods.iter().zip(&b.goods) {
@@ -888,7 +888,7 @@ mod tests {
             let compact = need_units.compact_for(wealth_f, size / POP_SCALE, &local);
             assert_eq!(compact.len(), cached.len());
             for (row, basket) in compact.iter().zip(&cached) {
-                assert_eq!(row.need_idx, basket.need_idx);
+                assert_eq!(row.need_id, basket.need_id);
                 assert!((row.package_value - basket.package_value).abs() < 1e-9);
                 assert_eq!(row.goods.len(), basket.goods.len());
                 for (&(good, quantity, value), &(expected_good, expected_qty)) in

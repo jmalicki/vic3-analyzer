@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use vic3_defs::{GameDefs, GoodIdx, GoodsVec, NeedIdx};
+use vic3_defs::{GameDefs, GoodId, GoodsVec, NeedId};
 
 use crate::consumption::{
     consumption, pop_compact_needs, NeedShares, UnitBaskets, UnitNeedBaskets,
@@ -153,8 +153,8 @@ fn detail_rows(
     let shares = NeedShares::from_sell(defs, &sell_orders);
     let units = UnitBaskets::from_shares(defs, &base_prices, &shares);
     let need_units = UnitNeedBaskets::from_shares(defs, &base_prices, &shares);
-    let mut state_buy = BTreeMap::<(u32, GoodIdx), f64>::new();
-    let mut state_sell = BTreeMap::<(u32, GoodIdx), f64>::new();
+    let mut state_buy = BTreeMap::<(u32, GoodId), f64>::new();
+    let mut state_sell = BTreeMap::<(u32, GoodId), f64>::new();
 
     let pops_by_state = snapshot.is_none().then(|| {
         let mut index = BTreeMap::<u32, Vec<WorldPop>>::new();
@@ -542,7 +542,7 @@ fn pop_needs_for(
     pop_compact_needs(&world_pop, prices, base_prices, units, need_units)
 }
 
-fn add_need_good(dst: &mut Vec<(GoodIdx, f64, f64)>, idx: GoodIdx, quantity: f64, value: f64) {
+fn add_need_good(dst: &mut Vec<(GoodId, f64, f64)>, idx: GoodId, quantity: f64, value: f64) {
     if let Some(existing) = dst.iter_mut().find(|(stored, _, _)| *stored == idx) {
         existing.1 += quantity;
         existing.2 += value;
@@ -553,20 +553,20 @@ fn add_need_good(dst: &mut Vec<(GoodIdx, f64, f64)>, idx: GoodIdx, quantity: f64
 
 struct NeedAgg {
     state_id: u32,
-    need_idx: NeedIdx,
+    need_id: NeedId,
     package_value: f64,
-    goods: Vec<(GoodIdx, f64, f64)>,
+    goods: Vec<(GoodId, f64, f64)>,
 }
 
 fn aggregate_state_needs(pops: &[CompactStatePop], tables: &EmitTables) -> Vec<StateNeed> {
-    let mut by_state: HashMap<(u32, NeedIdx), NeedAgg> = HashMap::new();
+    let mut by_state: HashMap<(u32, NeedId), NeedAgg> = HashMap::new();
     for pop in pops {
         for need in &pop.needs {
             let entry = by_state
-                .entry((pop.state_id, need.need_idx))
+                .entry((pop.state_id, need.need_id))
                 .or_insert_with(|| NeedAgg {
                     state_id: pop.state_id,
-                    need_idx: need.need_idx,
+                    need_id: need.need_id,
                     package_value: 0.0,
                     goods: Vec::new(),
                 });
@@ -578,10 +578,10 @@ fn aggregate_state_needs(pops: &[CompactStatePop], tables: &EmitTables) -> Vec<S
     }
 
     let mut rows: Vec<NeedAgg> = by_state.into_values().collect();
-    rows.sort_unstable_by_key(|row| (row.state_id, row.need_idx));
+    rows.sort_unstable_by_key(|row| (row.state_id, row.need_id));
     rows.into_iter()
         .filter_map(|mut row| {
-            let need_id = tables.need(row.need_idx)?.to_string();
+            let need_id = tables.need(row.need_id)?.to_string();
             row.goods.sort_unstable_by_key(|(idx, _, _)| *idx);
             Some(StateNeed {
                 state_id: row.state_id,
@@ -774,7 +774,7 @@ fn priced_flows(
     prices: &GoodsVec,
     defs: &GameDefs,
     state: Option<u32>,
-    state_side: &mut BTreeMap<(u32, GoodIdx), f64>,
+    state_side: &mut BTreeMap<(u32, GoodId), f64>,
 ) -> Vec<GoodFlow> {
     quantities
         .iter_indexed()

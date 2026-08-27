@@ -16,7 +16,7 @@ use std::sync::OnceLock;
 use schemars::JsonSchema;
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use vic3_defs::{GameDefs, GoodIdx, NeedIdx};
+use vic3_defs::{GameDefs, GoodId, NeedId};
 
 use crate::world::Intern;
 
@@ -385,20 +385,20 @@ impl EmitTables {
         self.labels.get(id).map(String::as_str)
     }
 
-    pub(crate) fn good(&self, idx: GoodIdx) -> Option<&str> {
+    pub(crate) fn good(&self, idx: GoodId) -> Option<&str> {
         self.goods_order.get(idx.as_usize()).map(String::as_str)
     }
 
-    pub(crate) fn need(&self, idx: NeedIdx) -> Option<&str> {
+    pub(crate) fn need(&self, idx: NeedId) -> Option<&str> {
         self.needs_order.get(idx.as_usize()).map(String::as_str)
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CompactNeed {
-    pub need_idx: NeedIdx,
+    pub need_id: NeedId,
     pub package_value: f64,
-    pub goods: Vec<(GoodIdx, f64, f64)>,
+    pub goods: Vec<(GoodId, f64, f64)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -419,7 +419,7 @@ pub(crate) struct CompactStatePop {
 
 /// JSON `state_pops` array.
 ///
-/// Solver rows stay interned (`u16` / [`GoodIdx`]) until serialize or first
+/// Solver rows stay interned (`u16` / [`GoodId`]) until serialize or first
 /// field access. CLI default output never walks this list; wasm / `--json`
 /// does. Skipping construction would make the CLI look fast while the webapp
 /// still paid the cost.
@@ -631,7 +631,7 @@ impl<'a> StatePopSer<'a> {
                 .needs
                 .iter()
                 .filter_map(|need| {
-                    let need_id = tables.need(need.need_idx)?;
+                    let need_id = tables.need(need.need_id)?;
                     Some(NeedSer {
                         need_id,
                         need_name: tables.label(need_id),

@@ -62,9 +62,7 @@ pub fn decode_blob(bytes: &[u8]) -> Result<GameDefs, DefsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        BuyPackage, Good, GoodIdx, NeedEntry, NeedIdx, NeedsVec, PopNeed, ProductionMethod,
-    };
+    use crate::{BuyPackage, Good, GoodId, NeedEntry, NeedId, NeedsVec, PopNeed, ProductionMethod};
     use std::collections::BTreeMap;
 
     fn sample_defs() -> GameDefs {
@@ -93,13 +91,13 @@ mod tests {
             "pm_simple_forestry".into(),
             ProductionMethod {
                 id: "pm_simple_forestry".into(),
-                inputs: vec![(GoodIdx::from_usize(0), 1.0)],
-                outputs: vec![(GoodIdx::from_usize(1), 30.0)],
+                inputs: vec![(GoodId::from_usize(0), 1.0)],
+                outputs: vec![(GoodId::from_usize(1), 30.0)],
                 ..ProductionMethod::default()
             },
         );
 
-        let heat = NeedIdx::from_usize(0);
+        let heat = NeedId::from_usize(0);
         let mut needs = NeedsVec::zeros(1);
         needs[heat] = 15.0;
         let mut buy_packages = BTreeMap::new();
@@ -113,7 +111,7 @@ mod tests {
         );
 
         let mut obsessions = BTreeMap::new();
-        obsessions.insert("french".into(), vec![GoodIdx::from_usize(0)]);
+        obsessions.insert("french".into(), vec![GoodId::from_usize(0)]);
 
         let mut defs = GameDefs {
             price_range: 0.75,
@@ -130,9 +128,9 @@ mod tests {
             building_groups: BTreeMap::new(),
             pop_needs: vec![PopNeed {
                 id: "popneed_heating".into(),
-                default_good: Some(GoodIdx::from_usize(1)),
+                default_good: Some(GoodId::from_usize(1)),
                 entries: vec![NeedEntry {
-                    good: GoodIdx::from_usize(1),
+                    good: GoodId::from_usize(1),
                     weight: 1.0,
                     min_supply_share: 0.0,
                     max_supply_share: 1.0,

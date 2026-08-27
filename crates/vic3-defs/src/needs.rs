@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 /// Index into [`crate::GameDefs::needs_order`].
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct NeedIdx(u16);
+pub struct NeedId(u16);
 
-impl NeedIdx {
+impl NeedId {
     /// Construct from a position when it fits the compact representation.
     #[inline]
     pub fn try_from_usize(index: usize) -> Option<Self> {
@@ -43,13 +43,13 @@ impl NeedIdx {
     }
 }
 
-impl fmt::Debug for NeedIdx {
+impl fmt::Debug for NeedId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "NeedIdx({})", self.0)
+        write!(f, "NeedId({})", self.0)
     }
 }
 
-impl fmt::Display for NeedIdx {
+impl fmt::Display for NeedId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -101,11 +101,11 @@ impl NeedsVec {
     }
 
     /// `(index, value)` pairs in order.
-    pub fn iter_indexed(&self) -> impl Iterator<Item = (NeedIdx, f64)> + '_ {
+    pub fn iter_indexed(&self) -> impl Iterator<Item = (NeedId, f64)> + '_ {
         self.data
             .iter()
             .enumerate()
-            .map(|(i, &v)| (NeedIdx::from_usize(i), v))
+            .map(|(i, &v)| (NeedId::from_usize(i), v))
     }
 
     /// Linear blend `a * (1 - t) + b * t`.
@@ -122,23 +122,23 @@ impl NeedsVec {
 
     /// Add `qty` into slot `idx`.
     #[inline]
-    pub fn add(&mut self, idx: NeedIdx, qty: f64) {
+    pub fn add(&mut self, idx: NeedId, qty: f64) {
         self.data[idx.as_usize()] += qty;
     }
 }
 
-impl Index<NeedIdx> for NeedsVec {
+impl Index<NeedId> for NeedsVec {
     type Output = f64;
 
     #[inline]
-    fn index(&self, index: NeedIdx) -> &Self::Output {
+    fn index(&self, index: NeedId) -> &Self::Output {
         &self.data[index.as_usize()]
     }
 }
 
-impl IndexMut<NeedIdx> for NeedsVec {
+impl IndexMut<NeedId> for NeedsVec {
     #[inline]
-    fn index_mut(&mut self, index: NeedIdx) -> &mut Self::Output {
+    fn index_mut(&mut self, index: NeedId) -> &mut Self::Output {
         &mut self.data[index.as_usize()]
     }
 }

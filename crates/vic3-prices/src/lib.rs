@@ -196,28 +196,28 @@ mod tests {
 
     use proptest::prelude::*;
     use vic3_defs::{
-        BuyPackage, GameDefs, Good, GoodIdx, GoodsVec, NeedEntry, NeedIdx, NeedsVec, PopNeed,
+        BuyPackage, GameDefs, Good, GoodId, GoodsVec, NeedEntry, NeedId, NeedsVec, PopNeed,
         ProductionMethod,
     };
 
     fn heating_defs() -> GameDefs {
-        let heat = NeedIdx::from_usize(0);
+        let heat = NeedId::from_usize(0);
         let mut defs = GameDefs {
             price_range: 0.75,
             goods_order: vec!["grain".into(), "wood".into(), "coal".into()],
             needs_order: vec!["popneed_heating".into()],
             pop_needs: vec![PopNeed {
                 id: "popneed_heating".into(),
-                default_good: Some(GoodIdx::from_usize(1)),
+                default_good: Some(GoodId::from_usize(1)),
                 entries: vec![
                     NeedEntry {
-                        good: GoodIdx::from_usize(1),
+                        good: GoodId::from_usize(1),
                         weight: 1.0,
                         min_supply_share: 0.0,
                         max_supply_share: 0.5,
                     },
                     NeedEntry {
-                        good: GoodIdx::from_usize(2),
+                        good: GoodId::from_usize(2),
                         weight: 2.0,
                         min_supply_share: 0.1,
                         max_supply_share: 1.0,
@@ -278,7 +278,7 @@ mod tests {
             ProductionMethod {
                 id: "pm_simple_forestry".into(),
                 inputs: Vec::new(),
-                outputs: vec![(GoodIdx::from_usize(1), 30.0)],
+                outputs: vec![(GoodId::from_usize(1), 30.0)],
                 ..Default::default()
             },
         );
@@ -288,8 +288,8 @@ mod tests {
 
     /// Two goods, two singleton needs — buy can equal sell at base prices.
     fn two_good_defs() -> GameDefs {
-        let staple = NeedIdx::from_usize(0);
-        let heat = NeedIdx::from_usize(1);
+        let staple = NeedId::from_usize(0);
+        let heat = NeedId::from_usize(1);
         let mut defs = GameDefs {
             price_range: 0.75,
             goods_order: vec!["grain".into(), "wood".into()],
@@ -297,9 +297,9 @@ mod tests {
             pop_needs: vec![
                 PopNeed {
                     id: "popneed_staple".into(),
-                    default_good: Some(GoodIdx::from_usize(0)),
+                    default_good: Some(GoodId::from_usize(0)),
                     entries: vec![NeedEntry {
-                        good: GoodIdx::from_usize(0),
+                        good: GoodId::from_usize(0),
                         weight: 1.0,
                         min_supply_share: 0.0,
                         max_supply_share: 1.0,
@@ -307,9 +307,9 @@ mod tests {
                 },
                 PopNeed {
                     id: "popneed_heating".into(),
-                    default_good: Some(GoodIdx::from_usize(1)),
+                    default_good: Some(GoodId::from_usize(1)),
                     entries: vec![NeedEntry {
-                        good: GoodIdx::from_usize(1),
+                        good: GoodId::from_usize(1),
                         weight: 1.0,
                         min_supply_share: 0.0,
                         max_supply_share: 1.0,
@@ -363,7 +363,7 @@ mod tests {
             ProductionMethod {
                 id: "pm_simple_forestry".into(),
                 inputs: Vec::new(),
-                outputs: vec![(GoodIdx::from_usize(1), 30.0)],
+                outputs: vec![(GoodId::from_usize(1), 30.0)],
                 ..Default::default()
             },
         );
@@ -556,8 +556,8 @@ mod tests {
             "pm_goofy_factory".into(),
             ProductionMethod {
                 id: "pm_goofy_factory".into(),
-                inputs: vec![(GoodIdx::from_usize(2), 2.0)],
-                outputs: vec![(GoodIdx::from_usize(1), 3.0)],
+                inputs: vec![(GoodId::from_usize(2), 2.0)],
+                outputs: vec![(GoodId::from_usize(1), 3.0)],
                 ..Default::default()
             },
         );
@@ -615,7 +615,7 @@ mod tests {
             "pm_wood_buyer".into(),
             ProductionMethod {
                 id: "pm_wood_buyer".into(),
-                inputs: vec![(GoodIdx::from_usize(1), 10.0)],
+                inputs: vec![(GoodId::from_usize(1), 10.0)],
                 outputs: Vec::new(),
                 ..Default::default()
             },
@@ -625,7 +625,7 @@ mod tests {
             ProductionMethod {
                 id: "pm_wood_seller".into(),
                 inputs: Vec::new(),
-                outputs: vec![(GoodIdx::from_usize(1), 10.0)],
+                outputs: vec![(GoodId::from_usize(1), 10.0)],
                 ..Default::default()
             },
         );
@@ -695,7 +695,7 @@ mod tests {
             "pm_wood_buyer".into(),
             ProductionMethod {
                 id: "pm_wood_buyer".into(),
-                inputs: vec![(GoodIdx::from_usize(1), 10.0)],
+                inputs: vec![(GoodId::from_usize(1), 10.0)],
                 outputs: Vec::new(),
                 ..Default::default()
             },
@@ -705,7 +705,7 @@ mod tests {
             ProductionMethod {
                 id: "pm_wood_seller".into(),
                 inputs: Vec::new(),
-                outputs: vec![(GoodIdx::from_usize(1), 10.0)],
+                outputs: vec![(GoodId::from_usize(1), 10.0)],
                 ..Default::default()
             },
         );
@@ -893,12 +893,12 @@ mod tests {
             ProductionMethod {
                 id: "pm_grain".into(),
                 inputs: Vec::new(),
-                outputs: vec![(GoodIdx::from_usize(0), 30.0)],
+                outputs: vec![(GoodId::from_usize(0), 30.0)],
                 ..Default::default()
             },
         );
-        let wood = GoodIdx::from_usize(1);
-        let grain = GoodIdx::from_usize(0);
+        let wood = GoodId::from_usize(1);
+        let grain = GoodId::from_usize(0);
         let world = World {
             pops: two_pops(),
             buildings: vec![WorldBuilding {
@@ -987,7 +987,7 @@ mod tests {
 
     #[test]
     fn preview_extra_levels_on_trade_center_type() {
-        let wood = GoodIdx::from_usize(1);
+        let wood = GoodId::from_usize(1);
         let world = World {
             buildings: vec![WorldBuilding {
                 id: 3,
@@ -1054,8 +1054,8 @@ mod tests {
         ) {
             let defs = heating_defs();
             let mut frozen_sell = GoodsVec::zeros(defs.goods_order.len());
-            frozen_sell[GoodIdx::from_usize(1)] = wood_sell;
-            frozen_sell[GoodIdx::from_usize(2)] = coal_sell;
+            frozen_sell[GoodId::from_usize(1)] = wood_sell;
+            frozen_sell[GoodId::from_usize(2)] = coal_sell;
             let world = World {
                 pops: vec![
                     WorldPop {
@@ -1098,8 +1098,8 @@ mod tests {
         ) {
             let defs = heating_defs();
             let mut frozen_sell = GoodsVec::zeros(defs.goods_order.len());
-            frozen_sell[GoodIdx::from_usize(1)] = wood_sell;
-            frozen_sell[GoodIdx::from_usize(2)] = coal_sell;
+            frozen_sell[GoodId::from_usize(1)] = wood_sell;
+            frozen_sell[GoodId::from_usize(2)] = coal_sell;
             let world = World {
                 pops: vec![
                     WorldPop {
