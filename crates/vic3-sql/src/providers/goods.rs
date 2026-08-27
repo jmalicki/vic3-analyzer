@@ -39,8 +39,8 @@ impl GoodsProvider {
         let mut by_label: HashMap<String, Vec<usize>> = HashMap::new();
         for (i, g) in binding.prices.goods.iter().enumerate() {
             by_good.insert(g.name.clone(), i);
-            if let Some(n) = &g.label {
-                by_label.entry(n.clone()).or_default().push(i);
+            if let Some(n) = binding.good_label(&g.name) {
+                by_label.entry(n).or_default().push(i);
             }
         }
         Self {
@@ -82,19 +82,19 @@ impl GoodsProvider {
             if !matches_str(&preds, "name", &g.name) {
                 continue;
             }
-            if let Some(n) = &g.label {
-                if !matches_str(&preds, "label", n) {
-                    continue;
-                }
-            } else if preds
+            let resolved_label = self.binding.good_label(&g.name);
+            if preds
                 .iter()
                 .any(|p| matches!(p, Pred::EqStr { column, .. } if column == "label"))
             {
-                continue;
+                match resolved_label.as_deref() {
+                    Some(n) if matches_str(&preds, "label", n) => {}
+                    _ => continue,
+                }
             }
             name.append_value(&g.name);
-            match &g.label {
-                Some(n) => label.append_value(n),
+            match resolved_label {
+                Some(n) => label.append_value(&n),
                 None => label.append_null(),
             }
             base.append_value(g.base);

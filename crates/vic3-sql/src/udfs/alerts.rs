@@ -7,7 +7,7 @@
 //! Projection / filter / LIMIT (speedup D, issue #37):
 //! - Mitigations builders run only when the `mitigations` column is projected
 //!   (or `SELECT *`). Projecting `evidence` alone stays on the lean path.
-//! - Exact equality on `severity`, `kind`, `good_id`, `state_id`, `building_id`,
+//! - Exact equality on `severity`, `kind`, `good_name`, `state_id`, `building_id`,
 //!   and `id` is applied in-provider before mitigations.
 //! - `LIMIT` truncates before mitigations when every filter is Exact (or there
 //!   are no filters). Residual Unsupported filters disable early LIMIT.
@@ -39,7 +39,7 @@ const ALERTS_MITIGATIONS_COL: usize = 9;
 const ALERTS_PUSH: PushSupport = PushSupport {
     eq_u32: &["state_id", "building_id"],
     eq_i32: &["severity"],
-    eq_str: &["kind", "good_id", "id"],
+    eq_str: &["kind", "good_name", "id"],
     range_str: &[],
 };
 
@@ -228,10 +228,10 @@ fn alert_matches(alert: &Alert, preds: &[Pred]) -> bool {
     // Nullable columns: equality excludes NULL rows (SQL NULL ≠ value).
     if preds
         .iter()
-        .any(|p| matches!(p, Pred::EqStr { column, .. } if column == "good_id"))
+        .any(|p| matches!(p, Pred::EqStr { column, .. } if column == "good_name"))
     {
         match &alert.good_name {
-            Some(g) if matches_str(preds, "good_id", g) => {}
+            Some(g) if matches_str(preds, "good_name", g) => {}
             _ => return false,
         }
     }

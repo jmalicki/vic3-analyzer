@@ -133,6 +133,7 @@ struct StoredPricesResult {
 
 #[derive(Deserialize)]
 struct StoredGoodPrice {
+    #[serde(alias = "good_name", alias = "id")]
     name: String,
     price: f64,
 }

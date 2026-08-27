@@ -125,7 +125,7 @@ Market-level goods from `PricesResult.goods` / `GameDefs`.
 
 | Column | Notes |
 | --- | --- |
-| `name` | Script id; **key** — `goods_order` + `index_of` (Exact `=`). Defs also keep a `BTreeMap` by script id → if that map is the scan source, Exact **range** on `good` is allowed |
+| `name` | Script id; **key** — `goods_order` + `index_of` (Exact `=`). Defs also keep a `BTreeMap` by script id → if that map is the scan source, Exact **range** on `name` is allowed |
 | `label` | Localized (`labels`); Exact `=` via inverse hash if built — **no** range Exact unless a btree of labels exists |
 | `base` / `price` / `buy` / `sell` / `shortage` | As modeled; document shortage formula in implementation |
 
@@ -158,11 +158,11 @@ Goods IO and PM recipes use **`List<Struct{good_name, good_label, qty}>`** (scri
 -- One unnest → rows of structs; double unnest → multi-column (list then struct)
 SELECT building_id, unnest(unnest(input_goods))
 FROM buildings;
--- → building_id | good | good_name | qty
+-- → building_id | good_name | good_label | qty
 
 SELECT pm, unnest(unnest(outputs))
 FROM production_methods;
--- → pm | good | good_name | qty
+-- → pm | good_name | good_label | qty
 ```
 
 Simple `TEXT[]` columns need only one unnest:
@@ -236,15 +236,15 @@ Static catalog from `GameDefs` (same for all saves once defs are loaded). Prefer
 -- Double unnest: list → rows, then struct → columns
 SELECT pm, unnest(unnest(outputs))
 FROM production_methods;
--- → pm | good | good_name | qty
+-- → pm | good_name | good_label | qty
 
 -- Filter after explode
-SELECT pm, good, qty
+SELECT pm, good_name, qty
 FROM (
   SELECT pm, unnest(unnest(outputs))
   FROM production_methods
 )
-WHERE good = 'grain';
+WHERE good_name = 'grain';
 ```
 
 Optional convenience view `production_method_goods` = that double-unnest pattern — ship in v1 if MCP examples need join-shaped SQL without teaching `unnest(unnest(…))`.
@@ -335,7 +335,7 @@ Examples:
 
 Other rules:
 
-- Prefer joins on `state_id` / `good` / `building_id` (script ids); use localized names in `WHERE`.
+- Prefer joins on `state_id` / `good_name` / `building_id` (script ids); use localized names in `WHERE`.
 - Declare **output ordering** when a scan walks a btree or a vec sorted by id so sort-merge can apply.
 - Building a **HashMap** name→id at `use_save` for states is fine (states have no btree today); that enables Exact `=` only, not range.
 - List/`array_has` filters: Exact pushdown only if we implement contains against the in-memory vec (cheap for small lists); otherwise Unsupported and DF filters after projection.
@@ -422,7 +422,7 @@ SELECT * FROM suggest_mitigations('all') WHERE action = 'build';
 
 Expands goods-shortage alerts for one good (`NULL` = all electricity / transportation / goods shortage alerts). Magnitudes come from the market `goods` row; evidence/mitigations are JSON from the alert expander (no invented economics).
 
-Same projection / Exact filter (`severity`, `kind`, `good`, `alert_id`, `state_id`, `building_id`) / LIMIT-before-mitigations rules as [`alerts()`](#alertsscope).
+Same projection / Exact filter (`severity`, `kind`, `good_name`, `alert_id`, `state_id`, `building_id`) / LIMIT-before-mitigations rules as [`alerts()`](#alertsscope).
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -495,7 +495,7 @@ One row per simple subgoal for readiness (mirrors gaps CLI/UI).
 -- After use_save({ "name": "autosave" }) or selector latest
 -- Short names are already player-scoped; use world_* for save-wide rows.
 
-SELECT s.state_name, g.good, g.shortage, g.price
+SELECT s.state_name, g.good_name, g.shortage, g.price
 FROM states s
 JOIN goods_by_state g USING (state_id)
 WHERE g.shortage > 0
@@ -520,7 +520,7 @@ SELECT id, evidence, mitigations FROM alerts() WHERE id = 'goods:engines';
 -- Full-save alerts (not player-scoped):
 -- SELECT id, kind, title FROM alerts('all') WHERE severity = 1 LIMIT 40;
 
-SELECT good, alert_id, kind, shortage, price
+SELECT good_name, alert_id, kind, shortage, price
 FROM shortage_analysis('engines');
 
 -- Underemployed domestic states (no owner_tag = player_tag() needed):
@@ -556,7 +556,7 @@ SELECT name, kind, mtime FROM saves ORDER BY mtime DESC LIMIT 5;
 The Tauri **Advanced Query** tab uses this same dialect:
 
 - SQL editor → same engine as MCP `query` (`sql_query` invoke → `vic3-sql`)
-- Results grid; clicking cells with recognized keys navigates to companion panes (`state_id` / `building_id` → States, `good` / `good_name` → Prices, plan `step` → Timeline highlight)
+- Results grid; clicking cells with recognized keys navigates to companion panes (`state_id` / `building_id` → States, `name` / `good_name` → Prices, plan `step` → Timeline highlight)
 - In-app docs panel renders this document (and a UDF index) via `sql_docs` — same markdown MCP serves as `vic3://docs/sql`
 
 ## Open questions for review

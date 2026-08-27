@@ -246,7 +246,7 @@ async fn join_example_from_docs() {
     // Exact docs example shape (`docs/sql.md`); fixture may have zero shortages.
     let batches = eng
         .query(
-            "SELECT s.state_name, g.name, g.shortage, g.price \
+            "SELECT s.state_name, g.good_name, g.shortage, g.price \
              FROM states s \
              JOIN goods_by_state g USING (state_id) \
              WHERE g.shortage > 0 \

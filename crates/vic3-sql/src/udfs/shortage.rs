@@ -36,7 +36,7 @@ const SHORTAGE_MITIGATIONS_COL: usize = 14;
 const SHORTAGE_PUSH: PushSupport = PushSupport {
     eq_u32: &["state_id", "building_id"],
     eq_i32: &["severity"],
-    eq_str: &["kind", "good", "alert_id"],
+    eq_str: &["kind", "good_name", "alert_id"],
     range_str: &[],
 };
 
