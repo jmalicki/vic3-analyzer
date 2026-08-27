@@ -34,10 +34,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   SQL `building_types` uses `name`/`label`; `buildings` uses `building_type_name`/
   `building_type_label`. `WhatIfOpts` / `ExtraLevelsDelta` use `building_type_id`.
   **Breaking** for JSON, SQL, and web. Construction queue snapshot fields remain
-  `building`/`building_name` (W2e).
-
-  across defs, prices, planning, and SQL. **Breaking** for Rust callers of those
-  newtypes (transparent `u16`; postcard layout unchanged).
+  `building`/`building_name` (W2e). `BLOB_VERSION` bumped to 15.
 
 - **Planning `SimpleSubgoal`:** Renamed goal leaf type `Atom` → `SimpleSubgoal`,
   `Goal::Atom` → `Goal::Simple`, `atoms()` → `simple_subgoals()`, and related
