@@ -16,6 +16,7 @@ use crate::{
 pub(crate) struct StagingDefs {
     pub price_range: f64,
     pub goods_order: Vec<String>,
+    pub building_types_order: Vec<String>,
     pub needs_order: Vec<String>,
     pub goods: BTreeMap<String, Good>,
     pub labels: BTreeMap<String, String>,
@@ -24,7 +25,7 @@ pub(crate) struct StagingDefs {
     pub flags: BTreeMap<String, Vec<u8>>,
     pub flag_defs: BTreeMap<String, Vec<FlagDefinition>>,
     pub production_methods: BTreeMap<String, StagingPm>,
-    pub buildings: BTreeMap<String, BuildingType>,
+    pub building_types: BTreeMap<String, BuildingType>,
     /// Building id → script-value name for `required_construction = construction_cost_*`.
     pub building_construction_refs: BTreeMap<String, String>,
     /// Flat numeric script values (e.g. `construction_cost_high = 600`).
@@ -43,6 +44,7 @@ impl Default for StagingDefs {
         Self {
             price_range: crate::DEFAULT_PRICE_RANGE,
             goods_order: Vec::new(),
+            building_types_order: Vec::new(),
             needs_order: Vec::new(),
             goods: BTreeMap::new(),
             labels: BTreeMap::new(),
@@ -51,7 +53,7 @@ impl Default for StagingDefs {
             flags: BTreeMap::new(),
             flag_defs: BTreeMap::new(),
             production_methods: BTreeMap::new(),
-            buildings: BTreeMap::new(),
+            building_types: BTreeMap::new(),
             building_construction_refs: BTreeMap::new(),
             script_values: BTreeMap::new(),
             building_groups: BTreeMap::new(),
@@ -111,7 +113,7 @@ impl StagingDefs {
             }
         }
 
-        let mut buildings = self.buildings;
+        let mut building_types = self.building_types;
         for (building_id, value_name) in self.building_construction_refs {
             let Some(cost) = self.script_values.get(&value_name).copied() else {
                 continue;
@@ -119,16 +121,24 @@ impl StagingDefs {
             if !(cost.is_finite() && cost >= 0.0) {
                 continue;
             }
-            if let Some(building) = buildings.get_mut(&building_id) {
+            if let Some(building) = building_types.get_mut(&building_id) {
                 if building.required_construction.is_none() {
                     building.required_construction = Some(cost);
                 }
+            }
+        }
+        // First-seen load order; append any map-only ids (overlays / tests).
+        let mut building_types_order = self.building_types_order;
+        for id in building_types.keys() {
+            if !building_types_order.contains(id) {
+                building_types_order.push(id.clone());
             }
         }
 
         let mut defs = GameDefs {
             price_range: self.price_range,
             goods_order: self.goods_order,
+            building_types_order,
             needs_order,
             goods: self.goods,
             labels: self.labels,
@@ -137,7 +147,7 @@ impl StagingDefs {
             flags: self.flags,
             flag_defs: self.flag_defs,
             production_methods: BTreeMap::new(),
-            buildings,
+            building_types,
             building_groups: self.building_groups,
             pop_needs: Vec::new(),
             buy_packages: BTreeMap::new(),

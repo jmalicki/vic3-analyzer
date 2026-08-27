@@ -64,13 +64,17 @@ pub(crate) fn report_from_solve(
 
 /// Def catalog rows for [`PricesResult::building_types`].
 fn building_type_infos(defs: &GameDefs) -> Vec<BuildingTypeInfo> {
-    defs.buildings
-        .values()
-        .map(|building| BuildingTypeInfo {
-            id: building.id.clone(),
-            name: defs.labels.get(&building.id).cloned(),
-            group_id: building.group.clone(),
-            city_type: building.city_type.clone(),
+    defs.building_types_order
+        .iter()
+        .filter_map(|script_id| {
+            let building = defs.building_types.get(script_id)?;
+            Some(BuildingTypeInfo {
+                id: defs.building_index_of(script_id)?,
+                name: script_id.clone(),
+                label: defs.labels.get(script_id).cloned(),
+                group_id: building.group.clone(),
+                city_type: building.city_type.clone(),
+            })
         })
         .collect()
 }
@@ -80,8 +84,8 @@ fn building_group_infos(defs: &GameDefs) -> Vec<BuildingGroupInfo> {
     defs.building_groups
         .values()
         .map(|group| BuildingGroupInfo {
-            id: group.id.clone(),
-            name: defs.labels.get(&group.id).cloned(),
+            name: group.id.clone(),
+            label: defs.labels.get(&group.id).cloned(),
             category: group.category.clone(),
             land_usage: group.land_usage.clone(),
             always_possible: group.always_possible,
@@ -215,7 +219,9 @@ fn detail_rows(
         buildings.push(BuildingEconomics {
             id: building.id,
             state_id: building.state,
-            type_id: building.building.clone(),
+            building_type_id: Some(building.building_type_id),
+            building_type_name: building.type_script_id(defs).to_string(),
+            building_type_label: defs.labels.get(building.type_script_id(defs)).cloned(),
             level: building.level,
             staffing: building.staffing,
             production_method_ids: building.production_methods.clone(),

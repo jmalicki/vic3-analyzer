@@ -432,7 +432,7 @@ mod tests {
     fn what_if_schema_describes_building_and_extra_levels() {
         let schema: Value = serde_json::from_str(&what_if_schema()).expect("schema");
         let props = schema["properties"].as_object().expect("properties");
-        assert!(props.contains_key("building"), "{props:?}");
+        assert!(props.contains_key("building_type_id"), "{props:?}");
         assert!(props.contains_key("extra_levels"), "{props:?}");
         let required = schema["required"]
             .as_array()
@@ -440,7 +440,7 @@ mod tests {
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
-        assert!(required.contains(&"building"));
+        assert!(required.contains(&"building_type_id"));
         assert!(required.contains(&"extra_levels"));
     }
 }

@@ -226,11 +226,11 @@ fn fixture_pop_types_record_qualification_sources() {
     assert!(uni.education_access);
     assert!(uni.qualifications_boost);
     assert_eq!(
-        defs.buildings["building_rye_farm"].production_method_groups,
+        defs.building_types["building_rye_farm"].production_method_groups,
         ["pmg_base_building_rye_farm"]
     );
     assert_eq!(
-        defs.buildings["building_rye_farm"].required_construction,
+        defs.building_types["building_rye_farm"].required_construction,
         Some(200.0)
     );
     assert_eq!(
@@ -250,7 +250,7 @@ fn fixture_pop_types_record_qualification_sources() {
 #[test]
 fn fixture_buildings_have_state_panel_metadata() {
     let defs = load_fixture();
-    let farm = &defs.buildings["building_rye_farm"];
+    let farm = &defs.building_types["building_rye_farm"];
     assert_eq!(farm.group.as_deref(), Some("bg_agriculture"));
     assert_eq!(farm.city_type.as_deref(), Some("farm"));
     let agriculture = &defs.building_groups["bg_agriculture"];

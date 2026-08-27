@@ -16,7 +16,7 @@ use std::sync::OnceLock;
 use schemars::JsonSchema;
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use vic3_defs::{GameDefs, GoodId, NeedId};
+use vic3_defs::{BuildingTypeId, GameDefs, GoodId, NeedId};
 
 use crate::world::Intern;
 
@@ -68,8 +68,9 @@ impl Default for SolveOpts {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WhatIfOpts {
-    /// Building type id (matches [`crate::WorldBuilding::building`]).
-    pub building: String,
+    /// Building type index (matches [`crate::WorldBuilding::building_type_id`]).
+    #[schemars(with = "u16")]
+    pub building_type_id: BuildingTypeId,
     /// Non-negative extra levels added to matching buildings.
     #[schemars(range(min = 0))]
     pub extra_levels: u32,
@@ -104,13 +105,14 @@ pub struct ProductionMethodDelta {
 
 /// Extra levels on a building type and/or a single instance.
 ///
-/// When `building_id` is set it wins; otherwise `building` matches
-/// [`crate::WorldBuilding::building`]. Neither set is a no-op.
+/// When `building_id` is set it wins; otherwise `building_type_id` matches
+/// [`crate::WorldBuilding::building_type_id`]. Neither set is a no-op.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExtraLevelsDelta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub building: Option<String>,
+    #[schemars(with = "Option<u16>")]
+    pub building_type_id: Option<BuildingTypeId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub building_id: Option<u32>,
     #[schemars(range(min = 0))]
@@ -129,7 +131,7 @@ impl From<WhatIfOpts> for WorldDelta {
     fn from(opts: WhatIfOpts) -> Self {
         Self {
             extra_levels: vec![ExtraLevelsDelta {
-                building: Some(opts.building),
+                building_type_id: Some(opts.building_type_id),
                 building_id: None,
                 extra_levels: opts.extra_levels,
             }],
@@ -267,16 +269,20 @@ pub struct StateQualification {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BuildingTypeInfo {
-    pub id: String,
-    pub name: Option<String>,
+    #[schemars(with = "u16")]
+    pub id: BuildingTypeId,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     pub group_id: Option<String>,
     pub city_type: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BuildingGroupInfo {
-    pub id: String,
-    pub name: Option<String>,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     pub category: Option<String>,
     pub land_usage: Option<String>,
     pub always_possible: bool,
@@ -314,7 +320,11 @@ pub struct GoodFlow {
 pub struct BuildingEconomics {
     pub id: u32,
     pub state_id: Option<u32>,
-    pub type_id: String,
+    #[schemars(with = "Option<u16>")]
+    pub building_type_id: Option<BuildingTypeId>,
+    pub building_type_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub building_type_label: Option<String>,
     pub level: f64,
     pub staffing: f64,
     pub production_method_ids: Vec<String>,

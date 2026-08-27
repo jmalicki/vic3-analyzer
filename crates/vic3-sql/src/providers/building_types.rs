@@ -19,9 +19,9 @@ use super::pushdown::{matches_str, PushSupport};
 const PUSH: PushSupport = PushSupport {
     eq_u32: &[],
     eq_i32: &[],
-    eq_str: &["type_id", "type_name", "group_id"],
-    // defs.buildings is a BTreeMap — Exact range on type_id.
-    range_str: &["type_id"],
+    eq_str: &["name", "label", "group_id"],
+    // defs.building_types is a BTreeMap — Exact range on name.
+    range_str: &["name"],
 };
 
 #[derive(Debug)]
@@ -40,23 +40,23 @@ impl BuildingTypesProvider {
 
     fn batch(&self, filters: &[Expr]) -> DfResult<RecordBatch> {
         let preds = PUSH.collect_preds(filters);
-        let mut type_id = StringBuilder::new();
-        let mut type_name = StringBuilder::new();
+        let mut name = StringBuilder::new();
+        let mut label = StringBuilder::new();
         let mut group_id = StringBuilder::new();
         let mut city_type = StringBuilder::new();
         let mut groups: Vec<Vec<String>> = Vec::new();
 
-        for (id, bt) in &self.binding.defs.buildings {
-            if !matches_str(&preds, "type_id", id) {
+        for (script_id, bt) in &self.binding.defs.building_types {
+            if !matches_str(&preds, "name", script_id) {
                 continue;
             }
-            let name = self.binding.label(id);
-            if let Some(n) = name {
-                if !matches_str(&preds, "type_name", n) {
+            let loc = self.binding.label(script_id);
+            if let Some(n) = loc {
+                if !matches_str(&preds, "label", n) {
                     continue;
                 }
             } else if preds.iter().any(
-                |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "type_name"),
+                |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "label"),
             ) {
                 continue;
             }
@@ -70,10 +70,10 @@ impl BuildingTypesProvider {
                 continue;
             }
 
-            type_id.append_value(id);
-            match name {
-                Some(n) => type_name.append_value(n),
-                None => type_name.append_null(),
+            name.append_value(script_id);
+            match loc {
+                Some(n) => label.append_value(n),
+                None => label.append_null(),
             }
             match &bt.group {
                 Some(g) => group_id.append_value(g),
@@ -89,8 +89,8 @@ impl BuildingTypesProvider {
         RecordBatch::try_new(
             Arc::clone(&self.schema),
             vec![
-                Arc::new(type_id.finish()),
-                Arc::new(type_name.finish()),
+                Arc::new(name.finish()),
+                Arc::new(label.finish()),
                 Arc::new(group_id.finish()),
                 Arc::new(city_type.finish()),
                 text_list_column(&groups),

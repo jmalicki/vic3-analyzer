@@ -7,9 +7,8 @@ use crate::{DefsError, GameDefs};
 /// [`decode_blob`] checks this **before** deserializing the payload so a stale
 /// blob reports [`DefsError::BlobVersion`] instead of a confusing field error.
 ///
-/// v14: `ProductionMethod.country_construction_add` (`Option<f64>`) — layout
-/// change from #95 that originally shipped without a version bump.
-pub const BLOB_VERSION: u32 = 14;
+/// v15: `building_types_order` and `building_types` (renamed from `buildings`).
+pub const BLOB_VERSION: u32 = 15;
 
 #[derive(Serialize, Deserialize)]
 struct DefsBlob {
@@ -116,6 +115,7 @@ mod tests {
         let mut defs = GameDefs {
             price_range: 0.75,
             goods_order: vec!["grain".into(), "wood".into()],
+            building_types_order: Vec::new(),
             needs_order: vec!["popneed_heating".into()],
             goods,
             labels: BTreeMap::new(),
@@ -124,7 +124,7 @@ mod tests {
             flags: BTreeMap::new(),
             flag_defs: BTreeMap::new(),
             production_methods,
-            buildings: BTreeMap::new(),
+            building_types: BTreeMap::new(),
             building_groups: BTreeMap::new(),
             pop_needs: vec![PopNeed {
                 id: "popneed_heating".into(),

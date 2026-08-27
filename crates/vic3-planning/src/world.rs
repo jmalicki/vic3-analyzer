@@ -1478,7 +1478,9 @@ mod tests {
         let building = |id, state_id, revenue| BuildingEconomics {
             id,
             state_id: Some(state_id),
-            type_id: "building_factory".into(),
+            building_type_id: None,
+            building_type_name: "building_factory".into(),
+            building_type_label: None,
             level: 1.0,
             staffing: 1.0,
             production_method_ids: Vec::new(),
@@ -1613,7 +1615,9 @@ mod tests {
         let building = |id, state_id, revenue| BuildingEconomics {
             id,
             state_id: Some(state_id),
-            type_id: "building_factory".into(),
+            building_type_id: None,
+            building_type_name: "building_factory".into(),
+            building_type_label: None,
             level: 1.0,
             staffing: 1.0,
             production_method_ids: Vec::new(),

@@ -167,7 +167,8 @@ fn synthetic_world_building(
     state_id: u32,
     levels: u32,
 ) -> Option<WorldBuilding> {
-    let building_type = defs.buildings.get(building)?;
+    let building_type = defs.building_types.get(building)?;
+    let building_type_id = defs.building_index_of(building)?;
     let level = f64::from(levels);
     if level <= 0.0 {
         return None;
@@ -183,7 +184,7 @@ fn synthetic_world_building(
         id: next_id,
         // TODO(buildability): verify free slot / potential in this state.
         state: Some(state_id),
-        building: building.to_string(),
+        building_type_id,
         level,
         staffing: level,
         production_methods: default_pms_for_building(defs, building_type),
@@ -292,7 +293,7 @@ impl EconomyContext {
             }
             let mut found = false;
             for row in &mut world.buildings {
-                if row.building == *building && row.state == Some(*state_id) {
+                if row.type_script_id(&self.defs) == building && row.state == Some(*state_id) {
                     row.add_extra_levels(*levels);
                     found = true;
                 }
@@ -331,7 +332,7 @@ impl EconomyContext {
             }
             let mut found = false;
             for row in &self.base_world.buildings {
-                if row.building == *building && row.state == Some(*state_id) {
+                if row.type_script_id(&self.defs) == building && row.state == Some(*state_id) {
                     found = true;
                     let (old_i, old_o) = row.goods_io(&self.defs);
                     let mut bumped = row.clone();
@@ -384,7 +385,7 @@ impl EconomyContext {
             if let Some(sid) = before.state {
                 if let Some(levels) = state
                     .building_level_deltas
-                    .get(&(before.building.clone(), sid))
+                    .get(&(before.type_script_id(&self.defs).to_string(), sid))
                 {
                     if *levels > 0 {
                         before.add_extra_levels(*levels);
@@ -436,7 +437,7 @@ impl EconomyContext {
         let mut have: BTreeSet<u32> = world
             .buildings
             .iter()
-            .filter(|row| row.building == building)
+            .filter(|row| row.type_script_id(&self.defs) == building)
             .filter_map(|row| row.state.filter(|sid| owned.contains(sid)))
             .collect();
         for job in &state.constructions {
@@ -492,7 +493,7 @@ impl EconomyContext {
             let Some(good_id) = self.defs.index_of(good) else {
                 continue;
             };
-            for (building_id, building_type) in &self.defs.buildings {
+            for (building_id, building_type) in &self.defs.building_types {
                 let (inputs, outputs) = default_building_io_per_level(&self.defs, building_type);
                 let produces = outputs[good_id];
                 let consumes = inputs[good_id];
@@ -517,7 +518,7 @@ impl EconomyContext {
                 }
             )
         }) {
-            for (building_id, building_type) in &self.defs.buildings {
+            for (building_id, building_type) in &self.defs.building_types {
                 let (_, outputs) = default_building_io_per_level(&self.defs, building_type);
                 let benefit = outputs
                     .iter_indexed()
@@ -634,7 +635,7 @@ impl EconomyContext {
     ) {
         let mil_types: Vec<&str> = self
             .defs
-            .buildings
+            .building_types
             .keys()
             .map(String::as_str)
             .chain([BUILDING_BARRACKS, BUILDING_SHIPYARD, BUILDING_NAVAL_ADMIN])
@@ -644,7 +645,7 @@ impl EconomyContext {
             .collect();
         let mut expensive_inputs = BTreeSet::new();
         for mil_id in mil_types {
-            let Some(building_type) = self.defs.buildings.get(mil_id) else {
+            let Some(building_type) = self.defs.building_types.get(mil_id) else {
                 continue;
             };
             let (inputs, _) = default_building_io_per_level(&self.defs, building_type);
@@ -667,7 +668,7 @@ impl EconomyContext {
         if expensive_inputs.is_empty() {
             return;
         }
-        for (building_id, building_type) in &self.defs.buildings {
+        for (building_id, building_type) in &self.defs.building_types {
             let (_, outputs) = default_building_io_per_level(&self.defs, building_type);
             if expensive_inputs
                 .iter()
@@ -756,7 +757,11 @@ impl EconomyContext {
             if state.pm_overrides.contains_key(&building.id) {
                 continue;
             }
-            let Some(building_type) = self.defs.buildings.get(&building.building) else {
+            let Some(building_type) = self
+                .defs
+                .building_types
+                .get(building.type_script_id(&self.defs))
+            else {
                 continue;
             };
             // One Vic3 PM group == one slot. Prefer def group count; fall back to
@@ -857,7 +862,7 @@ fn pm_alternatives_for_slot(
         alternatives.insert(current.clone());
     }
     for other in peers {
-        if other.building == building.building {
+        if other.building_type_id == building.building_type_id {
             if let Some(pm) = other.production_methods.get(slot) {
                 alternatives.insert(pm.clone());
             }
@@ -2220,7 +2225,7 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
-        defs.buildings.insert(
+        defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
                 id: "building_logging_camp".into(),
@@ -2230,6 +2235,8 @@ mod tests {
                 required_construction: Some(30.0),
             },
         );
+        defs.building_types_order
+            .push("building_logging_camp".into());
         defs.production_method_groups
             .insert("pmg_logging".into(), vec!["pm_sawmills".into()]);
         defs.production_methods.insert(
@@ -2254,7 +2261,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                building_type_id: defs.building_index_of("building_logging_camp").unwrap(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_sawmills".into()],
@@ -2267,7 +2274,7 @@ mod tests {
         let solve_opts = SolveOpts::default();
         let baseline = solve(&world, &defs, solve_opts.clone());
         let bumped = solve(
-            &world.with_extra_levels("building_logging_camp", 1),
+            &world.with_extra_levels(defs.building_index_of("building_logging_camp").unwrap(), 1),
             &defs,
             solve_opts.clone(),
         );
@@ -2604,7 +2611,7 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
-        defs.buildings.insert(
+        defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
                 id: "building_logging_camp".into(),
@@ -2614,6 +2621,8 @@ mod tests {
                 required_construction: Some(250.0),
             },
         );
+        defs.building_types_order
+            .push("building_logging_camp".into());
         defs.production_method_groups.insert(
             "pmg_logging".into(),
             vec!["pm_low".into(), "pm_high".into()],
@@ -2648,7 +2657,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                building_type_id: defs.building_index_of("building_logging_camp").unwrap(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_low".into()],
@@ -2746,7 +2755,7 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
-        defs.buildings.insert(
+        defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
                 id: "building_logging_camp".into(),
@@ -2756,6 +2765,8 @@ mod tests {
                 required_construction: Some(30.0),
             },
         );
+        defs.building_types_order
+            .push("building_logging_camp".into());
         defs.production_method_groups.insert(
             "pmg_logging".into(),
             vec!["pm_sawmills".into(), "pm_high".into()],
@@ -2792,7 +2803,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                building_type_id: defs.building_index_of("building_logging_camp").unwrap(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_sawmills".into()],
@@ -2856,7 +2867,7 @@ mod tests {
     fn construction_remaining_over_rate_ceils_wait_days() {
         use crate::world::{ConstructionQueueKind, PlanningConstruction};
 
-        let defs = GameDefs {
+        let mut defs = GameDefs {
             goods_order: vec!["wood".into()],
             goods: BTreeMap::from([(
                 "wood".into(),
@@ -2870,6 +2881,7 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
+        defs.ensure_building_type("building_logging_camp");
         let world = World {
             countries: vec![WorldCountry {
                 id: 1,
@@ -2884,7 +2896,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                building_type_id: defs.building_index_of("building_logging_camp").unwrap(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
@@ -2953,7 +2965,7 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
-        defs.buildings.insert(
+        defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
                 id: "building_logging_camp".into(),
@@ -2963,6 +2975,8 @@ mod tests {
                 required_construction: Some(25.0),
             },
         );
+        defs.building_types_order
+            .push("building_logging_camp".into());
         let world = World {
             countries: vec![WorldCountry {
                 id: 1,
@@ -2977,7 +2991,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                building_type_id: defs.building_index_of("building_logging_camp").unwrap(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
@@ -3051,7 +3065,7 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
-        defs.buildings.insert(
+        defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
                 id: "building_logging_camp".into(),
@@ -3062,6 +3076,8 @@ mod tests {
                 required_construction: Some(999.0),
             },
         );
+        defs.building_types_order
+            .push("building_logging_camp".into());
         let world = World {
             countries: vec![WorldCountry {
                 id: 1,
@@ -3076,7 +3092,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                building_type_id: defs.building_index_of("building_logging_camp").unwrap(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
@@ -3131,7 +3147,7 @@ mod tests {
     fn research_and_construction_run_in_parallel_not_serialized() {
         use crate::world::{ConstructionQueueKind, PlanningConstruction};
 
-        let defs = GameDefs {
+        let mut defs = GameDefs {
             goods_order: vec!["wood".into()],
             goods: BTreeMap::from([(
                 "wood".into(),
@@ -3145,6 +3161,7 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
+        defs.ensure_building_type("building_logging_camp");
         let world = World {
             countries: vec![WorldCountry {
                 id: 1,
@@ -3159,7 +3176,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                building_type_id: defs.building_index_of("building_logging_camp").unwrap(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
@@ -3241,7 +3258,7 @@ mod tests {
     fn higher_cs_capacity_shortens_construction_wait() {
         use crate::world::{ConstructionQueueKind, PlanningConstruction};
 
-        let defs = GameDefs {
+        let mut defs = GameDefs {
             goods_order: vec!["wood".into()],
             goods: BTreeMap::from([(
                 "wood".into(),
@@ -3255,6 +3272,7 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
+        defs.ensure_building_type("building_logging_camp");
         let world = World {
             countries: vec![WorldCountry {
                 id: 1,
@@ -3269,7 +3287,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                building_type_id: defs.building_index_of("building_logging_camp").unwrap(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
@@ -3324,7 +3342,7 @@ mod tests {
     fn parallel_allocation_advances_two_jobs_under_capacity_cap() {
         use crate::world::{ConstructionQueueKind, PlanningConstruction};
 
-        let defs = GameDefs {
+        let mut defs = GameDefs {
             goods_order: vec!["wood".into()],
             goods: BTreeMap::from([(
                 "wood".into(),
@@ -3338,6 +3356,7 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
+        defs.ensure_building_type("building_logging_camp");
         let world = World {
             countries: vec![WorldCountry {
                 id: 1,
@@ -3352,7 +3371,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                building_type_id: defs.building_index_of("building_logging_camp").unwrap(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
@@ -3433,7 +3452,7 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
-        defs.buildings.insert(
+        defs.building_types.insert(
             BUILDING_CONSTRUCTION_SECTOR.into(),
             BuildingType {
                 id: BUILDING_CONSTRUCTION_SECTOR.into(),
@@ -3443,6 +3462,9 @@ mod tests {
                 required_construction: Some(10.0),
             },
         );
+        defs.building_types_order
+            .push(BUILDING_CONSTRUCTION_SECTOR.into());
+        defs.ensure_building_type("building_logging_camp");
         defs.production_method_groups.insert(
             "pmg_base_building_construction_sector".into(),
             vec!["pm_iron_frame_buildings".into()],
@@ -3470,7 +3492,7 @@ mod tests {
                 WorldBuilding {
                     id: 1,
                     state: Some(1),
-                    building: "building_logging_camp".into(),
+                    building_type_id: defs.building_index_of("building_logging_camp").unwrap(),
                     level: 1.0,
                     staffing: 1.0,
                     production_methods: Vec::new(),
@@ -3480,7 +3502,9 @@ mod tests {
                 WorldBuilding {
                     id: 2,
                     state: Some(1),
-                    building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                    building_type_id: defs
+                        .building_index_of(BUILDING_CONSTRUCTION_SECTOR)
+                        .unwrap(),
                     level: 0.0,
                     staffing: 0.0,
                     production_methods: vec!["pm_iron_frame_buildings".into()],
@@ -3555,7 +3579,7 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
-        defs.buildings.insert(
+        defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
                 id: "building_logging_camp".into(),
@@ -3565,6 +3589,8 @@ mod tests {
                 required_construction: Some(10.0),
             },
         );
+        defs.building_types_order
+            .push("building_logging_camp".into());
         defs.production_method_groups
             .insert("pmg_logging".into(), vec!["pm_sawmills".into()]);
         defs.production_methods.insert(
@@ -3575,7 +3601,7 @@ mod tests {
                 ..ProductionMethod::default()
             },
         );
-        defs.buildings.insert(
+        defs.building_types.insert(
             BUILDING_CONSTRUCTION_SECTOR.into(),
             BuildingType {
                 id: BUILDING_CONSTRUCTION_SECTOR.into(),
@@ -3585,6 +3611,10 @@ mod tests {
                 required_construction: Some(10.0),
             },
         );
+        defs.building_types_order
+            .push(BUILDING_CONSTRUCTION_SECTOR.into());
+        defs.building_types_order
+            .push(BUILDING_CONSTRUCTION_SECTOR.into());
         defs.production_method_groups.insert(
             "pmg_base_building_construction_sector".into(),
             vec!["pm_iron_frame_buildings".into()],
@@ -3612,7 +3642,7 @@ mod tests {
                 WorldBuilding {
                     id: 1,
                     state: Some(state_id),
-                    building: "building_logging_camp".into(),
+                    building_type_id: defs.building_index_of("building_logging_camp").unwrap(),
                     level: 1.0,
                     staffing: 1.0,
                     production_methods: vec!["pm_sawmills".into()],
@@ -3622,7 +3652,9 @@ mod tests {
                 WorldBuilding {
                     id: 2,
                     state: Some(state_id),
-                    building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                    building_type_id: defs
+                        .building_index_of(BUILDING_CONSTRUCTION_SECTOR)
+                        .unwrap(),
                     level: 0.0,
                     staffing: 0.0,
                     production_methods: vec!["pm_iron_frame_buildings".into()],
@@ -3728,7 +3760,7 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
-        defs.buildings.insert(
+        defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
                 id: "building_logging_camp".into(),
@@ -3738,6 +3770,8 @@ mod tests {
                 required_construction: Some(100.0),
             },
         );
+        defs.building_types_order
+            .push("building_logging_camp".into());
         defs.production_method_groups
             .insert("pmg_logging".into(), vec!["pm_sawmills".into()]);
         defs.production_methods.insert(
@@ -3762,7 +3796,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: "building_logging_camp".into(),
+                building_type_id: defs.building_index_of("building_logging_camp").unwrap(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_sawmills".into()],
@@ -3815,7 +3849,7 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
-        defs.buildings.insert(
+        defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
                 id: "building_logging_camp".into(),
@@ -3825,6 +3859,8 @@ mod tests {
                 required_construction: Some(30.0),
             },
         );
+        defs.building_types_order
+            .push("building_logging_camp".into());
         defs.production_method_groups
             .insert("pmg_logging".into(), vec!["pm_sawmills".into()]);
         defs.production_methods.insert(
@@ -3939,7 +3975,7 @@ mod tests {
             ("building_expensive_mill", 200.0, 10.0),
             ("building_weak_mill", 50.0, 2.0),
         ] {
-            defs.buildings.insert(
+            defs.building_types.insert(
                 id.into(),
                 BuildingType {
                     id: id.into(),
@@ -3960,6 +3996,7 @@ mod tests {
                 },
             );
         }
+        defs.rebuild_building_types_order();
         let world = World {
             countries: vec![WorldCountry {
                 id: 1,
@@ -3981,7 +4018,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(10),
-                building: "building_good_mill".into(),
+                building_type_id: defs.building_index_of("building_good_mill").unwrap(),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_building_good_mill".into()],

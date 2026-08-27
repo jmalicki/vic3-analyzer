@@ -21,7 +21,7 @@ use super::pushdown::{matches_str, matches_u32, PushSupport};
 const PUSH: PushSupport = PushSupport {
     eq_u32: &["building_id", "state_id"],
     eq_i32: &[],
-    eq_str: &["type_id"],
+    eq_str: &["building_type_name"],
     range_str: &[],
 };
 
@@ -45,8 +45,8 @@ impl BuildingsProvider {
         let preds = PUSH.collect_preds(filters);
         let mut building_id = UInt32Builder::new();
         let mut state_id = UInt32Builder::new();
-        let mut type_id = StringBuilder::new();
-        let mut type_name = StringBuilder::new();
+        let mut building_type_name = StringBuilder::new();
+        let mut building_type_label = StringBuilder::new();
         let mut level = Float64Builder::new();
         let mut staffing = Float64Builder::new();
         let mut employees = Float64Builder::new();
@@ -77,7 +77,7 @@ impl BuildingsProvider {
             ) {
                 continue;
             }
-            if !matches_str(&preds, "type_id", &b.type_id) {
+            if !matches_str(&preds, "building_type_name", &b.building_type_name) {
                 continue;
             }
 
@@ -86,10 +86,15 @@ impl BuildingsProvider {
                 Some(s) => state_id.append_value(s),
                 None => state_id.append_null(),
             }
-            type_id.append_value(&b.type_id);
-            match self.binding.label(&b.type_id) {
-                Some(n) => type_name.append_value(n),
-                None => type_name.append_null(),
+            building_type_name.append_value(&b.building_type_name);
+            match b
+                .building_type_label
+                .as_deref()
+                .filter(|label| !label.is_empty())
+                .or_else(|| self.binding.label(&b.building_type_name))
+            {
+                Some(label) => building_type_label.append_value(label),
+                None => building_type_label.append_null(),
             }
             level.append_value(b.level);
             staffing.append_value(b.staffing);
@@ -108,8 +113,8 @@ impl BuildingsProvider {
             vec![
                 Arc::new(building_id.finish()),
                 Arc::new(state_id.finish()),
-                Arc::new(type_id.finish()),
-                Arc::new(type_name.finish()),
+                Arc::new(building_type_name.finish()),
+                Arc::new(building_type_label.finish()),
                 Arc::new(level.finish()),
                 Arc::new(staffing.finish()),
                 Arc::new(employees.finish()),

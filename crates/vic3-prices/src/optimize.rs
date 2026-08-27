@@ -149,7 +149,7 @@ pub fn optimize_pms(
     for building in &world.buildings {
         if player_ids.contains(&building.id) {
             by_type
-                .entry(building.building.clone())
+                .entry(building.type_script_id(defs).to_string())
                 .or_default()
                 .push(building);
         }
@@ -159,7 +159,7 @@ pub fn optimize_pms(
         if trials >= MAX_PM_TRIALS {
             break;
         }
-        let candidates = candidate_pms(world, &type_id);
+        let candidates = candidate_pms(world, defs, &type_id);
         if candidates.is_empty() {
             continue;
         }
@@ -232,7 +232,7 @@ pub fn optimize_pms(
         }
     }
 
-    let changes = changes_from_delta(world, &accepted);
+    let changes = changes_from_delta(world, defs, &accepted);
     OptimizeResult {
         axis,
         changes,
@@ -323,10 +323,11 @@ fn try_type_methods(
     })
 }
 
-fn candidate_pms(world: &World, type_id: &str) -> Vec<String> {
+fn candidate_pms(world: &World, defs: &GameDefs, building_type: &str) -> Vec<String> {
+    let want = defs.building_index_of(building_type);
     let mut ids = BTreeSet::new();
     for building in &world.buildings {
-        if building.building == type_id {
+        if Some(building.building_type_id) == want {
             ids.extend(building.production_methods.iter().cloned());
         }
     }
@@ -450,7 +451,7 @@ impl Scores {
     }
 }
 
-fn changes_from_delta(world: &World, delta: &WorldDelta) -> Vec<OptimizeChange> {
+fn changes_from_delta(world: &World, defs: &GameDefs, delta: &WorldDelta) -> Vec<OptimizeChange> {
     let mut changes = Vec::new();
     for entry in &delta.production_methods {
         let Some(building) = world
@@ -464,7 +465,7 @@ fn changes_from_delta(world: &World, delta: &WorldDelta) -> Vec<OptimizeChange> 
             continue;
         }
         changes.push(OptimizeChange {
-            building_type: building.building.clone(),
+            building_type: building.type_script_id(defs).to_string(),
             building_id: building.id,
             from: building.production_methods.clone(),
             to: entry.methods.clone(),
@@ -519,14 +520,15 @@ mod tests {
                 ..Default::default()
             },
         );
+        defs.ensure_building_type("workshop");
         defs
     }
 
-    fn workshop(id: u32, method: &str) -> WorldBuilding {
+    fn workshop(defs: &GameDefs, id: u32, method: &str) -> WorldBuilding {
         WorldBuilding {
             id,
             state: None,
-            building: "workshop".into(),
+            building_type_id: defs.building_index_of("workshop").unwrap(),
             level: 1.0,
             staffing: 1.0,
             production_methods: vec![method.into()],
@@ -539,7 +541,7 @@ mod tests {
     fn optimizer_selects_strictly_more_profitable_pm() {
         let defs = grain_defs();
         let world = World {
-            buildings: vec![workshop(1, "pm_rich"), workshop(2, "pm_poor")],
+            buildings: vec![workshop(&defs, 1, "pm_rich"), workshop(&defs, 2, "pm_poor")],
             ..World::default()
         };
         let baseline = solve(&world, &defs, SolveOpts::default());
@@ -584,7 +586,7 @@ mod tests {
                 techs: vec!["tech_romanticism".into()],
                 ..WorldCountry::default()
             }],
-            buildings: vec![workshop(1, "pm_poor")],
+            buildings: vec![workshop(&defs, 1, "pm_poor")],
             ..World::default()
         };
         let baseline = solve(&world, &defs, SolveOpts::default());

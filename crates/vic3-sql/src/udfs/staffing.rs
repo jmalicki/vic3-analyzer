@@ -59,8 +59,8 @@ struct BuildingStaffingProvider {
 impl BuildingStaffingProvider {
     fn batch(&self) -> DfResult<RecordBatch> {
         let mut building_id = UInt32Builder::new();
-        let mut building_name = StringBuilder::new();
-        let mut type_id = StringBuilder::new();
+        let mut building_type_label = StringBuilder::new();
+        let mut building_type_name = StringBuilder::new();
         let mut staffing = Float64Builder::new();
         let mut level = Float64Builder::new();
         let mut profession_name = StringBuilder::new();
@@ -102,8 +102,8 @@ impl BuildingStaffingProvider {
                     .find(|q| q.state_id == self.state_id && q.name == row.name);
 
                 building_id.append_value(building.id);
-                building_name.append_value(&name);
-                type_id.append_value(&building.type_id);
+                building_type_label.append_value(&name);
+                building_type_name.append_value(&building.building_type_name);
                 staffing.append_value(building.staffing);
                 level.append_value(building.level);
                 profession_name.append_value(&row.name);
@@ -131,8 +131,8 @@ impl BuildingStaffingProvider {
             if !wrote {
                 // Keep buildings visible when employee lists are empty.
                 building_id.append_value(building.id);
-                building_name.append_value(&name);
-                type_id.append_value(&building.type_id);
+                building_type_label.append_value(&name);
+                building_type_name.append_value(&building.building_type_name);
                 staffing.append_value(building.staffing);
                 level.append_value(building.level);
                 profession_name.append_null();
@@ -150,8 +150,8 @@ impl BuildingStaffingProvider {
             Arc::clone(&self.schema),
             vec![
                 Arc::new(building_id.finish()),
-                Arc::new(building_name.finish()),
-                Arc::new(type_id.finish()),
+                Arc::new(building_type_label.finish()),
+                Arc::new(building_type_name.finish()),
                 Arc::new(staffing.finish()),
                 Arc::new(level.finish()),
                 Arc::new(profession_name.finish()),
@@ -169,18 +169,17 @@ impl BuildingStaffingProvider {
 }
 
 fn building_label(binding: &SessionBinding, building: &BuildingEconomics) -> String {
-    binding
-        .label(&building.type_id)
+    building
+        .building_type_label
+        .as_deref()
+        .filter(|label| !label.is_empty())
         .map(str::to_owned)
         .or_else(|| {
             binding
-                .prices
-                .building_types
-                .iter()
-                .find(|t| t.id == building.type_id)
-                .and_then(|t| t.name.clone())
+                .label(&building.building_type_name)
+                .map(str::to_owned)
         })
-        .unwrap_or_else(|| building.type_id.clone())
+        .unwrap_or_else(|| building.building_type_name.clone())
 }
 
 #[async_trait]

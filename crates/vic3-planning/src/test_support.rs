@@ -62,6 +62,12 @@ fn next_building_id(world: &World) -> u32 {
     world.buildings.iter().map(|b| b.id).max().unwrap_or(0) + 1
 }
 
+fn ensure_building_type_order(defs: &mut GameDefs, building: &str) {
+    if !defs.building_types_order.iter().any(|id| id == building) {
+        defs.building_types_order.push(building.into());
+    }
+}
+
 /// Building def + auto PMG/PM + world row (level 1, staffing 1, saved_outputs).
 fn register_output_building(
     defs: &mut GameDefs,
@@ -77,7 +83,7 @@ fn register_output_building(
         .unwrap_or_else(|| panic!("good `{good_id}` must be registered before output_building"));
     let pmg = auto_pmg_id(building);
     let pm = auto_pm_id(building);
-    defs.buildings.insert(
+    defs.building_types.insert(
         building.into(),
         BuildingType {
             id: building.into(),
@@ -87,6 +93,7 @@ fn register_output_building(
             required_construction: Some(required_construction),
         },
     );
+    ensure_building_type_order(defs, building);
     defs.production_method_groups.insert(pmg, vec![pm.clone()]);
     defs.production_methods.insert(
         pm.clone(),
@@ -99,7 +106,9 @@ fn register_output_building(
     world.buildings.push(WorldBuilding {
         id: next_building_id(world),
         state: Some(state_id),
-        building: building.into(),
+        building_type_id: defs
+            .building_index_of(building)
+            .expect("building type registered"),
         level: 1.0,
         staffing: 1.0,
         production_methods: vec![pm],
@@ -118,7 +127,7 @@ fn register_construction_sector(
 ) {
     let pmg = "pmg_base_building_construction_sector";
     let pm = "pm_iron_frame_buildings";
-    defs.buildings.insert(
+    defs.building_types.insert(
         BUILDING_CONSTRUCTION_SECTOR.into(),
         BuildingType {
             id: BUILDING_CONSTRUCTION_SECTOR.into(),
@@ -128,6 +137,7 @@ fn register_construction_sector(
             required_construction: Some(required_construction),
         },
     );
+    ensure_building_type_order(defs, BUILDING_CONSTRUCTION_SECTOR);
     defs.production_method_groups
         .insert(pmg.into(), vec![pm.into()]);
     defs.production_methods.insert(
@@ -141,7 +151,9 @@ fn register_construction_sector(
     world.buildings.push(WorldBuilding {
         id: next_building_id(world),
         state: Some(state_id),
-        building: BUILDING_CONSTRUCTION_SECTOR.into(),
+        building_type_id: defs
+            .building_index_of(BUILDING_CONSTRUCTION_SECTOR)
+            .expect("construction sector registered"),
         level: 0.0,
         staffing: 0.0,
         production_methods: vec![pm.into()],
@@ -258,7 +270,7 @@ impl MiniEconomy {
     pub(crate) fn building_cost(self, building: &str, required_construction: f64) -> Self {
         self.remap(|defs, _world, _| {
             let bt = defs
-                .buildings
+                .building_types
                 .get_mut(building)
                 .unwrap_or_else(|| panic!("building `{building}` must exist before building_cost"));
             bt.required_construction = Some(required_construction);

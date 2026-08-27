@@ -63,6 +63,8 @@ mod world;
 
 use vic3_defs::GameDefs;
 
+pub use vic3_defs::BuildingTypeId;
+
 pub use alerts::{
     alerts, alerts_with, goods_shortage_alerts, Alert, AlertKind, AlertsOptions, AlertsResult,
     Evidence, Mitigation, MitigationAction,
@@ -135,9 +137,9 @@ pub fn apply_delta(world: &World, delta: &WorldDelta) -> World {
             if let Some(building) = next.buildings.iter_mut().find(|b| b.id == id) {
                 building.add_extra_levels(extra.extra_levels);
             }
-        } else if let Some(kind) = extra.building.as_deref() {
+        } else if let Some(kind) = extra.building_type_id {
             for building in &mut next.buildings {
-                if building.building == kind {
+                if building.building_type_id == kind {
                     building.add_extra_levels(extra.extra_levels);
                 }
             }
@@ -368,6 +370,7 @@ mod tests {
             },
         );
         defs.rebuild_package_ladder();
+        defs.ensure_building_type("logging_camp");
         defs
     }
 
@@ -412,7 +415,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: None,
-                building: "logging_camp".into(),
+                building_type_id: defs.building_index_of("logging_camp").unwrap(),
                 level: 0.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_simple_forestry".into()],
@@ -433,12 +436,14 @@ mod tests {
     fn fixture_forestry_orders_move_wood_below_base_price() {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../vic3-defs/tests/fixtures");
-        let defs = vic3_defs::load_from_path(root).expect("defs fixture");
+        let mut defs = vic3_defs::load_from_path(root).expect("defs fixture");
+        // Fixture buildings file has no logging camp; PM recipes are enough for IO.
+        let logging = defs.ensure_building_type("building_logging_camp");
         let world = World {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: None,
-                building: "building_logging_camp".into(),
+                building_type_id: logging,
                 level: 2.0,
                 staffing: 2.0,
                 production_methods: vec!["pm_simple_forestry".into()],
@@ -572,7 +577,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 9,
                 state: Some(7),
-                building: "building_goofy_factory".into(),
+                building_type_id: defs.ensure_building_type("building_goofy_factory"),
                 level: 2.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_goofy_factory".into()],
@@ -637,10 +642,10 @@ mod tests {
             infrastructure_usage: (id == 1).then_some(90.0),
             ..WorldState::default()
         };
-        let building = |id, state, method: &str| WorldBuilding {
+        let building = |defs: &mut GameDefs, id, state, method: &str| WorldBuilding {
             id,
             state: Some(state),
-            building: format!("building_{method}"),
+            building_type_id: defs.ensure_building_type(&format!("building_{method}")),
             level: 1.0,
             staffing: 1.0,
             production_methods: vec![method.into()],
@@ -650,8 +655,8 @@ mod tests {
         let world = World {
             states: vec![state(1), state(2)],
             buildings: vec![
-                building(1, 1, "pm_wood_buyer"),
-                building(2, 2, "pm_wood_seller"),
+                building(&mut defs, 1, 1, "pm_wood_buyer"),
+                building(&mut defs, 2, 2, "pm_wood_seller"),
             ],
             ..World::default()
         };
@@ -717,10 +722,10 @@ mod tests {
             infrastructure_usage: (id == 1).then_some(90.0),
             ..WorldState::default()
         };
-        let building = |id, state, method: &str| WorldBuilding {
+        let building = |defs: &mut GameDefs, id, state, method: &str| WorldBuilding {
             id,
             state: Some(state),
-            building: format!("building_{method}"),
+            building_type_id: defs.ensure_building_type(&format!("building_{method}")),
             level: 1.0,
             staffing: 1.0,
             production_methods: vec![method.into()],
@@ -738,8 +743,8 @@ mod tests {
         let world = World {
             states: vec![state(1), state(2)],
             buildings: vec![
-                building(1, 1, "pm_wood_buyer"),
-                building(2, 2, "pm_wood_seller"),
+                building(&mut defs, 1, 1, "pm_wood_buyer"),
+                building(&mut defs, 2, 2, "pm_wood_seller"),
             ],
             pops: vec![wage_pop(1), wage_pop(2)],
             ..World::default()
@@ -858,7 +863,7 @@ mod tests {
             &world,
             &defs,
             &WhatIfOpts {
-                building: "logging_camp".into(),
+                building_type_id: defs.building_index_of("logging_camp").unwrap(),
                 extra_levels: 1,
             },
             SolveOpts::default(),
@@ -908,7 +913,7 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 7,
                 state: None,
-                building: "farm".into(),
+                building_type_id: defs.ensure_building_type("farm"),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_simple_forestry".into()],
@@ -978,7 +983,7 @@ mod tests {
         let defs = two_good_defs();
         let world = balanced_world(&defs);
         let opts = WhatIfOpts {
-            building: "logging_camp".into(),
+            building_type_id: defs.building_index_of("logging_camp").unwrap(),
             extra_levels: 1,
         };
         let via_what_if = what_if(&world, &defs, &opts, SolveOpts::default());
@@ -992,11 +997,13 @@ mod tests {
     #[test]
     fn preview_extra_levels_on_trade_center_type() {
         let wood = GoodId::from_usize(1);
+        let mut defs = GameDefs::default();
+        let type_id = defs.ensure_building_type("building_trade_center");
         let world = World {
             buildings: vec![WorldBuilding {
                 id: 3,
                 state: Some(1),
-                building: "building_trade_center".into(),
+                building_type_id: type_id,
                 level: 2.0,
                 staffing: 1.0,
                 production_methods: Vec::new(),
@@ -1007,7 +1014,7 @@ mod tests {
         };
         let delta = WorldDelta {
             extra_levels: vec![ExtraLevelsDelta {
-                building: Some("building_trade_center".into()),
+                building_type_id: Some(type_id),
                 building_id: None,
                 extra_levels: 2,
             }],
