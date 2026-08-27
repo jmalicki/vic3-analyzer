@@ -1093,6 +1093,7 @@ fn collect_needs_unmet(args: &mut AlertCollectArgs<'_>) {
     );
     for (state_id, needs) in by_state {
         let mut evidence = Vec::new();
+        // `(good_name, good_label)` — script key + localized display for mitigations.
         let mut goods: Vec<(String, String)> = Vec::new();
         for need in &needs {
             for trip in need_trips(need, prices, defs, ceiling_factor) {
@@ -1100,12 +1101,12 @@ fn collect_needs_unmet(args: &mut AlertCollectArgs<'_>) {
                     label: format!("{}: {}", trip.need_label, trip.good_label),
                     value: trip.value,
                 });
-                if !goods.iter().any(|(id, _)| id == &trip.good_name) {
+                if !goods.iter().any(|(name, _)| name == &trip.good_name) {
                     goods.push((trip.good_name, trip.good_label));
                 }
             }
         }
-        let good_id = goods.first().map(|(id, _)| id.clone());
+        let good_name = goods.first().map(|(name, _)| name.clone());
         let alert_id = format!("needs_unmet:{state_id}");
         let mitigations = if opts.wants_mitigations(&alert_id) {
             need_mitigations(state_id, &goods)
@@ -1123,7 +1124,7 @@ fn collect_needs_unmet(args: &mut AlertCollectArgs<'_>) {
             summary: "Need goods exceed local sell, or sit at the max price.".into(),
             state_id: Some(state_id),
             building_id: None,
-            good_name: good_id,
+            good_name,
             evidence,
             mitigations,
             staffing: Vec::new(),
@@ -1131,6 +1132,8 @@ fn collect_needs_unmet(args: &mut AlertCollectArgs<'_>) {
     }
 }
 
+/// Private UI-facing row for needs-unmet evidence. Labels are display strings;
+/// `good_name` is the script key used for actions and dedup.
 struct NeedTrip {
     need_label: String,
     good_name: String,
@@ -1147,10 +1150,10 @@ fn need_trips(
     if need.goods.is_empty() && need.package_value > 0.0 {
         return Vec::new();
     }
-    let need_name = need
+    let need_label = need
         .label
         .as_deref()
-        .filter(|name| !name.is_empty())
+        .filter(|label| !label.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| script_label(defs, &need.name));
     let mut trips = Vec::new();
@@ -1176,7 +1179,7 @@ fn need_trips(
         if !amount_short && !at_max {
             continue;
         }
-        let good_label = good_label(prices, defs, &flow.name);
+        let good_label = resolve_good_label(prices, defs, &flow.name);
         let value = if amount_short {
             let sell = local.map(|row| row.sell).unwrap_or(0.0);
             format!("{} vs sell {}", format_num(flow.quantity), format_num(sell))
@@ -1197,7 +1200,7 @@ fn need_trips(
             format!("{} / {} (max)", format_num(price), format_num(base))
         };
         trips.push(NeedTrip {
-            need_label: need_name.clone(),
+            need_label: need_label.clone(),
             good_name: flow.name.clone(),
             good_label,
             value,
@@ -1206,35 +1209,37 @@ fn need_trips(
     trips
 }
 
-fn good_label(prices: &PricesResult, defs: &GameDefs, good_id: &str) -> String {
+fn resolve_good_label(prices: &PricesResult, defs: &GameDefs, name: &str) -> String {
     prices
         .goods
         .iter()
-        .find(|good| good.name == good_id)
+        .find(|good| good.name == name)
         .and_then(|good| good.label.clone())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| script_label(defs, good_id))
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| script_label(defs, name))
 }
 
 fn need_mitigations(state_id: u32, goods: &[(String, String)]) -> Vec<Mitigation> {
     let mut items = Vec::new();
-    for (good_id, good_name) in goods.iter().take(3) {
+    for (good_name, good_label) in goods.iter().take(3) {
         items.push(action_mit(
-            format!("needs:{state_id}:sol:{good_id}"),
-            format!("Cheapen {good_name}"),
-            format!("Lower the local price of {good_name} (produce more or import) to cover the need basket."),
+            format!("needs:{state_id}:sol:{good_name}"),
+            format!("Cheapen {good_label}"),
+            format!(
+                "Lower the local price of {good_label} (produce more or import) to cover the need basket."
+            ),
             MitigationAction::SolGoods {
-                good_name: good_id.clone(),
+                good_name: good_name.clone(),
                 state_id: Some(state_id),
             },
         ));
         items.push(action_mit(
-            format!("needs:{state_id}:import:{good_id}"),
-            format!("Import {good_name} through a trade center"),
-            format!("Trade-center imports of pop goods can fill the {good_name} basket."),
+            format!("needs:{state_id}:import:{good_name}"),
+            format!("Import {good_label} through a trade center"),
+            format!("Trade-center imports of pop goods can fill the {good_label} basket."),
             MitigationAction::TradeAlloc {
                 state_id,
-                good_name: good_id.clone(),
+                good_name: good_name.clone(),
             },
         ));
     }
