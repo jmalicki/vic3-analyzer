@@ -8,17 +8,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### 🌟 Added / Changed
-<<<<<<< HEAD
 - **Country and state naming:** Countries use `name` (tag) and `label` (display
   name). States keep `region_name` / `region_label` for shared geography and use
-  `state_label` for the owned-slice display name. SQL `states` / `countries`
-  columns match. **Breaking** for JSON, SQL, and web.
-=======
-- **Geo/country naming:** `StateInfo` uses `region_name` / `region_label` /
-  `label`; `CountryInfo` uses `name` / `label` (int `id`
-  kept). SQL `states` / `countries` columns match. **Breaking** for JSON, SQL,
-  and web.
->>>>>>> bb60ab9 (refactor: use bare name/label on CountryInfo and StateInfo)
+  `label` for the owned-slice display name. SQL `countries` and `states`
+  columns match. Construction queue rows still use `state_label`. **Breaking**
+  for JSON, SQL, and web.
 
 - **Pop / need / profession naming:** Rows that are only about one profession or
   need (`ProfessionCount`, `PopNeedBasket`, `StateNeed`, `StateQualification`,
