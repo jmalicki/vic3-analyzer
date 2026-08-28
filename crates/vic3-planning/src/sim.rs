@@ -159,6 +159,11 @@ fn default_building_io_per_level(
     (inputs, outputs)
 }
 
+fn row_matches_building_type(defs: &GameDefs, row: &WorldBuilding, building: &str) -> bool {
+    defs.resolve_building_type_index(building)
+        .is_some_and(|want| row.building_type_id == want)
+}
+
 /// Synthetic fully-staffed row for a type absent from the base world (greenfield).
 fn synthetic_world_building(
     defs: &GameDefs,
@@ -294,7 +299,9 @@ impl EconomyContext {
             }
             let mut found = false;
             for row in &mut world.buildings {
-                if row.type_script_id(&self.defs) == building && row.state == Some(*state_id) {
+                if row_matches_building_type(&self.defs, row, building)
+                    && row.state == Some(*state_id)
+                {
                     row.add_extra_levels(*levels);
                     found = true;
                 }
@@ -333,7 +340,9 @@ impl EconomyContext {
             }
             let mut found = false;
             for row in &self.base_world.buildings {
-                if row.type_script_id(&self.defs) == building && row.state == Some(*state_id) {
+                if row_matches_building_type(&self.defs, row, building)
+                    && row.state == Some(*state_id)
+                {
                     found = true;
                     let (old_i, old_o) = row.goods_io(&self.defs);
                     let mut bumped = row.clone();
@@ -384,13 +393,14 @@ impl EconomyContext {
             };
             let mut before = base_row.clone();
             if let Some(sid) = before.state {
-                if let Some(levels) = state
-                    .building_level_deltas
-                    .get(&(before.type_script_id(&self.defs).to_string(), sid))
-                {
-                    if *levels > 0 {
-                        before.add_extra_levels(*levels);
-                    }
+                let levels = Self::levels_added_in_state(
+                    state,
+                    before.type_script_id(&self.defs),
+                    sid,
+                    &self.defs,
+                );
+                if levels > 0 {
+                    before.add_extra_levels(levels);
                 }
             }
             let (old_i, old_o) = before.goods_io(&self.defs);
@@ -438,11 +448,11 @@ impl EconomyContext {
         let mut have: BTreeSet<u32> = world
             .buildings
             .iter()
-            .filter(|row| row.type_script_id(&self.defs) == building)
+            .filter(|row| row_matches_building_type(&self.defs, row, building))
             .filter_map(|row| row.state.filter(|sid| owned.contains(sid)))
             .collect();
         for job in &state.constructions {
-            if job.building == building {
+            if self.defs.building_types_equivalent(&job.building, building) {
                 if let Some(sid) = job.state_id.filter(|sid| owned.contains(sid)) {
                     have.insert(sid);
                 }
@@ -455,11 +465,18 @@ impl EconomyContext {
         }
     }
 
-    fn levels_added_in_state(state: &PlanningState, building: &str, state_id: u32) -> u32 {
+    fn levels_added_in_state(
+        state: &PlanningState,
+        building: &str,
+        state_id: u32,
+        defs: &GameDefs,
+    ) -> u32 {
         state
             .building_level_deltas
             .iter()
-            .find_map(|((b, sid), n)| (b.as_str() == building && *sid == state_id).then_some(*n))
+            .find_map(|((b, sid), n)| {
+                (*sid == state_id && defs.building_types_equivalent(b, building)).then_some(*n)
+            })
             .unwrap_or(0)
     }
 
@@ -555,7 +572,9 @@ impl EconomyContext {
         let mut out = BTreeSet::new();
         for building in types {
             for state_id in self.placement_states_for(state, &world, &building) {
-                if Self::levels_added_in_state(state, &building, state_id) < u32::from(cap) {
+                if Self::levels_added_in_state(state, &building, state_id, &self.defs)
+                    < u32::from(cap)
+                {
                     out.insert((building.clone(), state_id));
                 }
             }
@@ -1606,8 +1625,12 @@ pub fn apply_action(
             if !economy.owned_state_ids(&next.country).contains(state_id) {
                 return None;
             }
-            let remaining = construction_work_points_for_enqueue(building, economy, config);
-            next.push_construction(building.clone(), *state_id, remaining);
+            let building = economy
+                .defs
+                .canonical_building_type_key(building)
+                .unwrap_or_else(|| building.clone());
+            let remaining = construction_work_points_for_enqueue(&building, economy, config);
+            next.push_construction(building, *state_id, remaining);
         }
         Action::QueueInterest { kind, id } => {
             if id.is_empty() || next.interest_busy() {
@@ -1808,20 +1831,26 @@ fn apply_wait_for_event(
             next.techs.insert(tech.clone());
         }
         Event::BuildingCompleted { building, state_id } => {
+            let building = economy
+                .defs
+                .canonical_building_type_key(building)
+                .unwrap_or_else(|| building.clone());
             if !next.constructions.iter().any(|row| {
-                row.building == *building
+                economy
+                    .defs
+                    .building_types_equivalent(&row.building, &building)
                     && state_id
                         .map(|want| row.state_id == Some(want) || row.state_id.is_none())
                         .unwrap_or(true)
             }) {
                 return None;
             }
-            if days == 0 && !construction_work_complete(next, building, *state_id) {
+            if days == 0 && !construction_work_complete(next, &economy.defs, &building, *state_id) {
                 return None;
             }
             next.tick_parallel_tracks(days, &construction_points_per_day_per_job(next, config));
             next.date = next.date.add_days(i32::from(days));
-            next.complete_construction(building, *state_id);
+            next.complete_construction(&economy.defs, &building, *state_id);
             if let Some(sid) = *state_id {
                 *next
                     .building_level_deltas
@@ -1840,8 +1869,8 @@ fn apply_wait_for_event(
                     .entry((building.clone(), sid))
                     .or_default() += 1;
             }
-            if is_military_planning_building(building) {
-                next.push_mil_building_level(building);
+            if is_military_planning_building(&building) {
+                next.push_mil_building_level(&building);
             }
             if building == BUILDING_CONSTRUCTION_SECTOR {
                 sync_construction_points_per_day(next, economy, config);
@@ -1941,6 +1970,55 @@ mod tests {
     #[test]
     fn version_is_semver() {
         assert!(!super::version().is_empty());
+    }
+
+    #[test]
+    fn apply_planning_bumps_existing_building_when_alias_is_queued() {
+        use crate::military::{BUILDING_SHIPYARD, BUILDING_SHIPYARD_ALT};
+        use vic3_defs::GameDefs;
+
+        let mut defs = GameDefs::default();
+        defs.ensure_building_type(BUILDING_SHIPYARD_ALT);
+        let type_id = defs.building_index_of(BUILDING_SHIPYARD_ALT).unwrap();
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 10,
+                country: Some(1),
+                ..WorldState::default()
+            }],
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(10),
+                building_type_id: type_id,
+                level: 2.0,
+                staffing: 2.0,
+                production_methods: Vec::new(),
+                saved_inputs: Vec::new(),
+                saved_outputs: Vec::new(),
+            }],
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let mut branch = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            ..PlanningParts::default()
+        });
+        branch
+            .building_level_deltas
+            .insert((BUILDING_SHIPYARD.to_string(), 10), 1);
+
+        let applied = economy.apply_planning_to_world(&branch);
+        assert_eq!(
+            applied.buildings.len(),
+            1,
+            "alias delta must not add duplicate row"
+        );
+        assert!((applied.buildings[0].level - 3.0).abs() < 1e-9);
     }
 
     fn state_at(day_offset: i32) -> PlanningState {

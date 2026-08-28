@@ -792,9 +792,14 @@ impl PlanningState {
     /// Prefers a finished row (`remaining <= 0`) when several share the type so
     /// parallel completions pop the right job. When `state_id` is [`Some`], only
     /// that placement matches; [`None`] matches any state (save rows).
-    pub fn complete_construction(&mut self, building: &str, state_id: Option<u32>) {
+    pub fn complete_construction(
+        &mut self,
+        defs: &vic3_defs::GameDefs,
+        building: &str,
+        state_id: Option<u32>,
+    ) {
         let matches = |entry: &PlanningConstruction| {
-            entry.building == building
+            defs.building_types_equivalent(&entry.building, building)
                 && state_id
                     .map(|want| entry.state_id == Some(want) || entry.state_id.is_none())
                     .unwrap_or(true)

@@ -147,6 +147,26 @@ impl GameDefs {
             .and_then(|alias| self.building_types.contains_key(alias).then_some(alias))
     }
 
+    /// Whether two script keys refer to the same building type.
+    pub fn building_types_equivalent(&self, left: &str, right: &str) -> bool {
+        if left == right {
+            return true;
+        }
+        match (
+            self.resolve_building_type_index(left),
+            self.resolve_building_type_index(right),
+        ) {
+            (Some(left_id), Some(right_id)) => left_id == right_id,
+            _ => false,
+        }
+    }
+
+    /// Dense-order script key for `building`, when known.
+    pub fn canonical_building_type_key(&self, building: &str) -> Option<String> {
+        self.resolve_building_type_index(building)
+            .map(|id| self.building_by_index(id).to_string())
+    }
+
     /// Building type script key at `index`.
     ///
     /// # Panics

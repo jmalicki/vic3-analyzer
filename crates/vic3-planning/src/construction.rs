@@ -685,11 +685,12 @@ pub fn construction_eta_days(
 /// prior tick drained the job.
 pub fn construction_work_complete(
     state: &PlanningState,
+    defs: &vic3_defs::GameDefs,
     building: &str,
     state_id: Option<u32>,
 ) -> bool {
     state.constructions.iter().any(|row| {
-        row.building == building
+        defs.building_types_equivalent(&row.building, building)
             && state_id
                 .map(|want| row.state_id == Some(want) || row.state_id.is_none())
                 .unwrap_or(true)
