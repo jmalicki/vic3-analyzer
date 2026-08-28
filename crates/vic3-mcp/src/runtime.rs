@@ -317,7 +317,7 @@ pub fn world_delta_from_sugar(
     })?;
     let building_type_id = binding
         .defs
-        .building_index_of(building)
+        .resolve_building_type_index(building)
         .ok_or_else(|| format!("unknown building type {building:?}"))?;
 
     if let Some(want_state) = state_id {

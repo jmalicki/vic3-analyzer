@@ -133,17 +133,18 @@ impl GameDefs {
     /// Resolve a building type script key, including known Paradox aliases.
     pub fn resolve_building_type_index(&self, building_type: &str) -> Option<BuildingTypeId> {
         self.building_index_of(building_type).or_else(|| {
-            const ALIASES: &[(&str, &str)] = &[
-                ("building_shipyard", "building_shipyards"),
-                ("building_shipyards", "building_shipyard"),
-            ];
-            for (from, to) in ALIASES {
-                if building_type == *from {
-                    return self.building_index_of(to);
-                }
-            }
-            None
+            crate::building_types::building_type_alias(building_type)
+                .and_then(|alias| self.building_index_of(alias))
         })
+    }
+
+    /// Resolve a building type script key against [`Self::building_types`], including aliases.
+    pub fn resolve_building_type_key<'a>(&'a self, building_type: &'a str) -> Option<&'a str> {
+        if self.building_types.contains_key(building_type) {
+            return Some(building_type);
+        }
+        crate::building_types::building_type_alias(building_type)
+            .and_then(|alias| self.building_types.contains_key(alias).then_some(alias))
     }
 
     /// Building type script key at `index`.

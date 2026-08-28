@@ -1,7 +1,8 @@
 //! Dense building-type indices aligned with [`crate::GameDefs::building_types_order`].
 //!
 //! Prefer [`BuildingTypeId`] over script strings in world / planning hot paths.
-//! Resolve strings at load / API boundaries via [`crate::GameDefs::building_index_of`].
+//! Resolve strings at load / API boundaries via [`crate::GameDefs::building_index_of`]
+//! or [`crate::GameDefs::resolve_building_type_index`] when aliases may apply.
 
 use std::fmt;
 
@@ -54,5 +55,42 @@ impl fmt::Debug for BuildingTypeId {
 impl fmt::Display for BuildingTypeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+/// Alternate script ids for the same building type (Paradox / mod spelling drift).
+pub const BUILDING_TYPE_ALIASES: &[(&str, &str)] = &[
+    ("building_shipyard", "building_shipyards"),
+    ("building_shipyards", "building_shipyard"),
+    ("building_barrack", "building_barracks"),
+    ("building_barracks", "building_barrack"),
+];
+
+/// Return the alternate script id for `building_type`, if one is known.
+pub fn building_type_alias(building_type: &str) -> Option<&'static str> {
+    BUILDING_TYPE_ALIASES
+        .iter()
+        .find_map(|(from, to)| (building_type == *from).then_some(*to))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::GameDefs;
+
+    #[test]
+    fn resolve_building_type_index_accepts_known_aliases() {
+        let mut defs = GameDefs::default();
+        defs.ensure_building_type("building_shipyard");
+        assert_eq!(
+            defs.resolve_building_type_index("building_shipyards"),
+            defs.resolve_building_type_index("building_shipyard"),
+        );
+
+        let mut defs = GameDefs::default();
+        defs.ensure_building_type("building_barracks");
+        assert_eq!(
+            defs.resolve_building_type_index("building_barrack"),
+            defs.resolve_building_type_index("building_barracks"),
+        );
     }
 }

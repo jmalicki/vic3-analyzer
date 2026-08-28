@@ -167,8 +167,9 @@ fn synthetic_world_building(
     state_id: u32,
     levels: u32,
 ) -> Option<WorldBuilding> {
-    let building_type = defs.building_types.get(building)?;
-    let building_type_id = defs.building_index_of(building)?;
+    let building_key = defs.resolve_building_type_key(building)?;
+    let building_type = defs.building_types.get(building_key)?;
+    let building_type_id = defs.resolve_building_type_index(building_key)?;
     let level = f64::from(levels);
     if level <= 0.0 {
         return None;
