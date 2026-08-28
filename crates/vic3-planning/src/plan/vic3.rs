@@ -128,6 +128,63 @@ impl SearchTraceStats {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct GdpKnapsack {
+    /// List of (efficiency_gdp_per_cp, cp_cost_per_level, max_levels_available).
+    /// Sorted descending by efficiency.
+    pub items: Vec<(f64, f64, f64)>,
+}
+
+impl GdpKnapsack {
+    fn new(economy: &crate::sim::EconomyContext, config: crate::sim::SimConfig) -> Self {
+        let mut items = Vec::new();
+        for building_type in economy.defs.building_types.values() {
+            let (inputs, outputs) =
+                crate::sim::default_building_io_per_level(&economy.defs, building_type);
+            let mut gdp_add = 0.0;
+            for i in 0..outputs.len() {
+                let good_id = vic3_defs::GoodId::from_usize(i);
+                let qty = outputs[good_id];
+                if qty > 0.0 {
+                    if let Some(good) = economy.defs.goods.get(economy.defs.goods_order[i].as_str())
+                    {
+                        gdp_add += qty * good.base_price;
+                    }
+                }
+            }
+            for i in 0..inputs.len() {
+                let good_id = vic3_defs::GoodId::from_usize(i);
+                let qty = inputs[good_id];
+                if qty > 0.0 {
+                    if let Some(good) = economy.defs.goods.get(economy.defs.goods_order[i].as_str())
+                    {
+                        gdp_add -= qty * good.base_price;
+                    }
+                }
+            }
+            if gdp_add <= 0.0 {
+                continue;
+            }
+
+            let Some(cp_cost) = crate::construction::construction_work_points_for_enqueue(
+                &building_type.name,
+                economy,
+                config,
+            ) else {
+                continue;
+            };
+            if cp_cost <= 0.0 {
+                continue;
+            }
+
+            let max_levels = 1000.0; // Assume loose high upper bound for all buildings until parser supports potentials
+            items.push((gdp_add / cp_cost, cp_cost, max_levels));
+        }
+        items.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        Self { items }
+    }
+}
+
 /// Immutable inputs shared by every node in one planning search.
 #[derive(Debug)]
 struct SearchContext {
@@ -136,6 +193,7 @@ struct SearchContext {
     economy: Rc<EconomyContext>,
     /// Vic3-side search counters — see [`SearchTraceStats`].
     trace: SearchTraceStats,
+    gdp_knapsack: GdpKnapsack,
 }
 
 /// Compact key and state handle for Vic3 planning.
@@ -201,6 +259,7 @@ impl Vic3Node {
         config: SimConfig,
         economy: EconomyContext,
     ) -> Self {
+        let knapsack = GdpKnapsack::new(&economy, config);
         Self::with_context(
             state,
             Rc::new(SearchContext {
@@ -208,6 +267,7 @@ impl Vic3Node {
                 config,
                 economy: Rc::new(economy),
                 trace: SearchTraceStats::default(),
+                gdp_knapsack: knapsack,
             }),
         )
     }
@@ -349,6 +409,7 @@ fn goal_timing_lower_bound(
     state: &PlanningState,
     config: SimConfig,
     economy: &EconomyContext,
+    context: &SearchContext,
 ) -> u32 {
     let interest_days = u32::from(config.interest_days.max(1));
     let army_train_days = u32::from(config.army_training_days.max(1));
@@ -358,12 +419,12 @@ fn goal_timing_lower_bound(
     match goal {
         Goal::And(children) => children
             .iter()
-            .map(|child| goal_timing_lower_bound(child, state, config, economy))
+            .map(|child| goal_timing_lower_bound(child, state, config, economy, context))
             .max()
             .unwrap_or(0),
         Goal::Or(children) => children
             .iter()
-            .map(|child| goal_timing_lower_bound(child, state, config, economy))
+            .map(|child| goal_timing_lower_bound(child, state, config, economy, context))
             .min()
             .unwrap_or(0),
         Goal::Not(_) => 0,
@@ -414,13 +475,57 @@ fn goal_timing_lower_bound(
                 0
             }
         }
-        Goal::Simple(atom @ (SimpleSubgoal::GoodPrice { .. } | SimpleSubgoal::Gdp { .. })) => {
+        Goal::Simple(atom @ SimpleSubgoal::GoodPrice { .. }) => {
             if atom.eval(state)
                 || economy.has_pm_switch_path(state, std::slice::from_ref(atom), config)
             {
                 0
             } else {
                 construction_days
+            }
+        }
+        Goal::Simple(atom @ SimpleSubgoal::Gdp { .. }) => {
+            if atom.eval(state)
+                || economy.has_pm_switch_path(state, std::slice::from_ref(atom), config)
+            {
+                0
+            } else {
+                let mut target_val = 0.0;
+                if let SimpleSubgoal::Gdp { value, .. } = atom {
+                    target_val = *value;
+                }
+                let target_gap = target_val - state.gdp;
+                if target_gap <= 0.0 {
+                    return 0;
+                }
+
+                let mut needed_cp = 0.0;
+                let mut remaining_gap = target_gap;
+                for &(eff, cp_cost, max_levels) in &context.gdp_knapsack.items {
+                    if remaining_gap <= 0.0 {
+                        break;
+                    }
+                    let level_gdp = cp_cost * eff;
+                    let max_gdp = level_gdp * max_levels;
+                    if remaining_gap > max_gdp {
+                        needed_cp += cp_cost * max_levels;
+                        remaining_gap -= max_gdp;
+                    } else {
+                        needed_cp += remaining_gap / eff;
+                        remaining_gap = 0.0;
+                    }
+                }
+
+                if remaining_gap > 0.0 {
+                    if let Some(&(eff, _, _)) = context.gdp_knapsack.items.first() {
+                        needed_cp += remaining_gap / eff;
+                    } else {
+                        return construction_days;
+                    }
+                }
+
+                let rate = state.construction_points_per_day.max(1.0);
+                (needed_cp / rate).ceil() as u32
             }
         }
         Goal::Simple(_) => 0,
@@ -537,6 +642,7 @@ impl SearchNode for Vic3Node {
             &self.identity.state,
             self.cache.context.config,
             &self.cache.context.economy,
+            &self.cache.context,
         )
     }
 }
