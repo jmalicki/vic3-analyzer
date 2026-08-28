@@ -558,7 +558,8 @@ pub fn construction_points_per_day_per_job(state: &PlanningState, config: SimCon
         if fed >= max_jobs || remaining <= 0.0 {
             break;
         }
-        let cap = allocation_cap_points_per_day(state, config, Some(job.building.as_str()));
+        let cap =
+            allocation_cap_points_per_day(state, config, Some(job.building_type_name.as_str()));
         let take = cap.min(remaining);
         out[idx] = take;
         remaining -= take;
@@ -610,16 +611,16 @@ pub fn construction_wait_target(
         };
         let replace = match &best {
             None => true,
-            Some((best_days, best_building, best_state)) => {
+            Some((best_days, best_building_type_name, best_state)) => {
                 days < *best_days
-                    || (days == *best_days && job.building < *best_building)
+                    || (days == *best_days && job.building_type_name < *best_building_type_name)
                     || (days == *best_days
-                        && job.building == *best_building
+                        && job.building_type_name == *best_building_type_name
                         && job.state_id < *best_state)
             }
         };
         if replace {
-            best = Some((days, job.building.clone(), job.state_id));
+            best = Some((days, job.building_type_name.clone(), job.state_id));
         }
     }
     best
@@ -690,7 +691,7 @@ pub fn construction_work_complete(
     state_id: Option<u32>,
 ) -> bool {
     state.constructions.iter().any(|row| {
-        defs.building_types_equivalent(&row.building, building)
+        defs.building_types_equivalent(&row.building_type_name, building)
             && state_id
                 .map(|want| row.state_id == Some(want) || row.state_id.is_none())
                 .unwrap_or(true)
@@ -818,7 +819,7 @@ mod tests {
             order_id: 1,
             queue: ConstructionQueueKind::Government,
             state_id: None,
-            building: "building_logging_camp".into(),
+            building_type_name: "building_logging_camp".into(),
             remaining: Some(100.0),
         };
         let slow = PlanningState::from_parts(PlanningParts {
@@ -849,14 +850,14 @@ mod tests {
                     order_id: 1,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building: "building_a".into(),
+                    building_type_name: "building_a".into(),
                     remaining: Some(50.0),
                 },
                 PlanningConstruction {
                     order_id: 2,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building: "building_b".into(),
+                    building_type_name: "building_b".into(),
                     remaining: Some(50.0),
                 },
             ],
@@ -890,14 +891,14 @@ mod tests {
                     order_id: 1,
                     queue: ConstructionQueueKind::Private,
                     state_id: None,
-                    building: "building_private".into(),
+                    building_type_name: "building_private".into(),
                     remaining: Some(50.0),
                 },
                 PlanningConstruction {
                     order_id: 2,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building: "building_govt".into(),
+                    building_type_name: "building_govt".into(),
                     remaining: Some(50.0),
                 },
             ],
@@ -964,14 +965,14 @@ mod tests {
                     order_id: 1,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building: "building_a".into(),
+                    building_type_name: "building_a".into(),
                     remaining: Some(20.0),
                 },
                 PlanningConstruction {
                     order_id: 2,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building: "building_b".into(),
+                    building_type_name: "building_b".into(),
                     remaining: Some(100.0),
                 },
             ],

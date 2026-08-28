@@ -911,7 +911,7 @@ mod tests {
                 order_id: 1,
                 queue: ConstructionQueueKind::Government,
                 state_id: None,
-                building: "building_rye_farm".into(),
+                building_type_name: "building_rye_farm".into(),
                 remaining: Some(30.0),
             }],
             construction_points_per_day: 1.0,

@@ -47,7 +47,7 @@ const result: AlertsResult = {
           detail: 'Produce more grain.',
           rank: 2,
           apply_ready: false,
-          action: { type: 'build', building: 'building_rye_farm', extra_levels: 1 },
+          action: { type: 'build', building_type_name: 'building_rye_farm', extra_levels: 1 },
           effect:
             '~+10 grain sell, covering 25% of the 40 gap. Assumes the new level is staffed at current productivity.',
         },

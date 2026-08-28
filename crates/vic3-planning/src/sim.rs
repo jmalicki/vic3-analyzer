@@ -452,7 +452,10 @@ impl EconomyContext {
             .filter_map(|row| row.state.filter(|sid| owned.contains(sid)))
             .collect();
         for job in &state.constructions {
-            if self.defs.building_types_equivalent(&job.building, building) {
+            if self
+                .defs
+                .building_types_equivalent(&job.building_type_name, building)
+            {
                 if let Some(sid) = job.state_id.filter(|sid| owned.contains(sid)) {
                     have.insert(sid);
                 }
@@ -1065,7 +1068,7 @@ pub enum Event {
     /// One level of the queued building type completes.
     /// A building level completed in a placement state.
     BuildingCompleted {
-        building: String,
+        building_type_name: String,
         state_id: Option<u32>,
     },
     /// The queued interest declaration completes.
@@ -1095,7 +1098,10 @@ pub enum Action {
     /// in flight until parallel slots from capacity ÷ allocation cap are full.
     /// Construction Sector levels are offered as a capacity lever when other
     /// build candidates already exist for open economy/military atoms.
-    QueueBuildingLevel { building: String, state_id: u32 },
+    QueueBuildingLevel {
+        building_type_name: String,
+        state_id: u32,
+    },
     /// Queue a goal-relevant interest declaration.
     QueueInterest { kind: InterestKind, id: String },
     /// Queue hiring a military building type up to full employment.
@@ -1344,7 +1350,10 @@ fn successors_for_simple_subgoals_with_economy(
         push_decision(
             &mut result,
             state,
-            Action::QueueBuildingLevel { building, state_id },
+            Action::QueueBuildingLevel {
+                building_type_name: building,
+                state_id,
+            },
             economy,
             config,
         );
@@ -1388,7 +1397,13 @@ fn successors_for_simple_subgoals_with_economy(
     }
     if state.queued_building.is_some() {
         if let Some((days, building, state_id)) = construction_wait_target(state, config) {
-            wait_candidates.push((days, Event::BuildingCompleted { building, state_id }));
+            wait_candidates.push((
+                days,
+                Event::BuildingCompleted {
+                    building_type_name: building,
+                    state_id,
+                },
+            ));
         }
     }
     if let Some(queued) = state.queued_interest.as_ref().filter(|_| {
@@ -1618,19 +1633,23 @@ pub fn apply_action(
             next.queued_tech = Some(tech.clone());
             next.tech_days_left = Some(research_days_for_tech(tech, config, economy));
         }
-        Action::QueueBuildingLevel { building, state_id } => {
-            if building.is_empty() || construction_queue_full(&next, config) {
+        Action::QueueBuildingLevel {
+            building_type_name,
+            state_id,
+        } => {
+            if building_type_name.is_empty() || construction_queue_full(&next, config) {
                 return None;
             }
             if !economy.owned_state_ids(&next.country).contains(state_id) {
                 return None;
             }
-            let building = economy
+            let building_type_name = economy
                 .defs
-                .canonical_building_type_key(building)
-                .unwrap_or_else(|| building.clone());
-            let remaining = construction_work_points_for_enqueue(&building, economy, config);
-            next.push_construction(building, *state_id, remaining);
+                .canonical_building_type_key(building_type_name)
+                .unwrap_or_else(|| building_type_name.clone());
+            let remaining =
+                construction_work_points_for_enqueue(&building_type_name, economy, config);
+            next.push_construction(building_type_name, *state_id, remaining);
         }
         Action::QueueInterest { kind, id } => {
             if id.is_empty() || next.interest_busy() {
@@ -1752,7 +1771,10 @@ pub(crate) fn speculative_completed_state(
     config: SimConfig,
 ) -> Result<PlanningState, SpeculativeCompleteError> {
     match action {
-        Action::QueueBuildingLevel { building, state_id } => {
+        Action::QueueBuildingLevel {
+            building_type_name,
+            state_id,
+        } => {
             let queued = apply_action(state, action, economy, config)
                 .ok_or(SpeculativeCompleteError::ApplyRejected)?;
             let wait_days = construction_wait_days(&queued, config)
@@ -1761,7 +1783,7 @@ pub(crate) fn speculative_completed_state(
                 &queued,
                 &Action::WaitForEvent {
                     event: Event::BuildingCompleted {
-                        building: building.clone(),
+                        building_type_name: building_type_name.clone(),
                         state_id: Some(*state_id),
                     },
                     days: wait_days,
@@ -1830,31 +1852,36 @@ fn apply_wait_for_event(
             next.tech_days_left = None;
             next.techs.insert(tech.clone());
         }
-        Event::BuildingCompleted { building, state_id } => {
-            let building = economy
+        Event::BuildingCompleted {
+            building_type_name,
+            state_id,
+        } => {
+            let building_type_name = economy
                 .defs
-                .canonical_building_type_key(building)
-                .unwrap_or_else(|| building.clone());
+                .canonical_building_type_key(building_type_name)
+                .unwrap_or_else(|| building_type_name.clone());
             if !next.constructions.iter().any(|row| {
                 economy
                     .defs
-                    .building_types_equivalent(&row.building, &building)
+                    .building_types_equivalent(&row.building_type_name, &building_type_name)
                     && state_id
                         .map(|want| row.state_id == Some(want) || row.state_id.is_none())
                         .unwrap_or(true)
             }) {
                 return None;
             }
-            if days == 0 && !construction_work_complete(next, &economy.defs, &building, *state_id) {
+            if days == 0
+                && !construction_work_complete(next, &economy.defs, &building_type_name, *state_id)
+            {
                 return None;
             }
             next.tick_parallel_tracks(days, &construction_points_per_day_per_job(next, config));
             next.date = next.date.add_days(i32::from(days));
-            next.complete_construction(&economy.defs, &building, *state_id);
+            next.complete_construction(&economy.defs, &building_type_name, *state_id);
             if let Some(sid) = *state_id {
                 *next
                     .building_level_deltas
-                    .entry((building.clone(), sid))
+                    .entry((building_type_name.clone(), sid))
                     .or_default() += 1;
             } else if let Some(sid) = economy
                 .owned_state_ids(&next.country)
@@ -1866,13 +1893,13 @@ fn apply_wait_for_event(
                 // apply_planning_to_world still moves levels.
                 *next
                     .building_level_deltas
-                    .entry((building.clone(), sid))
+                    .entry((building_type_name.clone(), sid))
                     .or_default() += 1;
             }
-            if is_military_planning_building(&building) {
-                next.push_mil_building_level(&building);
+            if is_military_planning_building(&building_type_name) {
+                next.push_mil_building_level(&building_type_name);
             }
-            if building == BUILDING_CONSTRUCTION_SECTOR {
+            if building_type_name == BUILDING_CONSTRUCTION_SECTOR {
                 sync_construction_points_per_day(next, economy, config);
             }
             refresh_prices(next, economy);
@@ -2392,7 +2419,7 @@ mod tests {
             gdp_decisions.iter().any(|edge| {
                 matches!(
                     &edge.action,
-                    Action::QueueBuildingLevel { building, state_id: _ } if building == "building_logging_camp"
+                    Action::QueueBuildingLevel { building_type_name, state_id: _ } if building_type_name == "building_logging_camp"
                 )
             }),
             "gdp goal should queue logging camp; got {gdp_decisions:?}"
@@ -2401,8 +2428,8 @@ mod tests {
             gdp_decisions.iter().any(|edge| {
                 matches!(
                     &edge.action,
-                    Action::QueueBuildingLevel { building, state_id: _ }
-                        if building == BUILDING_CONSTRUCTION_SECTOR
+                    Action::QueueBuildingLevel { building_type_name, state_id: _ }
+                        if building_type_name == BUILDING_CONSTRUCTION_SECTOR
                 )
             }),
             "gdp goal should also offer construction sector as capacity lever"
@@ -2414,7 +2441,7 @@ mod tests {
             .find(|edge| {
                 matches!(
                     &edge.action,
-                    Action::QueueBuildingLevel { building, state_id: _ } if building == "building_logging_camp"
+                    Action::QueueBuildingLevel { building_type_name, state_id: _ } if building_type_name == "building_logging_camp"
                 )
             })
             .expect("good_price goal should queue logging camp");
@@ -2463,8 +2490,8 @@ mod tests {
                 .find(|edge| {
                     matches!(
                         &edge.action,
-                        Action::QueueBuildingLevel { building, state_id: _ }
-                            if building == "building_logging_camp"
+                        Action::QueueBuildingLevel { building_type_name, state_id: _ }
+                            if building_type_name == "building_logging_camp"
                     )
                 })
                 .expect("should still offer logging camp under GDP");
@@ -2482,8 +2509,8 @@ mod tests {
                 .all(|edge| {
                     !matches!(
                         &edge.action,
-                        Action::QueueBuildingLevel { building, state_id: _ }
-                            if building == "building_logging_camp"
+                        Action::QueueBuildingLevel { building_type_name, state_id: _ }
+                            if building_type_name == "building_logging_camp"
                     )
                 }),
             "per-type cap must stop further logging camp levels"
@@ -2993,7 +3020,7 @@ mod tests {
                 order_id: 1,
                 queue: ConstructionQueueKind::Government,
                 state_id: None,
-                building: "building_logging_camp".into(),
+                building_type_name: "building_logging_camp".into(),
                 remaining: Some(25.0),
             }],
             construction_points_per_day: 10.0,
@@ -3096,7 +3123,7 @@ mod tests {
         let queued = apply_action_with_economy(
             &state,
             &Action::QueueBuildingLevel {
-                building: "building_logging_camp".into(),
+                building_type_name: "building_logging_camp".into(),
                 state_id: 1,
             },
             &economy,
@@ -3189,7 +3216,7 @@ mod tests {
                 order_id: 1,
                 queue: ConstructionQueueKind::Government,
                 state_id: None,
-                building: "building_logging_camp".into(),
+                building_type_name: "building_logging_camp".into(),
                 remaining: Some(25.0),
             }],
             construction_points_per_day: 10.0,
@@ -3280,7 +3307,7 @@ mod tests {
                 order_id: 1,
                 queue: ConstructionQueueKind::Government,
                 state_id: None,
-                building: "building_logging_camp".into(),
+                building_type_name: "building_logging_camp".into(),
                 remaining: Some(50.0),
             }],
             construction_points_per_day: 1.0,
@@ -3386,7 +3413,7 @@ mod tests {
             order_id: 1,
             queue: ConstructionQueueKind::Government,
             state_id: None,
-            building: "building_logging_camp".into(),
+            building_type_name: "building_logging_camp".into(),
             remaining: Some(100.0),
         };
         let slow = PlanningState::from_parts(PlanningParts {
@@ -3474,14 +3501,14 @@ mod tests {
                     order_id: 1,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building: "building_a".into(),
+                    building_type_name: "building_a".into(),
                     remaining: Some(50.0),
                 },
                 PlanningConstruction {
                     order_id: 2,
                     queue: ConstructionQueueKind::Government,
                     state_id: None,
-                    building: "building_b".into(),
+                    building_type_name: "building_b".into(),
                     remaining: Some(50.0),
                 },
             ],
@@ -3609,7 +3636,7 @@ mod tests {
         let queued = apply_action_with_economy(
             &state,
             &Action::QueueBuildingLevel {
-                building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                building_type_name: BUILDING_CONSTRUCTION_SECTOR.into(),
                 state_id: 1,
             },
             &economy,
@@ -3620,7 +3647,7 @@ mod tests {
             &queued,
             &Action::WaitForEvent {
                 event: Event::BuildingCompleted {
-                    building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                    building_type_name: BUILDING_CONSTRUCTION_SECTOR.into(),
                     state_id: Some(1),
                 },
                 days: 10,
@@ -3764,7 +3791,7 @@ mod tests {
         let done = speculative_completed_state(
             &state,
             &Action::QueueBuildingLevel {
-                building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                building_type_name: BUILDING_CONSTRUCTION_SECTOR.into(),
                 state_id,
             },
             &economy,
@@ -3787,7 +3814,7 @@ mod tests {
         let done = speculative_completed_state(
             &state,
             &Action::QueueBuildingLevel {
-                building: "building_logging_camp".into(),
+                building_type_name: "building_logging_camp".into(),
                 state_id,
             },
             &economy,
@@ -3899,8 +3926,8 @@ mod tests {
             edges.iter().any(|edge| {
                 matches!(
                     &edge.action,
-                    Action::QueueBuildingLevel { building, state_id: _ }
-                        if building == BUILDING_CONSTRUCTION_SECTOR
+                    Action::QueueBuildingLevel { building_type_name, state_id: _ }
+                        if building_type_name == BUILDING_CONSTRUCTION_SECTOR
                 )
             }),
             "expected CS means-to-an-end edge among {edges:?}"
@@ -3985,7 +4012,7 @@ mod tests {
             edges.iter().any(|edge| {
                 matches!(
                     &edge.action,
-                    Action::QueueBuildingLevel { building, state_id: _ } if building == "building_logging_camp"
+                    Action::QueueBuildingLevel { building_type_name, state_id: _ } if building_type_name == "building_logging_camp"
                 )
             }),
             "first-of-type logging camp must be a candidate: {edges:?}"
@@ -3994,7 +4021,7 @@ mod tests {
         let queued = apply_action_with_economy(
             &state,
             &Action::QueueBuildingLevel {
-                building: "building_logging_camp".into(),
+                building_type_name: "building_logging_camp".into(),
                 state_id: 1,
             },
             &economy,
@@ -4005,7 +4032,7 @@ mod tests {
             &queued,
             &Action::WaitForEvent {
                 event: Event::BuildingCompleted {
-                    building: "building_logging_camp".into(),
+                    building_type_name: "building_logging_camp".into(),
                     state_id: Some(1),
                 },
                 days: construction_wait_days(&queued, config).expect("wait"),
@@ -4120,9 +4147,10 @@ mod tests {
         let queued: BTreeSet<_> = edges
             .iter()
             .filter_map(|edge| match &edge.action {
-                Action::QueueBuildingLevel { building, state_id } => {
-                    Some((building.as_str(), *state_id))
-                }
+                Action::QueueBuildingLevel {
+                    building_type_name,
+                    state_id,
+                } => Some((building_type_name.as_str(), *state_id)),
                 _ => None,
             })
             .collect();
@@ -4179,7 +4207,7 @@ mod tests {
             edges.iter().any(|edge| {
                 matches!(
                     &edge.action,
-                    Action::QueueBuildingLevel { building, state_id: _ } if building == BUILDING_BARRACKS
+                    Action::QueueBuildingLevel { building_type_name, state_id: _ } if building_type_name == BUILDING_BARRACKS
                 )
             }),
             "military construction must not be blocked by research: {edges:?}"
@@ -4187,7 +4215,7 @@ mod tests {
         assert!(apply_action_with_economy(
             &start,
             &Action::QueueBuildingLevel {
-                building: BUILDING_BARRACKS.into(),
+                building_type_name: BUILDING_BARRACKS.into(),
                 state_id: 1,
             },
             &economy,

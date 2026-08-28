@@ -77,19 +77,19 @@ export function deltaForMitigation(
       }
     }
     case 'build': {
-      if (!action.building) return undefined
+      if (!action.building_type_name) return undefined
       const extra = action.extra_levels ?? 1
-      const ids = matchingBuildingIds(buildings, action.building, action.state_id)
-      const fallback = ids.length ? ids : matchingBuildingIds(buildings, action.building)
+      const ids = matchingBuildingIds(buildings, action.building_type_name, action.state_id)
+      const fallback = ids.length ? ids : matchingBuildingIds(buildings, action.building_type_name)
       if (!fallback.length) return undefined
       return {
         extra_levels: fallback.map((building_id) => ({ building_id, extra_levels: extra })),
       }
     }
     case 'feeder_job': {
-      if (!action.building) return undefined
-      const ids = matchingBuildingIds(buildings, action.building, action.state_id)
-      const fallback = ids.length ? ids : matchingBuildingIds(buildings, action.building)
+      if (!action.building_type_name) return undefined
+      const ids = matchingBuildingIds(buildings, action.building_type_name, action.state_id)
+      const fallback = ids.length ? ids : matchingBuildingIds(buildings, action.building_type_name)
       if (!fallback.length) return undefined
       return {
         extra_levels: fallback.map((building_id) => ({ building_id, extra_levels: 1 })),

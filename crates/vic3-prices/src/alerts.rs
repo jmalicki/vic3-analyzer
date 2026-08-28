@@ -112,7 +112,7 @@ pub struct Mitigation {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MitigationAction {
     Build {
-        building: String,
+        building_type_name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         state_id: Option<u32>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -133,7 +133,7 @@ pub enum MitigationAction {
         good_name: String,
     },
     FeederJob {
-        building: String,
+        building_type_name: String,
         profession: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         state_id: Option<u32>,
@@ -535,7 +535,7 @@ fn goods_mitigations(
                 "Build a trade center",
                 format!("No trade center in this state/market. Compare a new trade center against a local {good_id} producer."),
                 MitigationAction::Build {
-                    building: "building_trade_center".into(),
+                    building_type_name: "building_trade_center".into(),
                     state_id,
                     extra_levels: Some(1),
                 },
@@ -601,7 +601,7 @@ fn goods_mitigations(
                     "Add trade-center levels",
                     format!("Trade center {} is fully employed; extra levels can raise throughput if this center moves {good_id}.", center.id),
                     MitigationAction::Build {
-                        building: center.building_type_name.clone(),
+                        building_type_name: center.building_type_name.clone(),
                         state_id: center.state_id,
                         extra_levels: Some(1),
                     },
@@ -659,7 +659,7 @@ fn push_local_producer(
                 ctx.good_name
             ),
             MitigationAction::Build {
-                building: building.clone(),
+                building_type_name: building.clone(),
                 state_id,
                 extra_levels: Some(1),
             },
@@ -1293,7 +1293,7 @@ fn collect_market_access(args: &mut AlertCollectArgs<'_>) {
                 "Add infrastructure",
                 "Build railways or urban infrastructure so usage no longer exceeds capacity.",
                 MitigationAction::Build {
-                    building: "building_railway".into(),
+                    building_type_name: "building_railway".into(),
                     state_id: Some(state.id),
                     extra_levels: Some(1),
                 },
@@ -1679,7 +1679,7 @@ fn pop_shortage_mitigations(
             "Hire peasants into commercial farms",
             "This state still has peasants. Put them in rye or wheat farms so they become farmers and laborers. Subsistence farms already hold leftover peasants and will not fill factory jobs.",
             MitigationAction::FeederJob {
-                building: farm.into(),
+                building_type_name: farm.into(),
                 profession: "farmers".into(),
                 state_id: state,
             },
@@ -1732,7 +1732,7 @@ fn qualification_levers(
                     lever.title,
                     lever.detail,
                     MitigationAction::Build {
-                        building: lever
+                        building_type_name: lever
                             .building
                             .unwrap_or_else(|| "building_university".into()),
                         state_id: Some(state_id),
@@ -1765,7 +1765,7 @@ fn qualification_levers(
                         lever.title,
                         lever.detail,
                         MitigationAction::FeederJob {
-                            building,
+                            building_type_name: building,
                             profession: lever.source,
                             state_id: Some(state_id),
                         },
@@ -1850,7 +1850,9 @@ fn has_unstaffed_university(
 
 fn is_university_build(item: &Mitigation) -> bool {
     match &item.action {
-        Some(MitigationAction::Build { building, .. }) => id_has(building, "university"),
+        Some(MitigationAction::Build {
+            building_type_name, ..
+        }) => id_has(building_type_name, "university"),
         _ => false,
     }
 }

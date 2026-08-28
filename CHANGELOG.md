@@ -33,8 +33,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   `BuildingEconomics` (`building_type_id`/`building_type_name`/`building_type_label`).
   SQL `building_types` uses `name`/`label`; `buildings` uses `building_type_name`/
   `building_type_label`. `WhatIfOpts` / `ExtraLevelsDelta` use `building_type_id`.
-  **Breaking** for JSON, SQL, and web. Construction queue snapshot fields remain
-  `building`/`building_name` (W2e). `BLOB_VERSION` bumped to 15.
+  Construction queues (`constructions`, `loaded_constructions`) and alert build/
+  feeder actions use `building_type_name`/`building_type_label`. **Breaking**
+  for JSON, SQL, and web. `BLOB_VERSION` bumped to 15.
 
 - **Planning `SimpleSubgoal`:** Renamed goal leaf type `Atom` → `SimpleSubgoal`,
   `Goal::Atom` → `Goal::Simple`, `atoms()` → `simple_subgoals()`, and related

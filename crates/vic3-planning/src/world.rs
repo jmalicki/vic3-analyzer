@@ -92,7 +92,7 @@ pub struct PlanningConstruction {
     pub order_id: u32,
     pub queue: ConstructionQueueKind,
     pub state_id: Option<u32>,
-    pub building: String,
+    pub building_type_name: String,
     pub remaining: Option<f64>,
 }
 
@@ -101,7 +101,7 @@ impl PartialEq for PlanningConstruction {
         self.order_id == other.order_id
             && self.queue == other.queue
             && self.state_id == other.state_id
-            && self.building == other.building
+            && self.building_type_name == other.building_type_name
             && f64_option_bits_eq(self.remaining, other.remaining)
     }
 }
@@ -113,7 +113,7 @@ impl Hash for PlanningConstruction {
         self.order_id.hash(state);
         self.queue.hash(state);
         self.state_id.hash(state);
-        self.building.hash(state);
+        self.building_type_name.hash(state);
         hash_f64_option(self.remaining, state);
     }
 }
@@ -124,14 +124,14 @@ impl From<&vic3_load::ConstructionQueueEntry> for PlanningConstruction {
             order_id: entry.order_id,
             queue: entry.queue,
             state_id: entry.state_id,
-            building: entry.building.clone(),
+            building_type_name: entry.building.clone(),
             remaining: entry.remaining,
         }
     }
 }
 
-impl From<&vic3_prices::WorldConstruction> for PlanningConstruction {
-    fn from(entry: &vic3_prices::WorldConstruction) -> Self {
+impl PlanningConstruction {
+    pub fn from_world(entry: &vic3_prices::WorldConstruction, defs: &GameDefs) -> Self {
         Self {
             order_id: entry.id,
             queue: match entry.queue {
@@ -139,7 +139,7 @@ impl From<&vic3_prices::WorldConstruction> for PlanningConstruction {
                 vic3_prices::ConstructionQueueKind::Government => ConstructionQueueKind::Government,
             },
             state_id: entry.state_id,
-            building: entry.building.clone(),
+            building_type_name: defs.building_by_index(entry.building_type_id).to_string(),
             remaining: entry.remaining,
         }
     }
@@ -756,7 +756,7 @@ impl PlanningState {
         self.queued_building = self
             .constructions
             .first()
-            .map(|entry| entry.building.clone());
+            .map(|entry| entry.building_type_name.clone());
     }
 
     /// Append a government construction (sim `QueueBuildingLevel`).
@@ -781,7 +781,7 @@ impl PlanningState {
             order_id,
             queue: ConstructionQueueKind::Government,
             state_id: Some(state_id),
-            building,
+            building_type_name: building,
             remaining,
         });
         self.sync_queued_building_from_constructions();
@@ -799,7 +799,7 @@ impl PlanningState {
         state_id: Option<u32>,
     ) {
         let matches = |entry: &PlanningConstruction| {
-            defs.building_types_equivalent(&entry.building, building)
+            defs.building_types_equivalent(&entry.building_type_name, building)
                 && state_id
                     .map(|want| entry.state_id == Some(want) || entry.state_id.is_none())
                     .unwrap_or(true)
@@ -1014,7 +1014,7 @@ impl PlanningState {
                 .constructions
                 .iter()
                 .filter(|row| row.country_id == Some(country.id))
-                .map(PlanningConstruction::from)
+                .map(|row| PlanningConstruction::from_world(row, defs))
                 .collect(),
             queued_interest: None,
             queued_hire: None,
@@ -1308,8 +1308,10 @@ mod tests {
             }),
         );
 
-        let state =
-            PlanningState::from_save(&save, "GER", BTreeMap::new(), &GameDefs::default()).unwrap();
+        let mut defs = GameDefs::default();
+        defs.ensure_building_type("building_construction_sector");
+
+        let state = PlanningState::from_save(&save, "GER", BTreeMap::new(), &defs).unwrap();
         assert!(state.has_tech("railways"));
         assert!(state.has_tech("nitroglycerin"));
         assert!(state.has_tech("urban_planning"));
@@ -1320,14 +1322,12 @@ mod tests {
         );
         assert_eq!(state.constructions.len(), 1);
         assert_eq!(
-            state.constructions[0].building,
+            state.constructions[0].building_type_name,
             "building_construction_sector"
         );
 
-        let world = World::from_save(&save, &vic3_defs::GameDefs::default());
-        let from_world =
-            PlanningState::from_world(&world, "GER", BTreeMap::new(), &GameDefs::default())
-                .unwrap();
+        let world = World::from_save(&save, &defs);
+        let from_world = PlanningState::from_world(&world, "GER", BTreeMap::new(), &defs).unwrap();
         assert_eq!(from_world.techs, state.techs);
         assert_eq!(from_world.queued_tech, state.queued_tech);
         assert_eq!(from_world.queued_building, state.queued_building);

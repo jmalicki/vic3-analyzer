@@ -581,7 +581,7 @@ async fn suggest_mitigations_player_le_all_and_columns() {
         "kind",
         "rank",
         "action",
-        "building",
+        "building_type_name",
         "good_name",
         "extra_levels",
         "title",
@@ -1069,7 +1069,9 @@ async fn gaps_army_power_unknown_not_silent_zero() {
 async fn constructions_table_lists_private_and_government() {
     use vic3_prices::{ConstructionQueueKind, WorldConstruction};
 
-    let defs = decode_blob(&defs_blob()).expect("decode defs");
+    let mut defs = decode_blob(&defs_blob()).expect("decode defs");
+    defs.ensure_building_type("building_logging_camp");
+    defs.ensure_building_type("building_construction_sector");
     let save = load_slice(&save_bytes(), empty_tokens()).expect("load save");
     let mut world = World::from_save(&save, &defs);
     let country_id = world
@@ -1083,7 +1085,7 @@ async fn constructions_table_lists_private_and_government() {
             queue: ConstructionQueueKind::Private,
             country_id,
             state_id: Some(1),
-            building: "building_logging_camp".into(),
+            building_type_id: defs.building_index_of("building_logging_camp").unwrap(),
             remaining: Some(5.0),
         },
         WorldConstruction {
@@ -1091,7 +1093,9 @@ async fn constructions_table_lists_private_and_government() {
             queue: ConstructionQueueKind::Government,
             country_id,
             state_id: Some(1),
-            building: "building_construction_sector".into(),
+            building_type_id: defs
+                .building_index_of("building_construction_sector")
+                .unwrap(),
             remaining: Some(40.0),
         },
     ];
@@ -1100,7 +1104,7 @@ async fn constructions_table_lists_private_and_government() {
 
     let batches = eng
         .query(
-            "SELECT queue, position, building, remaining FROM constructions ORDER BY queue, position",
+            "SELECT queue, position, building_type_name, remaining FROM constructions ORDER BY queue, position",
         )
         .await
         .expect("constructions");
@@ -1115,7 +1119,7 @@ async fn constructions_table_lists_private_and_government() {
     assert_eq!(queues.value(1), "private");
 
     let gov = eng
-        .query("SELECT building FROM constructions WHERE queue = 'government'")
+        .query("SELECT building_type_name FROM constructions WHERE queue = 'government'")
         .await
         .expect("gov filter");
     let buildings = gov[0]

@@ -33,7 +33,7 @@
 //! | `pops` | `state_id`, `profession` | — |
 //! | `state_qualifications` | `state_id`, `profession` | — |
 //! | `countries` | `country_id`, `name`, `label` | — |
-//! | `constructions` | `order_id`, `country_id`, `state_id`, `queue`, `building` | — |
+//! | `constructions` | `order_id`, `country_id`, `state_id`, `queue`, `building_type_name` | — |
 //!
 //! Exact means the provider filters rows itself; Unsupported predicates are
 //! left for DataFusion. `latest.*` advertises Inexact and delegates after load.

@@ -146,7 +146,8 @@ pub struct WorldConstruction {
     pub queue: ConstructionQueueKind,
     pub country_id: Option<u32>,
     pub state_id: Option<u32>,
-    pub building: String,
+    /// Dense index into [`GameDefs::building_types_order`].
+    pub building_type_id: BuildingTypeId,
     pub remaining: Option<f64>,
 }
 
@@ -484,13 +485,16 @@ impl World {
             buildings,
             constructions: vic3_load::all_constructions(save)
                 .into_iter()
-                .map(|entry| WorldConstruction {
-                    id: entry.order_id,
-                    queue: entry.queue.into(),
-                    country_id: entry.country_id,
-                    state_id: entry.state_id,
-                    building: entry.building,
-                    remaining: entry.remaining,
+                .filter_map(|entry| {
+                    let building_type_id = defs.building_index_of(&entry.building)?;
+                    Some(WorldConstruction {
+                        id: entry.order_id,
+                        queue: entry.queue.into(),
+                        country_id: entry.country_id,
+                        state_id: entry.state_id,
+                        building_type_id,
+                        remaining: entry.remaining,
+                    })
                 })
                 .collect(),
             frozen_buy: GoodsVec::zeros(defs.goods_order.len()),
@@ -879,7 +883,10 @@ mod tests {
         let world = World::from_save(&save, &defs);
         assert_eq!(world.constructions.len(), 2);
         assert_eq!(world.constructions[0].queue, ConstructionQueueKind::Private);
-        assert_eq!(world.constructions[0].building, "building_logging_camp");
+        assert_eq!(
+            world.constructions[0].building_type_id,
+            defs.building_index_of("building_logging_camp").unwrap()
+        );
         assert_eq!(
             world.constructions[1].queue,
             ConstructionQueueKind::Government

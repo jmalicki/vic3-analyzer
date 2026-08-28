@@ -293,11 +293,11 @@ export interface AlertEvidence {
 }
 
 export type MitigationAction =
-  | { type: 'build'; building: string; state_id?: number; extra_levels?: number }
+  | { type: 'build'; building_type_name: string; state_id?: number; extra_levels?: number }
   | { type: 'pm'; building_id: number; production_method: string; methods?: string[] }
   | { type: 'subsidize'; building_id: number }
   | { type: 'trade_alloc'; state_id: number; good_name: string }
-  | { type: 'feeder_job'; building: string; profession: string; state_id?: number }
+  | { type: 'feeder_job'; building_type_name: string; profession: string; state_id?: number }
   | { type: 'sol_goods'; good_name: string; state_id?: number }
 
 export interface AlertMitigation {
@@ -402,8 +402,8 @@ export interface ConstructionOrderSnapshot {
   country_id: number | null
   state_id: number | null
   state_label: string | null
-  building: string
-  building_name: string | null
+  building_type_name: string
+  building_type_label: string | null
   remaining: number | null
 }
 
