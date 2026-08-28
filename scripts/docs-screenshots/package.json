@@ -12,9 +12,9 @@
     "docs:screenshots:desktop:tauri": "node desktop-tauri/run.mjs"
   },
   "devDependencies": {
-    "pixelmatch": "^7.1.0",
-    "playwright": "^1.54.2",
+    "pixelmatch": "^7.2.0",
+    "playwright": "^1.62.1",
     "pngjs": "^7.0.0",
-    "serve-handler": "^6.1.6"
+    "serve-handler": "^6.1.7"
   }
 }
