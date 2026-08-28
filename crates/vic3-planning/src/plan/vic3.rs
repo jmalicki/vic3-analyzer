@@ -1144,4 +1144,63 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_gdp_knapsack_heuristic_bounds() {
+        let defs = vic3_defs::GameDefs::default();
+        let world = vic3_prices::World::default();
+        let economy = std::rc::Rc::new(EconomyContext::new(
+            world,
+            defs,
+            vic3_prices::SolveOpts::default(),
+        ));
+
+        let goal = compile("gdp >= 100").unwrap();
+        let mut state = PlanningState {
+            gdp: 10.0,
+            construction_points_per_day: 5.0,
+            ..PlanningState::default()
+        };
+
+        let config = SimConfig {
+            base_construction_capacity: 5,
+            default_construction_cost: 100,
+            ..SimConfig::default()
+        };
+
+        let mut context = SearchContext {
+            goal: goal.clone(),
+            config,
+            economy: economy.clone(),
+            trace: crate::plan::vic3::SearchTraceStats::default(),
+            gdp_knapsack: GdpKnapsack { items: vec![] },
+        };
+
+        // By default, the knapsack is empty.
+        // When knapsack is empty, it returns `construction_days` (which is computed dynamically based on config and state).
+        let base_days = goal_timing_lower_bound(&goal, &state, config, &economy, &context);
+
+        // Inject a mock knapsack item manually for the test.
+        // efficiency = 1.0, cp_cost = 100.0, max_levels = 1000.0
+        context.gdp_knapsack.items.push((1.0, 100.0, 1000.0));
+
+        // target gap is 90.
+        // needed_cp = 90.0 / 1.0 = 90.0.
+        // knapsack_days = ceil(90.0 / 5.0) = 18 days.
+        // max(18, base_days) = base_days (since 18 < 70).
+        assert_eq!(
+            goal_timing_lower_bound(&goal, &state, config, &economy, &context),
+            base_days
+        );
+
+        // Now make the gap huge so knapsack_days dominates.
+        state.gdp = -900.0;
+        // target gap is 1000. needed_cp = 1000.0 / 1.0 = 1000.0.
+        // knapsack_days = ceil(1000.0 / 5.0) = 200 days.
+        // max(200, base_days) = 200 (since 200 > 70).
+        assert_eq!(
+            goal_timing_lower_bound(&goal, &state, config, &economy, &context),
+            200
+        );
+    }
 }
