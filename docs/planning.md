@@ -99,6 +99,7 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
   - **Deferred:** free slots / potentials and building unlock techs (`TODO(buildability)`); A* incumbent upper bound via greedy feasible path (`TODO(anytime-ub)`).
 - Approximations: full staffing assumed for CS output; building-group `construction_efficiency_*` and most non-tech weekly-progress modifiers ignored; economic-law private mult table is vanilla-only. Still not full Paradox construction-goods demand or script cost tables beyond loaded `required_construction`.
 - **PM identity:** world/planning buildings store production methods as string script ids that **must** resolve in defs. Whether to replace those with indices into a bidirectional name↔id map remains an open design question.
+- **Progress ranking library** (unwired): residual-days / cheap-bag scorers in `plan/progress_h.rs` — see [`planning-progress-heuristic.md`](planning-progress-heuristic.md). Not PEA-wired; greedy $U$ still `TODO(anytime-ub)`.
 
 ---
 
