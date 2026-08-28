@@ -5,7 +5,11 @@
 //! [`plan`] runs PEA*-wrapped A* via [`PeaNode`] / [`Vic3Node`]; failures are
 //! [`PlanError`].
 
-use super::{pathfinding::shortest_path, PeaNode, Vic3Node};
+use super::{
+    greedy::greedy_upper_bound,
+    pathfinding::{shortest_path, PathFinderBuilder},
+    PeaNode, Vic3Node,
+};
 use crate::goals::Goal;
 use crate::sim::{Action, EconomyContext, SimConfig};
 use crate::world::PlanningState;
@@ -333,8 +337,23 @@ fn plan_from_root(
             max_days
         );
     }
-    let (pea_path, day_cost) = shortest_path::<_, PairingHeap<_, _>>(&PeaNode::ready(root))
-        .ok_or(PlanError::Unreachable)?;
+    let pea_root = PeaNode::ready(root);
+    let greedy_u = greedy_upper_bound(pea_root.domain(), max_days);
+    if super::astar_trace::enabled() {
+        eprintln!("[astar] greedy_u={greedy_u:?}");
+    }
+
+    let (pea_path, day_cost) = match greedy_u {
+        Some(0) => {
+            // Already at goal — trivial path.
+            shortest_path::<_, PairingHeap<_, _>>(&pea_root).ok_or(PlanError::Unreachable)?
+        }
+        Some(u) => PathFinderBuilder::new(pea_root)
+            .max_cost(u)
+            .shortest_path::<PairingHeap<_, _>>()
+            .ok_or(PlanError::Unreachable)?,
+        None => shortest_path::<_, PairingHeap<_, _>>(&pea_root).ok_or(PlanError::Unreachable)?,
+    };
     if super::astar_trace::enabled() {
         let summary = pea_path
             .first()

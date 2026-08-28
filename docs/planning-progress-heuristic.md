@@ -3,11 +3,12 @@
 Developer internals for planner search. Related:
 [`planning.md`](planning.md), [`planning-search.md`](planning-search.md).
 
-**Status:** ranking / cheap-bag **library** lives in `plan/progress_h.rs`.
-It is **not** wired into PEA or `plan()`. Greedy incumbent $U$ is **not** in
-this PR (`TODO(anytime-ub)` in [`planning.md`](planning.md)).
+**Status:** ranking / cheap-bag **library** lives in `plan/progress_h.rs`
+(not wired into search yet). Greedy incumbent $U$ lives in `plan/greedy.rs` and is
+wired into `plan()` via `PathFinderBuilder::max_cost`.
 
-Code: `plan/progress_h.rs` only (unwired).
+Code: `plan/progress_h.rs` (unwired ranking), `plan/greedy.rs` + `plan/result.rs`
+(greedy $U$ prune).
 
 ---
 
@@ -46,20 +47,176 @@ A **simple subgoal** is a compiled goal node with no further goal children
 | $e(a)$ | Edge cost of action $a$ (often $0$ for queue decisions) | `Successor::days` |
 | $h_{\mathrm{adm}}$ | Admissible remaining-days lower bound (timing DAG) | `Vic3Node::heuristic` |
 | $h$, $h_{\mathrm{rank}}$ | Progress residual-days estimate; **ranking bias**, not a proven admissible bound | `rank_heuristic` / `rank_heuristic_with_gdp_for_rates` |
+| $U$ | Incumbent feasible plan length in days | `greedy_upper_bound` |
+| $t_{\mathrm{goal}}^{\mathrm{greedy}}$ | Calendar day when greedy first satisfies the goal; $U$ equals this from the root | — |
 
 1. **Cost is calendar days.** Find a shortest path in days until GDP reaches
    the target (`evaluate` true).
 2. **A\*** / open-set search use $f = g + h$ with $g$ = days so far and edge costs in days
    (0-day decisions, positive waits). Today’s wired search still uses
    $h_{\mathrm{adm}}$ for Ready keys; $h_{\mathrm{rank}}$ is library-only until
-   search wiring.
-3. **$h_{\mathrm{rank}}$ only orders.** Progress residual scores are meant to
+   candidate-bag wiring.
+3. **Upper bound $U$ comes from greedy.** Run a feasible greedy simulation to
+   the GDP goal; $U$ is **only** that run’s day length (decisions are not kept).
+   Prune any node with $g \ge U$ (`PathFinderBuilder::max_cost` in `plan()`).
+   **v1:** when $U$ must be refreshed, **rebuild the whole greedy simulation**
+   (no retained plan to edit; no incremental membership).
+4. **$h_{\mathrm{rank}}$ only orders.** Progress residual scores are meant to
    rank the open set / candidate bag so search is not blind. They are **not** a
-   proven admissible lower bound and do **not** define an incumbent upper
-   bound $U$ (greedy $U$ is a later PR).
+   proven admissible lower bound and do **not** define $U$.
 
-The same day-cost skeleton applies to other goals; only the progress meter
-changes — see [Other goal types](#other-goal-types-how-the-gdp-story-changes).
+$$
+U = t_{\mathrm{goal}}^{\mathrm{greedy}}
+$$
+
+The same day-cost / $U$ / prune skeleton applies to other goals; only the
+progress meter changes — see [Other goal types](#other-goal-types-how-the-gdp-story-changes).
+
+---
+
+## Incumbent upper bound $U$ (greedy defines days)
+
+$U$ is the **length in calendar days** of one concrete greedy simulation that
+satisfies the goal (`evaluate` true). It is **not** derived from $h_{\mathrm{rank}}$.
+
+**v1 contract:** `greedy_upper_bound` returns a **scalar day count** for prune
+only. It does **not** return or retain the decision sequence. Search does not
+edit, simplify, or splice greedy picks — the loop invents decisions while
+simulating, then **discards** them once $U$ is known. A later “incremental
+membership” pass may keep an editable intended sequence; that is **not** this
+PR / not v1.
+
+- From the **root**, greedy runs to completion → $U$ is total plan days.
+- From a **search node** (optional refine), greedy builds only the
+  **remaining** suffix → incumbent path cost is $g + U_{\mathrm{remaining}}$.
+
+### Seeding and refreshing $U$
+
+Before or interleaved with planning search, run a **full** greedy from the root to
+seed $U$. **v1:** any later refresh **re-runs the whole greedy simulation** from
+the chosen start state (no patching a stored decision list; no incremental
+membership).
+
+- A feasible plan of length $U$ proves $\mathrm{optimal} \le U$.
+- Greedy **never** enqueues a **new** Construction Sector. Excluding CS picks
+  from greedy is **costless** (shortage-greedy would not choose CS — it does
+  not produce the scarce good) and **protects** future incremental greedy
+  assumptions (when/if we keep a membership set — not required for scalar $U$).
+- When rebuilding greedy from a world that **already has CS enqueued** by
+  search, greedy still does not pick a *new* CS; it waits the real
+  construction timeline (slots / points) until that job completes.
+- Ordinary productive builds are allowed; capacity always has at least one
+  government feed slot floor
+  (base capacity floor). So GDP greedy can get a finite $U$ by enqueueing a
+  logging camp (etc.) even when Construction Sector is never chosen.
+
+### Greedy loop (simulates days; v1 discards the path)
+
+The steps below describe how the day count is produced. **v1 does not persist**
+this timeline as an editable plan — only $U$ is returned to search.
+
+1. If `evaluate(goal)` already holds → $U = 0$.
+2. While a track has a spare slot, enqueue the greedy pick among allowed
+   0-day decisions (edge cost $0$). Allowed picks include ordinary
+   `QueueBuildingLevel` jobs; **exclude** Construction Sector.
+3. **Advance time** to the next completion (or payday), apply, and count the
+   landing day (v1 need not store a timeline row — only the running day total).
+4. When the GDP goal is satisfied, stop. **$U = t$** (current day).
+   Do not enqueue further “just in case” work.
+5. If nothing helps and no wait advances the goal → stop with no greedy $U$.
+
+Search may still find a cheaper path (including Construction Sector) and
+tighten $U$.
+
+### Future: incremental membership (not v1)
+
+Deferred. A later pass may keep an intended sequence + membership hash,
+consume in-set edges, end-subtract when off-plan still reaches the goal, etc.
+Until then: **always full-rebuild** greedy when refreshing $U$.
+
+Hard rule that survives that future: greedy must **never** enqueue Construction
+Sector.
+
+### What to pick (GDP / build-fed)
+
+Among legal `QueueBuildingLevel` successors **except Construction Sector**,
+pick a building that **produces the highest-shortage good** we are allowed to
+build toward.
+
+Shortage signal (domestic market): compare each good’s current market price
+to its defs **base** price — e.g. $p / p_{\mathrm{base}}$ (or the same ratio
+as a rank key). Higher means more scarce / over base. Then:
+
+1. Prefer the good with the highest signal among goods some **allowed**
+   candidate building can produce.
+2. Enqueue one allowed building that outputs that good (placement /
+   per-type caps already filter “allowed”).
+
+That is the greedy build policy — not rate-on-gap scoring, and not an
+optional tie-break.
+
+**PM / tax / other instant decisions:** if a 0-day option helps GDP (or clears
+the gap), take it before waiting; otherwise fall through to builds / waits.
+
+### Pruning with $U$ (safe)
+
+- Drop / never expand a node with $g \ge U$.
+- Optional: $g + h_{\mathrm{adm}} \ge U$ when $h_{\mathrm{adm}}$ is a true lower bound.
+- Do **not** prune on $g + h_{\mathrm{rank}} \ge U$ alone.
+
+### Role split
+
+| Quantity | Role |
+| --- | --- |
+| $h_{\mathrm{rank}}$ | Order open-set candidates (library today) |
+| $U = t_{\mathrm{goal}}^{\mathrm{greedy}}$ | Feasible plan days; prune with $g$ |
+| Partial-expansion cursor | Eventually emits deferred candidates |
+
+### Improving $U$ later
+
+When anything produces a **better feasible** day cost $U' < U$ (search goal
+hit, or a **full** greedy rebuild from a better state):
+
+1. Set $U \leftarrow U'$.
+2. **Keep** open / closed / partial-expansion state.
+3. Tighten prune: ignore nodes with $g \ge U$.
+4. Do not rebuild ranking bags solely because $U$ changed.
+
+**v1:** do not patch the old greedy timeline in place — run the greedy loop
+again if a new incumbent path is needed.
+
+### Construction Sector vs ordinary builds
+
+“Skip construction on greedy” means **skip Construction Sector only**, not
+skip every `QueueBuildingLevel`.
+
+Why exclude CS: (1) shortage-greedy would not pick it anyway; (2) a CS enqueue
+changes construction capacity for everything after it, which would make
+incremental greedy refresh unreliable. Search may still enqueue CS;
+greedy must not *pick* new CS (but honors search-enqueued CS on rebuild).
+
+[`ConstructionSlots::ONE`](../crates/vic3-planning/src/construction.rs) is the
+parallel-feed floor so a productive building can always be considered when
+capacity admits a job.
+
+### Bookkeeping the incumbent
+
+**v1 (shipped):** search prune needs **only** the scalar $U$.
+`greedy_upper_bound` does not return actions, a timeline, or a membership set —
+there is nothing to edit or simplify after the run.
+
+**Optional later (debug / incremental):** keep a greedy timeline or intended
+sequence for explanation or membership refresh:
+
+| Math | Definition | Rust / notes |
+| --- | --- | --- |
+| $t$ | Calendar day when a timeline event lands | future timeline row (not v1) |
+| $\Delta$ | Predicted GDP change at that event | same units as the GDP gap |
+| $G_{\mathrm{after}}$ | Residual GDP gap after $\Delta$ | — |
+
+No membership set until the future incremental pass. If search reaches a world
+it already solved, copy that world’s prices/GDP instead of running the price
+solver again.
 
 ---
 
@@ -182,7 +339,7 @@ subscript $t$ / Rust `*_curr`):
 | $\Delta C$ | Points/day from +1 Construction Sector (× government share) | `cheap_construction_sector_points_delta` |
 | — | $\mathrm{state}_t$ context for every cheap score in one expand | [`CheapBagCurr`](../crates/vic3-planning/src/plan/progress_h.rs) |
 | $\mathrm{score}_{\mathrm{cheap}}(a)$ | **Bag** order key (cheap follow-on) | `cheap_bag_score` |
-| $\mathrm{score}_{\mathrm{emit}}(a)$ | Emit-style key $e(a) + h(\mathrm{completed})$ (library; PEA not wired) | `emit_bag_score` |
+| $\mathrm{score}_{\mathrm{emit}}(a)$ | Emit-style key $e(a) + h(\mathrm{completed})$ (library; not wired into search) | `emit_bag_score` |
 
 **Tilde:** $\widetilde{\cdot}$ = cheap bag approximation. Neither cheap nor
 emit scorers redefine path cost $g$.
@@ -226,8 +383,8 @@ $$
 
 `emit_bag_score` takes a completed `PlanningState` and returns
 $e(a) +$ [`rank_heuristic_with_gdp_for_rates`](../crates/vic3-planning/src/plan/progress_h.rs)
-on that state’s GDP. PEA speculative complete / `gdp_for_rates` node fields /
-emit mismatch warns are **not** in this PR.
+on that state’s GDP. Speculative complete / `gdp_for_rates` node fields /
+emit mismatch warns are **not** wired yet (later search-ranking PR).
 
 Tie-break (when wired): higher $r_i$ for that candidate, then fingerprint.
 
@@ -249,7 +406,8 @@ $G = 1000$ (GDP shortfall), $r_A = 10$, $r_B = 20$, $S_{\mathrm{build}} = 2$.
 
 ## Other goal types (how the GDP story changes)
 
-Day cost $g$ and “$h_{\mathrm{rank}}$ is bias only” are **unchanged**. Swap the
+Day cost $g$, greedy $U$, prune on $g \ge U$, and “$h_{\mathrm{rank}}$ is bias
+only” are **unchanged**. Swap the
 progress meter ($G$, $\Delta$, which options feed $R^{*}$) and, where
 relevant, GDP-specific cheap formulas.
 
