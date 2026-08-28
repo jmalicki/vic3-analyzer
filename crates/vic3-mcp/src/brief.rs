@@ -24,11 +24,13 @@ pub(crate) fn campaign_brief_json(session: &ActiveSessionInfo, binding: &Session
         .states
         .iter()
         .map(|s| {
-            let name = s
-                .label
-                .clone()
-                .or_else(|| s.region_name.clone())
-                .unwrap_or_else(|| format!("state {}", s.id));
+            let name = if !s.label.is_empty() {
+                s.label.clone()
+            } else if let Some(region) = &s.region_name {
+                region.clone()
+            } else {
+                format!("state {}", s.id)
+            };
             (s.id, name)
         })
         .collect();

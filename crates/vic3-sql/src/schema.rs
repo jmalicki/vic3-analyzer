@@ -1,5 +1,11 @@
 //! Arrow schemas for `docs/sql.md` fact tables and TVFs.
 //!
+//! # `name` vs `label` columns
+//!
+//! Fact tables mirror [`vic3_prices::PricesResult`]: `name` (or `*_name`) is the
+//! Paradox script id; `label` (or `*_label`) is the pre-resolved display string.
+//! States also expose `region_name` (script id) and `region_label` (bare geography).
+//!
 //! # IO element type
 //!
 //! [`good_io_list_type`] is `List<Struct{good_name Utf8, good_label Utf8?, qty Float64}>`.

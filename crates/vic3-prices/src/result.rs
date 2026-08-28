@@ -7,6 +7,20 @@
 //!
 //! Schema snapshots live under `schema/`; regenerate with
 //! `VIC3_WRITE_SCHEMA=1 cargo test -p vic3-prices --test schema dump_schemas`.
+//!
+//! # `name` vs `label`
+//!
+//! Most [`PricesResult`] tables expose two parallel string columns:
+//!
+//! | Column | Meaning | Example |
+//! | --- | --- | --- |
+//! | `name` | Paradox **script id** — stable key for joins, filters, and defs lookup | `grain`, `building_rye_farm`, `PRU`, `peasants` |
+//! | `label` | **Display string** resolved at emit via [`GameDefs::display_label`] (English loc, else [`pretty_id`]) | `Grain`, `Rye Farm`, `Prussia`, `Peasants` |
+//!
+//! [`StateInfo`] adds geography columns (`region_name`, `region_label`, `label`);
+//! [`BuildingEconomics`] uses `building_type_name` / `building_type_label` on
+//! instance rows. Pop rows may omit script ids (`profession_name`, `culture_name`)
+//! but always carry the paired display `*_label` for SQL and UI.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -16,7 +30,7 @@ use std::sync::OnceLock;
 use schemars::JsonSchema;
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use vic3_defs::{BuildingTypeId, GameDefs, GoodId, NeedId};
+use vic3_defs::{pretty_id, BuildingTypeId, GameDefs, GoodId, NeedId};
 
 use crate::world::Intern;
 
@@ -165,8 +179,10 @@ impl fmt::Display for SolveStatus {
 /// One row of the goods table in [`PricesResult`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GoodPrice {
+    /// Good script id (`GameDefs::goods_order` key), e.g. `grain`.
     pub name: String,
-    pub label: Option<String>,
+    /// Localized or humanized display name for UI / SQL `label` filters.
+    pub label: String,
     pub base: f64,
     pub price: f64,
     pub buy: f64,
@@ -175,9 +191,12 @@ pub struct GoodPrice {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CountryInfo {
+    /// Paradox country id from the save.
     pub id: u32,
+    /// Country tag / script key (matches save `countries` and SQL `countries.name`).
     pub name: String,
-    pub label: Option<String>,
+    /// Localized country name (e.g. `Prussia` for tag `PRU`).
+    pub label: String,
     /// Localized demonym from `{TAG}_ADJ` (e.g. Prussian for PRU).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adjective: Option<String>,
@@ -189,13 +208,16 @@ pub struct CountryInfo {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateInfo {
+    /// Paradox state id from the save; primary join key for state-scoped tables.
     pub id: u32,
+    /// Non-localized region script id when known (e.g. `STATE_RHINE`). Same for
+    /// every co-owner of a split region. Omitted when the save has no region key.
     pub region_name: Option<String>,
-    /// Bare geographic label from defs (same for co-owners of a split region).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub region_label: Option<String>,
-    /// Display label for this owned slice (bare region, or demonym-prefixed when minority).
-    pub label: Option<String>,
+    /// Bare geographic display name from defs (same for all co-owners of a split region).
+    pub region_label: String,
+    /// Per-owner display label: usually equals [`Self::region_label`], or
+    /// demonym-prefixed for minority holders (e.g. `Prussian Rhineland`).
+    pub label: String,
     pub country_id: Option<u32>,
     pub market_id: Option<u32>,
     pub arable_land: Option<f64>,
@@ -208,16 +230,20 @@ pub struct StatePop {
     pub state_id: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<u32>,
+    /// Pop-type script id when the save names one (e.g. `peasants`).
     pub profession_name: Option<String>,
-    pub profession_label: Option<String>,
+    /// Display name for [`Self::profession_name`] (always set for export).
+    pub profession_label: String,
     pub demand_size: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workforce: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dependents: Option<f64>,
     pub wealth: Option<i32>,
+    /// Culture script id when present on the save pop.
     pub culture_name: Option<String>,
-    pub culture_label: Option<String>,
+    /// Display name for [`Self::culture_name`] (empty when culture is unknown).
+    pub culture_label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub literate: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -230,15 +256,19 @@ pub struct StatePop {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfessionCount {
+    /// Profession / pop-type script id.
     pub name: String,
-    pub label: Option<String>,
+    /// Localized profession name for display.
+    pub label: String,
     pub count: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PopNeedBasket {
+    /// Need package script id (e.g. `popneed_basic_food`).
     pub name: String,
-    pub label: Option<String>,
+    /// Localized need name for display.
+    pub label: String,
     pub package_value: f64,
     pub goods: Vec<GoodFlow>,
 }
@@ -246,8 +276,10 @@ pub struct PopNeedBasket {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateNeed {
     pub state_id: u32,
+    /// Need package script id aggregated for this state.
     pub name: String,
-    pub label: Option<String>,
+    /// Localized need name for display.
+    pub label: String,
     pub package_value: f64,
     pub goods: Vec<GoodFlow>,
 }
@@ -255,8 +287,10 @@ pub struct StateNeed {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateQualification {
     pub state_id: u32,
+    /// Target profession script id for this qualification row.
     pub name: String,
-    pub label: Option<String>,
+    /// Localized profession name for display.
+    pub label: String,
     pub qualified: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub employable: Option<f64>,
@@ -271,18 +305,20 @@ pub struct StateQualification {
 pub struct BuildingTypeInfo {
     #[schemars(with = "u16")]
     pub id: BuildingTypeId,
+    /// Building type script id (e.g. `building_rye_farm`).
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
+    /// Localized building name for display.
+    pub label: String,
     pub group_id: Option<String>,
     pub city_type: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BuildingGroupInfo {
+    /// Building group script id.
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
+    /// Localized group name for display.
+    pub label: String,
     pub category: Option<String>,
     pub land_usage: Option<String>,
     pub always_possible: bool,
@@ -293,6 +329,7 @@ pub struct BuildingGroupInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateGood {
     pub state_id: u32,
+    /// Good script id (join key to [`GoodPrice::name`] / `goods.name`).
     pub name: String,
     pub buy: f64,
     pub sell: f64,
@@ -311,6 +348,7 @@ pub struct StateGood {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GoodFlow {
+    /// Good script id for this IO line.
     pub name: String,
     pub quantity: f64,
     pub value: f64,
@@ -322,9 +360,10 @@ pub struct BuildingEconomics {
     pub state_id: Option<u32>,
     #[schemars(with = "Option<u16>")]
     pub building_type_id: Option<BuildingTypeId>,
+    /// Building type script id for this instance.
     pub building_type_name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub building_type_label: Option<String>,
+    /// Localized building type name for display (parallel to [`Self::building_type_name`]).
+    pub building_type_label: String,
     pub level: f64,
     pub staffing: f64,
     pub production_method_ids: Vec<String>,
@@ -374,7 +413,9 @@ impl MarketInputs {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct EmitTables {
+    /// Interned script ids from the world (dense u16 → &str).
     names: Intern,
+    /// Raw localization map from defs (`GameDefs::labels`).
     labels: BTreeMap<String, String>,
     goods_order: Vec<String>,
     needs_order: Vec<String>,
@@ -394,8 +435,11 @@ impl EmitTables {
         id.and_then(|id| self.names.get(id))
     }
 
-    pub(crate) fn label(&self, id: &str) -> Option<&str> {
-        self.labels.get(id).map(String::as_str)
+    pub(crate) fn label(&self, id: &str) -> String {
+        self.labels
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| pretty_id(id))
     }
 
     pub(crate) fn good(&self, idx: GoodId) -> Option<&str> {
@@ -571,7 +615,7 @@ struct StatePopSer<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<u32>,
     profession_name: Option<&'a str>,
-    profession_label: Option<&'a str>,
+    profession_label: String,
     demand_size: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     workforce: Option<f64>,
@@ -579,7 +623,7 @@ struct StatePopSer<'a> {
     dependents: Option<f64>,
     wealth: Option<i32>,
     culture_name: Option<&'a str>,
-    culture_label: Option<&'a str>,
+    culture_label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     literate: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -593,14 +637,14 @@ struct StatePopSer<'a> {
 #[derive(Serialize)]
 struct ProfessionCountSer<'a> {
     name: &'a str,
-    label: Option<&'a str>,
+    label: String,
     count: f64,
 }
 
 #[derive(Serialize)]
 struct NeedSer<'a> {
     name: &'a str,
-    label: Option<&'a str>,
+    label: String,
     package_value: f64,
     goods: Vec<GoodFlowSer<'a>>,
 }
@@ -614,17 +658,21 @@ struct GoodFlowSer<'a> {
 
 impl<'a> StatePopSer<'a> {
     fn from_row(tables: &'a EmitTables, row: &'a CompactStatePop) -> Self {
+        let profession_name = tables.name(row.profession);
+        let culture_name = tables.name(row.culture);
         Self {
             state_id: row.state_id,
             id: row.id,
-            profession_name: tables.name(row.profession),
-            profession_label: tables.name(row.profession).and_then(|id| tables.label(id)),
+            profession_name,
+            profession_label: profession_name
+                .map(|id| tables.label(id))
+                .unwrap_or_default(),
             demand_size: row.demand_size,
             workforce: row.workforce,
             dependents: row.dependents,
             wealth: row.wealth,
-            culture_name: tables.name(row.culture),
-            culture_label: tables.name(row.culture).and_then(|id| tables.label(id)),
+            culture_name,
+            culture_label: culture_name.map(|id| tables.label(id)).unwrap_or_default(),
             literate: row.literate,
             workplace_id: row.workplace_id,
             qualifications: row
@@ -673,13 +721,13 @@ fn materialize_state_pop(tables: &EmitTables, row: &CompactStatePop) -> StatePop
         state_id: ser.state_id,
         id: ser.id,
         profession_name: ser.profession_name.map(str::to_string),
-        profession_label: ser.profession_label.map(str::to_string),
+        profession_label: ser.profession_label,
         demand_size: ser.demand_size,
         workforce: ser.workforce,
         dependents: ser.dependents,
         wealth: ser.wealth,
         culture_name: ser.culture_name.map(str::to_string),
-        culture_label: ser.culture_label.map(str::to_string),
+        culture_label: ser.culture_label,
         literate: ser.literate,
         workplace_id: ser.workplace_id,
         qualifications: ser
@@ -687,7 +735,7 @@ fn materialize_state_pop(tables: &EmitTables, row: &CompactStatePop) -> StatePop
             .into_iter()
             .map(|row| ProfessionCount {
                 name: row.name.to_string(),
-                label: row.label.map(str::to_string),
+                label: row.label,
                 count: row.count,
             })
             .collect(),
@@ -696,7 +744,7 @@ fn materialize_state_pop(tables: &EmitTables, row: &CompactStatePop) -> StatePop
             .into_iter()
             .map(|need| PopNeedBasket {
                 name: need.name.to_string(),
-                label: need.label.map(str::to_string),
+                label: need.label,
                 package_value: need.package_value,
                 goods: need
                     .goods

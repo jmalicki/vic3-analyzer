@@ -46,12 +46,11 @@ impl StatesProvider {
             if let Some(r) = &s.region_name {
                 by_region_name.entry(r.clone()).or_default().push(i);
             }
-            if let Some(r) = &s.region_label {
-                by_region_label.entry(r.clone()).or_default().push(i);
-            }
-            if let Some(n) = &s.label {
-                by_state_label.entry(n.clone()).or_default().push(i);
-            }
+            by_region_label
+                .entry(s.region_label.clone())
+                .or_default()
+                .push(i);
+            by_state_label.entry(s.label.clone()).or_default().push(i);
         }
         Self {
             binding,
@@ -146,22 +145,10 @@ impl StatesProvider {
             }) {
                 continue;
             }
-            if let Some(r) = &s.region_label {
-                if !matches_str(&preds, "region_label", r) {
-                    continue;
-                }
-            } else if preds.iter().any(|p| {
-                matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "region_label")
-            }) {
+            if !matches_str(&preds, "region_label", &s.region_label) {
                 continue;
             }
-            if let Some(n) = &s.label {
-                if !matches_str(&preds, "label", n) {
-                    continue;
-                }
-            } else if preds.iter().any(
-                |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "label"),
-            ) {
+            if !matches_str(&preds, "label", &s.label) {
                 continue;
             }
             if let Some(t) = tag {
@@ -176,8 +163,8 @@ impl StatesProvider {
 
             ids.append_value(s.id);
             append_opt_str(&mut region_name, s.region_name.as_deref());
-            append_opt_str(&mut region_label, s.region_label.as_deref());
-            append_opt_str(&mut label, s.label.as_deref());
+            region_label.append_value(&s.region_label);
+            label.append_value(&s.label);
             append_opt_str(&mut owner_tag, tag);
             append_opt_u32(&mut market_id, s.market_id);
             append_opt_f64(&mut infrastructure, s.infrastructure);

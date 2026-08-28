@@ -598,9 +598,8 @@ mod tests {
                 .iter()
                 .find(|good| good.name == "wood")
                 .unwrap()
-                .label
-                .as_deref(),
-            Some("Wood")
+                .label,
+            "Wood"
         );
         let building = &result.buildings[0];
         assert_eq!(building.state_id, Some(7));

@@ -51,13 +51,7 @@ impl BuildingTypesProvider {
                 continue;
             }
             let loc = self.binding.label(script_id);
-            if let Some(n) = loc {
-                if !matches_str(&preds, "label", n) {
-                    continue;
-                }
-            } else if preds.iter().any(
-                |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "label"),
-            ) {
+            if !matches_str(&preds, "label", &loc) {
                 continue;
             }
             if let Some(g) = &bt.group {
@@ -71,10 +65,7 @@ impl BuildingTypesProvider {
             }
 
             name.append_value(script_id);
-            match loc {
-                Some(n) => label.append_value(n),
-                None => label.append_null(),
-            }
+            label.append_value(&loc);
             match &bt.group {
                 Some(g) => group_id.append_value(g),
                 None => group_id.append_null(),

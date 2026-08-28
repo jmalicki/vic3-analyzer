@@ -627,12 +627,10 @@ pub(crate) fn is_fully_staffed(staffing: f64, level: f64) -> bool {
 /// Per-profession shortfall on one building vs the whole state stock.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ProfessionGap {
+    /// Pop-type script id.
     pub name: String,
-    // FIXME: `label` should always be present (at least a humanized script key).
-    // Optional/null is a leftover from the old dialect; fixing emitters is out of
-    // scope for the name/label rename wave.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
+    /// Localized profession name (from [`StateQualification::label`] / emit).
+    pub label: String,
     pub employed_here: f64,
     pub jobs_here: f64,
     pub missing_here: f64,
@@ -680,7 +678,7 @@ pub(crate) fn building_staffing(
 }
 
 fn profession_gap(
-    defs: &GameDefs,
+    _defs: &GameDefs,
     prices: &PricesResult,
     state_id: Option<u32>,
     row: &ProfessionCount,
@@ -700,10 +698,7 @@ fn profession_gap(
     });
     ProfessionGap {
         name: row.name.clone(),
-        label: row
-            .label
-            .clone()
-            .or_else(|| defs.labels.get(&row.name).cloned()),
+        label: row.label.clone(),
         employed_here: row.count,
         jobs_here,
         missing_here,

@@ -1,8 +1,6 @@
-//! Display labels for script ids (states, buildings, professions, …).
+//! Owned-slice state labels and country demonyms for [`crate::result::StateInfo`].
 //!
-//! Prefer defs localization when present; otherwise humanize the id
-//! (`STATE_BRANDENBURG` → `Brandenburg`) so SQL `region_name` (lookup),
-//! `label` (owned-slice display), and alert titles share one dialect.
+//! See [`crate::result`] for the `name` vs `label` naming dialect on export rows.
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -11,41 +9,16 @@ use vic3_defs::GameDefs;
 
 use crate::result::StateInfo;
 
-/// Localized label for `id`, or [`pretty_id`] when defs have no entry.
+/// Localized label for `id`, or [`vic3_defs::pretty_id`] when defs have no entry.
 pub fn script_label(defs: &GameDefs, id: &str) -> String {
-    defs.labels
-        .get(id)
-        .cloned()
-        .unwrap_or_else(|| pretty_id(id))
+    defs.display_label(id)
 }
+
+pub use vic3_defs::pretty_id;
 
 /// Country demonym/adjective from `{TAG}_ADJ` localization (e.g. `PRU` → Prussian).
 pub(crate) fn country_adjective(defs: &GameDefs, tag: &str) -> Option<String> {
     defs.labels.get(&format!("{tag}_ADJ")).cloned()
-}
-
-/// Humanize a Paradox script id for display when localization is missing.
-pub fn pretty_id(id: &str) -> String {
-    let trimmed = id
-        .strip_prefix("STATE_")
-        .or_else(|| id.strip_prefix("building_"))
-        .or_else(|| id.strip_prefix("pm_"))
-        .or_else(|| id.strip_prefix("popneed_"))
-        .unwrap_or(id);
-    trimmed
-        .split('_')
-        .filter(|word| !word.is_empty())
-        .map(|word| {
-            let mut chars = word.chars();
-            match chars.next() {
-                Some(first) => {
-                    first.to_uppercase().collect::<String>() + &chars.as_str().to_ascii_lowercase()
-                }
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 /// Prefix minority holders of a shared region with the owner demonym.
@@ -90,15 +63,15 @@ pub(crate) fn apply_split_state_demonyms(
             let Some(adj) = country_adjective(defs, tag) else {
                 continue;
             };
-            let Some(name) = states[i].label.as_deref().filter(|n| !n.is_empty()) else {
+            if states[i].label.is_empty() {
                 continue;
-            };
-            renames.push((i, format!("{adj} {name}")));
+            }
+            renames.push((i, format!("{adj} {}", states[i].label)));
         }
     }
 
     for (i, name) in renames {
-        states[i].label = Some(name);
+        states[i].label = name;
     }
 }
 
@@ -128,20 +101,14 @@ mod tests {
         StateInfo {
             id,
             region_name: Some(region.into()),
-            region_label: Some(name.into()),
-            label: Some(name.into()),
+            region_label: name.into(),
+            label: name.into(),
             country_id: Some(country_id),
             market_id: None,
             arable_land: arable,
             infrastructure: None,
             infrastructure_usage: None,
         }
-    }
-
-    #[test]
-    fn pretty_id_strips_state_prefix() {
-        assert_eq!(pretty_id("STATE_BRANDENBURG"), "Brandenburg");
-        assert_eq!(pretty_id("building_rye_farm"), "Rye Farm");
     }
 
     #[test]
@@ -171,9 +138,9 @@ mod tests {
         ];
         let tags: HashMap<u32, &str> = [(1, "FRA"), (2, "PRU")].into_iter().collect();
         apply_split_state_demonyms(&mut states, &tags, &defs);
-        assert_eq!(states[0].label.as_deref(), Some("Rhineland"));
-        assert_eq!(states[1].label.as_deref(), Some("Prussian Rhineland"));
-        assert_eq!(states[2].label.as_deref(), Some("Other"));
+        assert_eq!(states[0].label, "Rhineland");
+        assert_eq!(states[1].label, "Prussian Rhineland");
+        assert_eq!(states[2].label, "Other");
     }
 
     #[test]
@@ -185,8 +152,8 @@ mod tests {
         ];
         let tags: HashMap<u32, &str> = [(1, "FRA"), (2, "PRU")].into_iter().collect();
         apply_split_state_demonyms(&mut states, &tags, &defs);
-        assert_eq!(states[0].label.as_deref(), Some("Prussian Rhineland"));
-        assert_eq!(states[1].label.as_deref(), Some("Rhineland"));
+        assert_eq!(states[0].label, "Prussian Rhineland");
+        assert_eq!(states[1].label, "Rhineland");
     }
 
     #[test]
@@ -198,7 +165,7 @@ mod tests {
         ];
         let tags: HashMap<u32, &str> = [(1, "FRA"), (2, "PRU")].into_iter().collect();
         apply_split_state_demonyms(&mut states, &tags, &defs);
-        assert_eq!(states[0].label.as_deref(), Some("Rhineland"));
-        assert_eq!(states[1].label.as_deref(), Some("Rhineland"));
+        assert_eq!(states[0].label, "Rhineland");
+        assert_eq!(states[1].label, "Rhineland");
     }
 }

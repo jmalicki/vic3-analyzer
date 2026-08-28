@@ -50,22 +50,13 @@ impl ProductionMethodsProvider {
             if !matches_str(&preds, "pm", id) {
                 continue;
             }
-            let name = self.binding.label(id);
-            if let Some(n) = name {
-                if !matches_str(&preds, "pm_name", n) {
-                    continue;
-                }
-            } else if preds.iter().any(
-                |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "pm_name"),
-            ) {
+            let pm_label = self.binding.label(id);
+            if !matches_str(&preds, "pm_name", &pm_label) {
                 continue;
             }
 
             pm.append_value(id);
-            match name {
-                Some(n) => pm_name.append_value(n),
-                None => pm_name.append_null(),
-            }
+            pm_name.append_value(&pm_label);
             inputs.push(flows_from_idx(&self.binding, &method.inputs));
             outputs.push(flows_from_idx(&self.binding, &method.outputs));
         }

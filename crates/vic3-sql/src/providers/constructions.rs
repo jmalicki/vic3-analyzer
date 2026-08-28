@@ -128,10 +128,7 @@ impl ConstructionsProvider {
                 None => state_id.append_null(),
             }
             building_type_name.append_value(type_name);
-            match self.binding.label(type_name) {
-                Some(label) => building_type_label.append_value(label),
-                None => building_type_label.append_null(),
-            }
+            building_type_label.append_value(self.binding.label(type_name));
             match row.remaining {
                 Some(value) => remaining.append_value(value),
                 None => remaining.append_null(),

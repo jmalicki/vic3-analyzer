@@ -71,14 +71,14 @@ describe('01 Workspace tabs — content', () => {
     await expect($('p*=No pops in this scope')).not.toBeExisting()
   })
 
-  it('Alerts includes the mock_lumber shortage', async () => {
+  it('Alerts includes the Mock Lumber shortage', async () => {
     await openWorkspaceTab('Alerts')
     await expect($('#alerts-heading')).toHaveText('Alerts')
     await browser.waitUntil(
-      async () => (await $('*=mock_lumber shortage').isExisting()),
+      async () => (await $('*=Mock Lumber shortage').isExisting()),
       {
         timeout: 60_000,
-        timeoutMsg: 'Alerts never showed mock_lumber shortage',
+        timeoutMsg: 'Alerts never showed Mock Lumber shortage',
       },
     )
     await expect($('*=Farmers')).toBeExisting()
@@ -265,9 +265,9 @@ describe('02 Content — interactions on shortage save', () => {
     await lumber.click()
   })
 
-  it('expands the mock_lumber shortage alert', async () => {
+  it('expands the Mock Lumber shortage alert', async () => {
     await openWorkspaceTab('Alerts')
-    const shortageAlert = await $('*=mock_lumber shortage')
+    const shortageAlert = await $('*=Mock Lumber shortage')
     await expect(shortageAlert).toBeExisting()
     await shortageAlert.click()
   })
@@ -383,7 +383,7 @@ describe('05 Scope — foreign alerts hidden; domestic vs market geography', () 
     await openWorkspaceTab('Alerts')
     await browser.waitUntil(
       async () =>
-        (await $('*=Home needs').isExisting()) || (await $('*=mock_lumber shortage').isExisting()),
+        (await $('*=Home needs').isExisting()) || (await $('*=Mock Lumber shortage').isExisting()),
       { timeout: 60_000, timeoutMsg: 'Player-scoped alerts never appeared' },
     )
     await expect($('*=Rivalia')).not.toBeExisting()
@@ -391,7 +391,7 @@ describe('05 Scope — foreign alerts hidden; domestic vs market geography', () 
     await expect($('*=Rivalia needs')).not.toBeExisting()
     const body = await $('section[aria-labelledby="alerts-heading"]')
     const text = await body.getText()
-    if (!text.includes('Home') && !text.includes('mock_lumber')) {
+    if (!text.includes('Home') && !text.includes('Mock Lumber') && !text.includes('mock_lumber')) {
       throw new Error(`expected player alerts, got: ${text.slice(0, 240)}`)
     }
   })
