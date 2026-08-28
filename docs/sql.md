@@ -152,7 +152,7 @@ From `state_goods` (state-attributed orders / MAPI blend).
 
 **Arrays stand in for junction tables.** DataFusion can explode lists into rows with `unnest` / `UNNEST` (and `unnest_outer` when empty/NULL parents should keep a row).
 
-Goods IO and PM recipes use **`List<Struct{good_name, good_label, qty}>`** (script id — never bare `GoodId` as the only key; required localized label; quantity):
+Goods IO and PM recipes use **`List<Struct{good_name, good_label, qty}>`** (script id — never bare `GoodId` as the only key; localized label is required; quantity):
 
 ```sql
 -- One unnest → rows of structs; double unnest → multi-column (list then struct)
@@ -193,7 +193,7 @@ Per-building modeled economy (from `BuildingEconomics` / `WorldBuilding`).
 | `profit` / `revenue` / `cost` | As modeled |
 | `production_methods` | `TEXT[]` — active PM script ids (`WorldBuilding.production_methods`) |
 | `short_inputs` | `TEXT[]` — scarce input good ids (`BuildingEconomics.short_inputs`) |
-| `input_goods` / `output_goods` | `List<Struct{good_name, good_label, qty}>` — script id (**not** raw `GoodId`), required localized label (always populated at emit), quantity. Project from resolved IO / `goods_io`. See nested-column unnest notes. |
+| `input_goods` / `output_goods` | `List<Struct{good_name, good_label, qty}>` — script id (**not** raw `GoodId`), localized label is required (always populated at emit), quantity. Project from resolved IO / `goods_io`. See nested-column unnest notes. |
 
 Filter examples without a junction table:
 
