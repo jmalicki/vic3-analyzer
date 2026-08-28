@@ -8,7 +8,7 @@
 //!
 //! # IO element type
 //!
-//! [`good_io_list_type`] is `List<Struct{good_name Utf8, good_label Utf8?, qty Float64}>`.
+//! [`good_io_list_type`] is `List<Struct{good_name Utf8, good_label Utf8, qty Float64}>`.
 //! Script ids only — never bare `GoodId` as the sole key. Consumers explode
 //! with SELECT-list `unnest(unnest(col))`.
 
@@ -25,7 +25,7 @@ pub fn good_io_list_type() -> DataType {
 pub fn good_io_struct_type() -> DataType {
     DataType::Struct(Fields::from(vec![
         Field::new("good_name", DataType::Utf8, false),
-        Field::new("good_label", DataType::Utf8, true),
+        Field::new("good_label", DataType::Utf8, false),
         Field::new("qty", DataType::Float64, false),
     ]))
 }
