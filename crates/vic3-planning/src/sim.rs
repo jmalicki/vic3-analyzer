@@ -1800,7 +1800,6 @@ pub(crate) enum SpeculativeCompleteError {
 ///   instant / no separate completion phase in this sim).
 ///
 /// `economy` is required: queue/complete paths need defs and price refresh.
-#[allow(dead_code)] // score/emit callers land in a later PR
 pub(crate) fn speculative_completed_state(
     state: &PlanningState,
     action: &Action,

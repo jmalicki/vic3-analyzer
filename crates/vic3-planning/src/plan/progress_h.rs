@@ -1,4 +1,4 @@
-//! Progress-aware ranking heuristic library (not wired into search yet).
+//! Progress-aware ranking heuristic library.
 //!
 //! # Role in search
 //!
@@ -12,10 +12,11 @@
 //! guesstimates. Those scores are meant only to **rank** the open set /
 //! candidate bag so search prefers actions that make progress. They are **not**
 //! a proven admissible lower bound and must not be used as an incumbent upper
-//! bound (greedy upper bounds are a later PR).
+//! bound (see [`super::greedy`]).
 //!
-//! Nothing here is called from `plan()` / search yet -- wiring lands later.
-//! Design write-up: `docs/planning-progress-heuristic.md`.
+//! [`super::bag_rank`] orchestrates cheap/emit bag scoring for search adapters;
+//! this module holds the pure ranking math. Design:
+//! `docs/planning-progress-heuristic.md`.
 //!
 //! # Timeline naming
 //!
@@ -35,7 +36,7 @@
 //! | Emit residual on a **completed** planning world | [`emit_bag_score`] |
 //! | Construction throughput (points/day) | `construction_points_per_day` on [`PlanningState`] |
 
-#![allow(dead_code)] // unwired library; search / greedy call sites land in later PRs
+#![allow(dead_code)] // some helpers are bag_rank / test-only today
 
 use crate::construction::{
     allocation_cap_points_per_day, construction_add_for_cs_building, construction_eta_days,
