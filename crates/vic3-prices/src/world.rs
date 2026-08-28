@@ -830,7 +830,7 @@ mod tests {
                     (
                         (*id).to_string(),
                         vic3_defs::Good {
-                            id: (*id).to_string(),
+                            name: (*id).to_string(),
                             base_price: 20.0,
                             traded_quantity: 10.0,
                             texture: None,
@@ -1136,7 +1136,7 @@ mod tests {
             (
                 "pm_smithy".into(),
                 ProductionMethod {
-                    id: "pm_smithy".into(),
+                    name: "pm_smithy".into(),
                     inputs: vec![(GoodId::from_usize(0), 2.0)],
                     outputs: vec![(GoodId::from_usize(1), 3.0)],
                     ..Default::default()
@@ -1145,7 +1145,7 @@ mod tests {
             (
                 "pm_steam".into(),
                 ProductionMethod {
-                    id: "pm_steam".into(),
+                    name: "pm_steam".into(),
                     inputs: vec![(GoodId::from_usize(2), 5.0), (GoodId::from_usize(0), 1.0)],
                     outputs: Vec::new(),
                     ..Default::default()
@@ -1178,7 +1178,7 @@ mod tests {
         defs.production_methods = BTreeMap::from([(
             "pm_mine".into(),
             ProductionMethod {
-                id: "pm_mine".into(),
+                name: "pm_mine".into(),
                 inputs: vec![(GoodId::from_usize(0), 10.0)],
                 outputs: vec![(GoodId::from_usize(1), 20.0)],
                 ..Default::default()
@@ -1212,7 +1212,7 @@ mod tests {
             (
                 "pm_wood".into(),
                 ProductionMethod {
-                    id: "pm_wood".into(),
+                    name: "pm_wood".into(),
                     inputs: Vec::new(),
                     outputs: vec![(wood, 10.0)],
                     ..Default::default()
@@ -1221,7 +1221,7 @@ mod tests {
             (
                 "pm_grain".into(),
                 ProductionMethod {
-                    id: "pm_grain".into(),
+                    name: "pm_grain".into(),
                     inputs: Vec::new(),
                     outputs: vec![(grain, 7.0)],
                     ..Default::default()

@@ -496,7 +496,7 @@ mod tests {
         defs.goods.insert(
             "grain".into(),
             Good {
-                id: "grain".into(),
+                name: "grain".into(),
                 base_price: 20.0,
                 traded_quantity: 12.0,
                 texture: None,
@@ -505,7 +505,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_rich".into(),
             ProductionMethod {
-                id: "pm_rich".into(),
+                name: "pm_rich".into(),
                 inputs: Vec::new(),
                 outputs: vec![(GoodId::from_usize(0), 40.0)],
                 ..Default::default()
@@ -514,7 +514,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_poor".into(),
             ProductionMethod {
-                id: "pm_poor".into(),
+                name: "pm_poor".into(),
                 inputs: Vec::new(),
                 outputs: vec![(GoodId::from_usize(0), 1.0)],
                 ..Default::default()

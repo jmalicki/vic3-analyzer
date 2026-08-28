@@ -265,7 +265,7 @@ impl DefsBuilder {
             good.texture
                 .as_deref()
                 .and_then(icon_stem)
-                .unwrap_or_else(|| good.id.to_lowercase())
+                .unwrap_or_else(|| good.name.to_lowercase())
         }));
         names.extend(
             parsed
@@ -278,7 +278,7 @@ impl DefsBuilder {
             pm.texture
                 .as_deref()
                 .and_then(icon_stem)
-                .or_else(|| Some(pm.id.to_lowercase()))
+                .or_else(|| Some(pm.name.to_lowercase()))
         }));
         self.prepare_coats()?;
         Ok(names)
@@ -397,7 +397,7 @@ fn parse_defs_text(
             defs.goods.extend(goods);
         } else if relative.starts_with("common/production_methods/") {
             for method in parse_production_methods_bytes(path, bytes)? {
-                defs.production_methods.insert(method.id.clone(), method);
+                defs.production_methods.insert(method.name.clone(), method);
             }
         } else if relative.starts_with("common/production_method_groups/") {
             defs.production_method_groups
@@ -436,7 +436,7 @@ fn parse_defs_text(
                     (
                         id.clone(),
                         BuildingGroup {
-                            id,
+                            name: id,
                             category: group.category,
                             land_usage: group.land_usage,
                             always_possible: group.always_possible,
@@ -466,7 +466,7 @@ fn parse_defs_text(
                 defs.pop_needs.insert(
                     id.clone(),
                     StagingNeed {
-                        id,
+                        name: id,
                         default_good: need.default,
                         entries,
                     },
@@ -558,8 +558,8 @@ fn attach_icons(defs: &mut StagingDefs, decoded: BTreeMap<String, Vec<u8>>) {
                 .texture
                 .as_deref()
                 .and_then(icon_stem)
-                .unwrap_or_else(|| good.id.to_lowercase());
-            Some((good.id.clone(), decoded.get(&stem)?.clone()))
+                .unwrap_or_else(|| good.name.to_lowercase());
+            Some((good.name.clone(), decoded.get(&stem)?.clone()))
         })
         .collect::<Vec<_>>();
     defs.icons.extend(wanted);
@@ -583,7 +583,7 @@ fn attach_extra_icons(defs: &mut StagingDefs, decoded: BTreeMap<String, Vec<u8>>
         }
     }
     for pm in defs.production_methods.values() {
-        let key = format!("pm:{}", pm.id);
+        let key = format!("pm:{}", pm.name);
         if defs.extra_icons.contains_key(&key) {
             continue;
         }
@@ -591,7 +591,12 @@ fn attach_extra_icons(defs: &mut StagingDefs, decoded: BTreeMap<String, Vec<u8>>
             .texture
             .as_deref()
             .and_then(icon_stem)
-            .unwrap_or_else(|| pm.id.strip_prefix("pm_").unwrap_or(&pm.id).to_lowercase());
+            .unwrap_or_else(|| {
+                pm.name
+                    .strip_prefix("pm_")
+                    .unwrap_or(&pm.name)
+                    .to_lowercase()
+            });
         if let Some(png) = defs.extra_icons.get(&format!("pm:{stem}")).cloned() {
             aliases.push((key, png));
         }
@@ -819,7 +824,7 @@ fn parse_goods_bytes(
         goods.insert(
             id.clone(),
             Good {
-                id,
+                name: id,
                 base_price,
                 traded_quantity: raw_good
                     .traded_quantity
@@ -889,7 +894,7 @@ fn load_production_methods(data_root: &Path) -> Result<BTreeMap<String, StagingP
     let mut pms = BTreeMap::new();
     for path in txt_files(&data_root.join("common/production_methods"))? {
         for pm in parse_production_methods(&path)? {
-            pms.insert(pm.id.clone(), pm);
+            pms.insert(pm.name.clone(), pm);
         }
     }
     Ok(pms)
@@ -1001,7 +1006,7 @@ fn parse_building_types_bytes(path: &Path, bytes: &[u8]) -> Result<ParsedBuildin
         buildings.insert(
             id.clone(),
             BuildingType {
-                id,
+                name: id,
                 group: raw_building.building_group,
                 city_type: raw_building.city_type,
                 production_method_groups: raw_building.production_method_groups,
@@ -1059,7 +1064,7 @@ fn parse_technologies_bytes(
             (
                 id.clone(),
                 Technology {
-                    id,
+                    name: id,
                     cost: tech.cost.filter(|v| v.is_finite() && *v >= 0.0),
                     prerequisites: tech.unlocking_technologies,
                 },
@@ -1076,7 +1081,7 @@ fn load_building_groups(data_root: &Path) -> Result<BTreeMap<String, BuildingGro
             (
                 id.clone(),
                 BuildingGroup {
-                    id,
+                    name: id,
                     category: raw.category,
                     land_usage: raw.land_usage,
                     always_possible: raw.always_possible,
@@ -1137,7 +1142,7 @@ fn parse_production_methods_bytes(path: &Path, bytes: &[u8]) -> Result<Vec<Stagi
             );
         }
         out.push(StagingPm {
-            id,
+            name: id,
             texture,
             inputs,
             outputs,
@@ -1291,7 +1296,7 @@ fn parse_pop_types_bytes(
         out.insert(
             id.clone(),
             PopType {
-                id,
+                name: id,
                 can_always_hire,
                 qualifications,
             },
@@ -1423,7 +1428,7 @@ fn load_pop_needs(
             needs.insert(
                 id.clone(),
                 StagingNeed {
-                    id,
+                    name: id,
                     default_good: raw.default,
                     entries,
                 },

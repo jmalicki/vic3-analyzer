@@ -26,6 +26,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   Mixed IO lists still use `{good_name, good_label, qty}`. Alert and mitigation
   good script keys are `good_name`. **Breaking** for JSON, SQL, and web.
 
+- **Defs catalog entities:** `Good`, `ProductionMethod`, `Technology`,
+  `BuildingType`, `PopType`, `BuildingGroup`, and `PopNeed` use `name` for the
+  script key field (was `id`). Dense indices (`GoodId`, `NeedId`,
+  `BuildingTypeId`) and order vectors are unchanged. **Breaking** for Rust
+  callers constructing defs in tests or overlays. `BLOB_VERSION` bumped to 16.
+
 - **Building type naming:** `GameDefs.buildings` → `building_types` with
   `building_types_order` and `BuildingTypeId`. `WorldBuilding` stores
   `building_type_id` internally; resolve script keys via `type_script_id(defs)`.

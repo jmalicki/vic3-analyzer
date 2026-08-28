@@ -7,8 +7,9 @@ use crate::{DefsError, GameDefs};
 /// [`decode_blob`] checks this **before** deserializing the payload so a stale
 /// blob reports [`DefsError::BlobVersion`] instead of a confusing field error.
 ///
+/// v16: catalog entity structs use `name` instead of `id` for script keys.
 /// v15: `building_types_order` and `building_types` (renamed from `buildings`).
-pub const BLOB_VERSION: u32 = 15;
+pub const BLOB_VERSION: u32 = 16;
 
 #[derive(Serialize, Deserialize)]
 struct DefsBlob {
@@ -69,7 +70,7 @@ mod tests {
         goods.insert(
             "grain".into(),
             Good {
-                id: "grain".into(),
+                name: "grain".into(),
                 base_price: 20.0,
                 traded_quantity: 12.0,
                 texture: None,
@@ -78,7 +79,7 @@ mod tests {
         goods.insert(
             "wood".into(),
             Good {
-                id: "wood".into(),
+                name: "wood".into(),
                 base_price: 20.0,
                 traded_quantity: 10.0,
                 texture: None,
@@ -89,7 +90,7 @@ mod tests {
         production_methods.insert(
             "pm_simple_forestry".into(),
             ProductionMethod {
-                id: "pm_simple_forestry".into(),
+                name: "pm_simple_forestry".into(),
                 inputs: vec![(GoodId::from_usize(0), 1.0)],
                 outputs: vec![(GoodId::from_usize(1), 30.0)],
                 ..ProductionMethod::default()
@@ -127,7 +128,7 @@ mod tests {
             building_types: BTreeMap::new(),
             building_groups: BTreeMap::new(),
             pop_needs: vec![PopNeed {
-                id: "popneed_heating".into(),
+                name: "popneed_heating".into(),
                 default_good: Some(GoodId::from_usize(1)),
                 entries: vec![NeedEntry {
                     good: GoodId::from_usize(1),

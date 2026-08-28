@@ -209,7 +209,7 @@ mod tests {
             goods_order: vec!["grain".into(), "wood".into(), "coal".into()],
             needs_order: vec!["popneed_heating".into()],
             pop_needs: vec![PopNeed {
-                id: "popneed_heating".into(),
+                name: "popneed_heating".into(),
                 default_good: Some(GoodId::from_usize(1)),
                 entries: vec![
                     NeedEntry {
@@ -231,7 +231,7 @@ mod tests {
         defs.goods.insert(
             "grain".into(),
             Good {
-                id: "grain".into(),
+                name: "grain".into(),
                 base_price: 20.0,
                 traded_quantity: 12.0,
                 texture: None,
@@ -240,7 +240,7 @@ mod tests {
         defs.goods.insert(
             "wood".into(),
             Good {
-                id: "wood".into(),
+                name: "wood".into(),
                 base_price: 20.0,
                 traded_quantity: 10.0,
                 texture: None,
@@ -249,7 +249,7 @@ mod tests {
         defs.goods.insert(
             "coal".into(),
             Good {
-                id: "coal".into(),
+                name: "coal".into(),
                 base_price: 30.0,
                 traded_quantity: 6.0,
                 texture: None,
@@ -278,7 +278,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_simple_forestry".into(),
             ProductionMethod {
-                id: "pm_simple_forestry".into(),
+                name: "pm_simple_forestry".into(),
                 inputs: Vec::new(),
                 outputs: vec![(GoodId::from_usize(1), 30.0)],
                 ..Default::default()
@@ -298,7 +298,7 @@ mod tests {
             needs_order: vec!["popneed_staple".into(), "popneed_heating".into()],
             pop_needs: vec![
                 PopNeed {
-                    id: "popneed_staple".into(),
+                    name: "popneed_staple".into(),
                     default_good: Some(GoodId::from_usize(0)),
                     entries: vec![NeedEntry {
                         good: GoodId::from_usize(0),
@@ -308,7 +308,7 @@ mod tests {
                     }],
                 },
                 PopNeed {
-                    id: "popneed_heating".into(),
+                    name: "popneed_heating".into(),
                     default_good: Some(GoodId::from_usize(1)),
                     entries: vec![NeedEntry {
                         good: GoodId::from_usize(1),
@@ -323,7 +323,7 @@ mod tests {
         defs.goods.insert(
             "grain".into(),
             Good {
-                id: "grain".into(),
+                name: "grain".into(),
                 base_price: 20.0,
                 traded_quantity: 12.0,
                 texture: None,
@@ -332,7 +332,7 @@ mod tests {
         defs.goods.insert(
             "wood".into(),
             Good {
-                id: "wood".into(),
+                name: "wood".into(),
                 base_price: 20.0,
                 traded_quantity: 10.0,
                 texture: None,
@@ -363,7 +363,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_simple_forestry".into(),
             ProductionMethod {
-                id: "pm_simple_forestry".into(),
+                name: "pm_simple_forestry".into(),
                 inputs: Vec::new(),
                 outputs: vec![(GoodId::from_usize(1), 30.0)],
                 ..Default::default()
@@ -560,7 +560,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_goofy_factory".into(),
             ProductionMethod {
-                id: "pm_goofy_factory".into(),
+                name: "pm_goofy_factory".into(),
                 inputs: vec![(GoodId::from_usize(2), 2.0)],
                 outputs: vec![(GoodId::from_usize(1), 3.0)],
                 ..Default::default()
@@ -619,7 +619,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_wood_buyer".into(),
             ProductionMethod {
-                id: "pm_wood_buyer".into(),
+                name: "pm_wood_buyer".into(),
                 inputs: vec![(GoodId::from_usize(1), 10.0)],
                 outputs: Vec::new(),
                 ..Default::default()
@@ -628,7 +628,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_wood_seller".into(),
             ProductionMethod {
-                id: "pm_wood_seller".into(),
+                name: "pm_wood_seller".into(),
                 inputs: Vec::new(),
                 outputs: vec![(GoodId::from_usize(1), 10.0)],
                 ..Default::default()
@@ -699,7 +699,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_wood_buyer".into(),
             ProductionMethod {
-                id: "pm_wood_buyer".into(),
+                name: "pm_wood_buyer".into(),
                 inputs: vec![(GoodId::from_usize(1), 10.0)],
                 outputs: Vec::new(),
                 ..Default::default()
@@ -708,7 +708,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_wood_seller".into(),
             ProductionMethod {
-                id: "pm_wood_seller".into(),
+                name: "pm_wood_seller".into(),
                 inputs: Vec::new(),
                 outputs: vec![(GoodId::from_usize(1), 10.0)],
                 ..Default::default()
@@ -900,7 +900,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_grain".into(),
             ProductionMethod {
-                id: "pm_grain".into(),
+                name: "pm_grain".into(),
                 inputs: Vec::new(),
                 outputs: vec![(GoodId::from_usize(0), 30.0)],
                 ..Default::default()

@@ -27,8 +27,8 @@
 //! | `states` | `state_id`, `region_name`, `region_label`, `label`, `owner_tag` | — |
 //! | `goods` | `name`, `label` | — (hash / order index) |
 //! | `goods_by_state` | `state_id`, `good` | — |
-//! | `buildings` | `building_id`, `state_id`, `type_id` | — |
-//! | `building_types` | `type_id`, `type_name`, `group_id` | `type_id` (defs `BTreeMap`) |
+//! | `buildings` | `building_id`, `state_id`, `building_type_name` | — |
+//! | `building_types` | `name`, `label`, `group_id` | `name` (defs `BTreeMap`) |
 //! | `production_methods` | `pm`, `pm_name` | `pm` (defs `BTreeMap`) |
 //! | `pops` | `state_id`, `profession` | — |
 //! | `state_qualifications` | `state_id`, `profession` | — |

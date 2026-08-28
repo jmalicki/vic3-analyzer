@@ -116,7 +116,7 @@ mod tests {
         let sell = GoodsVec::from_vec(rows.iter().map(|row| row.raw.max(0.0)).collect());
         (
             PopNeed {
-                id: "synth".into(),
+                name: "synth".into(),
                 default_good: None,
                 entries,
             },

@@ -706,7 +706,7 @@ pub fn loaded_production_methods_json() -> Result<String, ApiError> {
             .production_methods
             .values()
             .map(|pm| ProductionMethodJson {
-                id: pm.id.clone(),
+                id: pm.name.clone(),
                 inputs: pm
                     .inputs
                     .iter()

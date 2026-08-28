@@ -636,7 +636,7 @@ fn sync_query_helper_works() {
 #[tokio::test]
 async fn btree_range_on_building_types() {
     let eng = engine().await;
-    // Exact range pushdown on BTreeMap key `type_id`.
+    // Exact range pushdown on BTreeMap key `name`.
     let batches = eng
         .query(
             "SELECT name FROM building_types \

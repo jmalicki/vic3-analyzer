@@ -30,7 +30,7 @@
 //! defs.building_types.insert(
 //!     "building_rye_farm".into(),
 //!     BuildingType {
-//!         id: "building_rye_farm".into(),
+//!         name: "building_rye_farm".into(),
 //!         group: None,
 //!         city_type: None,
 //!         production_method_groups: vec![],
@@ -115,7 +115,7 @@ mod tests {
         defs.building_types.insert(
             "building_rye_farm".into(),
             BuildingType {
-                id: "building_rye_farm".into(),
+                name: "building_rye_farm".into(),
                 group: Some("bg_agriculture".into()),
                 city_type: Some("farm".into()),
                 production_method_groups: vec!["pmg_base_building_rye_farm".into()],

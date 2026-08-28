@@ -780,14 +780,14 @@ mod tests {
         defs.production_methods.insert(
             "pm_not_construction".into(),
             ProductionMethod {
-                id: "pm_not_construction".into(),
+                name: "pm_not_construction".into(),
                 ..ProductionMethod::default()
             },
         );
         defs.building_types.insert(
             BUILDING_CONSTRUCTION_SECTOR.into(),
             BuildingType {
-                id: BUILDING_CONSTRUCTION_SECTOR.into(),
+                name: BUILDING_CONSTRUCTION_SECTOR.into(),
                 group: None,
                 city_type: None,
                 production_method_groups: Vec::new(),
@@ -1014,7 +1014,7 @@ mod tests {
         defs.building_types.insert(
             BUILDING_CONSTRUCTION_SECTOR.into(),
             BuildingType {
-                id: BUILDING_CONSTRUCTION_SECTOR.into(),
+                name: BUILDING_CONSTRUCTION_SECTOR.into(),
                 group: None,
                 city_type: None,
                 production_method_groups: Vec::new(),
@@ -1026,7 +1026,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_iron_frame_buildings".into(),
             ProductionMethod {
-                id: "pm_iron_frame_buildings".into(),
+                name: "pm_iron_frame_buildings".into(),
                 country_construction_add: Some(5.0),
                 ..ProductionMethod::default()
             },
