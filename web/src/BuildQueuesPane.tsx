@@ -12,8 +12,8 @@ export type ConstructionQueueTab = 'government' | 'private'
 
 function displayBuilding(order: ConstructionOrderSnapshot): string {
   return (
-    order.building_name?.trim() ||
-    order.building.replace(/^building_/, '').replace(/_/g, ' ')
+    order.building_type_label?.trim() ||
+    order.building_type_name.replace(/^building_/, '').replace(/_/g, ' ')
   )
 }
 
@@ -25,7 +25,7 @@ function OrderCard({ order, icons }: { order: ConstructionOrderSnapshot; icons?:
   return (
     <li className="military-card">
       <div className="military-heading">
-        <GameIcon kind="building" id={order.building} icons={icons} />
+        <GameIcon kind="building" id={order.building_type_name} icons={icons} />
         <strong>{displayBuilding(order)}</strong>
       </div>
       {facts.length > 0 && <p className="military-meta">{facts.join(' · ')}</p>}

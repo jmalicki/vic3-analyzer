@@ -37,7 +37,7 @@ function buildingStaffingSummary(row: BuildingStaffing): string {
 
 function actionBuilding(action?: MitigationAction): string | undefined {
   if (!action) return undefined
-  if (action.type === 'build' || action.type === 'feeder_job') return action.building
+  if (action.type === 'build' || action.type === 'feeder_job') return action.building_type_name
   return undefined
 }
 

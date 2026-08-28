@@ -196,7 +196,7 @@
       "oneOf": [
         {
           "properties": {
-            "building": {
+            "building_type_name": {
               "type": "string"
             },
             "extra_levels": {
@@ -222,7 +222,7 @@
           },
           "required": [
             "type",
-            "building"
+            "building_type_name"
           ],
           "type": "object"
         },
@@ -297,7 +297,7 @@
         },
         {
           "properties": {
-            "building": {
+            "building_type_name": {
               "type": "string"
             },
             "profession": {
@@ -318,7 +318,7 @@
           },
           "required": [
             "type",
-            "building",
+            "building_type_name",
             "profession"
           ],
           "type": "object"

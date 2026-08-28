@@ -348,7 +348,7 @@ impl GerStateBuilder {
                     order_id: 1,
                     queue: ConstructionQueueKind::Government,
                     state_id: Some(1),
-                    building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                    building_type_name: BUILDING_CONSTRUCTION_SECTOR.into(),
                     remaining: Some(remaining),
                 }],
             ),

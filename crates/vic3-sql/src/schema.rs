@@ -141,8 +141,8 @@ pub fn constructions_schema() -> SchemaRef {
         Field::new("position", DataType::UInt32, false),
         Field::new("country_id", DataType::UInt32, true),
         Field::new("state_id", DataType::UInt32, true),
-        Field::new("building", DataType::Utf8, false),
-        Field::new("building_name", DataType::Utf8, true),
+        Field::new("building_type_name", DataType::Utf8, false),
+        Field::new("building_type_label", DataType::Utf8, true),
         Field::new("remaining", DataType::Float64, true),
     ]))
 }
@@ -215,7 +215,7 @@ pub fn suggest_mitigations_schema() -> SchemaRef {
         Field::new("kind", DataType::Utf8, false),
         Field::new("rank", DataType::UInt32, false),
         Field::new("action", DataType::Utf8, true),
-        Field::new("building", DataType::Utf8, true),
+        Field::new("building_type_name", DataType::Utf8, true),
         Field::new("good_name", DataType::Utf8, true),
         Field::new("extra_levels", DataType::UInt32, true),
         Field::new("title", DataType::Utf8, false),

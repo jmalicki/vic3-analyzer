@@ -290,18 +290,18 @@ Full private + government construction queues from save IR (`World.constructions
 | `position` | Dense 0-based index within `(country_id, queue)` (scan order) |
 | `country_id` | Owner resolved from the order's state; nullable if unknown |
 | `state_id` | Target state; nullable if missing on the order |
-| `building` | Building type script id; FK → `building_types.name` |
-| `building_name` | Localized label when defs provide one |
+| `building_type_name` | Script building type; FK → `building_types.name` |
+| `building_type_label` | Localized label when defs provide one |
 | `remaining` | Remaining construction points when present |
 
 ```sql
-SELECT queue, position, building, building_name, remaining
+SELECT queue, position, building_type_name, building_type_label, remaining
 FROM constructions
 WHERE country_id = 16777216 AND queue = 'government'
 ORDER BY position;
 ```
 
-**Storage:** `Vec<WorldConstruction>` ordered private then government by `order_id`. Exact pushdown on `order_id`, `country_id`, `state_id`, `queue`, `building`.
+**Storage:** `Vec<WorldConstruction>` ordered private then government by `order_id`. Exact pushdown on `order_id`, `country_id`, `state_id`, `queue`, `building_type_name`.
 
 ### `formations` (military)
 
@@ -402,14 +402,14 @@ One row per **existing** alert mitigation from `vic3-prices::alerts` (same build
 | `kind` | text | Parent alert kind (snake_case) |
 | `rank` | int | Lower is better |
 | `action` | text nullable | Mitigation action `type` (`build`, `pm`, `subsidize`, `trade_alloc`, `feeder_job`, `sol_goods`) |
-| `building` | text nullable | From `build` / `feeder_job` actions |
+| `building_type_name` | text nullable | From `build` / `feeder_job` actions |
 | `good_name` | text nullable | From `trade_alloc` / `sol_goods` actions |
 | `extra_levels` | int nullable | From `build` — heuristic (often 1), **not** sized-to-fix |
 | `title` | text | |
 | `detail` | text | Full mitigation object as JSON (remaining fields + action payload) |
 
 ```sql
-SELECT action, building, extra_levels, title
+SELECT action, building_type_name, extra_levels, title
 FROM suggest_mitigations()
 WHERE kind = 'goods_shortage'
 ORDER BY rank

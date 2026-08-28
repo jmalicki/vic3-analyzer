@@ -1028,8 +1028,8 @@ struct ConstructionSnap {
     state_id: Option<u32>,
     /// Localized state display label when known (demonym-prefixed for minority splits).
     state_label: Option<String>,
-    building: String,
-    building_name: Option<String>,
+    building_type_name: String,
+    building_type_label: Option<String>,
     remaining: Option<f64>,
 }
 
@@ -1071,14 +1071,15 @@ fn constructions_snapshot(
         if row.country_id != Some(player_id) {
             continue;
         }
+        let type_name = defs.building_by_index(row.building_type_id);
         let snap = ConstructionSnap {
             id: row.id,
             queue: row.queue.as_str(),
             country_id: row.country_id,
             state_id: row.state_id,
             state_label: state_name(row.state_id),
-            building: row.building.clone(),
-            building_name: defs.labels.get(&row.building).cloned(),
+            building_type_name: type_name.to_string(),
+            building_type_label: defs.labels.get(type_name).cloned(),
             remaining: row.remaining,
         };
         match row.queue {
