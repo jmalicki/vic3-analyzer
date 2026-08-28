@@ -689,11 +689,13 @@ mod tests {
             &mini.economy.defs,
             mini.economy.solve_opts.clone(),
         );
+        let logging_id = mini
+            .economy
+            .defs
+            .building_index_of("building_logging_camp")
+            .expect("logging camp type");
         let bumped = solve(
-            &mini
-                .economy
-                .base_world
-                .with_extra_levels("building_logging_camp", 1),
+            &mini.economy.base_world.with_extra_levels(logging_id, 1),
             &mini.economy.defs,
             mini.economy.solve_opts.clone(),
         );
@@ -725,7 +727,7 @@ mod tests {
         );
 
         let action = Action::QueueBuildingLevel {
-            building: "building_logging_camp".into(),
+            building_type_name: "building_logging_camp".into(),
             state_id: 1,
         };
         let completed = crate::sim::speculative_completed_state(
@@ -756,10 +758,9 @@ mod tests {
                     return None;
                 }
                 let d = n.domain();
-                let queued =
-                    d.state().constructions.iter().any(|row| {
-                        row.building == "building_logging_camp" && row.state_id == Some(1)
-                    });
+                let queued = d.state().constructions.iter().any(|row| {
+                    row.building_type_name == "building_logging_camp" && row.state_id == Some(1)
+                });
                 queued.then_some(d)
             })
             .expect("expected Ready PEA child for QueueBuildingLevel logging camp");
