@@ -361,6 +361,7 @@
           "type": "number"
         },
         "label": {
+          "description": "Localized profession name (from [`StateQualification::label`] / emit).",
           "type": "string"
         },
         "missing_here": {
@@ -368,6 +369,7 @@
           "type": "number"
         },
         "name": {
+          "description": "Pop-type script id.",
           "type": "string"
         },
         "state_jobs": {

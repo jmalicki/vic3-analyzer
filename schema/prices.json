@@ -12,9 +12,11 @@
           ]
         },
         "building_type_label": {
+          "description": "Localized building type name for display (parallel to [`Self::building_type_name`]).",
           "type": "string"
         },
         "building_type_name": {
+          "description": "Building type script id for this instance.",
           "type": "string"
         },
         "cost": {
@@ -115,6 +117,7 @@
           ]
         },
         "label": {
+          "description": "Localized group name for display.",
           "type": "string"
         },
         "land_usage": {
@@ -124,6 +127,7 @@
           ]
         },
         "name": {
+          "description": "Building group script id.",
           "type": "string"
         },
         "parent_group": {
@@ -161,9 +165,11 @@
           "type": "integer"
         },
         "label": {
+          "description": "Localized building name for display.",
           "type": "string"
         },
         "name": {
+          "description": "Building type script id (e.g. `building_rye_farm`).",
           "type": "string"
         }
       },
@@ -198,14 +204,17 @@
           ]
         },
         "id": {
+          "description": "Paradox country id from the save.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
         },
         "label": {
+          "description": "Localized country name (e.g. `Prussia` for tag `PRU`).",
           "type": "string"
         },
         "name": {
+          "description": "Country tag / script key (matches save `countries` and SQL `countries.name`).",
           "type": "string"
         }
       },
@@ -219,6 +228,7 @@
     "GoodFlow": {
       "properties": {
         "name": {
+          "description": "Good script id for this IO line.",
           "type": "string"
         },
         "quantity": {
@@ -249,9 +259,11 @@
           "type": "number"
         },
         "label": {
+          "description": "Localized or humanized display name for UI / SQL `label` filters.",
           "type": "string"
         },
         "name": {
+          "description": "Good script id (`GameDefs::goods_order` key), e.g. `grain`.",
           "type": "string"
         },
         "price": {
@@ -339,9 +351,11 @@
           "type": "array"
         },
         "label": {
+          "description": "Localized need name for display.",
           "type": "string"
         },
         "name": {
+          "description": "Need package script id (e.g. `popneed_basic_food`).",
           "type": "string"
         },
         "package_value": {
@@ -364,9 +378,11 @@
           "type": "number"
         },
         "label": {
+          "description": "Localized profession name for display.",
           "type": "string"
         },
         "name": {
+          "description": "Profession / pop-type script id.",
           "type": "string"
         }
       },
@@ -423,6 +439,7 @@
           "type": "number"
         },
         "name": {
+          "description": "Good script id (join key to [`GoodPrice::name`] / `goods.name`).",
           "type": "string"
         },
         "price": {
@@ -477,6 +494,7 @@
           ]
         },
         "id": {
+          "description": "Paradox state id from the save; primary join key for state-scoped tables.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -496,7 +514,7 @@
           ]
         },
         "label": {
-          "description": "Display label for this owned slice (bare region, or demonym-prefixed when minority).",
+          "description": "Per-owner display label: usually equals [`Self::region_label`], or\ndemonym-prefixed for minority holders (e.g. `Prussian Rhineland`).",
           "type": "string"
         },
         "market_id": {
@@ -508,10 +526,11 @@
           ]
         },
         "region_label": {
-          "description": "Bare geographic label from defs (same for co-owners of a split region).",
+          "description": "Bare geographic display name from defs (same for all co-owners of a split region).",
           "type": "string"
         },
         "region_name": {
+          "description": "Non-localized region script id when known (e.g. `STATE_RHINE`). Same for\nevery co-owner of a split region. Omitted when the save has no region key.",
           "type": [
             "string",
             "null"
@@ -534,9 +553,11 @@
           "type": "array"
         },
         "label": {
+          "description": "Localized need name for display.",
           "type": "string"
         },
         "name": {
+          "description": "Need package script id aggregated for this state.",
           "type": "string"
         },
         "package_value": {
@@ -561,9 +582,11 @@
     "StatePop": {
       "properties": {
         "culture_label": {
+          "description": "Display name for [`Self::culture_name`] (empty when culture is unknown).",
           "type": "string"
         },
         "culture_name": {
+          "description": "Culture script id when present on the save pop.",
           "type": [
             "string",
             "null"
@@ -605,9 +628,11 @@
           "type": "array"
         },
         "profession_label": {
+          "description": "Display name for [`Self::profession_name`] (always set for export).",
           "type": "string"
         },
         "profession_name": {
+          "description": "Pop-type script id when the save names one (e.g. `peasants`).",
           "type": [
             "string",
             "null"
@@ -672,6 +697,7 @@
           "type": "number"
         },
         "label": {
+          "description": "Localized profession name for display.",
           "type": "string"
         },
         "monthly_change": {
@@ -682,6 +708,7 @@
           ]
         },
         "name": {
+          "description": "Target profession script id for this qualification row.",
           "type": "string"
         },
         "qualified": {
