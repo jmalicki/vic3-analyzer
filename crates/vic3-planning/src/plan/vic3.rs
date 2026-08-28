@@ -525,7 +525,8 @@ fn goal_timing_lower_bound(
                 }
 
                 let rate = state.construction_points_per_day.max(1.0);
-                (needed_cp / rate).ceil() as u32
+                let knapsack_days = (needed_cp / rate).ceil() as u32;
+                construction_days.max(knapsack_days)
             }
         }
         Goal::Simple(_) => 0,
