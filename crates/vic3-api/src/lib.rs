@@ -1026,9 +1026,11 @@ struct ConstructionSnap {
     queue: &'static str,
     country_id: Option<u32>,
     state_id: Option<u32>,
-    /// Localized state display label (demonym-prefixed for minority splits).
+    /// Owned-slice state display label (from [`PricesResult::states`], demonym-prefixed when split).
     state_label: String,
+    /// Building type script id.
     building_type_name: String,
+    /// Localized building type name for UI display.
     building_type_label: String,
     remaining: Option<f64>,
 }

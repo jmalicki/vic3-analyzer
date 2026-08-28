@@ -627,7 +627,9 @@ pub(crate) fn is_fully_staffed(staffing: f64, level: f64) -> bool {
 /// Per-profession shortfall on one building vs the whole state stock.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ProfessionGap {
+    /// Pop-type script id.
     pub name: String,
+    /// Localized profession name (from [`StateQualification::label`] / emit).
     pub label: String,
     pub employed_here: f64,
     pub jobs_here: f64,

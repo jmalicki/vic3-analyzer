@@ -1,8 +1,6 @@
-//! Display labels for script ids (states, buildings, professions, …).
+//! Owned-slice state labels and country demonyms for [`crate::result::StateInfo`].
 //!
-//! Prefer defs localization when present; otherwise humanize the id
-//! (`STATE_BRANDENBURG` → `Brandenburg`) so SQL `region_name` (lookup),
-//! `label` (owned-slice display), and alert titles share one dialect.
+//! See [`crate::result`] for the `name` vs `label` naming dialect on export rows.
 
 use std::cmp::Ordering;
 use std::collections::HashMap;

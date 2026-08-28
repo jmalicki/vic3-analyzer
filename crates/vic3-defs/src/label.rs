@@ -1,12 +1,20 @@
-//! Display labels for script ids (states, buildings, professions, …).
+//! Resolve human-readable labels from Paradox script ids.
 //!
-//! Prefer defs localization when present; otherwise humanize the id
-//! (`STATE_BRANDENBURG` → `Brandenburg`).
+//! Game data and saves refer to entities by **script id** (`grain`, `STATE_RHINE`,
+//! `building_rye_farm`). English localization lives in [`GameDefs::labels`], keyed
+//! by that same id. When localization is missing (partial defs, modded ids), we
+//! fall back to [`pretty_id`] — strip common prefixes and title-case tokens.
+//!
+//! Call [`GameDefs::display_label`] once when building export rows; downstream
+//! SQL, alerts, and API code read the resolved `label` string directly.
 
 use crate::GameDefs;
 
 impl GameDefs {
-    /// Localized label for `id`, or [`pretty_id`] when defs have no entry.
+    /// Display string for a script `id`.
+    ///
+    /// Uses [`Self::labels`] when present; otherwise [`pretty_id`]. Never returns
+    /// an empty string for a non-empty id.
     pub fn display_label(&self, id: &str) -> String {
         self.labels
             .get(id)
@@ -15,7 +23,10 @@ impl GameDefs {
     }
 }
 
-/// Humanize a Paradox script id for display when localization is missing.
+/// Humanize a Paradox script id when localization is absent.
+///
+/// Strips known prefixes (`STATE_`, `building_`, `pm_`, `popneed_`) then splits
+/// on `_` and title-cases each token (`STATE_BRANDENBURG` → `Brandenburg`).
 pub fn pretty_id(id: &str) -> String {
     let trimmed = id
         .strip_prefix("STATE_")
