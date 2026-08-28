@@ -2076,7 +2076,7 @@ mod tests {
             defs.goods.insert(
                 id.into(),
                 Good {
-                    id: id.into(),
+                    name: id.into(),
                     base_price: base,
                     traded_quantity: traded,
                     texture: None,
@@ -2087,7 +2087,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_simple_farming".into(),
             ProductionMethod {
-                id: "pm_simple_farming".into(),
+                name: "pm_simple_farming".into(),
                 inputs: Vec::new(),
                 outputs: vec![(grain, 10.0)],
                 ..Default::default()
@@ -2096,7 +2096,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_soil_enriching_farming".into(),
             ProductionMethod {
-                id: "pm_soil_enriching_farming".into(),
+                name: "pm_soil_enriching_farming".into(),
                 inputs: Vec::new(),
                 outputs: vec![(grain, 25.0)],
                 ..Default::default()

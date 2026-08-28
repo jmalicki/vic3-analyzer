@@ -182,7 +182,7 @@ fn pop_type_for(defs: &GameDefs, target: &str) -> PopType {
                 .find_map(|(id, pop)| id_has(id, target).then_some(pop.clone()))
         })
         .unwrap_or(PopType {
-            id: target.to_string(),
+            name: target.to_string(),
             ..PopType::default()
         })
 }
@@ -585,7 +585,7 @@ fn vanilla_graph() -> &'static BTreeMap<String, PopType> {
                 (
                     id.clone(),
                     PopType {
-                        id,
+                        name: id,
                         can_always_hire: raw.can_always_hire,
                         qualifications: QualificationFactors {
                             literacy: raw.literacy,

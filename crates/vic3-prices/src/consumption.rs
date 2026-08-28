@@ -729,7 +729,7 @@ mod tests {
             goods_order: vec!["grain".into(), "wood".into(), "coal".into()],
             needs_order: vec!["popneed_heating".into()],
             pop_needs: vec![PopNeed {
-                id: "popneed_heating".into(),
+                name: "popneed_heating".into(),
                 default_good: Some(GoodId::from_usize(1)),
                 entries: vec![
                     NeedEntry {
@@ -751,7 +751,7 @@ mod tests {
         defs.goods.insert(
             "wood".into(),
             Good {
-                id: "wood".into(),
+                name: "wood".into(),
                 base_price: 20.0,
                 traded_quantity: 10.0,
                 texture: None,
@@ -760,7 +760,7 @@ mod tests {
         defs.goods.insert(
             "coal".into(),
             Good {
-                id: "coal".into(),
+                name: "coal".into(),
                 base_price: 30.0,
                 traded_quantity: 6.0,
                 texture: None,

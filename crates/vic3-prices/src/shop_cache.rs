@@ -437,7 +437,7 @@ mod tests {
                 (
                     "grain".into(),
                     Good {
-                        id: "grain".into(),
+                        name: "grain".into(),
                         base_price: 20.0,
                         traded_quantity: 0.0,
                         texture: None,
@@ -446,7 +446,7 @@ mod tests {
                 (
                     "fabric".into(),
                     Good {
-                        id: "fabric".into(),
+                        name: "fabric".into(),
                         base_price: 20.0,
                         traded_quantity: 0.0,
                         texture: None,
@@ -461,7 +461,7 @@ mod tests {
         defs.building_types.insert(
             "building_rye_farm".into(),
             BuildingType {
-                id: "building_rye_farm".into(),
+                name: "building_rye_farm".into(),
                 group: None,
                 city_type: None,
                 production_method_groups: vec!["pmg_base".into()],
@@ -471,7 +471,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_grain".into(),
             ProductionMethod {
-                id: "pm_grain".into(),
+                name: "pm_grain".into(),
                 outputs: vec![(defs.index_of("grain").unwrap(), 10.0)],
                 ..ProductionMethod::default()
             },

@@ -69,7 +69,7 @@ impl Default for StagingDefs {
 
 #[derive(Debug, Clone)]
 pub(crate) struct StagingPm {
-    pub id: String,
+    pub name: String,
     pub texture: Option<String>,
     pub inputs: BTreeMap<String, f64>,
     pub outputs: BTreeMap<String, f64>,
@@ -81,7 +81,7 @@ pub(crate) struct StagingPm {
 
 #[derive(Debug, Clone)]
 pub(crate) struct StagingNeed {
-    pub id: String,
+    pub name: String,
     pub default_good: Option<String>,
     pub entries: Vec<StagingNeedEntry>,
 }
@@ -187,7 +187,7 @@ impl StagingDefs {
             defs.production_methods.insert(
                 id,
                 ProductionMethod {
-                    id: pm.id,
+                    name: pm.name,
                     inputs,
                     outputs,
                     employment: pm.employment.into_iter().collect(),
@@ -200,7 +200,7 @@ impl StagingDefs {
 
         defs.pop_needs = vec![
             PopNeed {
-                id: String::new(),
+                name: String::new(),
                 default_good: None,
                 entries: Vec::new(),
             };
@@ -224,7 +224,7 @@ impl StagingDefs {
                 .collect();
             let default_good = need.default_good.as_deref().and_then(lookup_good);
             defs.pop_needs[idx.as_usize()] = PopNeed {
-                id: need.id,
+                name: need.name,
                 default_good,
                 entries,
             };

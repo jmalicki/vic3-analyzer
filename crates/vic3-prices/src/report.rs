@@ -84,8 +84,8 @@ fn building_group_infos(defs: &GameDefs) -> Vec<BuildingGroupInfo> {
     defs.building_groups
         .values()
         .map(|group| BuildingGroupInfo {
-            name: group.id.clone(),
-            label: defs.labels.get(&group.id).cloned(),
+            name: group.name.clone(),
+            label: defs.labels.get(&group.name).cloned(),
             category: group.category.clone(),
             land_usage: group.land_usage.clone(),
             always_possible: group.always_possible,

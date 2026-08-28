@@ -2275,7 +2275,7 @@ mod tests {
         technologies.insert(
             "manufacturies".into(),
             Technology {
-                id: "manufacturies".into(),
+                name: "manufacturies".into(),
                 cost: Some(50.0),
                 prerequisites: vec![],
             },
@@ -2283,7 +2283,7 @@ mod tests {
         technologies.insert(
             "shaft_mining".into(),
             Technology {
-                id: "shaft_mining".into(),
+                name: "shaft_mining".into(),
                 cost: Some(75.0),
                 prerequisites: vec!["manufacturies".into()],
             },
@@ -2291,7 +2291,7 @@ mod tests {
         technologies.insert(
             "nitroglycerin".into(),
             Technology {
-                id: "nitroglycerin".into(),
+                name: "nitroglycerin".into(),
                 cost: Some(100.0),
                 prerequisites: vec!["shaft_mining".into()],
             },
@@ -2322,7 +2322,7 @@ mod tests {
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
-                    id: "wood".into(),
+                    name: "wood".into(),
                     base_price: 20.0,
                     traded_quantity: 10.0,
                     texture: None,
@@ -2334,7 +2334,7 @@ mod tests {
         defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
-                id: "building_logging_camp".into(),
+                name: "building_logging_camp".into(),
                 group: None,
                 city_type: None,
                 production_method_groups: vec!["pmg_logging".into()],
@@ -2348,7 +2348,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_sawmills".into(),
             ProductionMethod {
-                id: "pm_sawmills".into(),
+                name: "pm_sawmills".into(),
                 outputs: vec![(wood, 10.0)],
                 ..Default::default()
             },
@@ -2708,7 +2708,7 @@ mod tests {
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
-                    id: "wood".into(),
+                    name: "wood".into(),
                     base_price: 20.0,
                     traded_quantity: 10.0,
                     texture: None,
@@ -2720,7 +2720,7 @@ mod tests {
         defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
-                id: "building_logging_camp".into(),
+                name: "building_logging_camp".into(),
                 group: None,
                 city_type: None,
                 production_method_groups: vec!["pmg_logging".into()],
@@ -2736,7 +2736,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_low".into(),
             ProductionMethod {
-                id: "pm_low".into(),
+                name: "pm_low".into(),
                 outputs: vec![(wood, 5.0)],
                 ..Default::default()
             },
@@ -2744,7 +2744,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_high".into(),
             ProductionMethod {
-                id: "pm_high".into(),
+                name: "pm_high".into(),
                 outputs: vec![(wood, 40.0)],
                 ..Default::default()
             },
@@ -2852,7 +2852,7 @@ mod tests {
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
-                    id: "wood".into(),
+                    name: "wood".into(),
                     base_price: 20.0,
                     traded_quantity: 10.0,
                     texture: None,
@@ -2864,7 +2864,7 @@ mod tests {
         defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
-                id: "building_logging_camp".into(),
+                name: "building_logging_camp".into(),
                 group: None,
                 city_type: None,
                 production_method_groups: vec!["pmg_logging".into()],
@@ -2880,7 +2880,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_sawmills".into(),
             ProductionMethod {
-                id: "pm_sawmills".into(),
+                name: "pm_sawmills".into(),
                 outputs: vec![(wood, 10.0)],
                 ..Default::default()
             },
@@ -2888,7 +2888,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_high".into(),
             ProductionMethod {
-                id: "pm_high".into(),
+                name: "pm_high".into(),
                 outputs: vec![(wood, 25.0)],
                 ..Default::default()
             },
@@ -2978,7 +2978,7 @@ mod tests {
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
-                    id: "wood".into(),
+                    name: "wood".into(),
                     base_price: 20.0,
                     traded_quantity: 10.0,
                     texture: None,
@@ -3062,7 +3062,7 @@ mod tests {
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
-                    id: "wood".into(),
+                    name: "wood".into(),
                     base_price: 20.0,
                     traded_quantity: 10.0,
                     texture: None,
@@ -3074,7 +3074,7 @@ mod tests {
         defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
-                id: "building_logging_camp".into(),
+                name: "building_logging_camp".into(),
                 group: None,
                 city_type: None,
                 production_method_groups: Vec::new(),
@@ -3162,7 +3162,7 @@ mod tests {
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
-                    id: "wood".into(),
+                    name: "wood".into(),
                     base_price: 20.0,
                     traded_quantity: 10.0,
                     texture: None,
@@ -3174,7 +3174,7 @@ mod tests {
         defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
-                id: "building_logging_camp".into(),
+                name: "building_logging_camp".into(),
                 group: None,
                 city_type: None,
                 production_method_groups: Vec::new(),
@@ -3258,7 +3258,7 @@ mod tests {
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
-                    id: "wood".into(),
+                    name: "wood".into(),
                     base_price: 20.0,
                     traded_quantity: 10.0,
                     texture: None,
@@ -3369,7 +3369,7 @@ mod tests {
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
-                    id: "wood".into(),
+                    name: "wood".into(),
                     base_price: 20.0,
                     traded_quantity: 10.0,
                     texture: None,
@@ -3453,7 +3453,7 @@ mod tests {
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
-                    id: "wood".into(),
+                    name: "wood".into(),
                     base_price: 20.0,
                     traded_quantity: 10.0,
                     texture: None,
@@ -3549,7 +3549,7 @@ mod tests {
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
-                    id: "wood".into(),
+                    name: "wood".into(),
                     base_price: 20.0,
                     traded_quantity: 10.0,
                     texture: None,
@@ -3561,7 +3561,7 @@ mod tests {
         defs.building_types.insert(
             BUILDING_CONSTRUCTION_SECTOR.into(),
             BuildingType {
-                id: BUILDING_CONSTRUCTION_SECTOR.into(),
+                name: BUILDING_CONSTRUCTION_SECTOR.into(),
                 group: None,
                 city_type: None,
                 production_method_groups: vec!["pmg_base_building_construction_sector".into()],
@@ -3578,7 +3578,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_iron_frame_buildings".into(),
             ProductionMethod {
-                id: "pm_iron_frame_buildings".into(),
+                name: "pm_iron_frame_buildings".into(),
                 country_construction_add: Some(5.0),
                 ..ProductionMethod::default()
             },
@@ -3676,7 +3676,7 @@ mod tests {
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
-                    id: "wood".into(),
+                    name: "wood".into(),
                     base_price: 20.0,
                     traded_quantity: 10.0,
                     texture: None,
@@ -3688,7 +3688,7 @@ mod tests {
         defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
-                id: "building_logging_camp".into(),
+                name: "building_logging_camp".into(),
                 group: None,
                 city_type: None,
                 production_method_groups: vec!["pmg_logging".into()],
@@ -3702,7 +3702,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_sawmills".into(),
             ProductionMethod {
-                id: "pm_sawmills".into(),
+                name: "pm_sawmills".into(),
                 outputs: vec![(wood, 10.0)],
                 ..ProductionMethod::default()
             },
@@ -3710,7 +3710,7 @@ mod tests {
         defs.building_types.insert(
             BUILDING_CONSTRUCTION_SECTOR.into(),
             BuildingType {
-                id: BUILDING_CONSTRUCTION_SECTOR.into(),
+                name: BUILDING_CONSTRUCTION_SECTOR.into(),
                 group: None,
                 city_type: None,
                 production_method_groups: vec!["pmg_base_building_construction_sector".into()],
@@ -3726,7 +3726,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_iron_frame_buildings".into(),
             ProductionMethod {
-                id: "pm_iron_frame_buildings".into(),
+                name: "pm_iron_frame_buildings".into(),
                 country_construction_add: Some(5.0),
                 ..ProductionMethod::default()
             },
@@ -3855,7 +3855,7 @@ mod tests {
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
-                    id: "wood".into(),
+                    name: "wood".into(),
                     base_price: 20.0,
                     traded_quantity: 10.0,
                     texture: None,
@@ -3867,7 +3867,7 @@ mod tests {
         defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
-                id: "building_logging_camp".into(),
+                name: "building_logging_camp".into(),
                 group: None,
                 city_type: None,
                 production_method_groups: vec!["pmg_logging".into()],
@@ -3881,7 +3881,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_sawmills".into(),
             ProductionMethod {
-                id: "pm_sawmills".into(),
+                name: "pm_sawmills".into(),
                 outputs: vec![(wood, 10.0)],
                 ..Default::default()
             },
@@ -3944,7 +3944,7 @@ mod tests {
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
-                    id: "wood".into(),
+                    name: "wood".into(),
                     base_price: 20.0,
                     traded_quantity: 10.0,
                     texture: None,
@@ -3956,7 +3956,7 @@ mod tests {
         defs.building_types.insert(
             "building_logging_camp".into(),
             BuildingType {
-                id: "building_logging_camp".into(),
+                name: "building_logging_camp".into(),
                 group: None,
                 city_type: None,
                 production_method_groups: vec!["pmg_logging".into()],
@@ -3970,7 +3970,7 @@ mod tests {
         defs.production_methods.insert(
             "pm_sawmills".into(),
             ProductionMethod {
-                id: "pm_sawmills".into(),
+                name: "pm_sawmills".into(),
                 outputs: vec![(wood, 20.0)],
                 ..Default::default()
             },
@@ -4065,7 +4065,7 @@ mod tests {
             goods: BTreeMap::from([(
                 "wood".into(),
                 Good {
-                    id: "wood".into(),
+                    name: "wood".into(),
                     base_price: 20.0,
                     traded_quantity: 10.0,
                     texture: None,
@@ -4082,7 +4082,7 @@ mod tests {
             defs.building_types.insert(
                 id.into(),
                 BuildingType {
-                    id: id.into(),
+                    name: id.into(),
                     group: None,
                     city_type: None,
                     production_method_groups: vec![format!("pmg_{id}")],
@@ -4094,7 +4094,7 @@ mod tests {
             defs.production_methods.insert(
                 format!("pm_{id}"),
                 ProductionMethod {
-                    id: format!("pm_{id}"),
+                    name: format!("pm_{id}"),
                     outputs: vec![(wood, out)],
                     ..Default::default()
                 },

@@ -838,7 +838,7 @@ mod tests {
         technologies.insert(
             "manufacturies".into(),
             Technology {
-                id: "manufacturies".into(),
+                name: "manufacturies".into(),
                 cost: Some(50.0),
                 prerequisites: vec![],
             },
@@ -846,7 +846,7 @@ mod tests {
         technologies.insert(
             "shaft_mining".into(),
             Technology {
-                id: "shaft_mining".into(),
+                name: "shaft_mining".into(),
                 cost: Some(75.0),
                 prerequisites: vec!["manufacturies".into()],
             },
@@ -854,7 +854,7 @@ mod tests {
         technologies.insert(
             "nitroglycerin".into(),
             Technology {
-                id: "nitroglycerin".into(),
+                name: "nitroglycerin".into(),
                 cost: Some(100.0),
                 prerequisites: vec!["shaft_mining".into()],
             },

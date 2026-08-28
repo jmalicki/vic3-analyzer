@@ -39,7 +39,7 @@ fn register_good(defs: &mut GameDefs, id: &str, base_price: f64) -> GoodId {
     defs.goods.insert(
         id.into(),
         Good {
-            id: id.into(),
+            name: id.into(),
             base_price,
             traded_quantity: DEFAULT_TRADED_QUANTITY,
             texture: None,
@@ -86,7 +86,7 @@ fn register_output_building(
     defs.building_types.insert(
         building.into(),
         BuildingType {
-            id: building.into(),
+            name: building.into(),
             group: None,
             city_type: None,
             production_method_groups: vec![pmg.clone()],
@@ -98,7 +98,7 @@ fn register_output_building(
     defs.production_methods.insert(
         pm.clone(),
         ProductionMethod {
-            id: pm.clone(),
+            name: pm.clone(),
             outputs: vec![(good, output_qty)],
             ..ProductionMethod::default()
         },
@@ -130,7 +130,7 @@ fn register_construction_sector(
     defs.building_types.insert(
         BUILDING_CONSTRUCTION_SECTOR.into(),
         BuildingType {
-            id: BUILDING_CONSTRUCTION_SECTOR.into(),
+            name: BUILDING_CONSTRUCTION_SECTOR.into(),
             group: None,
             city_type: None,
             production_method_groups: vec![pmg.into()],
@@ -143,7 +143,7 @@ fn register_construction_sector(
     defs.production_methods.insert(
         pm.into(),
         ProductionMethod {
-            id: pm.into(),
+            name: pm.into(),
             country_construction_add: Some(construction_add),
             ..ProductionMethod::default()
         },

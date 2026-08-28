@@ -267,7 +267,7 @@ impl GameDefs {
         self.building_types.insert(
             building_type.to_string(),
             BuildingType {
-                id: building_type.to_string(),
+                name: building_type.to_string(),
                 group: None,
                 city_type: None,
                 production_method_groups: Vec::new(),
@@ -337,7 +337,7 @@ pub struct FlagDefinition {
 /// A tradeable (or local) good and its scripted base price (`cost` in `common/goods`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Good {
-    pub id: String,
+    pub name: String,
     pub base_price: f64,
     /// Goods volume moved per unit of post-1.9 state trade capacity.
     pub traded_quantity: f64,
@@ -348,7 +348,7 @@ pub struct Good {
 /// A production method with goods inputs/outputs scraped from building modifiers.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ProductionMethod {
-    pub id: String,
+    pub name: String,
     pub inputs: Vec<(GoodId, f64)>,
     pub outputs: Vec<(GoodId, f64)>,
     /// `building_employment_{profession}_add` totals scraped from modifiers.
@@ -378,7 +378,7 @@ pub struct ProductionMethod {
 /// directly. [`None`] cost means planners fall back to a model constant.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Technology {
-    pub id: String,
+    pub name: String,
     /// Innovation points to research this tech when present in script/fixture.
     #[serde(default)]
     pub cost: Option<f64>,
@@ -390,7 +390,7 @@ pub struct Technology {
 /// A constructable building definition (`common/buildings`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BuildingType {
-    pub id: String,
+    pub name: String,
     pub group: Option<String>,
     pub city_type: Option<String>,
     /// Script ids from `production_method_groups = { ... }`.
@@ -410,7 +410,7 @@ pub struct BuildingType {
 /// mentions are recorded, but full trigger logic is not evaluated.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct PopType {
-    pub id: String,
+    pub name: String,
     #[serde(default)]
     pub can_always_hire: bool,
     #[serde(default)]
@@ -437,7 +437,7 @@ pub struct QualificationFactors {
 /// A Vic3 building group (`common/building_groups`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BuildingGroup {
-    pub id: String,
+    pub name: String,
     pub category: Option<String>,
     pub land_usage: Option<String>,
     pub always_possible: bool,
@@ -448,7 +448,7 @@ pub struct BuildingGroup {
 /// A pop need category (`common/pop_needs`) and its substitution table.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PopNeed {
-    pub id: String,
+    pub name: String,
     pub default_good: Option<GoodId>,
     pub entries: Vec<NeedEntry>,
 }
