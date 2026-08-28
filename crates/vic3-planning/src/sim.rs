@@ -288,7 +288,7 @@ impl EconomyContext {
         state: &PlanningState,
         building_id: &str,
     ) -> f64 {
-        let Some(building_type) = self.defs.buildings.get(building_id) else {
+        let Some(building_type) = self.defs.building_types.get(building_id) else {
             return 0.0;
         };
         let (_, outputs) = default_building_io_per_level(&self.defs, building_type);

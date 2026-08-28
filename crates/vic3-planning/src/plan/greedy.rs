@@ -186,7 +186,11 @@ fn best_shortage_build(
 ) -> Option<Successor> {
     let mut best: Option<(f64, Successor)> = None;
     for edge in edges {
-        let Action::QueueBuildingLevel { building, .. } = &edge.action else {
+        let Action::QueueBuildingLevel {
+            building_type_name: building,
+            ..
+        } = &edge.action
+        else {
             continue;
         };
         if building == BUILDING_CONSTRUCTION_SECTOR || edge.days != 0 {
@@ -213,7 +217,10 @@ fn best_shortage_build(
 /// Construction Sector. Waits are never decisions (main loop handles them).
 fn is_greedy_decision(action: &Action) -> bool {
     match action {
-        Action::QueueBuildingLevel { building, .. } => building != BUILDING_CONSTRUCTION_SECTOR,
+        Action::QueueBuildingLevel {
+            building_type_name: building,
+            ..
+        } => building != BUILDING_CONSTRUCTION_SECTOR,
         Action::SwitchPm { .. }
         | Action::QueueTech { .. }
         | Action::QueueLaw { .. }
@@ -303,11 +310,11 @@ mod tests {
     #[test]
     fn greedy_skips_construction_sector_only() {
         assert!(is_greedy_decision(&Action::QueueBuildingLevel {
-            building: "building_logging_camp".into(),
+            building_type_name: "building_logging_camp".into(),
             state_id: 1,
         }));
         assert!(!is_greedy_decision(&Action::QueueBuildingLevel {
-            building: BUILDING_CONSTRUCTION_SECTOR.into(),
+            building_type_name: BUILDING_CONSTRUCTION_SECTOR.into(),
             state_id: 1,
         }));
     }
@@ -325,7 +332,7 @@ mod tests {
                 order_id: 1,
                 queue: ConstructionQueueKind::Government,
                 state_id: Some(1),
-                building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                building_type_name: BUILDING_CONSTRUCTION_SECTOR.into(),
                 remaining: Some(50.0),
             }],
             construction_points_per_day: 5.0,
@@ -336,7 +343,7 @@ mod tests {
         let edges = vec![
             Successor {
                 action: Action::QueueBuildingLevel {
-                    building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                    building_type_name: BUILDING_CONSTRUCTION_SECTOR.into(),
                     state_id: 1,
                 },
                 days: 0,
@@ -345,7 +352,7 @@ mod tests {
             Successor {
                 action: Action::WaitForEvent {
                     event: Event::BuildingCompleted {
-                        building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                        building_type_name: BUILDING_CONSTRUCTION_SECTOR.into(),
                         state_id: Some(1),
                     },
                     days: 10,
@@ -390,9 +397,12 @@ mod tests {
             edges.iter().any(|e| matches!(
                 &e.action,
                 Action::WaitForEvent {
-                    event: Event::BuildingCompleted { building, state_id: Some(1) },
+                    event: Event::BuildingCompleted {
+                        building_type_name,
+                        state_id: Some(1),
+                    },
                     ..
-                } if building == BUILDING_CONSTRUCTION_SECTOR
+                } if building_type_name == BUILDING_CONSTRUCTION_SECTOR
             )),
             "economy must emit a CS BuildingCompleted wait; got {edges:?}"
         );
@@ -402,8 +412,10 @@ mod tests {
             assert!(
                 !matches!(
                     &pick.action,
-                    Action::QueueBuildingLevel { building, .. }
-                        if building == BUILDING_CONSTRUCTION_SECTOR
+                    Action::QueueBuildingLevel {
+                        building_type_name,
+                        ..
+                    } if building_type_name == BUILDING_CONSTRUCTION_SECTOR
                 ),
                 "greedy must not pick a new Construction Sector enqueue"
             );
@@ -415,9 +427,12 @@ mod tests {
                 matches!(
                     &e.action,
                     Action::WaitForEvent {
-                        event: Event::BuildingCompleted { building, state_id: Some(1) },
+                        event: Event::BuildingCompleted {
+                            building_type_name,
+                            state_id: Some(1),
+                        },
                         ..
-                    } if building == BUILDING_CONSTRUCTION_SECTOR
+                    } if building_type_name == BUILDING_CONSTRUCTION_SECTOR
                 )
             })
             .expect("CS BuildingCompleted wait");
