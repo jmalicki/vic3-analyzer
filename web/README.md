@@ -24,9 +24,10 @@ in-repo save fixtures.
 The Vite `base` is `/vic3-analyzer/` for GitHub Pages
 (`https://jmalicki.github.io/vic3-analyzer/`). Desktop embeds use
 `npm run build:desktop` (`vite build --mode desktop` → `base: '/'`) so Tauri can serve
-assets from `tauri://localhost`. Keep that base root-absolute: `loadWasm`
-dynamic-imports `/wasm/vic3_wasm.js`, and a relative `./wasm/…` would resolve
-under `/assets/` and fail with a MIME-type error.
+assets from `tauri://localhost`; the desktop app talks to native Rust via Tauri
+`invoke` (no wasm). Web builds keep `base` root-absolute so `loadWasm` can
+dynamic-import `/wasm/vic3_wasm.js` — a relative `./wasm/…` would resolve under
+`/assets/` and fail with a MIME-type error.
 
 The UI explains token maps / definitions via accessible help and shows the usual
 Victoria 3 save folder for your OS. Chromium can remember the last chosen save
