@@ -8,21 +8,18 @@
 //!
 //! # Country-wide top-K bag
 //!
-//! Each Ready expand builds one **national** [`Candidate`] bag from
-//! [`Vic3Node::sim_successors`] (all placement states / actions for that
-//! current node). Ranking uses [`super::progress_h::cheap_bag_score`] (quick
-//! guesstimate). Top‑[`DEFAULT_PEA_BEAM`] rows are chosen with `select_nth`.
-//! On emit, successors are applied and scored with speculative complete +
-//! [`super::progress_h::emit_bag_score`]; emit GDP anticipation is stored on
-//! the successor as [`Vic3Node::gdp_for_rates`]. Deferred rows stay action + cheap
-//! score. ShopCache stays unranked — used only when scoring/applying.
+//! Each Ready expand builds one **national** candidate bag via
+//! [`super::bag_rank::cheap_rank_bag`], takes top‑[`DEFAULT_PEA_BEAM`] rows
+//! with `select_nth`, and defers the rest in an `Expanding` cursor. Ranking
+//! math lives in [`super::progress_h`] / [`super::bag_rank`]; this module only
+//! handles beam partition, emit vs defer, and resume identity.
 //!
 //! Expanding identity is `(domain, emitted)` — the candidate list is
 //! `Rc<[…]>` so [`SearchNode`] clones are refcount bumps, and is not hashed.
 
+use super::bag_rank::{self, RankedBagEntry};
 use super::pathfinding::SearchNode;
 use super::Vic3Node;
-use crate::sim::Action;
 use derivative::Derivative;
 use std::cmp::Ordering;
 use std::rc::Rc;
@@ -33,63 +30,24 @@ use std::rc::Rc;
 /// candidates; top 8–16 captured the high-value head). Not a proven optimum.
 pub const DEFAULT_PEA_BEAM: usize = 16;
 
-/// Dependency tags for a deferred candidate (future dirty/rescore hooks).
-///
-/// Frozen-at-expand PEA does not rescore today; these tags document which
-/// geo/building a row touches without ranking ShopCache.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct CandidateDeps {
-    state_id: Option<u32>,
-    building_id: Option<u32>,
-}
-
-impl CandidateDeps {
-    fn from_action(action: &Action) -> Self {
-        match action {
-            Action::QueueBuildingLevel { state_id, .. } => Self {
-                state_id: Some(*state_id),
-                building_id: None,
-            },
-            Action::SwitchPm { building_id, .. } => Self {
-                state_id: None,
-                building_id: Some(*building_id),
-            },
-            _ => Self::default(),
-        }
-    }
-}
-
-/// One country-wide PEA edge: emit payload + score; no child until emit.
-#[derive(Clone, Debug)]
-struct Candidate {
-    action: Action,
-    days: u16,
-    /// `edge + h(child)` — independent of current-node \(g\) as a sort key and resume \(h\).
-    f_minus_g: u32,
-    #[allow(dead_code)] // reserved for live-rescore / dirty sets
-    deps: CandidateDeps,
-    /// Deterministic tie-break when `f_minus_g` matches (child fingerprint).
-    tie: u64,
-}
-
-fn candidate_cmp(a: &Candidate, b: &Candidate) -> Ordering {
-    a.f_minus_g
-        .cmp(&b.f_minus_g)
+fn entry_cmp(a: &RankedBagEntry, b: &RankedBagEntry) -> Ordering {
+    a.cheap_rank_key
+        .cmp(&b.cheap_rank_key)
         .then_with(|| a.tie.cmp(&b.tie))
 }
 
 /// Partition so the best `k` candidates are in `bag[..k]` (sorted); the rest
 /// stay unordered with `bag[k]` equal to the best deferred score when present.
-fn select_top_k(bag: &mut [Candidate], k: usize) {
+fn select_top_k(bag: &mut [RankedBagEntry], k: usize) {
     if bag.is_empty() || k == 0 {
         return;
     }
     let k = k.min(bag.len());
     if bag.len() > k {
-        bag.select_nth_unstable_by(k, candidate_cmp);
-        bag[..k].sort_unstable_by(candidate_cmp);
+        bag.select_nth_unstable_by(k, entry_cmp);
+        bag[..k].sort_unstable_by(entry_cmp);
     } else {
-        bag.sort_unstable_by(candidate_cmp);
+        bag.sort_unstable_by(entry_cmp);
     }
 }
 
@@ -101,38 +59,6 @@ fn select_top_k(bag: &mut [Candidate], k: usize) {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PeaNode {
     inner: PeaInner,
-}
-
-/// True when emit ranking is worse than the best deferred cheap bag score.
-///
-/// Design: emit score > deferred_min_cheap → warn (cheap under-ranked a rival).
-/// Emit/rebuild follow-on better than cheap is expected — do not warn.
-pub(crate) fn emit_score_exceeds_deferred_cheap(emit_score: u32, deferred_min_cheap: u32) -> bool {
-    emit_score > deferred_min_cheap
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct EmitDeferredCheapMismatch {
-    pub cheap_bag_score: u32,
-    pub emit_score: u32,
-    pub deferred_min_cheap: u32,
-}
-
-/// Build a mismatch record when a warn should fire; `None` if no warn.
-pub(crate) fn emit_deferred_cheap_mismatch(
-    cheap_bag_score: u32,
-    emit_score: u32,
-    deferred_min_cheap: Option<u32>,
-) -> Option<EmitDeferredCheapMismatch> {
-    let deferred_min = deferred_min_cheap?;
-    if !emit_score_exceeds_deferred_cheap(emit_score, deferred_min) {
-        return None;
-    }
-    Some(EmitDeferredCheapMismatch {
-        cheap_bag_score,
-        emit_score,
-        deferred_min_cheap: deferred_min,
-    })
 }
 
 /// Expanding identity is `(domain, emitted)` only — `candidates` is ignored.
@@ -147,7 +73,7 @@ enum PeaInner {
     Expanding {
         domain: Vic3Node,
         #[derivative(PartialEq = "ignore", Hash = "ignore")]
-        candidates: Rc<[Candidate]>,
+        candidates: Rc<[RankedBagEntry]>,
         emitted: usize,
     },
 }
@@ -168,128 +94,10 @@ impl PeaNode {
         }
     }
 
-    fn build_candidates(domain: &Vic3Node) -> Vec<Candidate> {
-        let state_curr = domain.state();
-        let curr = match super::progress_h::CheapBagCurr::new(
-            domain.goal(),
-            state_curr,
-            domain.config(),
-            domain.economy(),
-            domain.gdp_for_rates(),
-        ) {
-            Ok(curr) => curr,
-            Err(err) => {
-                // Bag ranking needs meters; fall back to admissible edge+h so
-                // PEA still expands (do not drop the expand).
-                tracing::warn!(
-                    target: "vic3_planning::pea",
-                    ?err,
-                    "CheapBagCurr failed; PEA bag falls back to h_adm"
-                );
-                return domain
-                    .sim_successors()
-                    .into_iter()
-                    .map(|successor| {
-                        let node = Vic3Node::with_shared_context(successor.state, domain);
-                        let edge = u32::from(successor.days);
-                        let f_minus_g = edge.saturating_add(node.heuristic());
-                        let deps = CandidateDeps::from_action(&successor.action);
-                        Candidate {
-                            action: successor.action,
-                            days: successor.days,
-                            f_minus_g,
-                            deps,
-                            tie: node.fingerprint(),
-                        }
-                    })
-                    .collect();
-            }
-        };
-
-        domain
-            .sim_successors()
-            .into_iter()
-            .map(|successor| {
-                // Cheap bag score only (see progress_h::cheap_bag_score deficiencies).
-                // Emit recomputes with speculative complete + full residual.
-                let f_minus_g =
-                    super::progress_h::cheap_bag_score(&successor.action, successor.days, &curr);
-                // Tie-break without building a full child: hash action + days.
-                let tie = {
-                    use std::collections::hash_map::DefaultHasher;
-                    use std::hash::{Hash, Hasher};
-                    let mut hasher = DefaultHasher::new();
-                    successor.action.hash(&mut hasher);
-                    successor.days.hash(&mut hasher);
-                    hasher.finish()
-                };
-                let deps = CandidateDeps::from_action(&successor.action);
-                Candidate {
-                    action: successor.action,
-                    days: successor.days,
-                    f_minus_g,
-                    deps,
-                    tie,
-                }
-            })
-            .collect()
-    }
-
-    fn emit_candidate(domain: &Vic3Node, candidate: &Candidate) -> Option<(Self, u32)> {
-        let state = domain.apply_action(&candidate.action)?;
-        let mut node = Vic3Node::with_shared_context(state, domain);
-
-        // Emit-time GDP: speculative complete + full price solve when possible.
-        // Emitted successor remains post-enqueue; gdp_for_rates anticipates the delta.
-        let gdp_curr = domain.gdp_for_rates();
-        match crate::sim::speculative_completed_state(
-            domain.state(),
-            &candidate.action,
-            domain.economy(),
-            domain.config(),
-        ) {
-            Ok(completed) => {
-                let emit_gdp_delta = completed.gdp - gdp_curr;
-                let gdp_for_rates = gdp_curr + emit_gdp_delta;
-                node = node.with_gdp_for_rates(gdp_for_rates);
-            }
-            Err(err) => {
-                // Apply already succeeded; keep enqueue-only gdp_for_rates (= state.gdp).
-                tracing::debug!(
-                    target: "vic3_planning::pea",
-                    ?err,
-                    action = ?candidate.action,
-                    "speculative_completed_state failed; emit without GDP anticipation"
-                );
-            }
-        }
-
-        Some((Self::ready(node), u32::from(candidate.days)))
-    }
-
-    /// Emit ranking key on speculative completed world (`edge +` residual).
-    fn emit_f_minus_g(domain: &Vic3Node, candidate: &Candidate) -> Option<u32> {
-        let completed = crate::sim::speculative_completed_state(
-            domain.state(),
-            &candidate.action,
-            domain.economy(),
-            domain.config(),
-        )
-        .ok()?;
-        super::progress_h::emit_bag_score(
-            candidate.days,
-            domain.goal(),
-            &completed,
-            domain.config(),
-            domain.economy(),
-        )
-        .ok()
-    }
-
     /// Select top‑K from `bag`, emit applied children, defer the rest.
     fn emit_beam(
         domain: &Vic3Node,
-        mut bag: Vec<Candidate>,
+        mut bag: Vec<RankedBagEntry>,
         already_emitted: usize,
     ) -> Vec<(Self, u32)> {
         let beam = DEFAULT_PEA_BEAM.max(1);
@@ -298,42 +106,32 @@ impl PeaNode {
         }
         select_top_k(&mut bag, beam);
         let take = beam.min(bag.len());
-        // Best deferred **cheap** bag score (for warn vs emit).
-        let deferred_min_cheap = (take < bag.len()).then(|| bag[take].f_minus_g);
+        let deferred_min_cheap = (take < bag.len()).then(|| bag[take].cheap_rank_key);
 
         let mut out = Vec::with_capacity(take.saturating_add(1));
-        for candidate in &bag[..take] {
-            let Some((child, edge)) = Self::emit_candidate(domain, candidate) else {
+        for entry in &bag[..take] {
+            let Some((child, edge)) = bag_rank::emit_child(domain, entry) else {
                 continue;
             };
-            let actual = Self::emit_f_minus_g(domain, candidate).unwrap_or_else(|| {
-                // Fallback when speculative complete / residual unavailable.
-                let residual = super::progress_h::rank_heuristic_with_gdp_for_rates(
-                    domain.goal(),
-                    child.domain().state(),
-                    domain.config(),
-                    domain.economy(),
-                    child.domain().gdp_for_rates(),
-                )
-                .unwrap_or_else(|_| child.domain().heuristic());
-                u32::from(candidate.days).saturating_add(residual)
-            });
-            if let Some(mismatch) =
-                emit_deferred_cheap_mismatch(candidate.f_minus_g, actual, deferred_min_cheap)
-            {
+            let emit_key = bag_rank::emit_rank_key(domain, entry, &child);
+            if let Some(mismatch) = bag_rank::emit_deferred_cheap_mismatch(
+                entry.cheap_rank_key,
+                emit_key,
+                deferred_min_cheap,
+            ) {
                 tracing::warn!(
                     target: "vic3_planning::pea",
-                    cheap_bag_score = mismatch.cheap_bag_score,
-                    emit_score = mismatch.emit_score,
+                    cheap_rank_key = mismatch.cheap_rank_key,
+                    emit_rank_key = mismatch.emit_rank_key,
                     deferred_min_cheap = mismatch.deferred_min_cheap,
-                    gdp = child.domain().state().gdp,
-                    gdp_for_rates = child.domain().gdp_for_rates(),
-                    action = ?candidate.action,
-                    "PEA beam emit score exceeds best deferred cheap bag score \
+                    gdp = child.state().gdp,
+                    gdp_for_rates = child.gdp_for_rates(),
+                    action = ?entry.action,
+                    "PEA beam emit rank exceeds best deferred cheap rank \
                      (cheap under-ranked a deferred rival; see docs/planning-search.md)"
                 );
             }
-            out.push((child, edge));
+            out.push((Self::ready(child), edge));
         }
         let deferred = take < bag.len();
         domain.note_beam_emit(out.len(), deferred);
@@ -359,7 +157,7 @@ impl SearchNode for PeaNode {
     fn successors(&self) -> Vec<(Self, Self::Cost)> {
         match &self.inner {
             PeaInner::Ready(domain) => {
-                let bag = Self::build_candidates(domain);
+                let bag = bag_rank::cheap_rank_bag(domain);
                 domain.note_pea_ready(bag.len());
                 super::astar_trace::on_expand("pea-ready", || {
                     let (fp_dups, fp_uniques) = domain.fingerprint_dup_stats();
@@ -405,11 +203,7 @@ impl SearchNode for PeaNode {
 
     fn is_goal(&self) -> bool {
         match &self.inner {
-            PeaInner::Ready(n) => {
-                let ok = n.is_goal();
-                // Vic3Node::is_goal already traces; avoid double GOAL lines.
-                ok
-            }
+            PeaInner::Ready(n) => n.is_goal(),
             PeaInner::Expanding { .. } => false,
         }
     }
@@ -419,10 +213,10 @@ impl SearchNode for PeaNode {
             PeaInner::Ready(n) => n.heuristic(),
             PeaInner::Expanding { candidates, .. } => {
                 // Remaining bag was sliced after select_nth: index 0 is the
-                // best deferred `edge + h_rank`. That is **not** h_adm; mixing
+                // best deferred cheap rank key. That is **not** h_adm; mixing
                 // this into A* f can drop when the child becomes Ready. v1
                 // tolerates — see docs/planning-search.md.
-                candidates.first().map(|c| c.f_minus_g).unwrap_or(0)
+                candidates.first().map(|c| c.cheap_rank_key).unwrap_or(0)
             }
         }
     }
@@ -438,52 +232,25 @@ mod tests {
     use rust_advanced_heaps::pairing::PairingHeap;
 
     #[test]
-    fn emit_score_exceeds_deferred_cheap_only_when_worse() {
-        assert!(!emit_score_exceeds_deferred_cheap(10, 10));
-        assert!(!emit_score_exceeds_deferred_cheap(9, 10));
-        assert!(emit_score_exceeds_deferred_cheap(11, 10));
-    }
-
-    #[test]
-    fn emit_deferred_cheap_mismatch_none_without_deferred() {
-        assert_eq!(emit_deferred_cheap_mismatch(5, 20, None), None);
-    }
-
-    #[test]
-    fn emit_deferred_cheap_mismatch_some_when_emit_worse() {
-        assert_eq!(
-            emit_deferred_cheap_mismatch(5, 20, Some(10)),
-            Some(EmitDeferredCheapMismatch {
-                cheap_bag_score: 5,
-                emit_score: 20,
-                deferred_min_cheap: 10,
-            })
-        );
-        assert_eq!(emit_deferred_cheap_mismatch(5, 10, Some(10)), None);
-        assert_eq!(emit_deferred_cheap_mismatch(5, 9, Some(10)), None);
-    }
-
-    #[test]
     fn select_top_k_puts_best_prefix_and_bound() {
-        let mut bag: Vec<Candidate> = [30u32, 10, 40, 20, 50, 15]
+        let mut bag: Vec<RankedBagEntry> = [30u32, 10, 40, 20, 50, 15]
             .into_iter()
             .enumerate()
-            .map(|(i, f)| Candidate {
+            .map(|(i, key)| RankedBagEntry {
                 action: Action::QueueTech {
                     tech: format!("t{i}"),
                 },
                 days: 0,
-                f_minus_g: f,
-                deps: CandidateDeps::default(),
+                cheap_rank_key: key,
                 tie: i as u64,
             })
             .collect();
         select_top_k(&mut bag, 3);
-        let prefix: Vec<u32> = bag[..3].iter().map(|c| c.f_minus_g).collect();
+        let prefix: Vec<u32> = bag[..3].iter().map(|c| c.cheap_rank_key).collect();
         assert_eq!(prefix, vec![10, 15, 20]);
-        let deferred_min = bag[3].f_minus_g;
+        let deferred_min = bag[3].cheap_rank_key;
         assert_eq!(deferred_min, 30);
-        assert!(bag[4..].iter().all(|c| c.f_minus_g >= deferred_min));
+        assert!(bag[4..].iter().all(|c| c.cheap_rank_key >= deferred_min));
     }
 
     #[test]
@@ -632,7 +399,6 @@ mod tests {
                 "{name}: PEA day_cost {pea_cost} != full A* {vic3_cost} (sim_branch={branch}, pea_first_expand={pea_branch})"
             );
 
-            // Production `plan()` path (PEA-wired) must match full A* cost.
             let via_plan = plan(
                 root.state().clone(),
                 root.goal().clone(),
@@ -668,22 +434,18 @@ mod tests {
         );
         let pea = PeaNode::ready(root);
         let succs = pea.successors();
-        // Research fixture has few successors (< beam); no Expanding cursor.
         assert!(succs
             .iter()
             .all(|(n, _)| matches!(n.inner, PeaInner::Ready(_))));
         assert!(!succs.is_empty());
     }
 
-    /// PEA emit stores anticipated complete GDP on `gdp_for_rates` while the
-    /// search child state stays post-enqueue (pre-complete GDP).
     #[test]
     fn pea_emit_sets_gdp_for_rates_from_speculative_delta() {
         use crate::test_support::{ger_state, logging_and_cs_economy};
         use vic3_prices::solve;
 
         let mini = logging_and_cs_economy();
-        // Seed state GDP from a real solve so speculative complete delta is meaningful.
         let baseline = solve(
             &mini.economy.base_world,
             &mini.economy.defs,
@@ -783,13 +545,6 @@ mod tests {
     }
 
     /// Live Prussia GDP bump: PEA* day cost must match full A*.
-    ///
-    /// ```text
-    /// VIC3_SAVE=…/prussia_1836_01_01.v3 VIC3_DEFS=…/defs.postcard \
-    ///   cargo test -p vic3-planning --lib \
-    ///   plan::pea::tests::spotcheck_live_save_gdp_pea_vs_full_astar \
-    ///   -- --ignored --nocapture
-    /// ```
     #[test]
     #[ignore = "set VIC3_SAVE and VIC3_DEFS for live Prussia GDP spot-check"]
     fn spotcheck_live_save_gdp_pea_vs_full_astar() {

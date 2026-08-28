@@ -18,13 +18,16 @@ Production `plan` / `plan_with_economy` wrap [`Vic3Node`] in [`PeaNode`]
 - Build one **national** candidate bag from domain successors (all placements /
   actions for that current node), scored by **cheap**
   $\mathrm{score}_{\mathrm{cheap}} = e + \text{follow-on guesstimate}$
-  ([`cheap_bag_score`](../crates/vic3-planning/src/plan/progress_h.rs) —
+  via [`bag_rank::cheap_rank_bag`](../crates/vic3-planning/src/plan/bag_rank.rs)
+  (which calls [`cheap_bag_score`](../crates/vic3-planning/src/plan/progress_h.rs) —
   not the admissible timing $h_{\mathrm{adm}}$).
 - Choose top [`DEFAULT_PEA_BEAM`] (**16**) with `select_nth` (sort only that
   prefix); defer the rest in one `Expanding` cursor (`Rc<[Candidate]>`).
-- **Apply child only on emit** — bag rows store `action` / `days` / cheap score /
-  deps, not a live [`Vic3Node`]. On emit: speculative complete +
-  $\mathrm{score}_{\mathrm{emit}}$; set `gdp_for_rates` from emit GDP delta.
+- **Apply child only on emit** — bag rows store `action` / `days` / cheap score;
+  [`bag_rank::emit_child`](../crates/vic3-planning/src/plan/bag_rank.rs) applies
+  the action and sets `gdp_for_rates`; emit rescore uses
+  [`bag_rank::emit_rank_key`](../crates/vic3-planning/src/plan/bag_rank.rs)
+  ($\mathrm{score}_{\mathrm{emit}}$ via [`emit_bag_score`](../crates/vic3-planning/src/plan/progress_h.rs)).
 - Cursor heuristic is the best deferred **cheap** bag score after `select_nth`.
 - ShopCache stays unranked (score/apply substrate only).
 
@@ -61,8 +64,9 @@ $\mathrm{edge} + h_{\mathrm{adm}}$) so resume cannot invent $f$ drops.
 
 When a beam emit’s $\mathrm{score}_{\mathrm{emit}}$ is **greater** than the
 best deferred $\mathrm{score}_{\mathrm{cheap}}$, `tracing::warn!`
-(`vic3_planning::pea`) fires — decided by pure
-`emit_deferred_cheap_mismatch` (testable without a tracing subscriber).
+(`vic3_planning::pea`) fires — decided by
+[`bag_rank::emit_deferred_cheap_mismatch`](../crates/vic3-planning/src/plan/bag_rank.rs)
+(testable without a tracing subscriber).
 
 ---
 
