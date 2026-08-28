@@ -570,7 +570,7 @@ pub fn cheap_gdp_delta_guesstimate(
     building: &str,
     economy: &EconomyContext,
 ) -> f64 {
-    let Some(building_type) = economy.defs.buildings.get(building) else {
+    let Some(building_type) = economy.defs.building_types.get(building) else {
         return (state.gdp.abs() * 0.005).max(1.0);
     };
     // Optimistic: sum default-PM outputs * current/base price (no input subtract).
@@ -635,17 +635,19 @@ pub fn cheap_construction_sector_points_delta(
 ) -> f64 {
     let world = economy.apply_planning_to_world(state);
 
+    let cs_type_id = economy.defs.building_index_of(BUILDING_CONSTRUCTION_SECTOR);
+
     // Prefer the live CS building’s PM on the applied world when one exists.
     let from_world_cs = world
         .buildings
         .iter()
-        .find(|building| building.building == BUILDING_CONSTRUCTION_SECTOR)
+        .find(|building| cs_type_id.is_some_and(|id| building.building_type_id == id))
         .and_then(|building| construction_add_for_cs_building(building, &economy.defs).ok());
 
     // Else fall back to the first CS production method’s country_construction_add in defs.
     let from_defs_pm = economy
         .defs
-        .buildings
+        .building_types
         .get(BUILDING_CONSTRUCTION_SECTOR)
         .and_then(|building_type| {
             building_type
@@ -728,10 +730,16 @@ fn estimated_build_days(
 pub fn cheap_bag_score(action: &Action, edge_days: u16, curr: &CheapBagCurr<'_>) -> u32 {
     let residual = &curr.residual;
     match action {
-        Action::QueueBuildingLevel { building, .. } if building == BUILDING_CONSTRUCTION_SECTOR => {
+        Action::QueueBuildingLevel {
+            building_type_name: building,
+            ..
+        } if building == BUILDING_CONSTRUCTION_SECTOR => {
             cheap_construction_sector_bag_score(curr, building)
         }
-        Action::QueueBuildingLevel { building, .. } => {
+        Action::QueueBuildingLevel {
+            building_type_name: building,
+            ..
+        } => {
             let build_days = estimated_build_days(curr.state, building, curr.config, curr.economy);
             // Only credit a GDP guesstimate against GDP-only open goals; otherwise
             // keep full follow-on (tech/law/etc. must not be erased by wood output).
@@ -935,7 +943,7 @@ mod tests {
         let state_curr = ger_state().gdp(1000.0).points(5.0).wood_price(30.0).get();
         let goal = compile("gdp >= 5000").unwrap();
         let action = Action::QueueBuildingLevel {
-            building: BUILDING_CONSTRUCTION_SECTOR.into(),
+            building_type_name: BUILDING_CONSTRUCTION_SECTOR.into(),
             state_id: 1,
         };
 
@@ -985,7 +993,7 @@ mod tests {
         let state_curr = state_curr_for_cheap_bag();
         let config = SimConfig::default();
         let action = Action::QueueBuildingLevel {
-            building: "building_logging_camp".into(),
+            building_type_name: "building_logging_camp".into(),
             state_id: 1,
         };
         // Without GDP credit: residual_gap/rate = 1000/10 -> follow 100.
@@ -1038,11 +1046,11 @@ mod tests {
         };
 
         let cs_action = Action::QueueBuildingLevel {
-            building: BUILDING_CONSTRUCTION_SECTOR.into(),
+            building_type_name: BUILDING_CONSTRUCTION_SECTOR.into(),
             state_id: 1,
         };
         let logging_action = Action::QueueBuildingLevel {
-            building: "building_logging_camp".into(),
+            building_type_name: "building_logging_camp".into(),
             state_id: 1,
         };
 
