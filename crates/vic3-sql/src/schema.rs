@@ -69,8 +69,8 @@ pub fn buildings_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
         Field::new("building_id", DataType::UInt32, false),
         Field::new("state_id", DataType::UInt32, true),
-        Field::new("type_id", DataType::Utf8, false),
-        Field::new("type_name", DataType::Utf8, true),
+        Field::new("building_type_name", DataType::Utf8, false),
+        Field::new("building_type_label", DataType::Utf8, true),
         Field::new("level", DataType::Float64, false),
         Field::new("staffing", DataType::Float64, false),
         Field::new("employees", DataType::Float64, false),
@@ -86,8 +86,8 @@ pub fn buildings_schema() -> SchemaRef {
 
 pub fn building_types_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
-        Field::new("type_id", DataType::Utf8, false),
-        Field::new("type_name", DataType::Utf8, true),
+        Field::new("name", DataType::Utf8, false),
+        Field::new("label", DataType::Utf8, true),
         Field::new("group_id", DataType::Utf8, true),
         Field::new("city_type", DataType::Utf8, true),
         Field::new("production_method_groups", text_list_type(), false),
@@ -252,8 +252,8 @@ pub fn shortage_analysis_schema() -> SchemaRef {
 pub fn building_staffing_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
         Field::new("building_id", DataType::UInt32, false),
-        Field::new("building_name", DataType::Utf8, false),
-        Field::new("type_id", DataType::Utf8, false),
+        Field::new("building_type_label", DataType::Utf8, false),
+        Field::new("building_type_name", DataType::Utf8, false),
         Field::new("staffing", DataType::Float64, false),
         Field::new("level", DataType::Float64, false),
         Field::new("profession_name", DataType::Utf8, true),

@@ -280,10 +280,13 @@ pub fn construction_points_per_day_from_save(
             continue;
         }
         let methods = building.active_production_methods();
+        let Some(type_id) = defs.building_index_of(&building.building) else {
+            continue;
+        };
         let world_building = vic3_prices::WorldBuilding {
             id,
             state: building.state,
-            building: building.building.clone(),
+            building_type_id: type_id,
             level,
             staffing: building.staffing.max(0.0),
             production_methods: methods,
@@ -317,7 +320,7 @@ pub fn construction_points_per_day_from_world(
         .filter_map(|state| (state.country == Some(country_id)).then_some(state.id))
         .collect();
     let cs = world.buildings.iter().filter(|building| {
-        building.building == BUILDING_CONSTRUCTION_SECTOR
+        building.type_script_id(defs) == BUILDING_CONSTRUCTION_SECTOR
             && building
                 .state
                 .is_some_and(|state_id| owned_states.contains(&state_id))
@@ -369,7 +372,7 @@ pub fn construction_sector_levels(state: &PlanningState, economy: &EconomyContex
         .apply_planning_to_world(state)
         .buildings
         .iter()
-        .filter(|b| b.building == BUILDING_CONSTRUCTION_SECTOR)
+        .filter(|b| b.type_script_id(&economy.defs) == BUILDING_CONSTRUCTION_SECTOR)
         .map(|b| b.level.max(0.0))
         .sum()
 }
@@ -389,7 +392,7 @@ pub fn national_construction_points_per_day(
     for building in world
         .buildings
         .iter()
-        .filter(|b| b.building == BUILDING_CONSTRUCTION_SECTOR)
+        .filter(|b| b.type_script_id(&economy.defs) == BUILDING_CONSTRUCTION_SECTOR)
     {
         let level = building.level.max(0.0);
         if level <= 0.0 {
@@ -682,11 +685,12 @@ pub fn construction_eta_days(
 /// prior tick drained the job.
 pub fn construction_work_complete(
     state: &PlanningState,
+    defs: &vic3_defs::GameDefs,
     building: &str,
     state_id: Option<u32>,
 ) -> bool {
     state.constructions.iter().any(|row| {
-        row.building == building
+        defs.building_types_equivalent(&row.building, building)
             && state_id
                 .map(|want| row.state_id == Some(want) || row.state_id.is_none())
                 .unwrap_or(true)
@@ -737,7 +741,7 @@ pub fn construction_work_points_for_enqueue(
 ) -> Option<f64> {
     economy
         .defs
-        .buildings
+        .building_types
         .get(building)
         .and_then(|b| b.required_construction)
         .filter(|c| c.is_finite() && *c >= 0.0)
@@ -779,10 +783,24 @@ mod tests {
                 ..ProductionMethod::default()
             },
         );
+        defs.building_types.insert(
+            BUILDING_CONSTRUCTION_SECTOR.into(),
+            BuildingType {
+                id: BUILDING_CONSTRUCTION_SECTOR.into(),
+                group: None,
+                city_type: None,
+                production_method_groups: Vec::new(),
+                required_construction: Some(10.0),
+            },
+        );
+        defs.building_types_order
+            .push(BUILDING_CONSTRUCTION_SECTOR.into());
         let building = WorldBuilding {
             id: 7,
             state: Some(1),
-            building: BUILDING_CONSTRUCTION_SECTOR.into(),
+            building_type_id: defs
+                .building_index_of(BUILDING_CONSTRUCTION_SECTOR)
+                .expect("cs"),
             level: 1.0,
             staffing: 1.0,
             production_methods: vec!["pm_not_construction".into()],
@@ -992,7 +1010,7 @@ mod tests {
     #[test]
     fn sync_points_per_day_after_cs_level_applies_government_share() {
         let mut defs = GameDefs::default();
-        defs.buildings.insert(
+        defs.building_types.insert(
             BUILDING_CONSTRUCTION_SECTOR.into(),
             BuildingType {
                 id: BUILDING_CONSTRUCTION_SECTOR.into(),
@@ -1002,6 +1020,8 @@ mod tests {
                 required_construction: Some(10.0),
             },
         );
+        defs.building_types_order
+            .push(BUILDING_CONSTRUCTION_SECTOR.into());
         defs.production_methods.insert(
             "pm_iron_frame_buildings".into(),
             ProductionMethod {
@@ -1024,7 +1044,9 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(1),
-                building: BUILDING_CONSTRUCTION_SECTOR.into(),
+                building_type_id: defs
+                    .building_index_of(BUILDING_CONSTRUCTION_SECTOR)
+                    .expect("cs"),
                 level: 0.0,
                 staffing: 0.0,
                 production_methods: vec!["pm_iron_frame_buildings".into()],

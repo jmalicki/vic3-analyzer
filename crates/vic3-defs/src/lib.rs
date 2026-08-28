@@ -33,7 +33,7 @@
 //!
 //! `goods_order` follows deterministic `common/goods` source-file order so
 //! saved building IO indices line up with vanilla. Dense [`GoodId`] /
-//! [`NeedId`] vectors are preferred over string keys in hot paths.
+//! [`NeedId`] / [`BuildingTypeId`] vectors are preferred over string keys in hot paths.
 //!
 //! # Path allowlist
 //!
@@ -50,6 +50,7 @@
 //! compatible.
 
 mod blob;
+mod building_types;
 mod coa;
 mod error;
 mod goods;
@@ -64,6 +65,7 @@ mod substitution;
 mod types;
 
 pub use blob::{decode_blob, encode_blob, BLOB_VERSION};
+pub use building_types::BuildingTypeId;
 pub use coa::{select_coa, select_flag_coa};
 pub use error::DefsError;
 pub use goods::{GoodId, GoodsVec};

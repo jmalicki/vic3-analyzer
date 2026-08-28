@@ -2,6 +2,24 @@
   "$defs": {
     "BuildingEconomics": {
       "properties": {
+        "building_type_id": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "building_type_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "building_type_name": {
+          "type": "string"
+        },
         "cost": {
           "format": "double",
           "type": "number"
@@ -64,14 +82,11 @@
             "integer",
             "null"
           ]
-        },
-        "type_id": {
-          "type": "string"
         }
       },
       "required": [
         "id",
-        "type_id",
+        "building_type_name",
         "level",
         "staffing",
         "production_method_ids",
@@ -101,8 +116,11 @@
             "null"
           ]
         },
-        "id": {
-          "type": "string"
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "land_usage": {
           "type": [
@@ -111,10 +129,7 @@
           ]
         },
         "name": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "parent_group": {
           "type": [
@@ -124,7 +139,7 @@
         }
       },
       "required": [
-        "id",
+        "name",
         "always_possible"
       ],
       "type": "object"
@@ -144,17 +159,24 @@
           ]
         },
         "id": {
-          "type": "string"
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
         },
-        "name": {
+        "label": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "name": {
+          "type": "string"
         }
       },
       "required": [
-        "id"
+        "id",
+        "name"
       ],
       "type": "object"
     },

@@ -304,7 +304,7 @@ pub fn world_delta_from_sugar(
         }
         return Ok(WorldDelta {
             extra_levels: vec![ExtraLevelsDelta {
-                building: None,
+                building_type_id: None,
                 building_id: Some(id),
                 extra_levels,
             }],
@@ -315,13 +315,17 @@ pub fn world_delta_from_sugar(
     let building = building.ok_or_else(|| {
         "sugar preview requires building or building_id (with extra_levels)".to_string()
     })?;
+    let building_type_id = binding
+        .defs
+        .resolve_building_type_index(building)
+        .ok_or_else(|| format!("unknown building type {building:?}"))?;
 
     if let Some(want_state) = state_id {
         let ids: Vec<u32> = binding
             .world
             .buildings
             .iter()
-            .filter(|b| b.building == building && b.state == Some(want_state))
+            .filter(|b| b.building_type_id == building_type_id && b.state == Some(want_state))
             .map(|b| b.id)
             .collect();
         if ids.is_empty() {
@@ -331,7 +335,7 @@ pub fn world_delta_from_sugar(
             extra_levels: ids
                 .into_iter()
                 .map(|id| ExtraLevelsDelta {
-                    building: None,
+                    building_type_id: None,
                     building_id: Some(id),
                     extra_levels,
                 })
@@ -342,7 +346,7 @@ pub fn world_delta_from_sugar(
 
     Ok(WorldDelta {
         extra_levels: vec![ExtraLevelsDelta {
-            building: Some(building.to_string()),
+            building_type_id: Some(building_type_id),
             building_id: None,
             extra_levels,
         }],

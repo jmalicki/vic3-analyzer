@@ -375,13 +375,14 @@ fn building_for_lever(
         if building.state_id != Some(state_id) {
             return None;
         }
-        if is_subsistence(&building.type_id, defs) {
+        if is_subsistence(&building.building_type_name, defs) {
             return None;
         }
-        lever_matches_building(key, &building.type_id, defs).then(|| building.type_id.clone())
+        lever_matches_building(key, &building.building_type_name, defs)
+            .then(|| building.building_type_name.clone())
     });
     from_state.or_else(|| {
-        defs.buildings.keys().find_map(|id| {
+        defs.building_types.keys().find_map(|id| {
             if is_subsistence(id, defs) {
                 return None;
             }
@@ -397,7 +398,7 @@ fn lever_matches_building(key: LeverKey, type_id: &str, defs: &GameDefs) -> bool
         }
         return true;
     }
-    let Some(building) = defs.buildings.get(type_id) else {
+    let Some(building) = defs.building_types.get(type_id) else {
         return false;
     };
     if key == LeverKey::Farm
@@ -415,14 +416,14 @@ pub(crate) fn is_subsistence(type_id: &str, defs: &GameDefs) -> bool {
     if id_has(type_id, "subsistence") {
         return true;
     }
-    defs.buildings
+    defs.building_types
         .get(type_id)
         .and_then(|building| building.group.as_deref())
         .is_some_and(|group| id_has(group, "subsistence"))
 }
 
 pub(crate) fn professions_employed(defs: &GameDefs, type_id: &str) -> Vec<String> {
-    let Some(building) = defs.buildings.get(type_id) else {
+    let Some(building) = defs.building_types.get(type_id) else {
         return Vec::new();
     };
     let mut counts: BTreeMap<String, f64> = BTreeMap::new();
@@ -644,8 +645,8 @@ pub struct ProfessionGap {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct BuildingStaffing {
     pub building_id: u32,
-    pub building_name: String,
-    pub type_id: String,
+    pub building_type_label: String,
+    pub building_type_name: String,
     pub staffing: f64,
     pub level: f64,
     pub professions: Vec<ProfessionGap>,
@@ -670,8 +671,8 @@ pub(crate) fn building_staffing(
         .collect();
     BuildingStaffing {
         building_id: building.id,
-        building_name: name,
-        type_id: building.type_id.clone(),
+        building_type_label: name,
+        building_type_name: building.building_type_name.clone(),
         staffing: building.staffing,
         level: building.level,
         professions,

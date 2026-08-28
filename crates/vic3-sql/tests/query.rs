@@ -206,7 +206,7 @@ async fn buildings_expose_list_io_columns() {
     let eng = engine().await;
     let batches = eng
         .query(
-            "SELECT building_id, type_id, production_methods, input_goods, output_goods \
+            "SELECT building_id, building_type_name, production_methods, input_goods, output_goods \
              FROM buildings",
         )
         .await
@@ -228,7 +228,7 @@ async fn buildings_expose_list_io_columns() {
 async fn building_types_and_production_methods_from_defs() {
     let eng = engine().await;
     let types = eng
-        .query("SELECT type_id FROM building_types WHERE type_id = 'building_rye_farm'")
+        .query("SELECT name FROM building_types WHERE name = 'building_rye_farm'")
         .await
         .expect("building_types");
     assert_eq!(types[0].num_rows(), 1);
@@ -639,8 +639,8 @@ async fn btree_range_on_building_types() {
     // Exact range pushdown on BTreeMap key `type_id`.
     let batches = eng
         .query(
-            "SELECT type_id FROM building_types \
-             WHERE type_id >= 'building_a' AND type_id < 'building_z'",
+            "SELECT name FROM building_types \
+             WHERE name >= 'building_a' AND name < 'building_z'",
         )
         .await
         .expect("range");
@@ -903,7 +903,7 @@ async fn building_staffing_for_state() {
         .unwrap()
         .value(0);
     let sql = format!(
-        "SELECT building_id, type_id, profession_name, employed_here, jobs_here \
+        "SELECT building_id, building_type_name, profession_name, employed_here, jobs_here \
          FROM building_staffing({sid})"
     );
     let batches = eng.query(&sql).await.expect("staffing");

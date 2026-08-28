@@ -458,7 +458,7 @@ mod tests {
             price_range: 0.75,
             ..GameDefs::default()
         };
-        defs.buildings.insert(
+        defs.building_types.insert(
             "building_rye_farm".into(),
             BuildingType {
                 id: "building_rye_farm".into(),
@@ -476,10 +476,15 @@ mod tests {
                 ..ProductionMethod::default()
             },
         );
+        defs.ensure_building_type("building_rye_farm");
         defs
     }
 
     fn tiny_world(defs: &GameDefs) -> World {
+        assert!(
+            defs.building_index_of("building_rye_farm").is_some(),
+            "tiny_defs must register building_rye_farm"
+        );
         let n = defs.goods_order.len();
         World {
             countries: vec![WorldCountry {
@@ -497,7 +502,9 @@ mod tests {
             buildings: vec![WorldBuilding {
                 id: 1,
                 state: Some(10),
-                building: "building_rye_farm".into(),
+                building_type_id: defs
+                    .building_index_of("building_rye_farm")
+                    .expect("rye farm"),
                 level: 1.0,
                 staffing: 1.0,
                 production_methods: vec!["pm_grain".into()],

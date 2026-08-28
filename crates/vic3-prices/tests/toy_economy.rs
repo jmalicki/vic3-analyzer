@@ -36,20 +36,29 @@ fn good<'a>(result: &'a PricesResult, id: &str) -> &'a GoodPrice {
         .unwrap_or_else(|| panic!("missing good {id}"))
 }
 
-fn mill_id(world: &World) -> u32 {
+fn mill_id(world: &World, defs: &vic3_defs::GameDefs) -> u32 {
+    let mill = defs
+        .building_index_of("building_flour_mill")
+        .expect("flour mill def");
     world
         .buildings
         .iter()
-        .find(|b| b.building == "building_flour_mill")
+        .find(|b| b.building_type_id == mill)
         .map(|b| b.id)
         .expect("flour mill in toy save")
 }
 
-fn trade_center(world: &World) -> &vic3_prices::WorldBuilding {
+fn trade_center<'a>(
+    world: &'a World,
+    defs: &vic3_defs::GameDefs,
+) -> &'a vic3_prices::WorldBuilding {
+    let tc = defs
+        .building_index_of("building_trade_center")
+        .expect("trade center def");
     world
         .buildings
         .iter()
-        .find(|b| b.building == "building_trade_center")
+        .find(|b| b.building_type_id == tc)
         .expect("trade center in toy save")
 }
 
@@ -57,14 +66,10 @@ fn trade_center(world: &World) -> &vic3_prices::WorldBuilding {
 fn toy_economy_solve_converges() {
     let (world, defs) = load_toy_world();
     assert_eq!(world.buildings.len(), 4);
-    assert!(world
-        .buildings
-        .iter()
-        .any(|b| b.building == "building_wheat_farm"));
-    assert!(world
-        .buildings
-        .iter()
-        .any(|b| b.building == "building_bakery"));
+    let wheat = defs.building_index_of("building_wheat_farm").unwrap();
+    let bakery = defs.building_index_of("building_bakery").unwrap();
+    assert!(world.buildings.iter().any(|b| b.building_type_id == wheat));
+    assert!(world.buildings.iter().any(|b| b.building_type_id == bakery));
 
     let result = solve(&world, &defs, SolveOpts::default());
     assert!(
@@ -97,7 +102,7 @@ fn what_if_extra_farm_levels_raises_wheat_supply_and_lowers_price() {
         &world,
         &defs,
         &WhatIfOpts {
-            building: "building_wheat_farm".into(),
+            building_type_id: defs.building_index_of("building_wheat_farm").unwrap(),
             extra_levels: 2,
         },
         SolveOpts::default(),
@@ -121,7 +126,7 @@ fn what_if_extra_farm_levels_raises_wheat_supply_and_lowers_price() {
         world
             .buildings
             .iter()
-            .find(|b| b.building == "building_wheat_farm")
+            .find(|b| b.building_type_id == defs.building_index_of("building_wheat_farm").unwrap())
             .map(|b| b.level),
         Some(3.0),
         "source world must stay immutable"
@@ -136,7 +141,7 @@ fn what_if_extra_bakery_levels_raises_bread_supply_and_lowers_price() {
         &world,
         &defs,
         &WhatIfOpts {
-            building: "building_bakery".into(),
+            building_type_id: defs.building_index_of("building_bakery").unwrap(),
             extra_levels: 2,
         },
         SolveOpts::default(),
@@ -171,7 +176,7 @@ fn what_if_extra_bakery_levels_raises_bread_supply_and_lowers_price() {
 #[test]
 fn preview_mill_pm_swap_to_efficient_changes_io() {
     let (world, defs) = load_toy_world();
-    let mill = mill_id(&world);
+    let mill = mill_id(&world, &defs);
     let baseline = solve(&world, &defs, SolveOpts::default());
 
     let delta = WorldDelta {
@@ -245,19 +250,19 @@ fn preview_extra_levels_on_trade_center_type() {
     // `preview_extra_levels_on_trade_center_type` in the unit tests; state trade
     // quantities stay frozen unless edited elsewhere.
     let (world, defs) = load_toy_world();
-    let before = trade_center(&world).clone();
+    let before = trade_center(&world, &defs).clone();
     let state_trade_before = world.state_trade.clone();
 
     let delta = WorldDelta {
         extra_levels: vec![ExtraLevelsDelta {
-            building: Some("building_trade_center".into()),
+            building_type_id: Some(defs.building_index_of("building_trade_center").unwrap()),
             building_id: None,
             extra_levels: 2,
         }],
         ..WorldDelta::default()
     };
     let next = apply_delta(&world, &delta);
-    let after = trade_center(&next);
+    let after = trade_center(&next, &defs);
 
     assert_eq!(before.level, 1.0);
     assert_eq!(after.level, 3.0);
@@ -269,5 +274,9 @@ fn preview_extra_levels_on_trade_center_type() {
 
     let result = preview(&world, &defs, &delta, SolveOpts::default());
     assert!(result.residual.is_finite());
-    assert_eq!(trade_center(&world).level, 1.0, "source world immutable");
+    assert_eq!(
+        trade_center(&world, &defs).level,
+        1.0,
+        "source world immutable"
+    );
 }

@@ -761,7 +761,7 @@ pub fn prices_json(
 
 /// Apply a what-if building-level delta and re-solve. One-shot.
 ///
-/// `what_if_opts_json` is [`WhatIfOpts`] (`building`, `extra_levels`).
+/// `what_if_opts_json` is [`WhatIfOpts`] (`building_type_id`, `extra_levels`).
 ///
 /// # Errors
 ///
@@ -1368,6 +1368,28 @@ mod tests {
         encode_blob(&defs).expect("encode defs blob")
     }
 
+    fn rye_farm_what_if_json(extra_levels: u32) -> String {
+        let defs = vic3_defs::decode_blob(&defs_blob()).expect("defs");
+        let building_type_id = defs
+            .building_index_of("building_rye_farm")
+            .expect("rye farm");
+        format!(
+            r#"{{"building_type_id":{},"extra_levels":{extra_levels}}}"#,
+            building_type_id.raw()
+        )
+    }
+
+    fn rye_farm_delta_json(extra_levels: u32) -> String {
+        let defs = vic3_defs::decode_blob(&defs_blob()).expect("defs");
+        let building_type_id = defs
+            .building_index_of("building_rye_farm")
+            .expect("rye farm");
+        format!(
+            r#"{{"extra_levels":[{{"building_type_id":{},"extra_levels":{extra_levels}}}]}}"#,
+            building_type_id.raw()
+        )
+    }
+
     #[test]
     fn builds_defs_blob_from_browser_manifest() {
         let goods = br#"grain = { cost = 20 }"#;
@@ -1484,8 +1506,7 @@ mod tests {
                 .expect("PricesResult");
         assert!(!baseline.goods.is_empty());
         let changed: PricesResult = serde_json::from_str(
-            &loaded_what_if_json(r#"{"building":"building_rye_farm","extra_levels":5}"#)
-                .expect("cached what-if"),
+            &loaded_what_if_json(&rye_farm_what_if_json(5)).expect("cached what-if"),
         )
         .expect("PricesResult");
         assert!(changed.residual.is_finite());
@@ -1517,10 +1538,7 @@ mod tests {
         clear_analysis();
         load_analysis_json(&load_fixture(), None, &defs_blob(), "{}").expect("load analysis");
         let baseline = loaded_prices_json().expect("cached prices");
-        let previewed = loaded_apply_delta_json(
-            r#"{"extra_levels":[{"building":"building_rye_farm","extra_levels":5}]}"#,
-        )
-        .expect("preview delta");
+        let previewed = loaded_apply_delta_json(&rye_farm_delta_json(5)).expect("preview delta");
         let after = loaded_prices_json().expect("prices after preview");
         assert_eq!(after, baseline, "preview must not commit loaded prices");
         let previewed_result: PricesResult =
@@ -1694,7 +1712,7 @@ mod tests {
             None,
             &defs_blob(),
             "{}",
-            r#"{"building":"building_rye_farm","extra_levels":5}"#,
+            &rye_farm_what_if_json(5),
         )
         .expect("what-if");
         let result: PricesResult = serde_json::from_str(&json).expect("PricesResult");

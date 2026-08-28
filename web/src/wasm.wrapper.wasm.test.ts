@@ -12,6 +12,22 @@ function readBytes(...parts: string[]): Uint8Array {
   return new Uint8Array(readFileSync(resolve(...parts)))
 }
 
+async function buildingTypeId(
+  api: WasmApi,
+  save: Uint8Array,
+  defs: Uint8Array,
+  buildingTypeName: string,
+): Promise<number> {
+  const result = JSON.parse(await api.prices(save, undefined, defs, '{}'))
+  const type = result.building_types?.find(
+    (row: { name: string; id?: number }) => row.name === buildingTypeName,
+  )
+  if (type?.id == null) {
+    throw new Error(`building type ${buildingTypeName} missing from building_types`)
+  }
+  return type.id
+}
+
 describe('wasm wrapper (real wasm-pack build)', () => {
   let api: WasmApi
   let save: Uint8Array
@@ -152,9 +168,10 @@ describe('wasm wrapper (real wasm-pack build)', () => {
 
     const cached = JSON.parse(await api.loaded_prices())
     expect(cached).toEqual(loaded.prices)
+    const ryeFarmId = await buildingTypeId(api, save, defs, 'building_rye_farm')
     const changed = JSON.parse(
       await api.loaded_what_if(
-        JSON.stringify({ building: 'building_rye_farm', extra_levels: 1 }),
+        JSON.stringify({ building_type_id: ryeFarmId, extra_levels: 1 }),
       ),
     )
     expect(changed.goods.length).toBeGreaterThan(0)
@@ -189,13 +206,14 @@ describe('wasm wrapper (real wasm-pack build)', () => {
   })
 
   it('what_if returns residual and limitations', async () => {
+    const ryeFarmId = await buildingTypeId(api, save, defs, 'building_rye_farm')
     const result = JSON.parse(
       await api.what_if(
         save,
         undefined,
         defs,
         '{}',
-        JSON.stringify({ building: 'building_rye_farm', extra_levels: 5 }),
+        JSON.stringify({ building_type_id: ryeFarmId, extra_levels: 5 }),
       ),
     )
     expect(typeof result.residual).toBe('number')
@@ -238,9 +256,9 @@ describe('wasm wrapper (real wasm-pack build)', () => {
 
   it('schemas are non-empty and describe required fields', () => {
     const whatIf = JSON.parse(api.what_if_schema())
-    expect(whatIf.properties.building).toBeTruthy()
+    expect(whatIf.properties.building_type_id).toBeTruthy()
     expect(whatIf.properties.extra_levels).toBeTruthy()
-    expect(whatIf.required).toEqual(expect.arrayContaining(['building', 'extra_levels']))
+    expect(whatIf.required).toEqual(expect.arrayContaining(['building_type_id', 'extra_levels']))
 
     const prices = JSON.parse(api.prices_schema())
     expect(prices.properties.residual).toBeTruthy()

@@ -70,7 +70,12 @@ fn main() -> Result<()> {
         Commands::WhatIf(cmd) => {
             let (world, defs) = load_world(&cmd.io)?;
             emit(
-                &what_if(&world, &defs, &cmd.what_if.into(), cmd.solve.into()),
+                &what_if(
+                    &world,
+                    &defs,
+                    &cmd.what_if.resolve(&defs)?,
+                    cmd.solve.into(),
+                ),
                 cmd.json,
             )
         }
@@ -184,7 +189,7 @@ impl From<SolveArgs> for SolveOpts {
 /// Flatten of [`WhatIfOpts`].
 #[derive(Debug, Clone, Args)]
 struct WhatIfArgs {
-    /// Building type id to bump.
+    /// Building type script id to bump (resolved to a dense index via defs).
     #[arg(long)]
     building: String,
     /// Non-negative extra levels added to matching buildings.
@@ -192,12 +197,15 @@ struct WhatIfArgs {
     extra_levels: u32,
 }
 
-impl From<WhatIfArgs> for WhatIfOpts {
-    fn from(args: WhatIfArgs) -> Self {
-        Self {
-            building: args.building,
-            extra_levels: args.extra_levels,
-        }
+impl WhatIfArgs {
+    fn resolve(self, defs: &vic3_defs::GameDefs) -> Result<WhatIfOpts> {
+        let building_type_id = defs
+            .resolve_building_type_index(&self.building)
+            .ok_or_else(|| anyhow::anyhow!("unknown building type `{}`", self.building))?;
+        Ok(WhatIfOpts {
+            building_type_id,
+            extra_levels: self.extra_levels,
+        })
     }
 }
 

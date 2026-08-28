@@ -70,15 +70,16 @@ export interface StateQualification {
 }
 
 export interface BuildingTypeInfo {
-  id: string
-  name?: string
+  id: number
+  name: string
+  label?: string
   group_id?: string
   city_type?: string
 }
 
 export interface BuildingGroupInfo {
-  id: string
-  name?: string
+  name: string
+  label?: string
   category?: string
   land_usage?: string
   always_possible: boolean
@@ -108,7 +109,9 @@ export interface GoodFlow {
 export interface BuildingEconomics {
   id: number
   state_id?: number
-  type_id: string
+  building_type_id?: number
+  building_type_name: string
+  building_type_label?: string
   level: number
   staffing: number
   production_method_ids?: string[]
@@ -178,7 +181,7 @@ export interface ProductionMethodDelta {
 }
 
 export interface ExtraLevelsDelta {
-  building?: string
+  building_type_id?: number
   building_id?: number
   extra_levels: number
 }
@@ -323,8 +326,8 @@ export interface ProfessionGap {
 
 export interface BuildingStaffing {
   building_id: number
-  building_name: string
-  type_id: string
+  building_type_label: string
+  building_type_name: string
   staffing: number
   level: number
   professions: ProfessionGap[]

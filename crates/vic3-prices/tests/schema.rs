@@ -146,7 +146,7 @@ fn prices_schema_required_fields_match_json_schema_md() {
 fn what_if_schema_required_fields_match_json_schema_md() {
     let schema = serde_json::to_value(schema_for!(WhatIfOpts)).unwrap();
     let req = required(&schema);
-    for field in ["building", "extra_levels"] {
+    for field in ["building_type_id", "extra_levels"] {
         assert!(
             req.iter().any(|f| f == field),
             "{field} must be required in WhatIfOpts schema, got {req:?}"

@@ -25,7 +25,7 @@ const result: PricesResult = {
     {
       id: 7,
       state_id: 1,
-      type_id: 'building_silly_hammer_factory',
+      building_type_name: 'building_silly_hammer_factory',
       level: 3,
       staffing: 2.4,
       inputs: [],
@@ -37,7 +37,7 @@ const result: PricesResult = {
     },
   ],
   building_types: [
-    { id: 'building_silly_hammer_factory', name: 'Silly Hammer Factory' },
+    { id: 0, name: 'building_silly_hammer_factory', label: 'Silly Hammer Factory' },
   ],
   state_pops: [
     {

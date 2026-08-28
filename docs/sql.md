@@ -186,8 +186,8 @@ Per-building modeled economy (from `BuildingEconomics` / `WorldBuilding`).
 | --- | --- |
 | `building_id` | **key** |
 | `state_id` | FK → states |
-| `type_id` | Script building type (`building_rye_farm`, …); FK → `building_types` |
-| `type_name` | Localized when available |
+| `building_type_name` | Script building type (`building_rye_farm`, …); FK → `building_types.name` |
+| `building_type_label` | Localized when available |
 | `level` / `staffing` | Levels vs staffed levels |
 | `employees` | Summary or join to `building_staffing` TVF |
 | `profit` / `revenue` / `cost` | As modeled |
@@ -199,7 +199,7 @@ Filter examples without a junction table:
 
 ```sql
 -- Buildings whose active PMs include a given method
-SELECT building_id, type_id
+SELECT building_id, building_type_name
 FROM buildings
 WHERE array_has(production_methods, 'pm_steam_engines');  -- exact DF fn name TBD; document chosen helper
 
@@ -218,8 +218,8 @@ Static catalog from `GameDefs` (same for all saves once defs are loaded). Prefer
 
 | Column | Notes |
 | --- | --- |
-| `type_id` | Script id; **key** (`BTreeMap` → Exact `=` and range) |
-| `type_name` | Localized |
+| `name` | Script id; **key** (`BTreeMap` → Exact `=` and range) |
+| `label` | Localized |
 | `group_id` | Building group |
 | `city_type` | If present |
 | `production_method_groups` | `TEXT[]` — already a `Vec` on `BuildingType`; Exact contains/`array_has` if we bother, else scan+filter |
@@ -290,7 +290,7 @@ Full private + government construction queues from save IR (`World.constructions
 | `position` | Dense 0-based index within `(country_id, queue)` (scan order) |
 | `country_id` | Owner resolved from the order's state; nullable if unknown |
 | `state_id` | Target state; nullable if missing on the order |
-| `building` | Building type script id; FK → `building_types.type_id` |
+| `building` | Building type script id; FK → `building_types.name` |
 | `building_name` | Localized label when defs provide one |
 | `remaining` | Remaining construction points when present |
 
@@ -445,8 +445,8 @@ One row per building×profession gap for buildings in that state (same professio
 | Column | Type | Notes |
 | --- | --- | --- |
 | `building_id` | int | |
-| `building_name` | text | Localized type label when available |
-| `type_id` | text | |
+| `building_type_label` | text | Localized type label when available |
+| `building_type_name` | text | Script building type key |
 | `staffing` / `level` | float | |
 | `profession_name` | text nullable | Script key; null when no employee rows are emitted (empty list, or every row filtered by staffing thresholds) |
 | `profession_label` | text nullable | Localized display name when available |

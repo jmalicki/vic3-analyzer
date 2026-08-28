@@ -2,15 +2,16 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{GoodId, NeedId, NeedsVec, DEFAULT_PRICE_RANGE};
+use crate::{BuildingTypeId, GoodId, NeedId, NeedsVec, DEFAULT_PRICE_RANGE};
 
 /// Parsed Victoria 3 definitions used by the price solver and wasm UI.
 ///
 /// Built with [`crate::load_from_path`] from a game install or fixture tree,
 /// [`crate::load_from_files`] / [`crate::DefsBuilder`] from an allowlisted
 /// in-memory selection, or [`crate::decode_blob`] from a postcard snapshot
-/// (wasm). Dense [`crate::GoodId`] / [`crate::NeedId`] vectors align with
-/// [`Self::goods_order`] / [`Self::needs_order`].
+/// (wasm). Dense [`crate::GoodId`] / [`crate::NeedId`] / [`crate::BuildingTypeId`]
+/// vectors align with [`Self::goods_order`] / [`Self::needs_order`] /
+/// [`Self::building_types_order`].
 ///
 /// Icons and flags are PNG bytes ready for the browser; DDS stays on disk
 /// during load. Localization may be empty when English goods/country files
@@ -21,6 +22,12 @@ pub struct GameDefs {
     pub price_range: f64,
     /// Good ids in deterministic `common/goods` source-file order.
     pub goods_order: Vec<String>,
+    /// Building type script ids in first-seen `common/buildings` source-file order.
+    ///
+    /// Dense [`crate::BuildingTypeId`] values index this table (same idea as
+    /// [`Self::goods_order`]), not BTreeMap key order.
+    #[serde(default)]
+    pub building_types_order: Vec<String>,
     /// Need ids in deterministic first-seen load order.
     pub needs_order: Vec<String>,
     pub goods: BTreeMap<String, Good>,
@@ -44,8 +51,8 @@ pub struct GameDefs {
     #[serde(default)]
     pub flag_defs: BTreeMap<String, Vec<FlagDefinition>>,
     pub production_methods: BTreeMap<String, ProductionMethod>,
-    /// Building type id → state-panel metadata.
-    pub buildings: BTreeMap<String, BuildingType>,
+    /// Building type script id → state-panel metadata.
+    pub building_types: BTreeMap<String, BuildingType>,
     /// Building group id → grouping and slot-capacity metadata.
     pub building_groups: BTreeMap<String, BuildingGroup>,
     /// Pop needs aligned with [`Self::needs_order`].
@@ -76,6 +83,7 @@ impl Default for GameDefs {
         Self {
             price_range: DEFAULT_PRICE_RANGE,
             goods_order: Vec::new(),
+            building_types_order: Vec::new(),
             needs_order: Vec::new(),
             goods: BTreeMap::new(),
             labels: BTreeMap::new(),
@@ -84,7 +92,7 @@ impl Default for GameDefs {
             flags: BTreeMap::new(),
             flag_defs: BTreeMap::new(),
             production_methods: BTreeMap::new(),
-            buildings: BTreeMap::new(),
+            building_types: BTreeMap::new(),
             building_groups: BTreeMap::new(),
             pop_needs: Vec::new(),
             buy_packages: BTreeMap::new(),
@@ -112,6 +120,82 @@ impl GameDefs {
             .iter()
             .position(|id| id == need_id)
             .map(NeedId::from_usize)
+    }
+
+    /// Index of `building_type` in [`Self::building_types_order`], if known.
+    pub fn building_index_of(&self, building_type: &str) -> Option<BuildingTypeId> {
+        self.building_types_order
+            .iter()
+            .position(|id| id == building_type)
+            .map(BuildingTypeId::from_usize)
+    }
+
+    /// Resolve a building type script key, including known Paradox aliases.
+    pub fn resolve_building_type_index(&self, building_type: &str) -> Option<BuildingTypeId> {
+        self.building_index_of(building_type).or_else(|| {
+            crate::building_types::building_type_alias(building_type)
+                .and_then(|alias| self.building_index_of(alias))
+        })
+    }
+
+    /// Resolve a building type script key against [`Self::building_types`], including aliases.
+    pub fn resolve_building_type_key<'a>(&'a self, building_type: &'a str) -> Option<&'a str> {
+        if self.building_types.contains_key(building_type) {
+            return Some(building_type);
+        }
+        crate::building_types::building_type_alias(building_type)
+            .and_then(|alias| self.building_types.contains_key(alias).then_some(alias))
+    }
+
+    /// Whether two script keys refer to the same building type.
+    pub fn building_types_equivalent(&self, left: &str, right: &str) -> bool {
+        if left == right {
+            return true;
+        }
+        match (
+            self.resolve_building_type_index(left),
+            self.resolve_building_type_index(right),
+        ) {
+            (Some(left_id), Some(right_id)) => left_id == right_id,
+            _ => false,
+        }
+    }
+
+    /// Dense-order script key for `building`, when known.
+    pub fn canonical_building_type_key(&self, building: &str) -> Option<String> {
+        self.resolve_building_type_index(building)
+            .map(|id| self.building_by_index(id).to_string())
+    }
+
+    /// Building type script key at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is outside [`Self::building_types_order`].
+    pub fn building_by_index(&self, index: BuildingTypeId) -> &str {
+        self.building_types_order
+            .get(index.as_usize())
+            .map(String::as_str)
+            .unwrap_or_else(|| {
+                panic!(
+                    "BuildingTypeId {} out of range (building_types_order len {})",
+                    index.as_usize(),
+                    self.building_types_order.len()
+                )
+            })
+    }
+
+    /// Building type definition at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of range or the order entry is missing from
+    /// [`Self::building_types`].
+    pub fn building_type(&self, index: BuildingTypeId) -> &BuildingType {
+        let key = self.building_by_index(index);
+        self.building_types.get(key).unwrap_or_else(|| {
+            panic!("building type `{key}` in building_types_order but missing from building_types")
+        })
     }
 
     /// Base price for `good_id`, if that good was parsed.
@@ -157,6 +241,41 @@ impl GameDefs {
     /// Call after manually assembling packages in tests.
     pub fn rebuild_package_ladder(&mut self) {
         self.package_ladder = build_package_ladder(&self.buy_packages, self.needs_order.len());
+    }
+
+    /// Rebuild [`Self::building_types_order`] from map keys (tests / overlays).
+    ///
+    /// Prefer recording ids as they are first inserted during load. This helper
+    /// is for tests that assemble a `building_types` map after the fact.
+    pub fn rebuild_building_types_order(&mut self) {
+        self.building_types_order = self.building_types.keys().cloned().collect();
+    }
+
+    /// Insert a minimal building type if missing, then return its dense index.
+    ///
+    /// Idempotent. Appends to [`Self::building_types_order`] so previously returned
+    /// indices stay valid (unlike a full [`Self::rebuild_building_types_order`]).
+    /// Intended for tests and synthetic worlds.
+    pub fn ensure_building_type(&mut self, building_type: &str) -> BuildingTypeId {
+        if let Some(idx) = self.building_index_of(building_type) {
+            return idx;
+        }
+        if self.building_types.contains_key(building_type) {
+            self.building_types_order.push(building_type.to_string());
+            return BuildingTypeId::from_usize(self.building_types_order.len() - 1);
+        }
+        self.building_types.insert(
+            building_type.to_string(),
+            BuildingType {
+                id: building_type.to_string(),
+                group: None,
+                city_type: None,
+                production_method_groups: Vec::new(),
+                required_construction: None,
+            },
+        );
+        self.building_types_order.push(building_type.to_string());
+        BuildingTypeId::from_usize(self.building_types_order.len() - 1)
     }
 }
 

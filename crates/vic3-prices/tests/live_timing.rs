@@ -64,7 +64,7 @@ fn live_solve_timings() {
     let building = world.buildings.first().expect("live save has buildings");
     let extra = WorldDelta {
         extra_levels: vec![ExtraLevelsDelta {
-            building: None,
+            building_type_id: None,
             building_id: Some(building.id),
             extra_levels: 1,
         }],
@@ -99,7 +99,7 @@ fn pm_swap_delta(world: &World, defs: &GameDefs) -> Option<WorldDelta> {
             continue;
         };
         let alt = world.buildings.iter().find_map(|other| {
-            if other.building == building.building
+            if other.building_type_id == building.building_type_id
                 && other.production_methods != building.production_methods
                 && !other.production_methods.is_empty()
             {

@@ -64,8 +64,8 @@ function workplaceLabel(
   if (pop.workplace_id == null) return undefined
   const building = buildingsById.get(pop.workplace_id)
   if (!building) return `Building ${pop.workplace_id}`
-  const type = typesById.get(building.type_id)
-  return type?.name || displayId(building.type_id)
+  const type = typesById.get(building.building_type_name)
+  return type?.label || displayId(type?.name || building.building_type_name)
 }
 
 function groupPops(pops: StatePop[]): ProfessionGroup[] {
@@ -141,7 +141,7 @@ export function PopsPane({
     [result?.buildings],
   )
   const typesById = useMemo(
-    () => new Map((result?.building_types ?? []).map((type) => [type.id, type])),
+    () => new Map((result?.building_types ?? []).map((type) => [type.name, type])),
     [result?.building_types],
   )
 

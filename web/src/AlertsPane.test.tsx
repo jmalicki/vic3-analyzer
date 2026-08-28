@@ -7,7 +7,7 @@ import type { AlertsResult, BuildingEconomics } from './types'
 const rye: BuildingEconomics = {
   id: 9,
   state_id: 1,
-  type_id: 'building_rye_farm',
+  building_type_name: 'building_rye_farm',
   level: 4,
   staffing: 3,
   inputs: [],
@@ -231,8 +231,8 @@ describe('AlertsPane', () => {
               staffing: [
                 {
                   building_id: 3,
-                  building_name: 'Textile Mills',
-                  type_id: 'building_textile_mill',
+                  building_type_label: 'Textile Mills',
+                  building_type_name: 'building_textile_mill',
                   staffing: 6,
                   level: 8,
                   professions: [
@@ -341,8 +341,8 @@ describe('LocalRecommendations', () => {
             staffing: [
               {
                 building_id: 4,
-                building_name: 'Textile Mills',
-                type_id: 'building_textile_mill',
+                building_type_label: 'Textile Mills',
+                building_type_name: 'building_textile_mill',
                 staffing: 6,
                 level: 8,
                 professions: [
@@ -370,8 +370,8 @@ describe('LocalRecommendations', () => {
               },
               {
                 building_id: 5,
-                building_name: 'Tooling Workshops',
-                type_id: 'building_tooling_workshops',
+                building_type_label: 'Tooling Workshops',
+                building_type_name: 'building_tooling_workshops',
                 staffing: 1,
                 level: 2,
                 professions: [

@@ -53,7 +53,7 @@ const result: PricesResult = {
     {
       id: 7,
       state_id: 1,
-      type_id: 'building_silly_hammer_factory',
+      building_type_name: 'building_silly_hammer_factory',
       level: 3,
       staffing: 2.4,
       production_method_ids: ['pm_goofy_hammers'],
@@ -67,14 +67,19 @@ const result: PricesResult = {
     },
   ],
   building_types: [
-    { id: 'building_silly_hammer_factory', name: 'Silly Hammer Factory',
+    {
+      id: 0,
+      name: 'building_silly_hammer_factory',
+      label: 'Silly Hammer Factory',
       group_id: 'bg_manufacturing',
     },
-    { id: 'building_rye_farm', name: 'Rye Farms', group_id: 'bg_agriculture' },
+    { id: 1, name: 'building_rye_farm', label: 'Rye Farms', group_id: 'bg_agriculture' },
   ],
   building_groups: [
-    { id: 'bg_manufacturing', name: 'Manufacturing', category: 'urban', always_possible: false },
-    { id: 'bg_agriculture', name: 'Agriculture',
+    { name: 'bg_manufacturing', label: 'Manufacturing', category: 'urban', always_possible: false },
+    {
+      name: 'bg_agriculture',
+      label: 'Agriculture',
       category: 'rural',
       land_usage: 'rural',
       always_possible: true,
@@ -160,7 +165,7 @@ const scopedResult: PricesResult = {
       ...result.buildings![0],
       id: 8,
       state_id: 2,
-      type_id: 'building_zebra_mill',
+      building_type_name: 'building_zebra_mill',
     },
   ],
 }
