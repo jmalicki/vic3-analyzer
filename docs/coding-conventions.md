@@ -44,7 +44,8 @@ when several entities share a row and bare `name` would be ambiguous):
 
 Same idea for SQL: a dedicated `goods` table may use `name` / `label`; a
 `goods_by_state` or building IO list that also has other identities should use
-`good_name` / `good_label`.
+`good_name` / `good_label`. In IO list structs (`List<Struct{good_name, good_label, qty}>`),
+`good_label` is always populated at emit via `SessionBinding::good_label` (never NULL in Arrow).
 
 ### Rust newtypes
 
