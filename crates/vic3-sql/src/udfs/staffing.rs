@@ -13,7 +13,7 @@ use datafusion::common::{plan_err, Result as DfResult};
 use datafusion::datasource::{TableProvider, TableType};
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
-use vic3_prices::{BuildingEconomics, ORDER_EPS};
+use vic3_prices::ORDER_EPS;
 
 use crate::binding::SessionBinding;
 use crate::exec::memory_exec;
@@ -76,7 +76,6 @@ impl BuildingStaffingProvider {
             if building.state_id != Some(self.state_id) {
                 continue;
             }
-            let name = building_label(self.binding.as_ref(), building);
             // Scale current employed counts up to full-level job demand.
             let ratio = if building.staffing > ORDER_EPS {
                 building.level / building.staffing
@@ -102,20 +101,12 @@ impl BuildingStaffingProvider {
                     .find(|q| q.state_id == self.state_id && q.name == row.name);
 
                 building_id.append_value(building.id);
-                building_type_label.append_value(&name);
+                building_type_label.append_value(&building.building_type_label);
                 building_type_name.append_value(&building.building_type_name);
                 staffing.append_value(building.staffing);
                 level.append_value(building.level);
                 profession_name.append_value(&row.name);
-                match row
-                    .label
-                    .as_deref()
-                    .filter(|label| !label.is_empty())
-                    .or_else(|| self.binding.label(&row.name))
-                {
-                    Some(n) => profession_label.append_value(n),
-                    None => profession_label.append_null(),
-                }
+                profession_label.append_value(&row.label);
                 employed_here.append_value(row.count);
                 jobs_here.append_value(jobs);
                 missing_here.append_value(missing);
@@ -131,7 +122,7 @@ impl BuildingStaffingProvider {
             if !wrote {
                 // Keep buildings visible when employee lists are empty.
                 building_id.append_value(building.id);
-                building_type_label.append_value(&name);
+                building_type_label.append_value(&building.building_type_label);
                 building_type_name.append_value(&building.building_type_name);
                 staffing.append_value(building.staffing);
                 level.append_value(building.level);
@@ -166,20 +157,6 @@ impl BuildingStaffingProvider {
         )
         .map_err(Into::into)
     }
-}
-
-fn building_label(binding: &SessionBinding, building: &BuildingEconomics) -> String {
-    building
-        .building_type_label
-        .as_deref()
-        .filter(|label| !label.is_empty())
-        .map(str::to_owned)
-        .or_else(|| {
-            binding
-                .label(&building.building_type_name)
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| building.building_type_name.clone())
 }
 
 #[async_trait]

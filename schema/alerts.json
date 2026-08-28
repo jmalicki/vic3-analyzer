@@ -361,10 +361,7 @@
           "type": "number"
         },
         "label": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "missing_here": {
           "format": "double",
@@ -388,6 +385,7 @@
       },
       "required": [
         "name",
+        "label",
         "employed_here",
         "jobs_here",
         "missing_here",

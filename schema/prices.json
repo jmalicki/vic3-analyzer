@@ -12,10 +12,7 @@
           ]
         },
         "building_type_label": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "building_type_name": {
           "type": "string"
@@ -87,6 +84,7 @@
       "required": [
         "id",
         "building_type_name",
+        "building_type_label",
         "level",
         "staffing",
         "production_method_ids",
@@ -117,10 +115,7 @@
           ]
         },
         "label": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "land_usage": {
           "type": [
@@ -140,6 +135,7 @@
       },
       "required": [
         "name",
+        "label",
         "always_possible"
       ],
       "type": "object"
@@ -165,10 +161,7 @@
           "type": "integer"
         },
         "label": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "name": {
           "type": "string"
@@ -176,7 +169,8 @@
       },
       "required": [
         "id",
-        "name"
+        "name",
+        "label"
       ],
       "type": "object"
     },
@@ -209,10 +203,7 @@
           "type": "integer"
         },
         "label": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "name": {
           "type": "string"
@@ -220,7 +211,8 @@
       },
       "required": [
         "id",
-        "name"
+        "name",
+        "label"
       ],
       "type": "object"
     },
@@ -257,10 +249,7 @@
           "type": "number"
         },
         "label": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "name": {
           "type": "string"
@@ -276,6 +265,7 @@
       },
       "required": [
         "name",
+        "label",
         "base",
         "price",
         "buy",
@@ -349,10 +339,7 @@
           "type": "array"
         },
         "label": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "name": {
           "type": "string"
@@ -364,6 +351,7 @@
       },
       "required": [
         "name",
+        "label",
         "package_value",
         "goods"
       ],
@@ -376,10 +364,7 @@
           "type": "number"
         },
         "label": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "name": {
           "type": "string"
@@ -387,6 +372,7 @@
       },
       "required": [
         "name",
+        "label",
         "count"
       ],
       "type": "object"
@@ -511,10 +497,7 @@
         },
         "label": {
           "description": "Display label for this owned slice (bare region, or demonym-prefixed when minority).",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "market_id": {
           "format": "uint32",
@@ -526,10 +509,7 @@
         },
         "region_label": {
           "description": "Bare geographic label from defs (same for co-owners of a split region).",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "region_name": {
           "type": [
@@ -539,7 +519,9 @@
         }
       },
       "required": [
-        "id"
+        "id",
+        "region_label",
+        "label"
       ],
       "type": "object"
     },
@@ -552,10 +534,7 @@
           "type": "array"
         },
         "label": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "name": {
           "type": "string"
@@ -573,6 +552,7 @@
       "required": [
         "state_id",
         "name",
+        "label",
         "package_value",
         "goods"
       ],
@@ -581,10 +561,7 @@
     "StatePop": {
       "properties": {
         "culture_label": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "culture_name": {
           "type": [
@@ -628,10 +605,7 @@
           "type": "array"
         },
         "profession_label": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "profession_name": {
           "type": [
@@ -674,7 +648,9 @@
         }
       },
       "required": [
-        "state_id"
+        "state_id",
+        "profession_label",
+        "culture_label"
       ],
       "type": "object"
     },
@@ -696,10 +672,7 @@
           "type": "number"
         },
         "label": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "monthly_change": {
           "format": "double",
@@ -728,6 +701,7 @@
       "required": [
         "state_id",
         "name",
+        "label",
         "qualified",
         "employed",
         "jobs",

@@ -87,15 +87,7 @@ impl BuildingsProvider {
                 None => state_id.append_null(),
             }
             building_type_name.append_value(&b.building_type_name);
-            match b
-                .building_type_label
-                .as_deref()
-                .filter(|label| !label.is_empty())
-                .or_else(|| self.binding.label(&b.building_type_name))
-            {
-                Some(label) => building_type_label.append_value(label),
-                None => building_type_label.append_null(),
-            }
+            building_type_label.append_value(&b.building_type_label);
             level.append_value(b.level);
             staffing.append_value(b.staffing);
             employees.append_value(b.employees.iter().map(|e| e.count).sum::<f64>());

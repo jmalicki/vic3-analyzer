@@ -334,7 +334,7 @@ fn collect_goods_alerts(args: &mut AlertCollectArgs<'_>) {
                         sell: row.map(|g| g.sell).unwrap_or(0.0),
                         price: row.map(|g| g.price).unwrap_or(0.0),
                         base: row.map(|g| g.base).unwrap_or(0.0),
-                        name: row.and_then(|g| g.label.clone()),
+                        name: row.map(|g| g.label.clone()),
                         building_id: Some(building.id),
                         state_id: building.state_id,
                         from_short_inputs: true,
@@ -440,7 +440,7 @@ impl GoodsShortageHint {
             sell: row.sell,
             price: row.price,
             base: row.base,
-            name: row.label.clone(),
+            name: Some(row.label.clone()),
             building_id,
             state_id,
             from_short_inputs: false,
@@ -1153,12 +1153,11 @@ fn need_trips(
     if need.goods.is_empty() && need.package_value > 0.0 {
         return Vec::new();
     }
-    let need_label = need
-        .label
-        .as_deref()
-        .filter(|label| !label.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| script_label(defs, &need.name));
+    let need_label = if need.label.is_empty() {
+        script_label(defs, &need.name)
+    } else {
+        need.label.clone()
+    };
     let mut trips = Vec::new();
     for flow in &need.goods {
         if flow.quantity <= ORDER_EPS {
@@ -1217,7 +1216,7 @@ fn resolve_good_label(prices: &PricesResult, defs: &GameDefs, name: &str) -> Str
         .goods
         .iter()
         .find(|good| good.name == name)
-        .and_then(|good| good.label.clone())
+        .map(|good| good.label.clone())
         .filter(|label| !label.is_empty())
         .unwrap_or_else(|| script_label(defs, name))
 }
@@ -1527,17 +1526,12 @@ fn push_state_employment_alert(args: &mut PushEmploymentAlertArgs<'_>) {
     let staffing: Vec<BuildingStaffing> = buildings
         .iter()
         .map(|building| {
-            building_staffing(
-                defs,
-                prices,
-                building,
-                building_label(prices, defs, &building.building_type_name),
-            )
+            building_staffing(defs, prices, building, building.building_type_label.clone())
         })
         .collect();
     let totals = state_profession_totals(&staffing);
     let blocker = blocking_profession(&staffing);
-    let blocker_name = blocker.map(|row| row.label.clone().unwrap_or_else(|| pretty_id(&row.name)));
+    let blocker_name = blocker.map(|row| row.label.clone());
     let building_count = staffing.len();
     let title = if qual_short {
         match blocker_name.as_deref() {
@@ -1552,9 +1546,7 @@ fn push_state_employment_alert(args: &mut PushEmploymentAlertArgs<'_>) {
             Some(row) => format!(
                 "{place} is short {} {}. {} building{} below full staffing. Extra levels add more empty jobs; the qualification shortage for this state has the next steps.",
                 format_num(row.state_shortage.max(row.missing_here)),
-                row.label
-                    .as_deref()
-                    .unwrap_or(&row.name),
+                row.label,
                 building_count,
                 if building_count == 1 { "" } else { "s" }
             ),
@@ -1587,7 +1579,11 @@ fn push_state_employment_alert(args: &mut PushEmploymentAlertArgs<'_>) {
         .iter()
         .filter(|row| row.missing_here > ORDER_EPS || row.state_shortage > ORDER_EPS)
     {
-        let name = row.label.as_deref().unwrap_or(&row.name);
+        let name = if row.label.is_empty() {
+            row.name.as_str()
+        } else {
+            row.label.as_str()
+        };
         evidence.push(Evidence {
             label: format!("{name} to finish these buildings"),
             value: format_num(row.missing_here),
@@ -1609,7 +1605,7 @@ fn push_state_employment_alert(args: &mut PushEmploymentAlertArgs<'_>) {
         let target = buildings
             .iter()
             .find_map(|building| shortage_target(prices, building))
-            .map(|id| profession_label(defs, id, None))
+            .map(|id| profession_label(id, ""))
             .unwrap_or_else(|| "workers".into());
         vec![plain(
             format!("under:{state_id}:qual"),
@@ -1924,7 +1920,7 @@ fn economics_from_world(building: &WorldBuilding, defs: &GameDefs) -> BuildingEc
         state_id: building.state,
         building_type_id: Some(building.building_type_id),
         building_type_name: building.type_script_id(defs).to_string(),
-        building_type_label: defs.labels.get(building.type_script_id(defs)).cloned(),
+        building_type_label: defs.display_label(building.type_script_id(defs)),
         level: building.level,
         staffing: building.staffing,
         production_method_ids: building.production_methods.clone(),
@@ -1938,47 +1934,37 @@ fn economics_from_world(building: &WorldBuilding, defs: &GameDefs) -> BuildingEc
     }
 }
 
-fn display_prof(defs: &GameDefs, row: &crate::StateQualification) -> String {
-    profession_label(defs, &row.name, row.label.as_deref())
+fn display_prof(_defs: &GameDefs, row: &crate::StateQualification) -> String {
+    if row.label.is_empty() {
+        pretty_id(&row.name)
+    } else {
+        row.label.clone()
+    }
 }
 
 fn state_label(prices: &PricesResult, world: &World, defs: &GameDefs, state_id: u32) -> String {
     if let Some(state) = prices.states.iter().find(|state| state.id == state_id) {
-        if let Some(name) = state.label.as_deref().filter(|name| !name.is_empty()) {
-            return name.to_string();
+        if !state.label.is_empty() {
+            return state.label.clone();
         }
         if let Some(region) = state.region_name.as_deref() {
-            return script_label(defs, region);
+            return defs.display_label(region);
         }
     }
     if let Some(state) = world.states.iter().find(|state| state.id == state_id) {
         if let Some(region) = state.region.as_deref() {
-            return script_label(defs, region);
+            return defs.display_label(region);
         }
     }
     format!("state {state_id}")
 }
 
-fn building_label(prices: &PricesResult, defs: &GameDefs, type_id: &str) -> String {
-    prices
-        .building_types
-        .iter()
-        .find(|row| row.name == type_id)
-        .and_then(|row| row.label.clone())
-        .or_else(|| defs.labels.get(type_id).cloned())
-        .unwrap_or_else(|| pretty_id(type_id))
-}
-
-fn profession_label(
-    defs: &GameDefs,
-    profession_name: &str,
-    profession_label: Option<&str>,
-) -> String {
-    profession_label
-        .filter(|name| !name.is_empty())
-        .map(str::to_string)
-        .or_else(|| defs.labels.get(profession_name).cloned())
-        .unwrap_or_else(|| pretty_id(profession_name))
+fn profession_label(name: &str, label: &str) -> String {
+    if label.is_empty() {
+        pretty_id(name)
+    } else {
+        label.to_string()
+    }
 }
 
 fn kind_id(kind: AlertKind) -> &'static str {
@@ -2120,7 +2106,7 @@ mod tests {
     fn good(id: &str, base: f64, price: f64, buy: f64, sell: f64) -> GoodPrice {
         GoodPrice {
             name: id.into(),
-            label: Some(id.into()),
+            label: id.into(),
             base,
             price,
             buy,
@@ -2145,7 +2131,7 @@ mod tests {
             state_id: Some(state),
             building_type_id: defs.building_index_of(type_id),
             building_type_name: type_id.into(),
-            building_type_label: defs.labels.get(type_id).cloned(),
+            building_type_label: defs.display_label(type_id),
             level,
             staffing,
             production_method_ids: vec!["pm_default".into()],
@@ -2159,7 +2145,7 @@ mod tests {
                 .iter()
                 .map(|(prof, count)| ProfessionCount {
                     name: (*prof).into(),
-                    label: None,
+                    label: defs.display_label(prof),
                     count: *count,
                 })
                 .collect(),
@@ -2252,8 +2238,8 @@ mod tests {
             states: vec![StateInfo {
                 id: 1,
                 region_name: Some("STATE_TEST".into()),
-                region_label: Some("Test".into()),
-                label: Some("Test".into()),
+                region_label: "Test".into(),
+                label: "Test".into(),
                 country_id: Some(1),
                 market_id: Some(1),
                 arable_land: None,
@@ -2333,13 +2319,13 @@ mod tests {
                     state_id: 1,
                     id: Some(1),
                     profession_name: Some("peasants".into()),
-                    profession_label: Some("Peasants".into()),
+                    profession_label: "Peasants".into(),
                     demand_size: Some(20_000.0),
                     workforce: Some(12_000.0),
                     dependents: Some(8_000.0),
                     wealth: Some(8),
                     culture_name: None,
-                    culture_label: None,
+                    culture_label: String::new(),
                     literate: Some(1_000.0),
                     workplace_id: None,
                     qualifications: Vec::new(),
@@ -2349,13 +2335,13 @@ mod tests {
                     state_id: 1,
                     id: Some(2),
                     profession_name: Some("farmers".into()),
-                    profession_label: Some("Farmers".into()),
+                    profession_label: "Farmers".into(),
                     demand_size: Some(4_000.0),
                     workforce: Some(4_000.0),
                     dependents: Some(0.0),
                     wealth: Some(10),
                     culture_name: None,
-                    culture_label: None,
+                    culture_label: String::new(),
                     literate: Some(400.0),
                     workplace_id: Some(3),
                     qualifications: Vec::new(),
@@ -2366,7 +2352,7 @@ mod tests {
             state_qualifications: vec![StateQualification {
                 state_id: 1,
                 name: "machinists".into(),
-                label: Some("Machinists".into()),
+                label: "Machinists".into(),
                 qualified: 800.0,
                 employable: Some(800.0),
                 employed: 800.0,
@@ -2377,7 +2363,7 @@ mod tests {
             state_needs: vec![StateNeed {
                 state_id: 1,
                 name: "popneed_clothing".into(),
-                label: Some("Clothing".into()),
+                label: "Clothing".into(),
                 package_value: 80.0,
                 goods: vec![GoodFlow {
                     name: "clothes".into(),
@@ -2522,13 +2508,13 @@ mod tests {
             state_id: 1,
             id: Some(1),
             profession_name: Some("peasants".into()),
-            profession_label: Some("Peasants".into()),
+            profession_label: "Peasants".into(),
             demand_size: Some(20_000.0),
             workforce: Some(12_000.0),
             dependents: Some(8_000.0),
             wealth: Some(8),
             culture_name: None,
-            culture_label: None,
+            culture_label: String::new(),
             literate: Some(1_000.0),
             workplace_id: None,
             qualifications: Vec::new(),
@@ -2536,7 +2522,7 @@ mod tests {
         }]
         .into();
         prices.state_qualifications[0].name = "aristocrats".into();
-        prices.state_qualifications[0].label = Some("Aristocrats".into());
+        prices.state_qualifications[0].label = "Aristocrats".into();
         let result = alerts(&world, &defs, &prices);
         let edu = result
             .alerts
@@ -2576,13 +2562,13 @@ mod tests {
             state_id: 1,
             id: Some(1),
             profession_name: Some("machinists".into()),
-            profession_label: Some("Machinists".into()),
+            profession_label: "Machinists".into(),
             demand_size: Some(20_000.0),
             workforce: Some(12_000.0),
             dependents: Some(8_000.0),
             wealth: Some(12),
             culture_name: None,
-            culture_label: None,
+            culture_label: String::new(),
             literate: Some(16_000.0),
             workplace_id: Some(4),
             qualifications: Vec::new(),
@@ -2590,7 +2576,7 @@ mod tests {
         }]
         .into();
         prices.state_qualifications[0].name = "engineers".into();
-        prices.state_qualifications[0].label = Some("Engineers".into());
+        prices.state_qualifications[0].label = "Engineers".into();
         let result = alerts(&world, &defs, &prices);
         let edu = result
             .alerts
@@ -2619,13 +2605,13 @@ mod tests {
             state_id: 1,
             id: Some(1),
             profession_name: Some("farmers".into()),
-            profession_label: Some("Farmers".into()),
+            profession_label: "Farmers".into(),
             demand_size: Some(20_000.0),
             workforce: Some(12_000.0),
             dependents: Some(8_000.0),
             wealth: Some(12),
             culture_name: None,
-            culture_label: None,
+            culture_label: String::new(),
             literate: Some(12_000.0),
             workplace_id: Some(3),
             qualifications: Vec::new(),
@@ -2633,7 +2619,7 @@ mod tests {
         }]
         .into();
         prices.state_qualifications[0].name = "aristocrats".into();
-        prices.state_qualifications[0].label = Some("Aristocrats".into());
+        prices.state_qualifications[0].label = "Aristocrats".into();
         let result = alerts(&world, &defs, &prices);
         let edu = result
             .alerts
@@ -2867,7 +2853,7 @@ mod tests {
 
     fn name_clothes(prices: &mut PricesResult, name: &str) {
         if let Some(good) = prices.goods.iter_mut().find(|good| good.name == "clothes") {
-            good.label = Some(name.into());
+            good.label = name.into();
         }
     }
 

@@ -36,10 +36,7 @@ pub fn good_io_list_column(binding: &SessionBinding, rows: &[Vec<GoodFlow>]) -> 
     for row in rows {
         for flow in row {
             good_name.append_value(&flow.name);
-            match binding.good_label(&flow.name) {
-                Some(n) => good_label.append_value(n),
-                None => good_label.append_null(),
-            }
+            good_label.append_value(binding.good_label(&flow.name));
             qty.append_value(flow.quantity);
             len += 1;
         }

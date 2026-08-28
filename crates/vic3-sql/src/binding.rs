@@ -55,20 +55,19 @@ impl SessionBinding {
         }
     }
 
-    /// Localized label from defs, if present.
-    pub fn label(&self, id: &str) -> Option<&str> {
-        self.defs.labels.get(id).map(String::as_str)
+    /// Localized display label for `id` (defs localization or pretty-printed id).
+    pub fn label(&self, id: &str) -> String {
+        self.defs.display_label(id)
     }
 
-    /// Display label for a good script name (defs labels, else prices row label).
-    pub fn good_label(&self, name: &str) -> Option<String> {
-        self.defs.labels.get(name).cloned().or_else(|| {
-            self.prices
-                .goods
-                .iter()
-                .find(|g| g.name == name)
-                .and_then(|g| g.label.clone())
-        })
+    /// Display label for a good script name from the prices row.
+    pub fn good_label(&self, name: &str) -> String {
+        self.prices
+            .goods
+            .iter()
+            .find(|g| g.name == name)
+            .map(|g| g.label.clone())
+            .unwrap_or_else(|| self.defs.display_label(name))
     }
 
     /// Full [`alerts_with`] result, cached per bind and mitigation mode.

@@ -55,21 +55,12 @@ impl CountriesProvider {
             if !matches_str(&preds, "name", &c.name) {
                 continue;
             }
-            if let Some(n) = &c.label {
-                if !matches_str(&preds, "label", n) {
-                    continue;
-                }
-            } else if preds.iter().any(
-                |p| matches!(p, crate::filter::Pred::EqStr { column, .. } if column == "label"),
-            ) {
+            if !matches_str(&preds, "label", &c.label) {
                 continue;
             }
             country_id.append_value(c.id);
             name.append_value(&c.name);
-            match &c.label {
-                Some(n) => label.append_value(n),
-                None => label.append_null(),
-            }
+            label.append_value(&c.label);
         }
 
         RecordBatch::try_new(

@@ -71,7 +71,7 @@ fn building_type_infos(defs: &GameDefs) -> Vec<BuildingTypeInfo> {
             Some(BuildingTypeInfo {
                 id: defs.building_index_of(script_id)?,
                 name: script_id.clone(),
-                label: defs.labels.get(script_id).cloned(),
+                label: defs.display_label(script_id),
                 group_id: building.group.clone(),
                 city_type: building.city_type.clone(),
             })
@@ -85,7 +85,7 @@ fn building_group_infos(defs: &GameDefs) -> Vec<BuildingGroupInfo> {
         .values()
         .map(|group| BuildingGroupInfo {
             name: group.name.clone(),
-            label: defs.labels.get(&group.name).cloned(),
+            label: defs.display_label(&group.name),
             category: group.category.clone(),
             land_usage: group.land_usage.clone(),
             always_possible: group.always_possible,
@@ -221,7 +221,7 @@ fn detail_rows(
             state_id: building.state,
             building_type_id: Some(building.building_type_id),
             building_type_name: building.type_script_id(defs).to_string(),
-            building_type_label: defs.labels.get(building.type_script_id(defs)).cloned(),
+            building_type_label: defs.display_label(building.type_script_id(defs)),
             level: building.level,
             staffing: building.staffing,
             production_method_ids: building.production_methods.clone(),
@@ -284,11 +284,13 @@ fn detail_rows(
             region_label: state
                 .region
                 .as_ref()
-                .map(|id| crate::label::script_label(defs, id)),
+                .map(|id| defs.display_label(id))
+                .unwrap_or_default(),
             label: state
                 .region
                 .as_ref()
-                .map(|id| crate::label::script_label(defs, id)),
+                .map(|id| defs.display_label(id))
+                .unwrap_or_default(),
             country_id: state.country,
             market_id: state.market,
             arable_land: state.arable_land,
@@ -329,7 +331,7 @@ where
             let profession_name = world.name(id)?.to_string();
             Some(ProfessionCount {
                 name: profession_name.clone(),
-                label: defs.labels.get(&profession_name).cloned(),
+                label: defs.display_label(&profession_name),
                 count,
             })
         })
@@ -596,7 +598,7 @@ fn aggregate_state_needs(pops: &[CompactStatePop], tables: &EmitTables) -> Vec<S
             Some(StateNeed {
                 state_id: row.state_id,
                 name: need_name.clone(),
-                label: tables.label(&need_name).map(str::to_string),
+                label: tables.label(&need_name),
                 package_value: row.package_value,
                 goods: row
                     .goods
@@ -712,7 +714,7 @@ fn state_qualification_rows(
             rows.push(StateQualification {
                 state_id: state.id,
                 name: profession_id.clone(),
-                label: defs.labels.get(&profession_id).cloned(),
+                label: defs.display_label(&profession_id),
                 qualified,
                 employable,
                 employed,
@@ -744,7 +746,7 @@ fn country_rows(world: &World, defs: &GameDefs) -> Vec<CountryInfo> {
             CountryInfo {
                 id: country.id,
                 name: country.tag.clone(),
-                label: defs.labels.get(&country.tag).cloned(),
+                label: defs.display_label(&country.tag),
                 adjective: crate::label::country_adjective(defs, &country.tag),
                 flag_coa,
                 flag_data_url,

@@ -1026,10 +1026,10 @@ struct ConstructionSnap {
     queue: &'static str,
     country_id: Option<u32>,
     state_id: Option<u32>,
-    /// Localized state display label when known (demonym-prefixed for minority splits).
-    state_label: Option<String>,
+    /// Localized state display label (demonym-prefixed for minority splits).
+    state_label: String,
     building_type_name: String,
-    building_type_label: Option<String>,
+    building_type_label: String,
     remaining: Option<f64>,
 }
 
@@ -1047,23 +1047,25 @@ fn constructions_snapshot(
             government: Vec::new(),
         };
     };
-    let state_name = |state_id: Option<u32>| -> Option<String> {
-        let id = state_id?;
-        if let Some(name) = prices
+    let state_label = |state_id: Option<u32>| -> String {
+        let Some(id) = state_id else {
+            return String::new();
+        };
+        if let Some(state) = prices.states.iter().find(|s| s.id == id) {
+            if !state.label.is_empty() {
+                return state.label.clone();
+            }
+            if let Some(region) = state.region_name.as_deref() {
+                return defs.display_label(region);
+            }
+        }
+        world
             .states
             .iter()
             .find(|s| s.id == id)
-            .and_then(|s| s.label.clone())
-        {
-            return Some(name);
-        }
-        let state = world.states.iter().find(|s| s.id == id)?;
-        state.region.clone().map(|region| {
-            defs.labels
-                .get(&region)
-                .cloned()
-                .unwrap_or_else(|| humanize_region(&region))
-        })
+            .and_then(|state| state.region.as_deref())
+            .map(|region| defs.display_label(region))
+            .unwrap_or_default()
     };
     let mut private = Vec::new();
     let mut government = Vec::new();
@@ -1077,9 +1079,9 @@ fn constructions_snapshot(
             queue: row.queue.as_str(),
             country_id: row.country_id,
             state_id: row.state_id,
-            state_label: state_name(row.state_id),
+            state_label: state_label(row.state_id),
             building_type_name: type_name.to_string(),
-            building_type_label: defs.labels.get(type_name).cloned(),
+            building_type_label: defs.display_label(type_name),
             remaining: row.remaining,
         };
         match row.queue {
@@ -1091,25 +1093,6 @@ fn constructions_snapshot(
         private,
         government,
     }
-}
-
-fn humanize_region(region_name: &str) -> String {
-    let trimmed = region_name
-        .strip_prefix("STATE_")
-        .or_else(|| region_name.strip_prefix("state_"))
-        .unwrap_or(region_name);
-    trimmed
-        .split('_')
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn is_navy(kind: Option<&str>) -> bool {
