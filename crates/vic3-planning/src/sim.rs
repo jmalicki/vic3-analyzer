@@ -286,9 +286,9 @@ impl EconomyContext {
     pub(crate) fn max_output_price_over_base(
         &self,
         state: &PlanningState,
-        building_id: &str,
+        building_type_name: &str,
     ) -> f64 {
-        let Some(building_type) = self.defs.building_types.get(building_id) else {
+        let Some(building_type) = self.defs.building_types.get(building_type_name) else {
             return 0.0;
         };
         let (_, outputs) = default_building_io_per_level(&self.defs, building_type);
