@@ -29,7 +29,7 @@
 //! `BuildingCompleted` fires for the in-flight CS, apply updates capacity.
 //! Residual shortage builds then run under the post-CS rate.
 //!
-//! This differs from the **PEA cheap Construction Sector bag score**, which
+//! This differs from the **search cheap Construction Sector bag score**, which
 //! only scales follow-on days on state_t by a construction-unit ratio and does not
 //! replay the actual queue. See `docs/planning-progress-heuristic.md`.
 //!

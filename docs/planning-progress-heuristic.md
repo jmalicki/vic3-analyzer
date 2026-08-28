@@ -4,7 +4,7 @@ Developer internals for planner search. Related:
 [`planning.md`](planning.md), [`planning-search.md`](planning-search.md).
 
 **Status:** ranking / cheap-bag **library** lives in `plan/progress_h.rs`
-(not PEA-wired yet). Greedy incumbent $U$ lives in `plan/greedy.rs` and is
+(not wired into search yet). Greedy incumbent $U$ lives in `plan/greedy.rs` and is
 wired into `plan()` via `PathFinderBuilder::max_cost`.
 
 Code: `plan/progress_h.rs` (unwired ranking), `plan/greedy.rs` + `plan/result.rs`
@@ -55,7 +55,7 @@ A **simple subgoal** is a compiled goal node with no further goal children
 2. **A\*** / open-set search use $f = g + h$ with $g$ = days so far and edge costs in days
    (0-day decisions, positive waits). Today’s wired search still uses
    $h_{\mathrm{adm}}$ for Ready keys; $h_{\mathrm{rank}}$ is library-only until
-   PEA wiring.
+   candidate-bag wiring.
 3. **Upper bound $U$ comes from greedy.** Run a feasible greedy simulation to
    the GDP goal; $U$ is **only** that run’s day length (decisions are not kept).
    Prune any node with $g \ge U$ (`PathFinderBuilder::max_cost` in `plan()`).
@@ -92,7 +92,7 @@ PR / not v1.
 
 ### Seeding and refreshing $U$
 
-Before or interleaved with A*/PEA*, run a **full** greedy from the root to
+Before or interleaved with planning search, run a **full** greedy from the root to
 seed $U$. **v1:** any later refresh **re-runs the whole greedy simulation** from
 the chosen start state (no patching a stored decision list; no incremental
 membership).
@@ -168,9 +168,9 @@ the gap), take it before waiting; otherwise fall through to builds / waits.
 
 | Quantity | Role |
 | --- | --- |
-| $h_{\mathrm{rank}}$ | Order open / PEA (library today) |
+| $h_{\mathrm{rank}}$ | Order open-set candidates (library today) |
 | $U = t_{\mathrm{goal}}^{\mathrm{greedy}}$ | Feasible plan days; prune with $g$ |
-| Expanding PEA cursor | Eventually emits deferred candidates |
+| Partial-expansion cursor | Eventually emits deferred candidates |
 
 ### Improving $U$ later
 
@@ -178,7 +178,7 @@ When anything produces a **better feasible** day cost $U' < U$ (search goal
 hit, or a **full** greedy rebuild from a better state):
 
 1. Set $U \leftarrow U'$.
-2. **Keep** open / closed / PEA Expanding state.
+2. **Keep** open / closed / partial-expansion state.
 3. Tighten prune: ignore nodes with $g \ge U$.
 4. Do not rebuild ranking bags solely because $U$ changed.
 
@@ -192,7 +192,7 @@ skip every `QueueBuildingLevel`.
 
 Why exclude CS: (1) shortage-greedy would not pick it anyway; (2) a CS enqueue
 changes construction capacity for everything after it, which would make
-incremental greedy refresh unreliable. Search / PEA may still enqueue CS;
+incremental greedy refresh unreliable. Search may still enqueue CS;
 greedy must not *pick* new CS (but honors search-enqueued CS on rebuild).
 
 [`ConstructionSlots::ONE`](../crates/vic3-planning/src/construction.rs) is the
@@ -222,7 +222,7 @@ solver again.
 
 ## Progress ranking for GDP
 
-Used to order candidates (library APIs today; PEA wiring later). New symbols
+Used to order candidates (library APIs today; search wiring later). New symbols
 for the residual-days bias:
 
 | Math | Definition | Rust |
@@ -339,7 +339,7 @@ subscript $t$ / Rust `*_curr`):
 | $\Delta C$ | Points/day from +1 Construction Sector (× government share) | `cheap_construction_sector_points_delta` |
 | — | $\mathrm{state}_t$ context for every cheap score in one expand | [`CheapBagCurr`](../crates/vic3-planning/src/plan/progress_h.rs) |
 | $\mathrm{score}_{\mathrm{cheap}}(a)$ | **Bag** order key (cheap follow-on) | `cheap_bag_score` |
-| $\mathrm{score}_{\mathrm{emit}}(a)$ | Emit-style key $e(a) + h(\mathrm{completed})$ (library; PEA not wired) | `emit_bag_score` |
+| $\mathrm{score}_{\mathrm{emit}}(a)$ | Emit-style key $e(a) + h(\mathrm{completed})$ (library; not wired into search) | `emit_bag_score` |
 
 **Tilde:** $\widetilde{\cdot}$ = cheap bag approximation. Neither cheap nor
 emit scorers redefine path cost $g$.
@@ -383,8 +383,8 @@ $$
 
 `emit_bag_score` takes a completed `PlanningState` and returns
 $e(a) +$ [`rank_heuristic_with_gdp_for_rates`](../crates/vic3-planning/src/plan/progress_h.rs)
-on that state’s GDP. PEA speculative complete / `gdp_for_rates` node fields /
-emit mismatch warns are **not** wired yet (later PEA ranking PR).
+on that state’s GDP. Speculative complete / `gdp_for_rates` node fields /
+emit mismatch warns are **not** wired yet (later search-ranking PR).
 
 Tie-break (when wired): higher $r_i$ for that candidate, then fingerprint.
 

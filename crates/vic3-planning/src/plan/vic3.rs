@@ -340,7 +340,7 @@ impl Hash for Vic3Node {
 /// never treats a missing tech as free while queued (consistency over 0-day
 /// enqueue). Construction uses head remaining ÷ rate when set.
 ///
-/// PEA bag ordering may use progress-aware [`super::progress_h`] scorers in a
+/// Search candidate-bag ordering may use progress-aware [`super::progress_h`] scorers in a
 /// later PR. Incumbent $U$ from greedy (builds allowed; Construction Sector
 /// excluded) prunes via `PathFinderBuilder::max_cost` in [`super::result`].
 fn goal_timing_lower_bound(
