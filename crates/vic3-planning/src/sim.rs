@@ -1387,17 +1387,26 @@ fn successors_for_simple_subgoals_with_economy(
         }
     }
 
-    for (building, state_id) in economy.building_candidates(state, open_simple_subgoals, config) {
-        push_decision(
-            &mut result,
-            state,
-            Action::QueueBuildingLevel {
-                building_type_name: building,
-                state_id,
-            },
-            economy,
-            config,
-        );
+    // If the construction queue is full (capped by `max_parallel_construction_jobs`),
+    // any `QueueBuildingLevel` action would simply append to the back of the queue,
+    // delaying its start. We don't consider queuing buildings when full,
+    // because doing so creates redundant states (queuing now vs waiting and queuing later
+    // both yield identical completion timing). By waiting until there is a free slot,
+    // we massively prune the search tree branching factor.
+    if !crate::construction::construction_queue_full(state, config) {
+        for (building, state_id) in economy.building_candidates(state, open_simple_subgoals, config)
+        {
+            push_decision(
+                &mut result,
+                state,
+                Action::QueueBuildingLevel {
+                    building_type_name: building,
+                    state_id,
+                },
+                economy,
+                config,
+            );
+        }
     }
     let (max_pm_candidates, max_pm_overrides) = config.pm_branch_caps();
     for (building_id, methods) in economy.pm_switch_candidates(

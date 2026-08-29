@@ -580,7 +580,9 @@ fn goal_timing_lower_bound(
                 // We calculate this exactly in O(1) using a fixed-point equation:
                 // T = (OptimalCP + sum(min(remaining_cp, cap_rate * T))) / TotalRate
                 //
-                let Some((optimal_cp, active_penalties)) = calculate_optimal_cp_and_penalties(state, config, economy, context, target_gap) else {
+                let Some((optimal_cp, active_penalties)) =
+                    calculate_optimal_cp_and_penalties(state, config, economy, context, target_gap)
+                else {
                     return construction_days;
                 };
 
@@ -588,8 +590,9 @@ fn goal_timing_lower_bound(
                 let c_s = f64::from(config.default_construction_cost);
                 let delta_c = 5.0; // Optimistic upper bound for construction sector yield
                 let r = delta_c / c_s;
-                
-                let knapsack_days = solve_fixed_point_timeline(optimal_cp, &active_penalties, c_0, r).ceil() as u32;
+
+                let knapsack_days =
+                    solve_fixed_point_timeline(optimal_cp, &active_penalties, c_0, r).ceil() as u32;
 
                 construction_days.max(knapsack_days)
             }
@@ -598,7 +601,7 @@ fn goal_timing_lower_bound(
     }
 }
 
-/// Translates the current game state into base optimal CP required and 
+/// Translates the current game state into base optimal CP required and
 /// extracts penalties for any active sub-optimal jobs in the queue.
 #[inline(always)]
 fn calculate_optimal_cp_and_penalties(
@@ -611,9 +614,9 @@ fn calculate_optimal_cp_and_penalties(
     let needed_cp = context.gdp_knapsack.needed_cp(target_gap)?;
     let mut sum_theoretical_costs = 0.0;
     let mut active_penalties = Vec::new();
-    
+
     let cap_rates = crate::construction::construction_points_per_day_per_job(state, config);
-    
+
     for (c, &cap_rate) in state.constructions.iter().zip(&cap_rates) {
         let eff = context
             .gdp_knapsack
@@ -627,13 +630,13 @@ fn calculate_optimal_cp_and_penalties(
             config,
         )
         .unwrap_or(f64::from(config.default_construction_cost));
-        
+
         let remaining_cp = c.remaining.unwrap_or(total_cost);
-        
+
         if cap_rate > 0.0 {
             active_penalties.push((remaining_cp, cap_rate));
         }
-        
+
         if eff > 0.0 {
             let gdp = total_cost * eff;
             if gdp > 0.0 {
@@ -641,7 +644,7 @@ fn calculate_optimal_cp_and_penalties(
             }
         }
     }
-    
+
     let optimal_cp = (needed_cp - sum_theoretical_costs).max(0.0);
     Some((optimal_cp, active_penalties))
 }
@@ -660,15 +663,15 @@ fn estimate_optimistic_capacity(state: &PlanningState) -> f64 {
 
 /// Pure mathematical solver for the queue penalty fixed-point timeline.
 /// T = ExponentialTime(OptimalCP + sum(min(remaining_cp, cap_rate * T)))
-/// 
+///
 /// ARCHITECTURE NOTE: Why open-code this instead of using `basin` (our NLS solver)?
-/// 1. Performance: This is the A* heuristic hot-path, called millions of times per second. 
-///    A generalized solver like `basin` would introduce function call/trait overhead that 
+/// 1. Performance: This is the A* heuristic hot-path, called millions of times per second.
+///    A generalized solver like `basin` would introduce function call/trait overhead that
 ///    would destroy search performance. This open-coded loop compiles to inline SIMD/floats.
-/// 2. Strict Admissibility: A* requires we NEVER overestimate. By initializing `t_guess = 0` 
-///    and iterating on a concave function, we approach the fixed point strictly from below. 
-///    If we terminate early (e.g. hit max iterations), we return a value slightly *less* 
-///    than the true fixed point, preserving perfect admissibility. A generalized solver 
+/// 2. Strict Admissibility: A* requires we NEVER overestimate. By initializing `t_guess = 0`
+///    and iterating on a concave function, we approach the fixed point strictly from below.
+///    If we terminate early (e.g. hit max iterations), we return a value slightly *less*
+///    than the true fixed point, preserving perfect admissibility. A generalized solver
 ///    might overshoot by 0.000001, which `.ceil()` would round up, breaking admissibility!
 #[inline(always)]
 fn solve_fixed_point_timeline(
@@ -683,20 +686,20 @@ fn solve_fixed_point_timeline(
         for &(remaining_cp, cap_rate) in active_penalties {
             penalty += remaining_cp.min(cap_rate * t_guess);
         }
-        
+
         let w = optimal_cp + penalty;
         if w <= 0.0 {
             t_guess = 0.0;
             break;
         }
-        
+
         let new_t = if r * (w / c_0) > 1.0 {
             let t1 = (1.0 / r) * (r * w / c_0).ln();
             t1 + (1.0 / r)
         } else {
             w / c_0
         };
-        
+
         if (new_t - t_guess).abs() < 0.1 {
             t_guess = new_t;
             break;
@@ -1471,27 +1474,27 @@ mod tests {
         );
         assert_eq!(new_bound, 91);
     }
-    
+
     #[test]
     fn test_queue_penalty_fixed_point_matches_timeline() {
         let optimal_cp = 1000.0f64;
         let total_rate = 5.0f64; // c_0
         let r = 0.0; // r=0 makes the exponential function linear, matching the test scenario
-        
+
         // The monument is queued:
         let monument_remaining = 100.0f64;
         let monument_cap = 1.0f64;
         let active_penalties = vec![(monument_remaining, monument_cap)];
-        
+
         let t_guess = solve_fixed_point_timeline(optimal_cp, &active_penalties, total_rate, r);
-        
+
         // User's exact manual timeline trace:
         // 100 days: Monument 1 CP/day (finishes), Knapsack 4 CP/day (400 CP)
         // Remaining knapsack: 600 CP
         // After 100 days: Knapsack 5 CP/day
         // 600 / 5 = 120 days.
         // Total time = 100 + 120 = 220 days.
-        
+
         assert_eq!(t_guess.ceil() as u32, 220);
     }
 }
