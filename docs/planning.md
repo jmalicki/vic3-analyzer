@@ -96,9 +96,15 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
   - **Direct:** defs building types whose default PM IO helps open `good_price` / raising `gdp`, plus barracks/shipyards/naval admin when PP needs levels (hire stays on the military simple-subgoal arm). Each type expands to states that already have that building, or every owned state for first-of-type / greenfield. Completion bumps levels in that state (synthetic row when absent) so prices move.
   - **No type-level dominance prune:** modeled benefit/cost axes omit slots, local markets, and unlocks, so “strictly better type” is not sound.
   - **Meta:** Construction Sector when any other build candidate already exists (capacity lever, not IO), also placed by state.
-  - **Deferred:** free slots / potentials and building unlock techs (`TODO(buildability)`); A* incumbent upper bound via greedy feasible path (`TODO(anytime-ub)`).
+  - **Deferred:** free slots / potentials and building unlock techs (`TODO(buildability)`). Incumbent $U$ via greedy (including construction; always ≥1 government slot) + `max_cost` prune is wired (`plan::greedy`); see [`planning-progress-heuristic.md`](planning-progress-heuristic.md).
 - Approximations: full staffing assumed for CS output; building-group `construction_efficiency_*` and most non-tech weekly-progress modifiers ignored; economic-law private mult table is vanilla-only. Still not full Paradox construction-goods demand or script cost tables beyond loaded `required_construction`.
 - **PM identity:** world/planning buildings store production methods as string script ids that **must** resolve in defs. Whether to replace those with indices into a bidirectional name↔id map remains an open design question.
+- **Progress ranking** (wired into search): residual-days / cheap-bag scorers in
+  `plan/progress_h.rs`, orchestrated by `plan/bag_rank.rs` for candidate bags;
+  emit uses speculative complete + `gdp_for_rates` — see
+  [`planning-progress-heuristic.md`](planning-progress-heuristic.md)
+  and [`planning-search.md`](planning-search.md). Greedy incumbent $U$ is wired
+  into `plan()` (`TODO(anytime-ub)` cleared).
 
 ---
 

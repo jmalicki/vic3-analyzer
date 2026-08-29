@@ -205,6 +205,14 @@ struct SearchContext {
 pub struct Vic3Node {
     identity: Vic3Identity,
     cache: Vic3Cache,
+    /// GDP used for residual / rate math when ranking children.
+    ///
+    /// Design doc: $\mathrm{gdp}_{\mathrm{for\_rates}}$ in
+    /// `docs/planning-progress-heuristic.md`. Equals [`PlanningState::gdp`] at
+    /// roots and after real price refresh; after PEA emit of a build may be
+    /// state_t GDP plus the emit-time GDP delta (anticipated before
+    /// `BuildingCompleted` updates `state.gdp`). Not part of Hash/Eq identity.
+    gdp_for_rates: f64,
 }
 
 /// Domain identity for the pathfinder intern map.
@@ -283,12 +291,25 @@ impl Vic3Node {
     }
 
     fn with_context(state: PlanningState, context: Rc<SearchContext>) -> Self {
+        let gdp_for_rates = state.gdp;
         let identity = Vic3Identity::new(state);
         context.trace.note_fp(identity.fingerprint);
         Self {
             identity,
             cache: Vic3Cache { context },
+            gdp_for_rates,
         }
+    }
+
+    /// GDP for residual-days / rate math (may anticipate emit GDP delta).
+    pub fn gdp_for_rates(&self) -> f64 {
+        self.gdp_for_rates
+    }
+
+    /// Set anticipated GDP for child ranking after PEA emit scoring.
+    pub(crate) fn with_gdp_for_rates(mut self, gdp_for_rates: f64) -> Self {
+        self.gdp_for_rates = gdp_for_rates;
+        self
     }
 
     /// `(dups, uniques)` of domain fingerprints created in this search.
@@ -393,17 +414,17 @@ impl Hash for Vic3Node {
 /// zero. This is deliberately a relaxation of the real state graph, not a
 /// replacement for A*.
 ///
-/// // TODO(anytime-ub): `h` is a lower bound only. A later PR can compute a
-/// // greedy feasible path for easy goal shapes, take its cost as incumbent
-/// // `U`, and prune nodes/edges with `g + h >= U`. That complements wide
-/// // state-scoped building candidate sets (no type-level IO dominance prune).
-///
-/// Goal-DAG timing lower bound used by A*.
+/// Goal-DAG timing lower bound used by A* (`h_adm`).
 ///
 /// AND → max, OR → min across children (independent tracks finish near the
 /// max). Open research uses defs cost / remaining-style ETA when available but
 /// never treats a missing tech as free while queued (consistency over 0-day
 /// enqueue). Construction uses head remaining ÷ rate when set.
+///
+/// Search candidate-bag ordering uses [`super::bag_rank`] over
+/// progress-aware [`super::progress_h`] scorers. Incumbent $U$ from greedy
+/// (builds allowed; Construction Sector excluded) prunes via
+/// `PathFinderBuilder::max_cost` in [`super::result`].
 fn goal_timing_lower_bound(
     goal: &Goal,
     state: &PlanningState,
@@ -610,10 +631,17 @@ impl SearchNode for Vic3Node {
         edges
             .into_iter()
             .map(|successor| {
-                (
-                    Self::with_context(successor.state, Rc::clone(&self.cache.context)),
-                    u32::from(successor.days),
-                )
+                let cost = u32::from(successor.days);
+                let next = Self::with_context(successor.state, Rc::clone(&self.cache.context));
+                // A* Consistency Check: h(parent) <= cost + h(child)
+                debug_assert!(
+                    self.heuristic() <= cost.saturating_add(next.heuristic()),
+                    "Consistency violation in Vic3Node: h(parent)={} > cost={} + h(child)={}",
+                    self.heuristic(),
+                    cost,
+                    next.heuristic()
+                );
+                (next, cost)
             })
             .collect()
     }
