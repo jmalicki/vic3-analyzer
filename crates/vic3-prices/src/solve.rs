@@ -357,14 +357,13 @@ impl PriceResidual<'_> {
                 let buy = shop.frozen_buy[good] + scratch.pop_buy[good];
                 let sell = shop.frozen_sell[good];
                 let base = self.cache.base_prices[good];
-                // Unclipped state τ for the blend target (same formulation as the
-                // national residual). Box the blended local price so pop shopping
-                // stays inside the game range — nested analog of boxed p^loc.
+                // Calculate the unclipped local price target, blend it with the global market
+                // price using MAPI, and finally clamp the resulting local price to strictly
+                // obey the game's price limits.
                 let state_target = target_price(base, buy, sell, self.price_range);
                 let blended = local_price(shop.mapi, market[good], state_target);
-                let lo = base * (1.0 - self.price_range);
-                let hi = base * (1.0 + self.price_range);
-                let local = blended.clamp(lo, hi);
+                let local =
+                    blended.clamp(base * (1.0 - self.price_range), base * (1.0 + self.price_range));
                 delta = delta.max((local - scratch.local[good]).abs());
                 scratch.next[good] = local;
             }
