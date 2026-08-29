@@ -435,14 +435,11 @@ fn goal_timing_lower_bound(
                 0
             }
         }
-        Goal::Simple(atom @ (SimpleSubgoal::GoodPrice { .. } | SimpleSubgoal::Gdp { .. })) => {
-            if atom.eval(state)
-                || economy.has_pm_switch_path(state, std::slice::from_ref(atom), config)
-            {
-                0
-            } else {
-                construction_days
-            }
+        Goal::Simple(SimpleSubgoal::GoodPrice { .. } | SimpleSubgoal::Gdp { .. }) => {
+            // Rate-derived capacity ETA is inadmissible because queuing a Construction Sector
+            // could increase capacity and drop the ETA faster than cost. Return 0 to preserve
+            // A* consistency.
+            0
         }
         Goal::Simple(_) => 0,
     }
@@ -792,7 +789,7 @@ mod tests {
     }
 
     #[test]
-    fn construction_bound_applies_without_pm_path() {
+    fn construction_bound_is_zero_without_pm_path() {
         let start = Vic3Node::new(
             PlanningState::from_parts(PlanningParts {
                 country: "GER".into(),
@@ -811,8 +808,8 @@ mod tests {
         );
         assert_eq!(
             start.heuristic(),
-            33,
-            "empty economy has no PM candidates; open price uses capacity ETA (one level)"
+            0,
+            "rate-derived term is removed for admissibility, returns 0"
         );
     }
 
@@ -1028,6 +1025,30 @@ mod tests {
         );
         assert_eq!(start, rebuilt);
         assert_eq!(start.fingerprint(), rebuilt.fingerprint());
+    }
+
+    #[test]
+    fn construction_sector_heuristic_admissible() {
+        let mini = crate::test_support::logging_and_cs_economy();
+        let economy = mini.economy;
+        let state = crate::test_support::ger_state().wood_price(35.0).get();
+        let goal = compile("good_price(wood) <= 10").unwrap();
+        let config = SimConfig {
+            default_construction_cost: 30,
+            max_construction_allocation: Some(1000),
+            ..SimConfig::default()
+        };
+        let start = Vic3Node::new_with_economy(state, goal, config, economy);
+
+        let (_, cost) = shortest_path::<_, PairingHeap<_, _>>(&start)
+            .expect("construction sector goal reachable");
+
+        assert!(
+            start.heuristic() <= cost,
+            "Construction Sector heuristic {} must be <= actual cost {}",
+            start.heuristic(),
+            cost
+        );
     }
 
     proptest! {
