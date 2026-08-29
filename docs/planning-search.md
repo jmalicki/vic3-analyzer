@@ -110,7 +110,7 @@ For GDP goals, we implement a **Fractional Knapsack** relaxation to provide a ti
 
 Instead of a full greedy simulation (which would overestimate time and break A* admissibility by providing an upper bound), the planner precomputes the theoretical \(\Delta\mathrm{GDP} / \mathrm{CP}\) efficiency of all available buildings using optimistic base prices. 
 
-During node evaluation, it fractionally consumes this perfectly sorted, idealized knapsack until the GDP target is reached. By assuming zero economic friction (no input shortages, no price crashes from oversupply, and infinite construction scaling if needed), we guarantee this theoretical "perfect economy" path will *always* take less time than any real gameplay simulation. This guarantees A* admissibility while keeping the heuristic perfectly \(O(1)\) to evaluate in the hot path.
+During node evaluation, it fractionally consumes this perfectly sorted, idealized knapsack until the GDP target is reached. By assuming zero economic friction (no input shortages, no price crashes from oversupply, and infinite construction scaling if needed), we guarantee this theoretical "perfect economy" path will *always* take less time than any real gameplay simulation. This guarantees A* admissibility while keeping the heuristic perfectly \(O(B)\) to evaluate in the hot path, where \(B\) is the number of viable building types in the dataset.
 
 ---
 
