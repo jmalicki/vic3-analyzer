@@ -30,7 +30,7 @@ During a solve, **building employment, base wages, and trade-center route volume
 
 ## 2. Primitives and state space
 
-- **Priced goods:** \(g\) with base \(b_g > 0\) and price-range \(\rho \in (0,1]\) (NLS unknowns). Goods with \(b_g = 0\) are not relative-price unknowns.
+- **Priced goods:** Set \(G'\) (a subset of all goods \(G\)). For \(g \in G'\), base price \(b_g > 0\) and price-range \(\rho \in (0,1]\) (NLS unknowns). Goods with \(b_g = 0\) are not relative-price unknowns. Throughout this document, \(g\) refers to \(g \in G'\).
 - **States (regions):** \(s \in S\). Effective MAPI weight \(m_s = 0.75 \cdot \mathrm{access}_s\) with \(\mathrm{access}_s \in [0,1]\), so typically \(m_s \in [0, 0.75]\). Local price blends toward the **market** price \(p^{\mathrm{mkt}}\), not an average of other locals ([`effective_mapi`](../crates/vic3-prices/src/formula.rs) / [`local_price`](../crates/vic3-prices/src/formula.rs)).
 - **Access \(\alpha_s\):** infrastructure access also scales state orders into the market residual (same infra input as MAPI, different role).
 - **Frozen volumes:** per state, non-pop buy \(B^{0}_{s,g}\) and sell \(Q_{s,g}\); national frozen non-pop aggregates; non-wage pop buy frozen; wage bins respond to local prices ([`ShopCache`](../crates/vic3-prices/src/shop_cache.rs)).
@@ -64,14 +64,18 @@ Imbalance ratio (see [`market_ratio`](../crates/vic3-prices/src/formula.rs) for 
 
 Stack national and local consistency into \(R^{\mathrm{full}}(x)\).
 
-**Buys:**
+**Buys and Sells:**
 
 \[
 B_{s,g}(x) = B^{0}_{s,g} + D_{s,g}(p^{\mathrm{loc}}_s), \quad
 B_g(x) = B^{\mathrm{nat,0}}_g + \sum_s \alpha_s D_{s,g}(p^{\mathrm{loc}}_s)
 \]
 
-(plus frozen pop components as in ShopCache).
+\[
+Q_g = Q^{\mathrm{nat,0}}_g
+\]
+
+(where \(B^{\mathrm{nat,0}}_g\) and \(Q^{\mathrm{nat,0}}_g\) aggregate state-building, trade, and frozen-population orders weighted by \(\alpha_s\), while world-level frozen extras and stateless orders use access 1.0, matching ShopCache).
 
 **Local residual** (relative-price units):
 
@@ -88,15 +92,15 @@ p^{\mathrm{loc}}_{s,g}
 R^{\mathrm{nat}}_g(x) = r_g - \tau(B_g(x), Q_g)
 \]
 
-Minimize \(\tfrac12 \|R^{\mathrm{full}}(x)\|_2^2\) subject to the box on \(x\).
+Minimize \(\tfrac12 \|R^{\mathrm{full}}(x)\|_2^2\) subject to the box on \(x\). (Note: This is a box-constrained least-squares formulation, not a strict Mixed Complementarity Problem (MCP). Stationarity implies projected gradients involving \((J^{\mathrm{full}})^T R^{\mathrm{full}}\) vanish, which does not necessarily enforce componentwise sign complementarity on \(R^{\mathrm{full}}\) at the bounds.)
 
 **Shipped nested path** instead solves only over \(r\), with locals from inner successive substitution ([`solve.rs`](../crates/vic3-prices/src/solve.rs)).
 
 ---
 
-## 5. Bound shortages (MCP)
+## 5. Bound shortages (Projected-Gradient Stationarity)
 
-With unclipped \(\tau\) and box constraints: at a hard shortage the hub coordinate sits on \(1+\rho\), residual need not be \(\approx 0\), but the projected gradient / KKT conditions can still hold. Callers must not treat \(\|R\|\approx 0\) as the only success criterion once that map ships—see Basin termination flags. Today’s **I5** (`converged` \(\Rightarrow\) residual \(<\varepsilon\)) still matches the clipped nested path; it may evolve with the MCP target ([`invariants.md`](invariants.md)).
+With unclipped \(\tau\) and box constraints: at a hard shortage the hub coordinate sits on \(1+\rho\), and the component residual \(R_g\) need not be \(\approx 0\). Under the least-squares objective, projected-gradient stationarity can hold even with large \(\|R\|\). Callers must not treat \(\|R\|\approx 0\) as the only success criterion once that map ships—see Basin termination flags. Today’s **I5** (`converged` \(\Rightarrow\) residual \(<\varepsilon\)) still matches the clipped nested path; it may evolve with the unclipped target ([`invariants.md`](invariants.md)).
 
 ---
 

@@ -74,7 +74,7 @@ Instead of generic promotion advice, the alert engine filters advice specificall
 
 To provide fast, deterministic evaluations for what-if scenarios and search heuristics:
 
-1. **Frozen Variables:** Building employment, base wages, and **trade-center route volumes** are held fixed from the save during pop re-equilibration unless explicitly modified by a what-if delta or production method override. **Trade is frozen today**; that is part of the pricing model, not only a future footnote.
+1. **Frozen Variables:** Building employment and base wages are held fixed from the save during pop re-equilibration unless explicitly modified by a what-if delta or production method override. **Trade-center route volumes** remain strictly frozen during pop re-equilibration (they are separate from the what-if delta or PM override exceptions). **Trade is frozen today**; that is part of the pricing model, not only a future footnote.
 2. **Authoritative Saved IO:** Saved building input/output volumes are authoritative. Buildings with no saved IO fall back to PM recipe quantities scaled by staffed levels.
 3. **Empty Markets:** If a save has no orders for a good, it prices at base price. `PricesResult.inputs` tracks active order counts so diagnostics can distinguish an empty market from a balanced one.
 
