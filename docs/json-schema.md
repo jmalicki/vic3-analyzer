@@ -19,6 +19,12 @@ Core option structs never contain `PathBuf` or OS-specific filesystem fields.
       "type": "array",
       "items": { "type": "number" },
       "description": "Previous relative prices in goods-with-base-price order. Ignored when length does not match; omitted when unset."
+    },
+    "strategy": {
+      "type": "string",
+      "enum": ["nested", "joint"],
+      "default": "nested",
+      "description": "Equilibrium formulation. joint currently aliases nested until the simultaneous solve lands."
     }
   }
 }

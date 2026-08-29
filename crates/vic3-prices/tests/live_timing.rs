@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use vic3_defs::GameDefs;
 use vic3_load::{empty_tokens, load_path_world, load_tokens_path};
 use vic3_prices::{
-    preview, solve, ExtraLevelsDelta, ProductionMethodDelta, SolveOpts, World, WorldDelta,
+    preview, solve, ExtraLevelsDelta, ProductionMethodDelta, SolveOpts, SolveStrategy, World,
+    WorldDelta,
 };
 
 #[test]
@@ -235,4 +236,62 @@ fn live_equilibrate_warm_vs_cold() {
     time_runs("warm equilibrate same world", 5, || {
         equilibrate(&world, &defs, with_warm_rel(&relative))
     });
+}
+
+#[test]
+#[ignore = "set VIC3_SAVE (and VIC3_TOKENS for binary) plus VIC3_GAME or VIC3_DEFS"]
+fn live_nested_vs_joint_equilibrate() {
+    use vic3_prices::equilibrate;
+
+    let save_path = std::env::var("VIC3_SAVE").expect("VIC3_SAVE");
+    let defs = if let Ok(path) = std::env::var("VIC3_DEFS") {
+        vic3_defs::decode_blob(&std::fs::read(path).expect("defs blob")).expect("decode blob")
+    } else {
+        vic3_defs::load_from_path(std::env::var("VIC3_GAME").expect("VIC3_GAME"))
+            .expect("game defs")
+    };
+    let tokens = match std::env::var("VIC3_TOKENS") {
+        Ok(path) => load_tokens_path(path).expect("tokens"),
+        Err(_) => empty_tokens(),
+    };
+    let save = load_path_world(&save_path, tokens).expect("load save");
+    let world = World::from_save(&save, &defs);
+    drop(save);
+
+    let nested_opts = SolveOpts {
+        strategy: SolveStrategy::Nested,
+        ..SolveOpts::default()
+    };
+    let joint_opts = SolveOpts {
+        strategy: SolveStrategy::Joint,
+        ..SolveOpts::default()
+    };
+
+    // Warm up once each (Joint aliases Nested until a later PR).
+    let _ = equilibrate(&world, &defs, nested_opts.clone());
+    let _ = equilibrate(&world, &defs, joint_opts.clone());
+
+    let nested = time_runs("nested equilibrate", 5, || {
+        equilibrate(&world, &defs, nested_opts.clone())
+    });
+    let joint = time_runs("joint equilibrate", 5, || {
+        equilibrate(&world, &defs, joint_opts.clone())
+    });
+
+    eprintln!(
+        "nested stats strategy={:?} param_dim={} residual_evals={} jacobian_evals={} residual={}",
+        nested.stats.strategy,
+        nested.stats.param_dim,
+        nested.stats.n_residual_evals,
+        nested.stats.n_jacobian_evals,
+        nested.residual
+    );
+    eprintln!(
+        "joint stats strategy={:?} param_dim={} residual_evals={} jacobian_evals={} residual={}",
+        joint.stats.strategy,
+        joint.stats.param_dim,
+        joint.stats.n_residual_evals,
+        joint.stats.n_jacobian_evals,
+        joint.residual
+    );
 }

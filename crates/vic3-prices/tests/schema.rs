@@ -188,14 +188,16 @@ fn solve_opts_schema_matches_json_schema_md_in_spirit() {
     assert!(props.contains_key("residual_eps"));
     assert!(props.contains_key("max_iters"));
     assert!(props.contains_key("warm_rel"));
+    assert!(props.contains_key("strategy"));
     assert_eq!(
         schema.get("additionalProperties"),
         Some(&Value::Bool(false))
     );
     let req = required(&schema);
     assert!(
-        !req.iter()
-            .any(|f| f == "residual_eps" || f == "max_iters" || f == "warm_rel"),
+        !req.iter().any(|f| {
+            f == "residual_eps" || f == "max_iters" || f == "warm_rel" || f == "strategy"
+        }),
         "SolveOpts fields have defaults and should not be required, got {req:?}"
     );
 }

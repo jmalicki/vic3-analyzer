@@ -255,6 +255,13 @@ struct PriceResidual<'a> {
 
 impl PriceResidual<'_> {
     /// Map relative prices `rel` to absolute prices using base prices in the cache.
+    /// Converts a slice of relative prices (one per market good) into a full `GoodsVec` of market prices.
+    ///
+    /// # Arguments
+    /// * `rel` - A slice of relative prices `r_g` corresponding to the goods in `self.goods`.
+    ///
+    /// # Returns
+    /// A `GoodsVec` containing the absolute market price `p_g = base_g * r_g` for each good.
     fn prices_from_rel(&self, rel: &[f64]) -> GoodsVec {
         let mut prices = self.cache.base_prices.clone();
         for (&good, (&base, &r)) in self.goods.iter().zip(self.bases.iter().zip(rel)) {
@@ -268,6 +275,15 @@ impl PriceResidual<'_> {
     /// * `shop` — that state’s frozen orders + wage bins.
     /// * `market` — current market absolute prices.
     /// * `scratch` — reusable buffers for local / pop_buy / next.
+    /// Computes the local market prices, wage shifts, and resulting pop buy volumes for a single state.
+    ///
+    /// # Arguments
+    /// * `shop` - The state's local shop cache containing frozen data and wealth bins.
+    /// * `market` - The absolute market prices `p_g` for all goods.
+    /// * `scratch` - A scratchpad for reusing allocations during evaluation.
+    ///
+    /// # Side Effects
+    /// Mutates `scratch.locals` with the blended local prices and `scratch.pop_buy` with the resulting pop consumption.
     fn settle_state(&self, shop: &StateShop, market: &GoodsVec, scratch: &mut SettleScratch) {
         let n = self.cache.base_prices.len();
         scratch.local.copy_from(market);
@@ -300,6 +316,14 @@ impl PriceResidual<'_> {
     }
 
     /// World pop buy at `market` prices (stateless wages + access-scaled state settles).
+    /// Computes the aggregate worldwide pop consumption for all goods at the given market prices.
+    ///
+    /// # Arguments
+    /// * `market` - The absolute market prices `p_g` for all goods.
+    /// * `scratch` - A scratchpad for reusing allocations.
+    ///
+    /// # Returns
+    /// A `GoodsVec` summing the pop buy volumes across all states.
     fn world_pop_buy_at(&self, market: &GoodsVec, scratch: &mut SettleScratch) -> GoodsVec {
         let mut buy = self.cache.frozen_pop_buy.clone();
         add_wage_bins(
@@ -323,6 +347,14 @@ impl PriceResidual<'_> {
     }
 
     /// Full settle snapshot: world pop buy plus per-state local / pop_buy maps.
+    /// Takes a full snapshot of the local prices and pop buy volumes across all states at the given market prices.
+    ///
+    /// # Arguments
+    /// * `market` - The absolute market prices `p_g` for all goods.
+    /// * `scratch` - A scratchpad for reusing allocations.
+    ///
+    /// # Returns
+    /// A `ShopSnapshot` containing the local prices per state and the worldwide aggregate pop consumption.
     fn snapshot_at(&self, market: &GoodsVec, scratch: &mut SettleScratch) -> ShopSnapshot {
         let mut world_pop_buy = self.cache.frozen_pop_buy.clone();
         add_wage_bins(
@@ -350,11 +382,27 @@ impl PriceResidual<'_> {
         }
     }
 
+    /// Helper to compute worldwide pop consumption directly from absolute market prices.
+    ///
+    /// # Arguments
+    /// * `prices` - The absolute market prices `p_g` for all goods.
+    /// * `scratch` - A scratchpad for reusing allocations.
+    ///
+    /// # Returns
+    /// A `GoodsVec` with the total pop buy volumes.
     fn pop_buy_at(&self, prices: &GoodsVec, scratch: &mut SettleScratch) -> GoodsVec {
         self.world_pop_buy_at(prices, scratch)
     }
 
     /// Formula relative prices from orders at the pop demand implied by `rel`.
+    /// Computes the target relative price formula for each market good based on current orders.
+    ///
+    /// # Arguments
+    /// * `rel` - The current relative prices `r_g` to evaluate at.
+    /// * `scratch` - A scratchpad for reusing allocations.
+    ///
+    /// # Returns
+    /// A vector of target relative prices for each market good.
     fn formula_rel(&self, rel: &[f64], scratch: &mut SettleScratch) -> Vec<f64> {
         let prices = self.prices_from_rel(rel);
         let pop_buy = self.pop_buy_at(&prices, scratch);
@@ -369,6 +417,14 @@ impl PriceResidual<'_> {
             .collect()
     }
 
+    /// Computes the mathematical residual `R_g = r_g - formula(r_g)` for all market goods.
+    ///
+    /// # Arguments
+    /// * `rel` - The current relative prices `r_g`.
+    /// * `scratch` - A scratchpad for reusing allocations.
+    ///
+    /// # Returns
+    /// A vector of residuals `R_g` corresponding to each market good.
     fn residual_at(&self, rel: &[f64], scratch: &mut SettleScratch) -> Vec<f64> {
         self.formula_rel(rel, scratch)
             .into_iter()
@@ -377,12 +433,22 @@ impl PriceResidual<'_> {
             .collect()
     }
 
+    /// Clamps the given relative prices `r_g` into the solver's valid box `[1 - ρ, 1 + ρ]`.
+    ///
+    /// # Arguments
+    /// * `rel` - A mutable slice of relative prices `r_g` to be clamped in place.
     fn clamp_rel(&self, rel: &mut [f64]) {
         for (i, r) in rel.iter_mut().enumerate() {
             *r = r.clamp(self.lower[i], self.upper[i]);
         }
     }
 
+    /// Warms up relative prices via damped successive substitution `r ← (1−α)r + α formula(c(r))`.
+    ///
+    /// # Arguments
+    /// * `rel` - A mutable slice of relative prices to start from and update in place.
+    /// * `alpha` - The damping factor (e.g., `0.5`).
+    /// * `iters` - The number of substitution iterations to perform.
     fn damp_toward_formula(&self, rel: &mut [f64], alpha: f64, iters: u32) {
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         for _ in 0..iters {
@@ -394,6 +460,18 @@ impl PriceResidual<'_> {
         }
     }
 
+    /// Full evaluation of the market state at the given relative prices `r_g`.
+    ///
+    /// This resolves the local state, aggregates supply/demand, and yields the final rows and residuals.
+    ///
+    /// # Arguments
+    /// * `rel` - A slice of relative prices `r_g` corresponding to each market good.
+    ///
+    /// # Returns
+    /// A tuple containing:
+    /// 1. A vector of `GoodPrice` rows summarizing base, price, buy, and sell volumes per good.
+    /// 2. The scalar objective value (the root sum of squared residuals `‖R‖`).
+    /// 3. The `ShopSnapshot` containing local price/consumption details across states.
     fn evaluate(&self, rel: &[f64]) -> (Vec<GoodPrice>, f64, ShopSnapshot) {
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         let prices = self.prices_from_rel(rel);
