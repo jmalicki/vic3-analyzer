@@ -5,16 +5,17 @@
 //! 1. Build access-scaled frozen non-pop orders and state shops (pops at local
 //!    prices; buildings + post-1.9 trade frozen).
 //! 2. If a valid `warm_rel` is provided, use it as the starting point. Otherwise,
-//!    warm-start by interpolating towards the unclipped target relative price.
+//!    warm-start by interpolating towards the unclipped target relative price
+//!    using successive substitution: `r ← (1−α)r + α τ(c(r))` (where `α = 0.5`).
 //! 3. Run the Basin trust-region-reflective (TRF) optimizer to minimize the
-//!    difference between the current relative prices and the target prices,
-//!    bounded by the allowed price range.
+//!    difference between the current relative prices and the target prices
+//!    (`‖r − τ(orders(r))‖²`), bounded by the allowed price range.
 //! 4. Polish the result using successive substitution, which also acts as a
 //!    fallback if the optimizer fails.
 //!
 //! # Target Prices and Bounds
 //!
-//! The optimizer targets the unclipped relative price ([`crate::unclipped_target_relative_price`]).
+//! The optimizer targets the unclipped relative price, τ ([`crate::unclipped_target_relative_price`]).
 //! However, hard bounds on the relative price still apply. If the market has a
 //! severe shortage or glut, the unclipped target might fall outside the allowed
 //! price range. In these cases, the solver will hit the bound and report a large
