@@ -14,9 +14,10 @@
 //!    interior-reflective method; it evaluates strictly inside the allowed bounds
 //!    and can only approach bounds asymptotically, often struggling to converge
 //!    when the true market-clearing price sits exactly on a hard min/max bound.
-//!    Our manual successive substitution evaluates the exact target formula and
-//!    hard-clamps the result, successfully snapping these goods perfectly onto
-//!    their limits. It also acts as a fallback if TRF fails.
+//!    Our manual successive substitution acts as a fixed-point iteration, evaluating 
+//!    the exact clamped target formula across all goods simultaneously (Jacobi-style). 
+//!    This successfully snaps these goods perfectly onto their limits without 
+//!    altering the true steady-state equilibrium. It also acts as a fallback if TRF fails.
 //!
 //! # Target Prices and Bounds
 //!
