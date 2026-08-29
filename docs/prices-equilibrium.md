@@ -8,7 +8,7 @@ Canonical formulation for the multi-region price NLS in [`vic3-prices`](../crate
 | --- | --- | --- |
 | Unknowns | Market relative prices \(r\) only | Joint \(x = (r, \{p^{\mathrm{loc}}_s\})\) |
 | Locals | Nested successive substitution per residual eval | Local residual block in one stacked system |
-| Price map | Clipped [`price`](../crates/vic3-prices/src/formula.rs) | Unclipped \(\tau\). Box bounds enforce \(\pm\rho\) |
+| Price map | Unclipped target relative price (\(\tau\)) via `unclipped_target_relative_price` / `target_price`. Box bounds on \(r\) and locals | Unclipped target relative price (\(\tau\)). Box bounds enforce \(\pm\rho\) |
 | Jacobian | Dense FD on \(r\) | **Sparse / arrowhead only** — never a dense \(N\times N\) Joint Jac |
 | Market scope | One whole-save price blob | One **market** star (Vic3 market / CU). Multi-market later |
 
@@ -20,7 +20,7 @@ Until the Joint path ships and becomes default, treat the Target column as desig
 
 The system models a [spatial price equilibrium](https://en.wikipedia.org/wiki/Spatial_price_equilibrium) inspired by Victoria 3 [Market Access Price Impact (MAPI)](https://vic3.paradoxwikis.com/Market#Market_access_price_impact). States (regions) couple through a **market-level** relative price hub \(r\), not through country-level price auxiliaries—countries are not a price-clearing layer in the game economy.
 
-The framework is a [disequilibrium model](https://en.wikipedia.org/wiki/Disequilibrium_(economics)): prices respond to buy/sell imbalance but are capped at \(\pm\rho\) (typically \(0.75\)). Severe shortage hits the regulatory ceiling. Orders need not clear ([non-Walrasian](https://en.wikipedia.org/wiki/Walrasian_auction) shortfall).
+The framework is a [disequilibrium model](https://en.wikipedia.org/wiki/Disequilibrium_(economics)): prices respond to buy/sell imbalance but are capped at the price range limits (\(\pm\rho\), typically \(0.75\)). Severe shortage hits the regulatory ceiling. Orders need not clear ([non-Walrasian](https://en.wikipedia.org/wiki/Walrasian_auction) shortfall).
 
 ### Frozen dimensions (today)
 
@@ -30,10 +30,10 @@ During a solve, **building employment, base wages, and trade-center route volume
 
 ## 2. Primitives and state space
 
-- **Priced goods:** Set \(G'\) (a subset of all goods \(G\)). For \(g \in G'\), base price \(b_g > 0\) and price-range \(\rho \in (0,1]\) (NLS unknowns). Goods with \(b_g = 0\) are not relative-price unknowns. Throughout this document, \(g\) refers to \(g \in G'\).
+- **Priced goods:** Set \(G'\) (a subset of all goods \(G\)). For \(g \in G'\), base price \(b_g > 0\) and a price range limit (\(\rho \in (0,1]\)) (NLS unknowns). Goods with \(b_g = 0\) are not relative-price unknowns. Throughout this document, \(g\) refers to \(g \in G'\).
 - **States (regions):** \(s \in S\). Effective MAPI weight \(m_s = 0.75 \cdot \mathrm{access}_s\) with \(\mathrm{access}_s \in [0,1]\), so typically \(m_s \in [0, 0.75]\). Local price blends toward the **market** price \(p^{\mathrm{mkt}}\), not an average of other locals ([`effective_mapi`](../crates/vic3-prices/src/formula.rs) / [`local_price`](../crates/vic3-prices/src/formula.rs)).
 - **Access \(\alpha_s\):** infrastructure access also scales state orders into the market residual (same infra input as MAPI, different role).
-- **Frozen volumes:** per state, non-pop buy \(B^{0}_{s,g}\) and sell \(Q_{s,g}\). National frozen non-pop aggregates. Non-wage pop buy frozen. Wage bins respond to local prices ([`ShopCache`](../crates/vic3-prices/src/shop_cache.rs)).
+- **Frozen volumes:** per state, non-pop buy \(B^{0}_{s,g}\) and sell \(Q_{s,g}\). National frozen non-pop aggregates and non-wage pop buy are also frozen. Wage bins respond to local prices ([`ShopCache`](../crates/vic3-prices/src/shop_cache.rs)).
 - **Target joint state:** \(x = (r, \{p^{\mathrm{loc}}_s\})\) with \(r_g \in [1-\rho, 1+\rho]\), \(p^{\mathrm{mkt}}_g = b_g r_g\), locals in \([b_g(1-\rho), b_g(1+\rho)]\).
 
 **Hub = market.** One relative-price vector \(r\) per Vic3 market. Do not introduce country auxiliaries.
@@ -46,15 +46,15 @@ During a solve, **building employment, base wages, and trade-center route volume
 
 Pop demand uses [Laspeyres-style](https://en.wikipedia.org/wiki/Price_index#Laspeyres_price_index) continuous wealth then **floor/ceil lerp** of integer packages ([`consumption`](../crates/vic3-prices/src/consumption.rs)). That is continuous in wealth but **not** \(C^1\) at integers. Wealth clamps add nonsmooth points. Treating \(D_s\) as smooth and monotone is a **modeling ideal** for analysis, not a claim about the shipped ladder.
 
-### B. Unclipped target \(\tau\) (target map)
+### B. Unclipped target relative price (\(\tau\)) (target map)
 
-Imbalance ratio (see [`market_ratio`](../crates/vic3-prices/src/formula.rs) for zero-order branches: both empty → \(0\). Buy-only → \(+1\). Sell-only → \(-1\). Else \((B-Q)/\min(B,Q)\)):
+Imbalance ratio (see [`market_ratio`](../crates/vic3-prices/src/formula.rs) for zero-order branches: both empty → \(0\), buy-only → \(+1\), sell-only → \(-1\), else \((B-Q)/\min(B,Q)\)):
 
 \[
 \tau(B,Q) = 1 + \rho \cdot R(B,Q)
 \]
 
-**Target:** omit \(\mathrm{clip}_{[-1,1]}\) on \(R\) inside the residual so shortage pushes \(\tau\) outside \([1-\rho, 1+\rho]\). The solver **box** enforces the cap ([Mixed Complementarity](https://en.wikipedia.org/wiki/Mixed_complementarity_problem) / projected gradients).
+**Target:** omit \(\mathrm{clip}_{[-1,1]}\) on \(R\) inside the residual so shortage pushes the target relative price (\(\tau\)) outside \([1-\rho, 1+\rho]\). The solver **box** enforces the cap ([Mixed Complementarity](https://en.wikipedia.org/wiki/Mixed_complementarity_problem) / projected gradients).
 
 **Current:** [`price`](../crates/vic3-prices/src/formula.rs) still applies `.clamp(-1, 1)` on the ratio.
 
@@ -68,14 +68,14 @@ Stack national and local consistency into \(R^{\mathrm{full}}(x)\).
 
 \[
 B_{s,g}(x) = B^{0}_{s,g} + D_{s,g}(p^{\mathrm{loc}}_s), \quad
-B_g(x) = B^{\mathrm{nat,0}}_g + \sum_s \alpha_s \left[D_{s,g}(p^{\mathrm{loc}}_s) - D^0_{s,g}\right]
+B_g(x) = B^{\mathrm{nat,0}}_g + \sum_s \alpha_s D_{s,g}(p^{\mathrm{loc}}_s)
 \]
 
 \[
 Q_g = Q^{\mathrm{nat,0}}_g
 \]
 
-(where \(B^{\mathrm{nat,0}}_g\) includes frozen state-population buy, while \(Q^{\mathrm{nat,0}}_g\) contains frozen sell orders only. State-building, trade, and frozen-population orders are weighted by \(\alpha_s\), while world-level frozen extras and stateless orders use access 1.0, matching ShopCache).
+(where \(B^{\mathrm{nat,0}}_g\) and \(Q^{\mathrm{nat,0}}_g\) aggregate state-building, trade, and frozen-population orders weighted by \(\alpha_s\), while world-level frozen extras and stateless orders use access 1.0, matching ShopCache).
 
 **Local residual** (relative-price units):
 
@@ -92,7 +92,7 @@ p^{\mathrm{loc}}_{s,g}
 R^{\mathrm{nat}}_g(x) = r_g - \tau(B_g(x), Q_g)
 \]
 
-Minimize \(\tfrac12 \|R^{\mathrm{full}}(x)\|_2^2\) subject to the box on \(x\). (Note: This is a box-constrained least-squares formulation, not a strict Mixed Complementarity Problem. Stationarity implies projected gradients involving \((J^{\mathrm{full}})^T R^{\mathrm{full}}\) vanish, which does not necessarily enforce componentwise sign complementarity on \(R^{\mathrm{full}}\) at the bounds.)
+Minimize \(\tfrac12 \|R^{\mathrm{full}}(x)\|_2^2\) subject to the box on \(x\). (Note: This is a box-constrained least-squares formulation, not a strict Mixed Complementarity Problem (MCP). Stationarity implies projected gradients involving \((J^{\mathrm{full}})^T R^{\mathrm{full}}\) vanish, which does not necessarily enforce componentwise sign complementarity on \(R^{\mathrm{full}}\) at the bounds.)
 
 **Shipped nested path** instead solves only over \(r\), with locals from inner successive substitution ([`solve.rs`](../crates/vic3-prices/src/solve.rs)).
 
@@ -100,7 +100,9 @@ Minimize \(\tfrac12 \|R^{\mathrm{full}}(x)\|_2^2\) subject to the box on \(x\). 
 
 ## 5. Bound shortages (Projected-Gradient Stationarity)
 
-With unclipped \(\tau\) and box constraints: at a hard shortage the hub coordinate sits on \(1+\rho\), and the component residual \(R_g\) need not be \(\approx 0\). Under the least-squares objective, projected-gradient stationarity can hold even with large \(\|R\|\). Callers must not treat \(\|R\|\approx 0\) as the only success criterion once that map ships—see Basin termination flags. Today’s **I5** (`converged` \(\Rightarrow\) residual \(<\varepsilon\)) still matches the clipped nested path. It may evolve with the unclipped target ([`invariants.md`](invariants.md)).
+Because the model uses an unclipped target price alongside strict box constraints, a severe shortage will pin the market price to its upper bound (\(1+\rho\)). In this state, the mathematical residual \(R_g\) will not reach zero, but the solver will still successfully converge to a stationary point.
+
+As a result, callers cannot rely solely on a near-zero residual (\(\|R\| \approx 0\)) to verify success. Instead, they should check the solver's termination flags (Note: **I5** may evolve accordingly. See [`invariants.md`](invariants.md)).
 
 ---
 

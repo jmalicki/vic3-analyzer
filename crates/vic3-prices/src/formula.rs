@@ -1,9 +1,11 @@
 //! Closed-form Vic3 market price and MAPI blend helpers.
 //!
 //! [`price`] / [`market_ratio`] implement the wiki formula with a documented
-//! zero-order convention ([`ORDER_EPS`]). [`price`] currently **clips** the
-//! imbalance ratio to \([-1,1]\); the design target uses an unclipped \(\tau\)
-//! with solver box bounds—see [`docs/prices-equilibrium.md`](../../../../docs/prices-equilibrium.md).
+//! zero-order convention ([`ORDER_EPS`]). [`unclipped_target_relative_price`] is the **unclipped**
+//! relative target τ used by the NLS residual and successive-substitution map
+//! (box bounds on `r` enforce the game price range; see
+//! [`docs/prices-equilibrium.md`](../../../../docs/prices-equilibrium.md)).
+//! [`price`] **clips** the imbalance ratio to \([-1,1]\) for wiki / I1–I3 display.
 //! [`market_access`] → [`effective_mapi`] → [`local_price`] are the Milestone-1
 //! local blend used inside the residual (pops shop locally; state orders are
 //! then access-scaled into one whole-save market). Extra MAPI modifiers and
@@ -50,7 +52,7 @@ pub fn market_ratio(buy: f64, sell: f64) -> f64 {
     }
 }
 
-/// Vic3 market price from buy/sell orders.
+/// Vic3 market price from buy/sell orders (**clipped** wiki helper).
 ///
 /// ```text
 /// ratio = (buy - sell) / min(buy, sell)
@@ -58,8 +60,11 @@ pub fn market_ratio(buy: f64, sell: f64) -> f64 {
 /// ```
 ///
 /// See [`market_ratio`] for the zero-order convention. The clamp is part of
-/// the model (I2): the result stays in
+/// the display / I1–I3 model (I2): the result stays in
 /// `[1 - price_range, 1 + price_range] * base` when `price_range ≥ 0`.
+///
+/// The NLS residual and successive-substitution map use [`unclipped_target_relative_price`] instead
+/// (unclipped τ); box bounds on relative prices still enforce the game range.
 ///
 /// **I1:** `buy == sell` (including both zero) ⇒ `price == base`.
 /// **I3:** weakly more buy with sell fixed ⇒ weakly higher price, away from
@@ -67,6 +72,28 @@ pub fn market_ratio(buy: f64, sell: f64) -> f64 {
 pub fn price(base: f64, buy: f64, sell: f64, price_range: f64) -> f64 {
     let ratio = market_ratio(buy, sell).clamp(-1.0, 1.0);
     base * (1.0 + price_range * ratio)
+}
+
+/// Unclipped target relative price τ from buy/sell orders.
+///
+/// ```text
+/// τ = 1 + price_range * market_ratio(buy, sell)   // no clamp on the ratio
+/// ```
+///
+/// When `buy ≫ sell`, τ can exceed `1 + price_range`. The solver keeps relative
+/// prices `r` inside the box `[1 − ρ, 1 + ρ]`; using unclipped τ in the residual
+/// avoids flat zero-gradient regions from an intermediate clamp. Display and
+/// I1–I3 checks that expect the wiki clamp continue to use [`price`].
+pub fn unclipped_target_relative_price(buy: f64, sell: f64, price_range: f64) -> f64 {
+    1.0 + price_range * market_ratio(buy, sell)
+}
+
+/// Absolute unclipped target price `base * `[`unclipped_target_relative_price`].
+///
+/// Prefer this (or [`unclipped_target_relative_price`]) anywhere that feeds the residual / local
+/// settle fixed-point map. Use [`price`] for clipped wiki / display values.
+pub fn target_price(base: f64, buy: f64, sell: f64, price_range: f64) -> f64 {
+    base * unclipped_target_relative_price(buy, sell, price_range)
 }
 
 /// Infrastructure-only market access in `[0, 1]`.
@@ -136,6 +163,32 @@ mod tests {
     fn only_sell_clamps_low() {
         let p = price(20.0, 0.0, 10.0, 0.75);
         assert!((p - 20.0 * 0.25).abs() < EPS);
+    }
+
+    #[test]
+    fn unclipped_target_relative_price_exceeds_box_when_buy_dominates() {
+        let price_range = 0.75;
+        // buy = 10 * sell ⇒ market_ratio = 9 ⇒ unclipped_target = 1 + 0.75*9 = 7.75 ≫ 1.75
+        let unclipped_target = unclipped_target_relative_price(100.0, 10.0, price_range);
+        assert!((unclipped_target - (1.0 + price_range * 9.0)).abs() < EPS);
+        assert!(unclipped_target > 1.0 + price_range);
+        let clipped = price(20.0, 100.0, 10.0, price_range);
+        assert!((clipped - 20.0 * (1.0 + price_range)).abs() < EPS);
+        assert!(
+            (target_price(20.0, 100.0, 10.0, price_range) - 20.0 * unclipped_target).abs() < EPS
+        );
+    }
+
+    #[test]
+    fn unclipped_target_relative_price_matches_price_inside_open_interval() {
+        let price_range = 0.75;
+        let buy = 12.0;
+        let sell = 10.0;
+        let ratio = market_ratio(buy, sell);
+        assert!(ratio.abs() < 1.0);
+        let unclipped_target = unclipped_target_relative_price(buy, sell, price_range);
+        let clipped_rel = price(1.0, buy, sell, price_range);
+        assert!((unclipped_target - clipped_rel).abs() < EPS);
     }
 
     #[test]

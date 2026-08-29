@@ -28,13 +28,17 @@
 //! **not** frozen — it sits inside the residual.
 //!
 //! ```text
-//! min ‖r − r_formula(orders(r))‖²
+//! min ‖r − τ(orders(r))‖²
 //! subject to r ∈ [1 − PRICE_RANGE, 1 + PRICE_RANGE]
 //! ```
 //!
+//! Here the unclipped target relative price (τ) = [`unclipped_target_relative_price`](formula::unclipped_target_relative_price)
+//! (`1 + ρ · market_ratio`); box bounds on `r` enforce the game price range.
+//! Clipped [`price`](formula::price) remains the wiki / display helper (I1–I3).
+//!
 //! # Why Basin + successive substitution
 //!
-//! - **Successive substitution** `r ← (1−α)r + α P(c(r))` is cheap and usually
+//! - **Successive substitution** `r ← (1−α)r + α τ(c(r))` is cheap and usually
 //!   lands near the fixed point; it is the warm start and the polish / fallback
 //!   when Basin reports failure or after a bound-clamped TRF finish.
 //! - **Basin `Trf`** (trust-region-reflective, dense Vec Jacobian) finishes the
@@ -73,7 +77,8 @@ pub use alerts::{
 };
 pub use consumption::consumption;
 pub use formula::{
-    effective_mapi, local_price, market_access, market_ratio, price, BASE_MAPI, ORDER_EPS,
+    effective_mapi, local_price, market_access, market_ratio, price, target_price,
+    unclipped_target_relative_price, BASE_MAPI, ORDER_EPS,
 };
 pub use label::{pretty_id, script_label};
 pub use optimize::{
