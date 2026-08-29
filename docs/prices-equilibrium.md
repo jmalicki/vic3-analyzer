@@ -68,14 +68,14 @@ Stack national and local consistency into \(R^{\mathrm{full}}(x)\).
 
 \[
 B_{s,g}(x) = B^{0}_{s,g} + D_{s,g}(p^{\mathrm{loc}}_s), \quad
-B_g(x) = B^{\mathrm{nat,0}}_g + \sum_s \alpha_s D_{s,g}(p^{\mathrm{loc}}_s)
+B_g(x) = B^{\mathrm{nat,0}}_g + \sum_s \alpha_s \left[D_{s,g}(p^{\mathrm{loc}}_s) - D^0_{s,g}\right]
 \]
 
 \[
 Q_g = Q^{\mathrm{nat,0}}_g
 \]
 
-(where \(B^{\mathrm{nat,0}}_g\) and \(Q^{\mathrm{nat,0}}_g\) aggregate state-building, trade, and frozen-population orders weighted by \(\alpha_s\), while world-level frozen extras and stateless orders use access 1.0, matching ShopCache).
+(where \(B^{\mathrm{nat,0}}_g\) includes frozen state-population buy, while \(Q^{\mathrm{nat,0}}_g\) contains frozen sell orders only. State-building, trade, and frozen-population orders are weighted by \(\alpha_s\), while world-level frozen extras and stateless orders use access 1.0, matching ShopCache).
 
 **Local residual** (relative-price units):
 

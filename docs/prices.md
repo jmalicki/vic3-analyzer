@@ -2,7 +2,7 @@
 
 This document is the **product / methodology hub** for prices in [`vic3-prices`](../crates/vic3-prices): why we solve, MAPI and pop consumption at a glance, frozen dimensions, qualification alerts, and caller-facing limitations.
 
-The **NLS formulation** (joint market + local residuals, lifting/star sparsity, unclipped target map, MCP shortages) is specified in [`prices-equilibrium.md`](prices-equilibrium.md). Incremental shop setup for planning re-solves is [`prices-shop-cache.md`](prices-shop-cache.md).
+The **NLS formulation** (joint market + local residuals, lifting/star sparsity, unclipped target map, bound shortages) is specified in [`prices-equilibrium.md`](prices-equilibrium.md). Incremental shop setup for planning re-solves is [`prices-shop-cache.md`](prices-shop-cache.md).
 
 Solved prices feed the [`PlanningState`](planning.md) (`good_prices`, modeled GDP), the CLI, Web UI, Desktop GUI, and SQL diagnostics.
 
@@ -82,10 +82,10 @@ To provide fast, deterministic evaluations for what-if scenarios and search heur
 
 ## Solver
 
-Formulation, nested vs joint target, lifting/star sparsity, and MCP shortages: **[`prices-equilibrium.md`](prices-equilibrium.md)**.
+Formulation, nested vs joint target, lifting/star sparsity, and bound shortages: **[`prices-equilibrium.md`](prices-equilibrium.md)**.
 
 - **Warm Starts:** Previous relative price vectors (`SolveOpts.warm_rel`) are reused across what-if previews and delta evaluations.
-- **Convergence Invariant (I5):** Residual is always reported; today `status = converged` implies residual \(<\varepsilon\). Bound-MCP may revise that criterion—see [`invariants.md`](invariants.md) and the equilibrium doc.
+- **Convergence Invariant (I5):** Residual is always reported; today `status = converged` implies residual \(<\varepsilon\). Projected-gradient stationarity may revise that criterion—see [`invariants.md`](invariants.md) and the equilibrium doc.
 
 ---
 
@@ -96,7 +96,7 @@ Every analytical result carries structured limitation strings:
 2. Prices are strictly clamped to \(\pm \text{PRICE-RANGE}\) (typically \(\pm 75\%\)) as defined by the game.
 3. Employment, wages, and **trade route volumes are frozen** unless explicitly modified.
 4. State orders are infrastructure-access scaled into a single whole-save market; overseas convoy limits and separate custom unions (multiple game markets) are not yet partitioned in the IR/solver.
-5. The solve residual is part of the answer: a large residual indicates the model did not find a consistent fixed point (or, under a future MCP map, a bound shortage).
+5. The solve residual is part of the answer: a large residual indicates the model did not find a consistent fixed point (or, under a future projected-gradient stationarity map, a bound shortage).
 
 ---
 
