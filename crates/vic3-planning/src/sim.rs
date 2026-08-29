@@ -1129,6 +1129,8 @@ pub struct Successor {
     pub action: Action,
     /// Edge cost in days. Decision edges have cost zero.
     pub days: u16,
+    /// Tie-breaker for PEA* candidate sorting.
+    pub tiebreaker: ordered_float::OrderedFloat<f64>,
     pub state: PlanningState,
 }
 
@@ -1213,6 +1215,7 @@ fn push_decision(
         result.push(Successor {
             action,
             days: 0,
+            tiebreaker: ordered_float::OrderedFloat(0.0),
             state: next,
         });
     }
@@ -1232,6 +1235,7 @@ fn push_wait(
         result.push(Successor {
             action,
             days,
+            tiebreaker: ordered_float::OrderedFloat(0.0),
             state: next,
         });
     }

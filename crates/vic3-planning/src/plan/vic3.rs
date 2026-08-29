@@ -133,11 +133,43 @@ pub(crate) struct GdpKnapsack {
     /// List of (efficiency_gdp_per_cp, cp_cost_per_level, max_levels_available).
     /// Sorted descending by efficiency.
     pub items: Vec<(f64, f64, f64)>,
+    /// Map of building_type_script_id to efficiency for quick tie-breaker lookup.
+    pub efficiency_map: std::collections::HashMap<String, f64>,
 }
 
 impl GdpKnapsack {
+    pub(crate) fn needed_cp(&self, mut target_gap: f64) -> Option<f64> {
+        if target_gap <= 0.0 {
+            return Some(0.0);
+        }
+        let mut needed_cp = 0.0;
+        for &(eff, cp_cost, max_levels) in &self.items {
+            if target_gap <= 0.0 {
+                break;
+            }
+            let level_gdp = cp_cost * eff;
+            let max_gdp = level_gdp * max_levels;
+            if target_gap > max_gdp {
+                needed_cp += cp_cost * max_levels;
+                target_gap -= max_gdp;
+            } else {
+                needed_cp += target_gap / eff;
+                target_gap = 0.0;
+            }
+        }
+        if target_gap > 0.0 {
+            if let Some(&(eff, _, _)) = self.items.first() {
+                needed_cp += target_gap / eff;
+            } else {
+                return None;
+            }
+        }
+        Some(needed_cp)
+    }
+
     fn new(economy: &crate::sim::EconomyContext, config: crate::sim::SimConfig) -> Self {
         let mut items = Vec::new();
+        let mut efficiency_map = std::collections::HashMap::new();
         for building_type in economy.defs.building_types.values() {
             let (inputs, outputs) =
                 crate::sim::default_building_io_per_level(&economy.defs, building_type);
@@ -178,10 +210,22 @@ impl GdpKnapsack {
             }
 
             let max_levels = 1000.0; // Assume loose high upper bound for all buildings until parser supports potentials
-            items.push((gdp_add / cp_cost, cp_cost, max_levels));
+            let efficiency = gdp_add / cp_cost;
+            items.push((efficiency, cp_cost, max_levels));
+            efficiency_map.insert(building_type.name.clone(), efficiency);
         }
         items.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        Self { items }
+        Self {
+            items,
+            efficiency_map,
+        }
+    }
+
+    pub fn efficiency_for(&self, building_type: &str) -> f64 {
+        self.efficiency_map
+            .get(building_type)
+            .copied()
+            .unwrap_or(0.0)
     }
 }
 
@@ -344,12 +388,27 @@ impl Vic3Node {
     }
 
     pub(crate) fn sim_successors(&self) -> Vec<Successor> {
-        crate::sim::successors(
+        let mut successors = crate::sim::successors(
             &self.identity.state,
             &self.cache.context.goal,
             self.cache.context.config,
             &self.cache.context.economy,
-        )
+        );
+        for succ in &mut successors {
+            let tie = match &succ.action {
+                crate::sim::Action::QueueBuildingLevel {
+                    building_type_name, ..
+                } => self
+                    .cache
+                    .context
+                    .gdp_knapsack
+                    .efficiency_for(building_type_name),
+                crate::sim::Action::WaitForEvent { .. } => f64::INFINITY,
+                _ => 0.0,
+            };
+            succ.tiebreaker = ordered_float::OrderedFloat(tie);
+        }
+        successors
     }
 
     /// Apply one action against this domain node (PEA* emit path).
@@ -499,31 +558,54 @@ fn goal_timing_lower_bound(
                     return 0;
                 }
 
-                let mut needed_cp = 0.0;
-                let mut remaining_gap = target_gap;
-                for &(eff, cp_cost, max_levels) in &context.gdp_knapsack.items {
-                    if remaining_gap <= 0.0 {
-                        break;
+                let Some(mut needed_cp) = context.gdp_knapsack.needed_cp(target_gap) else {
+                    return construction_days;
+                };
+
+                // ADMISSIBILITY MATH (The "Savings" Bound):
+                // To maintain A* admissibility (never overestimating the true cost), we
+                // must credit the heuristic for the CP already spent on queued buildings.
+                // However, we CANNOT simply sum the `remaining_cp` of all queued buildings.
+                // If a terrible building is at the bottom of the queue, it might never start
+                // building before we hit the GDP goal using optimal buildings. If we penalized
+                // the heuristic by adding the terrible building's cost, we would overestimate.
+                //
+                // Instead, we calculate the "savings" from partially finished buildings.
+                // If a queued building provides GDP, we calculate what the Knapsack *would*
+                // have charged for that GDP from scratch (`theoretical_cost`). If we can finish
+                // the building for cheaper than the Knapsack rate (`remaining_cp` < `theoretical_cost`),
+                // we safely subtract the difference (`savings`). This perfectly credits optimal
+                // buildings without penalizing bad ones (savings bounds at 0).
+                let mut savings = 0.0;
+                for c in &state.constructions {
+                    let eff = context
+                        .gdp_knapsack
+                        .efficiency_map
+                        .get(&c.building_type_name)
+                        .copied()
+                        .unwrap_or(0.0);
+                    if eff <= 0.0 {
+                        continue;
                     }
-                    let level_gdp = cp_cost * eff;
-                    let max_gdp = level_gdp * max_levels;
-                    if remaining_gap > max_gdp {
-                        needed_cp += cp_cost * max_levels;
-                        remaining_gap -= max_gdp;
-                    } else {
-                        needed_cp += remaining_gap / eff;
-                        remaining_gap = 0.0;
+                    let total_cost = crate::construction::construction_work_points_for_enqueue(
+                        &c.building_type_name,
+                        economy,
+                        config,
+                    )
+                    .unwrap_or(f64::from(config.default_construction_cost));
+
+                    let gdp = total_cost * eff;
+                    if gdp <= 0.0 {
+                        continue;
                     }
+
+                    let theoretical_cost = context.gdp_knapsack.needed_cp(gdp).unwrap_or(0.0);
+                    let remaining_cp = c.remaining.unwrap_or(total_cost);
+                    let s = (theoretical_cost - remaining_cp).max(0.0);
+                    savings += s;
                 }
 
-                if remaining_gap > 0.0 {
-                    if let Some(&(eff, _, _)) = context.gdp_knapsack.items.first() {
-                        needed_cp += remaining_gap / eff;
-                    } else {
-                        return construction_days;
-                    }
-                }
-
+                needed_cp = (needed_cp - savings).max(0.0);
                 let rate = state.construction_points_per_day.max(1.0);
                 let knapsack_days = (needed_cp / rate).ceil() as u32;
                 construction_days.max(knapsack_days)
@@ -1173,7 +1255,10 @@ mod tests {
             config,
             economy: economy.clone(),
             trace: crate::plan::vic3::SearchTraceStats::default(),
-            gdp_knapsack: GdpKnapsack { items: vec![] },
+            gdp_knapsack: GdpKnapsack {
+                items: vec![],
+                efficiency_map: std::collections::HashMap::new(),
+            },
         };
 
         // By default, the knapsack is empty.

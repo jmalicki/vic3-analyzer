@@ -67,13 +67,16 @@ struct Candidate {
     #[allow(dead_code)] // reserved for live-rescore / dirty sets
     deps: CandidateDeps,
     /// Deterministic tie-break when `f_minus_g` matches (child fingerprint).
-    tie: u64,
+    hash: u64,
+    /// Explicit domain-provided tiebreaker for zero-day heuristics.
+    tiebreaker: ordered_float::OrderedFloat<f64>,
 }
 
 fn candidate_cmp(a: &Candidate, b: &Candidate) -> Ordering {
     a.f_minus_g
         .cmp(&b.f_minus_g)
-        .then_with(|| a.tie.cmp(&b.tie))
+        .then_with(|| b.tiebreaker.cmp(&a.tiebreaker))
+        .then_with(|| a.hash.cmp(&b.hash))
 }
 
 /// Partition so the best `k` candidates are in `bag[..k]` (sorted); the rest
@@ -150,7 +153,8 @@ impl PeaNode {
                     days: successor.days,
                     f_minus_g,
                     deps,
-                    tie: node.fingerprint(),
+                    hash: node.fingerprint(),
+                    tiebreaker: successor.tiebreaker,
                 }
             })
             .collect()
@@ -293,7 +297,8 @@ mod tests {
                 days: 0,
                 f_minus_g: f,
                 deps: CandidateDeps::default(),
-                tie: i as u64,
+                hash: i as u64,
+                tiebreaker: ordered_float::OrderedFloat(0.0),
             })
             .collect();
         select_top_k(&mut bag, 3);
@@ -552,5 +557,33 @@ mod tests {
 
         eprintln!("live: full_A*={vic3_cost}d ({vic3_ms}ms) PEA*={pea_cost}d ({pea_ms}ms)");
         assert_eq!(pea_cost, vic3_cost);
+    }
+}
+
+#[cfg(test)]
+mod tiebreaker_tests {
+    use super::*;
+
+    #[test]
+    fn select_top_k_sorts_by_tiebreaker() {
+        let mut bag: Vec<Candidate> = [10.0, 50.0, 20.0, 40.0, 30.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, eff)| Candidate {
+                action: Action::QueueTech {
+                    tech: format!("t{i}"),
+                },
+                days: 0,
+                f_minus_g: 100, // all have identical A* score (plateau)
+                deps: CandidateDeps::default(),
+                hash: i as u64,
+                tiebreaker: ordered_float::OrderedFloat(eff),
+            })
+            .collect();
+        select_top_k(&mut bag, 3);
+
+        // Should sort descending by tiebreaker since f_minus_g is identical
+        let prefix: Vec<f64> = bag[..3].iter().map(|c| c.tiebreaker.into_inner()).collect();
+        assert_eq!(prefix, vec![50.0, 40.0, 30.0]);
     }
 }
