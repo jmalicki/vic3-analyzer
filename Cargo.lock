@@ -6751,6 +6751,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "tracing",
  "vic3-defs",
  "vic3-load",
  "vic3-prices",

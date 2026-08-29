@@ -284,6 +284,43 @@ impl EconomyContext {
         Self::new(World::default(), GameDefs::default(), SolveOpts::default())
     }
 
+    /// Highest $p / p_{\mathrm{base}}$ among goods this building type produces
+    /// (default PMs). Used by greedy build picks. Zero if unknown / no outputs.
+    pub(crate) fn max_output_price_over_base(
+        &self,
+        state: &PlanningState,
+        building_type_name: &str,
+    ) -> f64 {
+        let Some(building_type) = self.defs.building_types.get(building_type_name) else {
+            return 0.0;
+        };
+        let (_, outputs) = default_building_io_per_level(&self.defs, building_type);
+        let mut best = 0.0_f64;
+        for (good_idx, qty) in outputs.iter_indexed() {
+            if qty <= ORDER_EPS || !qty.is_finite() {
+                continue;
+            }
+            let Some(good_id) = self.defs.good_by_index(good_idx) else {
+                continue;
+            };
+            let Some(def) = self.defs.goods.get(good_id) else {
+                continue;
+            };
+            if def.base_price <= ORDER_EPS || !def.base_price.is_finite() {
+                continue;
+            }
+            let price = state.price(good_id).unwrap_or(def.base_price);
+            if !price.is_finite() {
+                continue;
+            }
+            let ratio = price / def.base_price;
+            if ratio > best {
+                best = ratio;
+            }
+        }
+        best
+    }
+
     /// Apply this planning branch onto a clone of [`Self::base_world`].
     ///
     /// Applies [`PlanningState::building_level_deltas`] and PM overrides. Used for
@@ -1130,7 +1167,6 @@ pub struct Successor {
     /// Edge cost in days. Decision edges have cost zero.
     pub days: u16,
     /// Tie-breaker for PEA* candidate sorting.
-    pub tiebreaker: ordered_float::OrderedFloat<f64>,
     pub state: PlanningState,
 }
 
@@ -1215,7 +1251,6 @@ fn push_decision(
         result.push(Successor {
             action,
             days: 0,
-            tiebreaker: ordered_float::OrderedFloat(0.0),
             state: next,
         });
     }
@@ -1235,7 +1270,6 @@ fn push_wait(
         result.push(Successor {
             action,
             days,
-            tiebreaker: ordered_float::OrderedFloat(0.0),
             state: next,
         });
     }
@@ -1770,7 +1804,6 @@ pub(crate) enum SpeculativeCompleteError {
 ///   instant / no separate completion phase in this sim).
 ///
 /// `economy` is required: queue/complete paths need defs and price refresh.
-#[allow(dead_code)] // score/emit callers land in a later PR
 pub(crate) fn speculative_completed_state(
     state: &PlanningState,
     action: &Action,
