@@ -6,11 +6,17 @@
 //!    prices; buildings + post-1.9 trade frozen).
 //! 2. If [`SolveOpts::warm_rel`] length matches, clamp and start Basin from it
 //!    (skip step 3). Else run successive substitution
-//!    `r ← (1−α)r + α P(c(r))` for a few iterations (`α = 0.5`).
+//!    `r ← (1−α)r + α τ(c(r))` for a few iterations (`α = 0.5`).
 //! 3. Run Basin trust-region-reflective on
-//!    `‖r − r_formula(orders(r))‖²` with box bounds from `PRICE_RANGE`.
+//!    `‖r − τ(orders(r))‖²` with box bounds from `PRICE_RANGE`.
 //! 4. Polish with successive substitution (also the fallback after
 //!    `SolverFailed`). TRF stays strictly inside the box; SS may sit on a bound.
+//!
+//! The unclipped target relative price (τ) is [`crate::unclipped_target_relative_price`]. Box bounds on `r` still apply; when a
+//! bound is active under a true shortage/glut, τ may lie outside the box and the
+//! residual can stay large even though the solve is “as good as the box allows”
+//! (I5 still: `Converged` ⇒ residual < eps; bound shortages typically report
+//! `MaxIters` / large residual rather than a false zero).
 //!
 //! [`equilibrate`] returns a compact [`SolveOutcome`] (goods, residual, relative,
 //! building revenues). [`solve`] packages that into a full [`PricesResult`] via
@@ -22,6 +28,7 @@
 
 use std::collections::BTreeMap;
 use std::convert::Infallible;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use basin::{
@@ -30,9 +37,11 @@ use basin::{
 use vic3_defs::{GameDefs, GoodId, GoodsVec};
 
 use crate::consumption::add_wage_bins;
-use crate::formula::{local_price, price};
+use crate::formula::{local_price, target_price, unclipped_target_relative_price};
 use crate::report::{building_revenues_from_cache, report_from_solve};
-use crate::result::{GoodPrice, PricesResult, SolveOpts, SolveOutcome, SolveStatus};
+use crate::result::{
+    GoodPrice, PricesResult, SolveOpts, SolveOutcome, SolveStats, SolveStatus, SolveStrategy,
+};
 use crate::shop_cache::{ShopCache, StateShop};
 use crate::world::World;
 
@@ -41,7 +50,7 @@ const FD_STEP: f64 = 1e-7;
 const LOCAL_ITERS: u32 = 16;
 const LOCAL_EPS: f64 = 1e-10;
 
-/// Find relative prices `r` minimizing `‖r − r_formula(orders(r))‖²`
+/// Find relative prices `r` minimizing `‖r − τ(orders(r))‖²`
 /// with box bounds `r ∈ [1 − PRICE_RANGE, 1 + PRICE_RANGE]`.
 ///
 /// * `world` — buildings, pops, trade, infra (cold path builds a [`ShopCache`]).
@@ -94,11 +103,33 @@ pub fn what_if(
 ///
 /// Steps: validate goods → build residual → warm start → Basin TRF → polish →
 /// evaluate → building revenues from `cache.buildings`.
+///
+/// [`SolveStrategy::Joint`] currently aliases [`SolveStrategy::Nested`].
 fn equilibrate_from_cache(
     cache: &ShopCache,
     defs: &GameDefs,
     opts: SolveOpts,
 ) -> (SolveOutcome, Option<ShopSnapshot>) {
+    match opts.strategy {
+        SolveStrategy::Nested | SolveStrategy::Joint => equilibrate_nested(cache, defs, opts),
+    }
+}
+
+fn empty_stats(strategy: SolveStrategy) -> SolveStats {
+    SolveStats {
+        strategy,
+        param_dim: 0,
+        n_residual_evals: 0,
+        n_jacobian_evals: 0,
+    }
+}
+
+fn equilibrate_nested(
+    cache: &ShopCache,
+    defs: &GameDefs,
+    opts: SolveOpts,
+) -> (SolveOutcome, Option<ShopSnapshot>) {
+    let strategy = opts.strategy;
     let goods = market_goods(&cache.base_prices);
     if goods.is_empty() {
         return (
@@ -108,6 +139,7 @@ fn equilibrate_from_cache(
                 status: SolveStatus::Converged,
                 relative: Vec::new(),
                 building_revenues: Vec::new(),
+                stats: empty_stats(strategy),
             },
             None,
         );
@@ -122,6 +154,7 @@ fn equilibrate_from_cache(
                 status: SolveStatus::Failed,
                 relative: Vec::new(),
                 building_revenues: Vec::new(),
+                stats: empty_stats(strategy),
             },
             None,
         );
@@ -129,6 +162,8 @@ fn equilibrate_from_cache(
 
     let price_range = defs.price_range.max(0.0);
     let n = goods.len();
+    let n_residual_evals = Arc::new(AtomicU64::new(0));
+    let n_jacobian_evals = Arc::new(AtomicU64::new(0));
     let problem = PriceResidual {
         defs,
         goods: &goods,
@@ -137,6 +172,8 @@ fn equilibrate_from_cache(
         lower: vec![1.0 - price_range; n],
         upper: vec![1.0 + price_range; n],
         cache: Arc::new(cache.clone()),
+        n_residual_evals: Arc::clone(&n_residual_evals),
+        n_jacobian_evals: Arc::clone(&n_jacobian_evals),
     };
 
     let mut rel = vec![1.0; n];
@@ -189,6 +226,12 @@ fn equilibrate_from_cache(
     };
 
     let building_revenues = building_revenues_from_cache(cache, defs, &rows, Some(&snapshot));
+    let stats = SolveStats {
+        strategy,
+        param_dim: rel.len(),
+        n_residual_evals: n_residual_evals.load(Ordering::Relaxed),
+        n_jacobian_evals: n_jacobian_evals.load(Ordering::Relaxed),
+    };
     (
         SolveOutcome {
             goods: rows,
@@ -196,6 +239,7 @@ fn equilibrate_from_cache(
             status,
             relative: rel,
             building_revenues,
+            stats,
         },
         Some(snapshot),
     )
@@ -235,13 +279,14 @@ pub(crate) struct ShopSnapshot {
     pub(crate) pop_buy_by_state: BTreeMap<u32, GoodsVec>,
 }
 
-/// NLS residual: relative prices vs formula from shop orders + pop settle.
+/// NLS residual: relative prices vs unclipped τ from shop orders + pop settle.
 ///
 /// * `defs` — labels / good ids for output rows.
 /// * `goods` / `bases` — priced goods and their base prices (NLS unknowns).
-/// * `price_range` — Vic3 clamp width.
+/// * `price_range` — Vic3 clamp width (box on `r`; τ itself is unclipped).
 /// * `lower` / `upper` — box bounds on relative prices.
 /// * `cache` — frozen shops/orders (Arc so Basin `Clone` only bumps refcount).
+/// * `n_residual_evals` / `n_jacobian_evals` — shared Basin call counters.
 #[derive(Clone)]
 struct PriceResidual<'a> {
     defs: &'a GameDefs,
@@ -251,6 +296,8 @@ struct PriceResidual<'a> {
     lower: Vec<f64>,
     upper: Vec<f64>,
     cache: Arc<ShopCache>,
+    n_residual_evals: Arc<AtomicU64>,
+    n_jacobian_evals: Arc<AtomicU64>,
 }
 
 impl PriceResidual<'_> {
@@ -303,10 +350,17 @@ impl PriceResidual<'_> {
                 let good = GoodId::from_usize(i);
                 let buy = shop.frozen_buy[good] + scratch.pop_buy[good];
                 let sell = shop.frozen_sell[good];
-                let state_price = price(self.cache.base_prices[good], buy, sell, self.price_range);
-                let price = local_price(shop.mapi, market[good], state_price);
-                delta = delta.max((price - scratch.local[good]).abs());
-                scratch.next[good] = price;
+                let base = self.cache.base_prices[good];
+                // Unclipped state τ for the blend target (same formulation as the
+                // national residual). Box the blended local price so pop shopping
+                // stays inside the game range — nested analog of boxed p^loc.
+                let state_target = target_price(base, buy, sell, self.price_range);
+                let blended = local_price(shop.mapi, market[good], state_target);
+                let lo = base * (1.0 - self.price_range);
+                let hi = base * (1.0 + self.price_range);
+                let local = blended.clamp(lo, hi);
+                delta = delta.max((local - scratch.local[good]).abs());
+                scratch.next[good] = local;
             }
             scratch.local.copy_from(&scratch.next);
             if delta < LOCAL_EPS {
@@ -394,30 +448,29 @@ impl PriceResidual<'_> {
         self.world_pop_buy_at(prices, scratch)
     }
 
-    /// Formula relative prices from orders at the pop demand implied by `rel`.
-    /// Computes the target relative price formula for each market good based on current orders.
+    /// Unclipped target relative prices τ from orders at pop demand implied by `rel`.
+    /// Computes the unclipped target relative price (τ) for each market good based on current orders.
     ///
     /// # Arguments
     /// * `rel` - The current relative prices `r_g` to evaluate at.
     /// * `scratch` - A scratchpad for reusing allocations.
     ///
     /// # Returns
-    /// A vector of target relative prices for each market good.
+    /// A vector of unclipped target relative prices `τ_g` for each market good.
     fn formula_rel(&self, rel: &[f64], scratch: &mut SettleScratch) -> Vec<f64> {
         let prices = self.prices_from_rel(rel);
         let pop_buy = self.pop_buy_at(&prices, scratch);
         self.goods
             .iter()
-            .zip(self.bases)
-            .map(|(&id, base)| {
+            .map(|&id| {
                 let buy = self.cache.frozen_buy[id] + pop_buy[id];
                 let sell = self.cache.frozen_sell[id];
-                price(*base, buy, sell, self.price_range) / *base
+                unclipped_target_relative_price(buy, sell, self.price_range)
             })
             .collect()
     }
 
-    /// Computes the mathematical residual `R_g = r_g - formula(r_g)` for all market goods.
+    /// Computes the mathematical residual `R_g = r_g - τ_g` for all market goods.
     ///
     /// # Arguments
     /// * `rel` - The current relative prices `r_g`.
@@ -443,7 +496,7 @@ impl PriceResidual<'_> {
         }
     }
 
-    /// Warms up relative prices via damped successive substitution `r ← (1−α)r + α formula(c(r))`.
+    /// Warms up relative prices via damped successive substitution `r ← (1−α)r + α τ(c(r))`.
     ///
     /// # Arguments
     /// * `rel` - A mutable slice of relative prices to start from and update in place.
@@ -480,11 +533,11 @@ impl PriceResidual<'_> {
         let residual = self
             .goods
             .iter()
-            .zip(self.bases.iter().zip(rel.iter()))
-            .map(|(&id, (base, rrel))| {
+            .zip(rel.iter())
+            .map(|(&id, rrel)| {
                 let buy = self.cache.frozen_buy[id] + pop_buy[id];
                 let sell = self.cache.frozen_sell[id];
-                let formula = price(*base, buy, sell, self.price_range) / *base;
+                let formula = unclipped_target_relative_price(buy, sell, self.price_range);
                 rrel - formula
             })
             .map(|x| x * x)
@@ -518,6 +571,7 @@ impl CostFunction for PriceResidual<'_> {
     type Error = Infallible;
 
     fn cost(&self, param: &Vec<f64>) -> Result<f64, Infallible> {
+        self.n_residual_evals.fetch_add(1, Ordering::Relaxed);
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         Ok(0.5
             * self
@@ -534,6 +588,7 @@ impl Residual for PriceResidual<'_> {
     type Error = Infallible;
 
     fn residual(&self, param: &Vec<f64>) -> Result<Vec<f64>, Infallible> {
+        self.n_residual_evals.fetch_add(1, Ordering::Relaxed);
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         Ok(self.residual_at(param, &mut scratch))
     }
@@ -543,6 +598,7 @@ impl Jacobian for PriceResidual<'_> {
     type Jacobian = DenseMatrix<f64>;
 
     fn jacobian(&self, param: &Vec<f64>) -> Result<DenseMatrix<f64>, Infallible> {
+        self.n_jacobian_evals.fetch_add(1, Ordering::Relaxed);
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         let r0 = self.residual_at(param, &mut scratch);
         let n = param.len();
