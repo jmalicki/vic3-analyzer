@@ -10,16 +10,16 @@
 //! 3. Run the Basin trust-region-reflective (TRF) optimizer to minimize the
 //!    difference between the current relative prices and the target prices
 //!    (`‖r − τ(orders(r))‖²`), bounded by the allowed price range.
-//! 4. Polish the result using successive substitution. This simultaneous fixed-point 
-//!    iteration snaps bounds perfectly, overcoming the interior-reflective limitation 
+//! 4. Polish the result using successive substitution. This simultaneous fixed-point
+//!    iteration snaps bounds perfectly, overcoming the interior-reflective limitation
 //!    of the TRF algorithm. It also acts as a fallback if the optimizer fails.
 //!
 //! # Target Prices and Bounds
 //!
 //! The optimizer targets the unclipped relative price, τ ([`crate::unclipped_target_relative_price`]).
-//! This avoids zero-gradient regions during the solve. For a formal breakdown of the 
-//! game economics, the strict `clamp()` boundary definition, and why successive 
-//! substitution is required to hit exact market limits, see 
+//! This avoids zero-gradient regions during the solve. For a formal breakdown of the
+//! game economics, the strict `clamp()` boundary definition, and why successive
+//! substitution is required to hit exact market limits, see
 //! [`docs/prices-equilibrium.md`](../../../../docs/prices-equilibrium.md).
 //!
 //! [`equilibrate`] returns a compact [`SolveOutcome`] (goods, residual, relative,
@@ -30,9 +30,9 @@
 //! Downstream: [`PricesResult`] feeds `vic3-api` JSON; see the crate root docs.
 //! Formulation (nested today, joint/star target): [`docs/prices-equilibrium.md`](../../../../docs/prices-equilibrium.md).
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::convert::Infallible;
-use std::cell::Cell;
 use std::sync::Arc;
 
 use basin::{
@@ -199,9 +199,7 @@ fn equilibrate_nested(
         problem.damp_toward_formula(&mut rel, WARM_START_ALPHA, warm_iters);
     }
 
-    let mut used_max_iters = false;
-    let mut failed = false;
-
+    let mut termination = None;
     if price_range > 0.0 {
         let basin_iters = u64::from(opts.max_iters.saturating_sub(warm_iters)).max(1);
         match Executor::from_start(problem.clone(), Trf::new(), rel.clone())
@@ -210,11 +208,7 @@ fn equilibrate_nested(
         {
             Ok(outcome) => {
                 rel.clone_from(outcome.param());
-                match outcome.reason {
-                    TerminationReason::MaxIter => used_max_iters = true,
-                    TerminationReason::SolverFailed => failed = true,
-                    _ => {}
-                }
+                termination = Some(outcome.reason);
             }
             Err(e) => match e {},
         }
@@ -222,6 +216,7 @@ fn equilibrate_nested(
 
     // TRF stays strictly inside the box; successive substitution may sit on a
     // closed bound and is also the fallback after SolverFailed.
+    let failed = matches!(termination, Some(TerminationReason::SolverFailed));
     let polish = if failed { opts.max_iters } else { warm_iters };
     problem.damp_toward_formula(&mut rel, WARM_START_ALPHA, polish);
     problem.clamp_rel(&mut rel);
@@ -229,7 +224,7 @@ fn equilibrate_nested(
     let (rows, residual, snapshot) = problem.evaluate(&rel);
     let status = if residual < opts.residual_eps {
         SolveStatus::Converged
-    } else if failed && !used_max_iters {
+    } else if failed {
         SolveStatus::Failed
     } else {
         SolveStatus::MaxIters
