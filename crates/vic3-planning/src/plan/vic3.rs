@@ -614,8 +614,25 @@ fn goal_timing_lower_bound(
                     }
                 }
 
-                let rate = future_rate.max(1.0);
-                let knapsack_days = (needed_cp / rate).ceil() as u32;
+                let c_0 = future_rate.max(1.0);
+                let w = needed_cp;
+                let c_s = f64::from(config.default_construction_cost);
+                let delta_c = 5.0; // Optimistic upper bound for construction sector yield
+                let r = delta_c / c_s;
+
+                // Exponential capacity growth lower bound:
+                // If w is large enough, the fastest path is to build construction sectors
+                // until time t1, then switch to building the goal.
+                // t1 = (1/r) * ln(r * w / c_0)
+                // t2 = t1 + (w / C(t1)) = t1 + (1 / r)
+                let knapsack_days = if r * (w / c_0) > 1.0 {
+                    let t1 = (1.0 / r) * (r * w / c_0).ln();
+                    let t2 = t1 + (1.0 / r);
+                    t2.ceil() as u32
+                } else {
+                    (w / c_0).ceil() as u32
+                };
+
                 construction_days.max(knapsack_days)
             }
         }
@@ -1288,19 +1305,27 @@ mod tests {
 
         // Now make the gap huge so knapsack_days dominates.
         state.gdp = -900.0;
-        // target gap is 1000. needed_cp = 1000.0 / 1.0 = 1000.0.
-        // knapsack_days = ceil(1000.0 / 5.0) = 200 days.
-        // max(200, base_days) = 200 (since 200 > 70).
+        // target gap is 10000. needed_cp = 10000.0 / 1.0 = 10000.0.
+        // r = 5.0 / 100.0 = 0.05
+        // c_0 = 5.0
+        // r * w / c_0 = 0.05 * 10000 / 5 = 100 > 1.0
+        // t1 = 20 * ln(100) = 20 * 4.605 = 92.1 days
+        // t2 = 92.1 + 20 = 112.1 days -> ceil(112.1) = 113 days
+        // max(113, base_days) = 113
+        state.gdp = -9900.0;
         assert_eq!(
             goal_timing_lower_bound(&goal, &state, config, &economy, &context),
-            200
+            113
         );
 
         // CodeRabbit Regression Test: Queued Construction Sectors increase optimistic future capacity.
         // If we queue 2 construction sectors, the optimistic rate increases by 2 * 5.0 = 10.0.
         // Future rate = 5.0 (base) + 10.0 = 15.0.
-        // New knapsack days = ceil(1000.0 / 15.0) = 67 days.
-        // The heuristic drops, proving we do not artificially overestimate cost when the player ramps up capacity.
+        // c_0 = 15.0
+        // r * w / c_0 = 0.05 * 10000 / 15 = 33.333 > 1.0
+        // t1 = 20 * ln(33.333) = 20 * 3.506 = 70.1 days
+        // t2 = 70.1 + 20 = 90.1 days -> ceil(90.1) = 91 days
+        // The heuristic drops from 113 to 91, proving we optimistically model future capacity.
         state
             .constructions
             .push(crate::world::PlanningConstruction {
@@ -1328,10 +1353,10 @@ mod tests {
 
         let new_bound = goal_timing_lower_bound(&goal, &state, config, &economy, &context);
         assert!(
-            new_bound < 200,
+            new_bound < 113,
             "Heuristic did not optimistically model future construction capacity (was {})",
             new_bound
         );
-        assert_eq!(new_bound, 70); // max(67, 70) = 70
+        assert_eq!(new_bound, 91);
     }
 }
