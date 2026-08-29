@@ -92,8 +92,8 @@ pub use result::{
     BuildingEconomics, BuildingGroupInfo, BuildingRevenue, BuildingTypeInfo, CountryInfo,
     ExtraLevelsDelta, GoodFlow, GoodPrice, MarketInputs, PopNeedBasket, PricesResult,
     ProductionMethodDelta, ProfessionCount, SolveOpts, SolveOutcome, SolveStats, SolveStatus,
-    StateGood, StateInfo, StateNeed, StatePop, StateQualification, SubsidizeDelta, WhatIfOpts,
-    WorldDelta,
+    SolveStrategy, StateGood, StateInfo, StateNeed, StatePop, StateQualification, SubsidizeDelta,
+    WhatIfOpts, WorldDelta,
 };
 pub use shop_cache::{BuildingIo, ShopCache, StateShop};
 pub use solve::{equilibrate, equilibrate_cached, solve, what_if};
