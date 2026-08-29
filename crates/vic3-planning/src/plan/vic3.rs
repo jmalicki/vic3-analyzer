@@ -690,6 +690,115 @@ fn goal_timing_lower_bound(
 ///
 /// Queued identity is ignored: a missing tech always costs at least one research
 /// period so a 0-day `QueueTech` edge cannot drop the heuristic (A* consistency).
+
+/// Translates the current game state into base optimal CP required and 
+/// extracts penalties for any active sub-optimal jobs in the queue.
+#[inline(always)]
+fn calculate_optimal_cp_and_penalties(
+    state: &PlanningState,
+    config: SimConfig,
+    economy: &EconomyContext,
+    context: &SearchContext,
+    target_gap: f64,
+) -> Option<(f64, Vec<(f64, f64)>)> {
+    let mut needed_cp = context.gdp_knapsack.needed_cp(target_gap)?;
+    let mut sum_theoretical_costs = 0.0;
+    let mut active_penalties = Vec::new();
+    
+    let cap_rates = crate::construction::construction_points_per_day_per_job(state, config);
+    
+    for (c, &cap_rate) in state.constructions.iter().zip(&cap_rates) {
+        let eff = context
+            .gdp_knapsack
+            .efficiency_map
+            .get(&c.building_type_name)
+            .copied()
+            .unwrap_or(0.0);
+        let total_cost = crate::construction::construction_work_points_for_enqueue(
+            &c.building_type_name,
+            economy,
+            config,
+        )
+        .unwrap_or(f64::from(config.default_construction_cost));
+        
+        let remaining_cp = c.remaining.unwrap_or(total_cost);
+        
+        if cap_rate > 0.0 {
+            active_penalties.push((remaining_cp, cap_rate));
+        }
+        
+        if eff > 0.0 {
+            let gdp = total_cost * eff;
+            if gdp > 0.0 {
+                sum_theoretical_costs += context.gdp_knapsack.needed_cp(gdp).unwrap_or(0.0);
+            }
+        }
+    }
+    
+    let optimal_cp = (needed_cp - sum_theoretical_costs).max(0.0);
+    Some((optimal_cp, active_penalties))
+}
+
+/// Optimistically projects future capacity if the current queue contains construction sectors.
+#[inline(always)]
+fn estimate_optimistic_capacity(state: &PlanningState) -> f64 {
+    let mut future_rate = state.construction_points_per_day;
+    for c in &state.constructions {
+        if c.building_type_name == crate::construction::BUILDING_CONSTRUCTION_SECTOR {
+            future_rate += 5.0; // Optimistic upper bound for sector yield
+        }
+    }
+    future_rate.max(1.0)
+}
+
+/// Pure mathematical solver for the queue penalty fixed-point timeline.
+/// T = ExponentialTime(OptimalCP + sum(min(remaining_cp, cap_rate * T)))
+/// 
+/// ARCHITECTURE NOTE: Why open-code this instead of using `basin` (our NLS solver)?
+/// 1. Performance: This is the A* heuristic hot-path, called millions of times per second. 
+///    A generalized solver like `basin` would introduce function call/trait overhead that 
+///    would destroy search performance. This open-coded loop compiles to inline SIMD/floats.
+/// 2. Strict Admissibility: A* requires we NEVER overestimate. By initializing `t_guess = 0` 
+///    and iterating on a concave function, we approach the fixed point strictly from below. 
+///    If we terminate early (e.g. hit max iterations), we return a value slightly *less* 
+///    than the true fixed point, preserving perfect admissibility. A generalized solver 
+///    might overshoot by 0.000001, which `.ceil()` would round up, breaking admissibility!
+#[inline(always)]
+fn solve_fixed_point_timeline(
+    optimal_cp: f64,
+    active_penalties: &[(f64, f64)],
+    c_0: f64,
+    r: f64,
+) -> f64 {
+    let mut t_guess = 0.0;
+    for _ in 0..10 {
+        let mut penalty = 0.0;
+        for &(remaining_cp, cap_rate) in active_penalties {
+            penalty += remaining_cp.min(cap_rate * t_guess);
+        }
+        
+        let w = optimal_cp + penalty;
+        if w <= 0.0 {
+            t_guess = 0.0;
+            break;
+        }
+        
+        let new_t = if r * (w / c_0) > 1.0 {
+            let t1 = (1.0 / r) * (r * w / c_0).ln();
+            t1 + (1.0 / r)
+        } else {
+            w / c_0
+        };
+        
+        if (new_t - t_guess).abs() < 0.1 {
+            t_guess = new_t;
+            break;
+        }
+        t_guess = new_t;
+    }
+    t_guess
+}
+
 fn research_eta_for_leaf(
     tech: &str,
     state: &PlanningState,
@@ -1450,29 +1559,14 @@ mod tests {
     fn test_queue_penalty_fixed_point_matches_timeline() {
         let optimal_cp = 1000.0f64;
         let total_rate = 5.0f64; // c_0
+        let r = 0.0; // r=0 makes the exponential function linear, matching the test scenario
         
         // The monument is queued:
         let monument_remaining = 100.0f64;
         let monument_cap = 1.0f64;
         let active_penalties = vec![(monument_remaining, monument_cap)];
         
-        // Fixed-point iterative solver (linear version without exponential growth for this test case)
-        let mut t_guess = 0.0f64;
-        for _ in 0..20 {
-            let mut penalty = 0.0f64;
-            for &(remaining_cp, cap_rate) in &active_penalties {
-                penalty += remaining_cp.min(cap_rate * t_guess);
-            }
-            
-            let w = optimal_cp + penalty;
-            let new_t = w / total_rate;
-            
-            if (new_t - t_guess).abs() < 0.1 {
-                t_guess = new_t;
-                break;
-            }
-            t_guess = new_t;
-        }
+        let t_guess = solve_fixed_point_timeline(optimal_cp, &active_penalties, total_rate, r);
         
         // User's exact manual timeline trace:
         // 100 days: Monument 1 CP/day (finishes), Knapsack 4 CP/day (400 CP)
