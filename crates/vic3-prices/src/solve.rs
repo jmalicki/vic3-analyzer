@@ -10,8 +10,10 @@
 //! 3. Run the Basin trust-region-reflective (TRF) optimizer to minimize the
 //!    difference between the current relative prices and the target prices
 //!    (`‖r − τ(orders(r))‖²`), bounded by the allowed price range.
-//! 4. Polish the result using successive substitution, which also acts as a
-//!    fallback if the optimizer fails.
+//! 4. Polish the result using successive substitution. The TRF optimizer algorithm
+//!    evaluates strictly inside the allowed price box bounds, whereas successive
+//!    substitution can sit exactly on the hard bounds. This step pushes bounded goods
+//!    to their exact limits and acts as a fallback if the optimizer fails.
 //!
 //! # Target Prices and Bounds
 //!
