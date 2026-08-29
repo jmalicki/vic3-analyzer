@@ -10,28 +10,17 @@
 //! 3. Run the Basin trust-region-reflective (TRF) optimizer to minimize the
 //!    difference between the current relative prices and the target prices
 //!    (`‖r − τ(orders(r))‖²`), bounded by the allowed price range.
-//! 4. Polish the result using successive substitution. The TRF algorithm is an
-//!    interior-reflective method; it evaluates strictly inside the allowed bounds
-//!    and can only approach bounds asymptotically, often struggling to converge
-//!    when the true market-clearing price sits exactly on a hard min/max bound.
-//!    Our manual successive substitution acts as a fixed-point iteration, evaluating 
-//!    the exact clamped target formula across all goods simultaneously (Jacobi-style). 
-//!    This successfully snaps these goods perfectly onto their limits without 
-//!    altering the true steady-state equilibrium. It also acts as a fallback if TRF fails.
+//! 4. Polish the result using successive substitution. This simultaneous fixed-point 
+//!    iteration snaps bounds perfectly, overcoming the interior-reflective limitation 
+//!    of the TRF algorithm. It also acts as a fallback if the optimizer fails.
 //!
 //! # Target Prices and Bounds
 //!
 //! The optimizer targets the unclipped relative price, τ ([`crate::unclipped_target_relative_price`]).
-//! In the live game, prices update weekly based on the previous week's orders using a clamped
-//! formula, defined by `NGoods::PRICE_RANGE` in `00_defines.txt` and documented on the
-//! [Victoria 3 Wiki](https://vic3.paradoxwikis.com/Market#Market_price):
-//! `price = clamp(base_price * (1 + 0.75 * (buy - sell) / min(buy, sell)), min_price, max_price)`.
-//!
-//! To find the steady-state equilibrium (where `price == target`), our TRF solver minimizes the
-//! difference between the price and the *unclipped* target `τ`. Using the unclipped target prevents
-//! the solver from getting stuck in flat, zero-gradient regions if it guesses a price far outside
-//! the bounds. Once TRF gets as close as the box constraints allow, successive substitution evaluates
-//! the exact clamped wiki formula to snap goods perfectly onto their limits.
+//! This avoids zero-gradient regions during the solve. For a formal breakdown of the 
+//! game economics, the strict `clamp()` boundary definition, and why successive 
+//! substitution is required to hit exact market limits, see 
+//! [`docs/prices-equilibrium.md`](../../../../docs/prices-equilibrium.md).
 //!
 //! [`equilibrate`] returns a compact [`SolveOutcome`] (goods, residual, relative,
 //! building revenues). [`solve`] packages that into a full [`PricesResult`] via
