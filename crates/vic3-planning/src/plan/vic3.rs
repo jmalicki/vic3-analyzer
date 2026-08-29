@@ -606,7 +606,15 @@ fn goal_timing_lower_bound(
                 }
 
                 needed_cp = (needed_cp - savings).max(0.0);
-                let rate = state.construction_points_per_day.max(1.0);
+
+                let mut future_rate = state.construction_points_per_day;
+                for c in &state.constructions {
+                    if c.building_type_name == crate::construction::BUILDING_CONSTRUCTION_SECTOR {
+                        future_rate += 5.0; // Optimistic upper bound for sector yield
+                    }
+                }
+
+                let rate = future_rate.max(1.0);
                 let knapsack_days = (needed_cp / rate).ceil() as u32;
                 construction_days.max(knapsack_days)
             }
@@ -1287,5 +1295,43 @@ mod tests {
             goal_timing_lower_bound(&goal, &state, config, &economy, &context),
             200
         );
+
+        // CodeRabbit Regression Test: Queued Construction Sectors increase optimistic future capacity.
+        // If we queue 2 construction sectors, the optimistic rate increases by 2 * 5.0 = 10.0.
+        // Future rate = 5.0 (base) + 10.0 = 15.0.
+        // New knapsack days = ceil(1000.0 / 15.0) = 67 days.
+        // The heuristic drops, proving we do not artificially overestimate cost when the player ramps up capacity.
+        state
+            .constructions
+            .push(crate::world::PlanningConstruction {
+                building_type_name: crate::construction::BUILDING_CONSTRUCTION_SECTOR.to_string(),
+                state_id: Some(1),
+                remaining: None,
+                order_id: 1,
+                queue: crate::world::ConstructionQueueKind::Government,
+            });
+        state
+            .constructions
+            .push(crate::world::PlanningConstruction {
+                building_type_name: crate::construction::BUILDING_CONSTRUCTION_SECTOR.to_string(),
+                state_id: Some(2),
+                remaining: None,
+                order_id: 2,
+                queue: crate::world::ConstructionQueueKind::Government,
+            });
+        // We must also add the construction sectors to the context so `needed_cp` doesn't drop due to `savings` logic.
+        // We set efficiency to 0.0 for construction sectors so they yield no GDP and thus no savings.
+        context.gdp_knapsack.efficiency_map.insert(
+            crate::construction::BUILDING_CONSTRUCTION_SECTOR.to_string(),
+            0.0,
+        );
+
+        let new_bound = goal_timing_lower_bound(&goal, &state, config, &economy, &context);
+        assert!(
+            new_bound < 200,
+            "Heuristic did not optimistically model future construction capacity (was {})",
+            new_bound
+        );
+        assert_eq!(new_bound, 70); // max(67, 70) = 70
     }
 }
