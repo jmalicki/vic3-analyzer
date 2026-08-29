@@ -160,18 +160,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Actions parity baseline (known not frontier — keep for ratio reference only)
           - name: zstd-3-long30-actions
+          # Isolates --long=31 at same level (cheap; often free size win)
           - name: zstd-3-long31
+          # Mid / high / max zstd (decompress stays fast)
           - name: zstd-10-long31
           - name: zstd-19-long31
           - name: zstd-22-ultra-long31
-          - name: xz-6
-          - name: xz-9
+          # Single non-zstd max check (xz can occasionally win size; slow decompress)
           - name: xz-9e
-          - name: brotli-5
-          - name: brotli-11
-          - name: lz4-9
-          - name: pigz-9
+          # Dropped as not near size×time frontier for rust target caches:
+          # xz-6, xz-9, brotli-5, brotli-11, lz4-9, pigz-9/gzip-9
     name: measure / ${{ matrix.name }}
     steps:
       - uses: actions/checkout@v7
@@ -184,7 +184,7 @@ jobs:
       - name: Install compressors
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd xz-utils brotli liblz4-tool pigz
+          sudo apt-get install -y zstd xz-utils
 
       - uses: actions/download-artifact@v4
         with:
