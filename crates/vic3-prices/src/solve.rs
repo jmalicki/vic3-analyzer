@@ -274,7 +274,8 @@ impl PriceResidual<'_> {
     ///
     /// * `shop` — that state’s frozen orders + wage bins.
     /// * `market` — current market absolute prices.
-    /// * `scratch` — reusable buffers for local / pop_buy / next.
+    /// * `scratch` - reusable buffers for local / pop_buy / next.
+    ///
     /// Computes the local market prices, wage shifts, and resulting pop buy volumes for a single state.
     ///
     /// # Arguments
