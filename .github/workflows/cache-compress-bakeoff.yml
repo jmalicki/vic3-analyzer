@@ -171,7 +171,7 @@ jobs:
           - name: brotli-5
           - name: brotli-11
           - name: lz4-9
-          - name: gzip-9
+          - name: pigz-9
     name: measure / ${{ matrix.name }}
     steps:
       - uses: actions/checkout@v7
@@ -184,7 +184,7 @@ jobs:
       - name: Install compressors
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd xz-utils brotli liblz4-tool gzip
+          sudo apt-get install -y zstd xz-utils brotli liblz4-tool pigz
 
       - uses: actions/download-artifact@v4
         with:
