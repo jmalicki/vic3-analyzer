@@ -362,8 +362,10 @@ impl PriceResidual<'_> {
                 // obey the game's price limits.
                 let state_target = target_price(base, buy, sell, self.price_range);
                 let blended = local_price(shop.mapi, market[good], state_target);
-                let local =
-                    blended.clamp(base * (1.0 - self.price_range), base * (1.0 + self.price_range));
+                let local = blended.clamp(
+                    base * (1.0 - self.price_range),
+                    base * (1.0 + self.price_range),
+                );
                 delta = delta.max((local - scratch.local[good]).abs());
                 scratch.next[good] = local;
             }
