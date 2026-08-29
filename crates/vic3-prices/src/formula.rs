@@ -1,11 +1,13 @@
 //! Closed-form Vic3 market price and MAPI blend helpers.
 //!
 //! [`price`] / [`market_ratio`] implement the wiki formula with a documented
-//! zero-order convention ([`ORDER_EPS`]). [`market_access`] → [`effective_mapi`]
-//! → [`local_price`] are the Milestone-1 local blend used inside the residual
-//! (pops shop locally; state orders are then access-scaled into one whole-save
-//! market). Extra MAPI modifiers and overseas convoy constraints are out of
-//! scope until the IR carries them.
+//! zero-order convention ([`ORDER_EPS`]). [`price`] currently **clips** the
+//! imbalance ratio to \([-1,1]\); the design target uses an unclipped \(\tau\)
+//! with solver box bounds—see [`docs/prices-equilibrium.md`](../../../../docs/prices-equilibrium.md).
+//! [`market_access`] → [`effective_mapi`] → [`local_price`] are the Milestone-1
+//! local blend used inside the residual (pops shop locally; state orders are
+//! then access-scaled into one whole-save market). Extra MAPI modifiers and
+//! overseas convoy constraints are out of scope until the IR carries them.
 
 /// Orders at or below this are treated as empty so `min(buy, sell)` never
 /// divides by a numerical zero. I1–I3 are required only for strictly larger
