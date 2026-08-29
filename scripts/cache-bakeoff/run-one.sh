@@ -32,7 +32,7 @@ compress() {
     brotli-5)              brotli -q 5 -c "$TAR" >"$ARCHIVE" ;;
     brotli-11)             brotli -q 11 -c "$TAR" >"$ARCHIVE" ;;
     lz4-9)                 lz4 -9 -c "$TAR" >"$ARCHIVE" ;;
-    gzip-9)                gzip -9 -c "$TAR" >"$ARCHIVE" ;;
+    pigz-9)                pigz -9 -c "$TAR" >"$ARCHIVE" ;;
     *) echo "unknown codec $NAME" >&2; exit 1 ;;
   esac
 }
@@ -44,7 +44,7 @@ decompress() {
     xz-*)                  xz -d -T0 -c <"$ARCHIVE" >/dev/null ;;
     brotli-*)              brotli -d -c <"$ARCHIVE" >/dev/null ;;
     lz4-9)                 lz4 -d -c <"$ARCHIVE" >/dev/null ;;
-    gzip-9)                gzip -d -c <"$ARCHIVE" >/dev/null ;;
+    pigz-9)                pigz -d -c <"$ARCHIVE" >/dev/null ;;
   esac
 }
 
