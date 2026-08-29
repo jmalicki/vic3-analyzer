@@ -4,19 +4,22 @@
 //!
 //! 1. Build access-scaled frozen non-pop orders and state shops (pops at local
 //!    prices; buildings + post-1.9 trade frozen).
-//! 2. If [`SolveOpts::warm_rel`] length matches, clamp and start Basin from it
-//!    (skip step 3). Else run successive substitution
-//!    `r ← (1−α)r + α τ(c(r))` for a few iterations (`α = 0.5`).
-//! 3. Run Basin trust-region-reflective on
-//!    `‖r − τ(orders(r))‖²` with box bounds from `PRICE_RANGE`.
-//! 4. Polish with successive substitution (also the fallback after
-//!    `SolverFailed`). TRF stays strictly inside the box; SS may sit on a bound.
+//! 2. If a valid `warm_rel` is provided, use it as the starting point. Otherwise,
+//!    warm-start by interpolating towards the unclipped target relative price.
+//! 3. Run the Basin trust-region-reflective (TRF) optimizer to minimize the
+//!    difference between the current relative prices and the target prices,
+//!    bounded by the allowed price range.
+//! 4. Polish the result using successive substitution, which also acts as a
+//!    fallback if the optimizer fails.
 //!
-//! The unclipped target relative price (τ) is [`crate::unclipped_target_relative_price`]. Box bounds on `r` still apply; when a
-//! bound is active under a true shortage/glut, τ may lie outside the box and the
-//! residual can stay large even though the solve is “as good as the box allows”
-//! (I5 still: `Converged` ⇒ residual < eps; bound shortages typically report
-//! `MaxIters` / large residual rather than a false zero).
+//! # Target Prices and Bounds
+//!
+//! The optimizer targets the unclipped relative price ([`crate::unclipped_target_relative_price`]).
+//! However, hard bounds on the relative price still apply. If the market has a
+//! severe shortage or glut, the unclipped target might fall outside the allowed
+//! price range. In these cases, the solver will hit the bound and report a large
+//! residual (often exiting with `MaxIters` rather than `Converged`), correctly
+//! reflecting that the strict market-clearing price is unattainable.
 //!
 //! [`equilibrate`] returns a compact [`SolveOutcome`] (goods, residual, relative,
 //! building revenues). [`solve`] packages that into a full [`PricesResult`] via
