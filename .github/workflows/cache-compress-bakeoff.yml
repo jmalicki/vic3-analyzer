@@ -1,0 +1,269 @@
+# PR-only bake-off: one job per compressor × setting (parallel).
+# MEASURE ONLY — never writes to the GitHub Actions cache (no actions/cache,
+# no Swatinem/rust-cache). Compresses a local tar, records size/timings as
+# tiny JSON + a PR comment, then discards the archives.
+# Do not merge to main long-term — delete this workflow after picking a winner.
+name: cache-compress-bakeoff
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/cache-compress-bakeoff.yml"
+      - "scripts/cache-bakeoff/**"
+  workflow_dispatch:
+
+concurrency:
+  group: cache-bakeoff-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+jobs:
+  # Single corpus build matching e2e tauri (macos-14) "Build Tauri App".
+  prepare:
+    runs-on: macos-14
+    timeout-minutes: 90
+    outputs:
+      compile_secs: ${{ steps.times.outputs.compile_secs }}
+      fetch_secs: ${{ steps.times.outputs.fetch_secs }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Isolated CARGO_HOME + cold caches
+        run: |
+          echo "CARGO_HOME=${RUNNER_TEMP}/cargo-home" >>"$GITHUB_ENV"
+          echo "RUSTUP_HOME=${RUNNER_TEMP}/rustup-home" >>"$GITHUB_ENV"
+          echo "CARGO_INCREMENTAL=0" >>"$GITHUB_ENV"
+          mkdir -p "${RUNNER_TEMP}/cargo-home" "${RUNNER_TEMP}/rustup-home"
+
+      - name: Desktop web UI (setup; not timed as rust compile)
+        working-directory: web
+        run: |
+          npm ci
+          npm run build:desktop
+
+      - name: Cold cargo fetch
+        id: fetch
+        env:
+          # Keep toolchain from dtolnay; only isolate registry/git under CARGO_HOME.
+          CARGO_HOME: ${{ env.CARGO_HOME }}
+        run: |
+          set -euo pipefail
+          # Ensure cargo uses our CARGO_HOME for registry while rustc comes from PATH.
+          export PATH="${CARGO_HOME}/bin:$PATH"
+          # Wipe any prior registry in this CARGO_HOME (fresh dir already).
+          test ! -d "${CARGO_HOME}/registry"
+          T0=$(date +%s)
+          cargo fetch
+          T1=$(date +%s)
+          echo "fetch_secs=$((T1 - T0))" >>"$GITHUB_OUTPUT"
+          echo "cold fetch: $((T1 - T0))s"
+          du -sh "${CARGO_HOME}/registry" "${CARGO_HOME}/git" || true
+
+      - name: Cold compile (e2e Build Tauri App command)
+        id: times
+        working-directory: crates/vic3-analyzer
+        env:
+          TAURI_CONFIG: '{"app":{"security":{"capabilities":["webdriver"]}}}'
+          CARGO_HOME: ${{ env.CARGO_HOME }}
+          FETCH_SECS: ${{ steps.fetch.outputs.fetch_secs }}
+        run: |
+          set -euo pipefail
+          node -e "require('fs').writeFileSync('capabilities/webdriver.json', JSON.stringify({identifier:'webdriver',description:'Companion UI + embedded WebDriver (E2E only).',windows:['main'],permissions:['core:default','allow-companion','wdio-webdriver:default','wdio:default']}, null, 2))"
+          rm -rf "${GITHUB_WORKSPACE}/target"
+          T0=$(date +%s)
+          cargo build -p vic3-analyzer --features webdriver
+          T1=$(date +%s)
+          COMPILE_SECS=$((T1 - T0))
+          node -e "try { require('fs').unlinkSync('capabilities/webdriver.json') } catch (_) {}"
+          echo "compile_secs=${COMPILE_SECS}" >>"$GITHUB_OUTPUT"
+          echo "fetch_secs=${FETCH_SECS}" >>"$GITHUB_OUTPUT"
+          echo "cold compile: ${COMPILE_SECS}s (fetch was ${FETCH_SECS}s)"
+
+      - name: Pack corpus (zstd -1 transport only)
+        env:
+          CARGO_HOME: ${{ env.CARGO_HOME }}
+        run: |
+          chmod +x scripts/cache-bakeoff/pack-corpus.sh
+          CORPUS=$(./scripts/cache-bakeoff/pack-corpus.sh)
+          cp "$CORPUS" "${RUNNER_TEMP}/corpus.tar.zst"
+          ls -lh "${RUNNER_TEMP}/corpus.tar.zst"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bakeoff-corpus
+          path: ${{ runner.temp }}/corpus.tar.zst
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Write timing artifact
+        env:
+          COMPILE_SECS: ${{ steps.times.outputs.compile_secs }}
+          FETCH_SECS: ${{ steps.fetch.outputs.fetch_secs }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ["RUNNER_TEMP"]) / "timing.json"
+          p.write_text(json.dumps({
+            "compile_secs": int(os.environ["COMPILE_SECS"]),
+            "fetch_secs": int(os.environ["FETCH_SECS"]),
+            "fetch_plus_compile_secs": int(os.environ["COMPILE_SECS"]) + int(os.environ["FETCH_SECS"]),
+            "job": "e2e tauri macos-14 Build Tauri App (Debug, WebDriver)",
+            "command": "cargo build -p vic3-analyzer --features webdriver",
+          }, indent=2) + "\n")
+          print(p.read_text())
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bakeoff-timing
+          path: ${{ runner.temp }}/timing.json
+          retention-days: 3
+
+  # ONE JOB PER CODEC × SETTING (matrix.include — do not collapse).
+  # Each job only measures; it does NOT call actions/cache or rust-cache.
+  compress:
+    needs: prepare
+    runs-on: macos-14
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: zstd-3-long30-actions
+          - name: zstd-3-long31
+          - name: zstd-10-long31
+          - name: zstd-19-long31
+          - name: zstd-22-ultra-long31
+          - name: xz-6
+          - name: xz-9
+          - name: xz-9e
+          - name: brotli-5
+          - name: brotli-11
+          - name: lz4-9
+          - name: gzip-9
+    name: measure / ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/cache-bakeoff
+          sparse-checkout-cone-mode: false
+
+      - name: Install compressors
+        run: brew install zstd xz brotli lz4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bakeoff-corpus
+          path: ${{ runner.temp }}/in
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bakeoff-timing
+          path: ${{ runner.temp }}/timing
+
+      - name: Run single compressor setting
+        env:
+          COMPILE_SECS: ${{ needs.prepare.outputs.compile_secs }}
+          FETCH_SECS: ${{ needs.prepare.outputs.fetch_secs }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/cache-bakeoff/run-one.sh
+          # Prefer job outputs; fall back to timing.json
+          if [[ -z "${COMPILE_SECS}" || "${COMPILE_SECS}" == "" ]]; then
+            COMPILE_SECS=$(python3 -c "import json; print(json.load(open('${RUNNER_TEMP}/timing/timing.json'))['compile_secs'])")
+            FETCH_SECS=$(python3 -c "import json; print(json.load(open('${RUNNER_TEMP}/timing/timing.json'))['fetch_secs'])")
+            export COMPILE_SECS FETCH_SECS
+          fi
+          mkdir -p "${RUNNER_TEMP}/results"
+          ./scripts/cache-bakeoff/run-one.sh \
+            "${{ matrix.name }}" \
+            "${RUNNER_TEMP}/in/corpus.tar.zst" \
+            "${RUNNER_TEMP}/results/${{ matrix.name }}.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ matrix.name }}
+          path: ${{ runner.temp }}/results/${{ matrix.name }}.json
+          retention-days: 3
+
+  report:
+    needs: [prepare, compress]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/cache-bakeoff
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: result-*
+          path: results
+          merge-multiple: true
+
+      - name: Aggregate report
+        run: |
+          chmod +x scripts/cache-bakeoff/report.sh
+          mkdir -p out
+          find results -name '*.json' -print
+          ./scripts/cache-bakeoff/report.sh results out/bakeoff-report.md
+          cp out/bakeoff-report.md "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bakeoff-report
+          path: |
+            out/bakeoff-report.md
+            out/winner.txt
+          retention-days: 14
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('out/bakeoff-report.md', 'utf8');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const marker = '<!-- cache-compress-bakeoff -->';
+            const existing = comments.find(c => c.body.includes(marker));
+            const text = marker + '\n' + body;
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: text,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: text,
+              });
+            }

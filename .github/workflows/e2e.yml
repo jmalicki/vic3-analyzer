@@ -12,8 +12,10 @@ concurrency:
 permissions:
   contents: read
 
+# Skip all jobs on the cache bake-off branch (measure-only workflow runs instead).
 jobs:
   web:
+    if: github.head_ref != 'chore/cache-compress-bakeoff' && github.ref_name != 'chore/cache-compress-bakeoff'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
@@ -52,6 +54,7 @@ jobs:
           cd ../e2e
           npm test
   tauri:
+    if: github.head_ref != 'chore/cache-compress-bakeoff' && github.ref_name != 'chore/cache-compress-bakeoff'
     strategy:
       fail-fast: false
       matrix:
