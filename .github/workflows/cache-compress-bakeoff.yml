@@ -1,7 +1,8 @@
 # PR-only bake-off: one job per compressor × setting (parallel).
-# MEASURE ONLY — never writes to the GitHub Actions cache (no actions/cache,
-# no Swatinem/rust-cache). Compresses a local tar, records size/timings as
-# tiny JSON + a PR comment, then discards the archives.
+# MEASURE ONLY — no GitHub Actions cache read or write (no actions/cache restore/save,
+# no setup-node npm cache, no Swatinem/rust-cache). Isolated CARGO_HOME under
+# RUNNER_TEMP; cold fetch + cold compile. Compresses locally, records size/timings,
+# discards archives.
 # Do not merge to main long-term — delete this workflow after picking a winner.
 name: cache-compress-bakeoff
 
@@ -22,9 +23,9 @@ permissions:
   actions: read
 
 jobs:
-  # Single corpus build matching e2e tauri (macos-14) "Build Tauri App".
+  # Single corpus build matching e2e tauri (ubuntu-24.04) "Build Tauri App".
   prepare:
-    runs-on: macos-14
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     outputs:
       compile_secs: ${{ steps.times.outputs.compile_secs }}
@@ -36,18 +37,33 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Tauri Linux deps (e2e tauri matrix)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      # No npm cache — cold install only.
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
 
-      - name: Isolated CARGO_HOME + cold caches
+      - name: Isolated CARGO_HOME + cold caches (no rust-cache restore)
         run: |
           echo "CARGO_HOME=${RUNNER_TEMP}/cargo-home" >>"$GITHUB_ENV"
           echo "RUSTUP_HOME=${RUNNER_TEMP}/rustup-home" >>"$GITHUB_ENV"
           echo "CARGO_INCREMENTAL=0" >>"$GITHUB_ENV"
           mkdir -p "${RUNNER_TEMP}/cargo-home" "${RUNNER_TEMP}/rustup-home"
+          # Prove we are not reusing the runner's default cargo registry.
+          test ! -d "${RUNNER_TEMP}/cargo-home/registry"
 
       - name: Desktop web UI (setup; not timed as rust compile)
         working-directory: web
@@ -122,7 +138,7 @@ jobs:
             "compile_secs": int(os.environ["COMPILE_SECS"]),
             "fetch_secs": int(os.environ["FETCH_SECS"]),
             "fetch_plus_compile_secs": int(os.environ["COMPILE_SECS"]) + int(os.environ["FETCH_SECS"]),
-            "job": "e2e tauri macos-14 Build Tauri App (Debug, WebDriver)",
+            "job": "e2e tauri ubuntu-24.04 Build Tauri App (Debug, WebDriver)",
             "command": "cargo build -p vic3-analyzer --features webdriver",
           }, indent=2) + "\n")
           print(p.read_text())
@@ -135,10 +151,10 @@ jobs:
           retention-days: 3
 
   # ONE JOB PER CODEC × SETTING (matrix.include — do not collapse).
-  # Each job only measures; it does NOT call actions/cache or rust-cache.
+  # Each job only measures; no actions/cache or rust-cache read/write.
   compress:
     needs: prepare
-    runs-on: macos-14
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -166,7 +182,9 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Install compressors
-        run: brew install zstd xz brotli lz4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd xz-utils brotli liblz4-tool gzip
 
       - uses: actions/download-artifact@v4
         with:

@@ -36,7 +36,7 @@ fetch_plus = baseline["fetch_plus_compile_s"]
 tar_bytes = baseline["tar_bytes"]
 
 lines = [
-    "# Rust cache compression bake-off (Tauri macOS e2e corpus)",
+    "# Rust cache compression bake-off (Tauri e2e ubuntu-24.04 corpus)",
     "",
     f"- Corpus: `cargo-home` + `target` after `cargo build -p vic3-analyzer --features webdriver` (debug)",
     f"- Uncompressed tar: **{human(tar_bytes)}**",
