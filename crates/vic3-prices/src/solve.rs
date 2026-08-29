@@ -21,11 +21,14 @@
 //! # Target Prices and Bounds
 //!
 //! The optimizer targets the unclipped relative price, τ ([`crate::unclipped_target_relative_price`]).
-//! However, hard bounds on the relative price still apply. If the market has a
-//! severe shortage or glut, the unclipped target might fall outside the allowed
+//! However, hard bounds on the relative price still apply. As defined by `NGoods::PRICE_RANGE` in 
+//! the game's `00_defines.txt` and confirmed by the official Victoria 3 Wiki, the exact mathematical 
+//! definition of a market price is strictly clamped: `price = clamp(unclipped_target, min_price, max_price)`. 
+//!
+//! If the market has a severe shortage or glut, the unclipped target might fall outside the allowed
 //! price range. In these cases, the solver will hit the bound and report a large
 //! residual (often exiting with `MaxIters` rather than `Converged`), correctly
-//! reflecting that the strict market-clearing price is unattainable.
+//! reflecting that the strict market-clearing price is mathematically unattainable.
 //!
 //! [`equilibrate`] returns a compact [`SolveOutcome`] (goods, residual, relative,
 //! building revenues). [`solve`] packages that into a full [`PricesResult`] via
