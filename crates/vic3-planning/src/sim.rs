@@ -1166,6 +1166,7 @@ pub struct Successor {
     pub action: Action,
     /// Edge cost in days. Decision edges have cost zero.
     pub days: u16,
+    /// Tie-breaker for PEA* candidate sorting.
     pub state: PlanningState,
 }
 
