@@ -32,7 +32,7 @@
 
 use std::collections::BTreeMap;
 use std::convert::Infallible;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::cell::Cell;
 use std::sync::Arc;
 
 use basin::{
@@ -166,8 +166,8 @@ fn equilibrate_nested(
 
     let price_range = defs.price_range.max(0.0);
     let n = goods.len();
-    let n_residual_evals = Arc::new(AtomicU64::new(0));
-    let n_jacobian_evals = Arc::new(AtomicU64::new(0));
+    let n_residual_evals = Cell::new(0);
+    let n_jacobian_evals = Cell::new(0);
     let problem = PriceResidual {
         defs,
         goods: &goods,
@@ -176,8 +176,8 @@ fn equilibrate_nested(
         lower: vec![1.0 - price_range; n],
         upper: vec![1.0 + price_range; n],
         cache: Arc::new(cache.clone()),
-        n_residual_evals: Arc::clone(&n_residual_evals),
-        n_jacobian_evals: Arc::clone(&n_jacobian_evals),
+        n_residual_evals: &n_residual_evals,
+        n_jacobian_evals: &n_jacobian_evals,
     };
 
     let mut rel = vec![1.0; n];
@@ -233,8 +233,8 @@ fn equilibrate_nested(
     let stats = SolveStats {
         strategy,
         param_dim: rel.len(),
-        n_residual_evals: n_residual_evals.load(Ordering::Relaxed),
-        n_jacobian_evals: n_jacobian_evals.load(Ordering::Relaxed),
+        n_residual_evals: n_residual_evals.get(),
+        n_jacobian_evals: n_jacobian_evals.get(),
     };
     (
         SolveOutcome {
@@ -300,8 +300,8 @@ struct PriceResidual<'a> {
     lower: Vec<f64>,
     upper: Vec<f64>,
     cache: Arc<ShopCache>,
-    n_residual_evals: Arc<AtomicU64>,
-    n_jacobian_evals: Arc<AtomicU64>,
+    n_residual_evals: &'a Cell<u64>,
+    n_jacobian_evals: &'a Cell<u64>,
 }
 
 impl PriceResidual<'_> {
@@ -576,7 +576,7 @@ impl CostFunction for PriceResidual<'_> {
     type Error = Infallible;
 
     fn cost(&self, param: &Vec<f64>) -> Result<f64, Infallible> {
-        self.n_residual_evals.fetch_add(1, Ordering::Relaxed);
+        self.n_residual_evals.set(self.n_residual_evals.get() + 1);
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         Ok(0.5
             * self
@@ -593,7 +593,7 @@ impl Residual for PriceResidual<'_> {
     type Error = Infallible;
 
     fn residual(&self, param: &Vec<f64>) -> Result<Vec<f64>, Infallible> {
-        self.n_residual_evals.fetch_add(1, Ordering::Relaxed);
+        self.n_residual_evals.set(self.n_residual_evals.get() + 1);
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         Ok(self.residual_at(param, &mut scratch))
     }
@@ -603,7 +603,7 @@ impl Jacobian for PriceResidual<'_> {
     type Jacobian = DenseMatrix<f64>;
 
     fn jacobian(&self, param: &Vec<f64>) -> Result<DenseMatrix<f64>, Infallible> {
-        self.n_jacobian_evals.fetch_add(1, Ordering::Relaxed);
+        self.n_jacobian_evals.set(self.n_jacobian_evals.get() + 1);
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         let r0 = self.residual_at(param, &mut scratch);
         let n = param.len();
