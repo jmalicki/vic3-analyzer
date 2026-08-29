@@ -54,7 +54,7 @@ Imbalance ratio (see [`market_ratio`](../crates/vic3-prices/src/formula.rs) for 
 \tau(B,Q) = 1 + \rho \cdot R(B,Q)
 \]
 
-**Target:** omit \(\mathrm{clip}_{[-1,1]}\) on \(R\) inside the residual so shortage pushes \(\tau\) outside \([1-\rho, 1+\rho]\); the solver **box** enforces the cap ([MCP](https://en.wikipedia.org/wiki/Mixed_complementarity_problem) / projected gradients).
+**Target:** omit \(\mathrm{clip}_{[-1,1]}\) on \(R\) inside the residual so shortage pushes \(\tau\) outside \([1-\rho, 1+\rho]\); the solver **box** enforces the cap ([Mixed Complementarity](https://en.wikipedia.org/wiki/Mixed_complementarity_problem) / projected gradients).
 
 **Current:** [`price`](../crates/vic3-prices/src/formula.rs) still applies `.clamp(-1, 1)` on the ratio.
 
@@ -92,7 +92,7 @@ p^{\mathrm{loc}}_{s,g}
 R^{\mathrm{nat}}_g(x) = r_g - \tau(B_g(x), Q_g)
 \]
 
-Minimize \(\tfrac12 \|R^{\mathrm{full}}(x)\|_2^2\) subject to the box on \(x\). (Note: This is a box-constrained least-squares formulation, not a strict Mixed Complementarity Problem (MCP). Stationarity implies projected gradients involving \((J^{\mathrm{full}})^T R^{\mathrm{full}}\) vanish, which does not necessarily enforce componentwise sign complementarity on \(R^{\mathrm{full}}\) at the bounds.)
+Minimize \(\tfrac12 \|R^{\mathrm{full}}(x)\|_2^2\) subject to the box on \(x\). (Note: This is a box-constrained least-squares formulation, not a strict Mixed Complementarity Problem. Stationarity implies projected gradients involving \((J^{\mathrm{full}})^T R^{\mathrm{full}}\) vanish, which does not necessarily enforce componentwise sign complementarity on \(R^{\mathrm{full}}\) at the bounds.)
 
 **Shipped nested path** instead solves only over \(r\), with locals from inner successive substitution ([`solve.rs`](../crates/vic3-prices/src/solve.rs)).
 
