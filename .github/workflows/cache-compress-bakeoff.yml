@@ -113,6 +113,7 @@ jobs:
         env:
           CARGO_HOME: ${{ env.CARGO_HOME }}
         run: |
+          set -euo pipefail
           chmod +x scripts/cache-bakeoff/pack-corpus.sh
           CORPUS=$(./scripts/cache-bakeoff/pack-corpus.sh)
           cp "$CORPUS" "${RUNNER_TEMP}/corpus.tar.zst"

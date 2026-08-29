@@ -16,6 +16,5 @@ tar -cf - \
   -C "$GITHUB_WORKSPACE" target \
   | zstd -1 --long=31 -T0 -o "$OUT/corpus.tar.zst"
 
-ls -lh "$OUT/corpus.tar.zst"
-echo "corpus_bytes=$(wc -c <"$OUT/corpus.tar.zst" | tr -d ' ')" >>"${GITHUB_OUTPUT:-/dev/null}"
+ls -lh "$OUT/corpus.tar.zst" >&2
 echo "$OUT/corpus.tar.zst"
