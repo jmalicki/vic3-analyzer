@@ -54,10 +54,11 @@ for r in ranked:
     )
 lines += [
     "",
-    f"**Winner (smallest): `{winner['name']}`** at {human(winner['size_bytes'])} "
+    f"**Winner (smallest among reasonable restores): `{winner['name']}`** at {human(winner['size_bytes'])} "
     f"({winner['ratio_vs_baseline']}× vs Actions baseline).",
     "",
-    "Primary metric is compressed size (10 GiB Actions quota). Compress/decompress times are compared to cold fetch and compile.",
+    "Criterion: **space-first within reason** — minimize size; reject slow decompress "
+    "(paid on every restore). Slow compress is more tolerable (paid mainly on cache save).",
 ]
 text = "\n".join(lines) + "\n"
 out_md.write_text(text)
