@@ -28,7 +28,7 @@ ratio = (buy - sell) / min(buy, sell)
 price = base * (1 + PRICE_RANGE * clamp(ratio, -1, +1))
 ```
 
-The equilibrium design target uses an **unclipped** \(\tau\) with box bounds instead of an interior clamp; see [`prices-equilibrium.md`](prices-equilibrium.md). Formal invariants **I1–I3** are in [`invariants.md`](invariants.md).
+The equilibrium design target uses an **unclipped** \(\tau\) with box bounds instead of an interior clamp. See [`prices-equilibrium.md`](prices-equilibrium.md). Formal invariants **I1–I3** are in [`invariants.md`](invariants.md).
 
 When orders are zero for a good, price defaults to base price without division by zero.
 
@@ -74,7 +74,7 @@ Instead of generic promotion advice, the alert engine filters advice specificall
 
 To provide fast, deterministic evaluations for what-if scenarios and search heuristics:
 
-1. **Frozen Variables:** Building employment and base wages are held fixed from the save during pop re-equilibration unless explicitly modified by a what-if delta or production method override. **Trade-center route volumes** remain strictly frozen during pop re-equilibration (they are separate from the what-if delta or PM override exceptions). **Trade is frozen today**; that is part of the pricing model, not only a future footnote.
+1. **Frozen Variables:** Building employment and base wages are held fixed from the save during pop re-equilibration unless explicitly modified by a what-if delta or production method override. **Trade-center route volumes** remain strictly frozen during pop re-equilibration (they are separate from the what-if delta or PM override exceptions). **Trade is frozen today**. That is part of the pricing model, not only a future footnote.
 2. **Authoritative Saved IO:** Saved building input/output volumes are authoritative. Buildings with no saved IO fall back to PM recipe quantities scaled by staffed levels.
 3. **Empty Markets:** If a save has no orders for a good, it prices at base price. `PricesResult.inputs` tracks active order counts so diagnostics can distinguish an empty market from a balanced one.
 
@@ -85,7 +85,7 @@ To provide fast, deterministic evaluations for what-if scenarios and search heur
 Formulation, nested vs joint target, lifting/star sparsity, and bound shortages: **[`prices-equilibrium.md`](prices-equilibrium.md)**.
 
 - **Warm Starts:** Previous relative price vectors (`SolveOpts.warm_rel`) are reused across what-if previews and delta evaluations.
-- **Convergence Invariant (I5):** Residual is always reported; today `status = converged` implies residual \(<\varepsilon\). Projected-gradient stationarity may revise that criterion—see [`invariants.md`](invariants.md) and the equilibrium doc.
+- **Convergence Invariant (I5):** Residual is always reported. Today `status = converged` implies residual \(<\varepsilon\). Projected-gradient stationarity may revise that criterion—see [`invariants.md`](invariants.md) and the equilibrium doc.
 
 ---
 
@@ -95,7 +95,7 @@ Every analytical result carries structured limitation strings:
 1. Wealth is relaxed to a continuous variable during the solve, then rounded.
 2. Prices are strictly clamped to \(\pm \text{PRICE-RANGE}\) (typically \(\pm 75\%\)) as defined by the game.
 3. Employment, wages, and **trade route volumes are frozen** unless explicitly modified.
-4. State orders are infrastructure-access scaled into a single whole-save market; overseas convoy limits and separate custom unions (multiple game markets) are not yet partitioned in the IR/solver.
+4. State orders are infrastructure-access scaled into a single whole-save market. Overseas convoy limits and separate custom unions (multiple game markets) are not yet partitioned in the IR/solver.
 5. The solve residual is part of the answer: a large residual indicates the model did not find a consistent fixed point (or, under a future projected-gradient stationarity map, a bound shortage).
 
 ---

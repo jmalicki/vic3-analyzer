@@ -9,7 +9,7 @@ These expressions power the **Goal Gaps** evaluator (which checks unsatisfied re
 ## Grammar
 
 Goals are parsed into boolean abstract syntax trees (AND, OR, NOT). A
-`simple` production is a bare predicate; after compile it becomes a
+`simple` production is a bare predicate. After compile it becomes a
 **simple subgoal** (`Goal::Simple` / `SimpleSubgoal`). Parenthesized goals
 stay compound until flattened.
 

@@ -16,7 +16,7 @@ Game entities use three roles. Do not overload them.
 These roles apply **everywhere**: public DTOs, SQL columns, TypeScript types, **and**
 private helpers / locals / evidence builders. Do not name a display string
 `*_name` or a script key `*_id` “just because it is internal.” `label` is for
-UI-facing text (including alert evidence and mitigation titles); `name` is for
+UI-facing text (including alert evidence and mitigation titles). `name` is for
 lookups, join keys, and action wiring.
 
 ### Prefix rule
@@ -42,7 +42,7 @@ when several entities share a row and bare `name` would be ambiguous):
 | SQL / JSON join keys on mixed tables | prefixed columns as needed (`state_id`, `good_name`, …) |
 | Field typed `GoodId` on a non-good struct | `good_id: GoodId` |
 
-Same idea for SQL: a dedicated `goods` table may use `name` / `label`; a
+Same idea for SQL: a dedicated `goods` table may use `name` / `label`. A
 `goods_by_state` or building IO list that also has other identities should use
 `good_name` / `good_label`. In IO list structs (`List<Struct{good_name, good_label, qty}>`),
 `good_label` is always populated at emit via `SessionBinding::good_label` (never NULL in Arrow).
@@ -50,7 +50,7 @@ Same idea for SQL: a dedicated `goods` table may use `name` / `label`; a
 ### Rust newtypes
 
 Prefer `*Id` wrappers for dense indices (`GoodId`, `NeedId`, `BuildingTypeId`),
-not `*Idx`. On a similarly named struct the field is bare `id: GoodId`; elsewhere
+not `*Idx`. On a similarly named struct the field is bare `id: GoodId`. Elsewhere
 keep the prefix (`good_id: GoodId`).
 
 ### Hard breaks
@@ -88,12 +88,12 @@ script is always `name` / `*_name`, loc is always `label` / `*_label`, and `id` 
 | `BuildingEconomics.id` / `.type_id` | `id` (instance) / `building_type_name` (+ `building_type_id` when dense) |
 | `BuildingTypeInfo.id` / `.name` | `name` / `label` (+ `id: BuildingTypeId` when dense) |
 | SQL buildings `type_id` / `type_name` | `building_type_name` / `building_type_label` (prefixed: not a building-type table row alone) |
-| `profession_id` / `profession_name` on pop/profession DTOs | `name` / `label` on profession-scoped structs; else `profession_name` / `profession_label` |
+| `profession_id` / `profession_name` on pop/profession DTOs | `name` / `label` on profession-scoped structs. Else `profession_name` / `profession_label` |
 | `culture_id` / `culture_name` | same omit-prefix rule |
 | `need_id` / `need_name` | same omit-prefix rule (`NeedId` integer stays `need_id` / `id` as appropriate) |
 | `region_id` / `region_name` / `state_name` | on `StateInfo`: `region_name` / `region_label` / `label` |
 | `CountryInfo.name` / `tag` | `label` / `name` (keep int `id`) |
-| `WorldBuilding.building` (script string) | `building_type_id: BuildingTypeId` internally; resolve type `name` / `label` at JSON/SQL edges |
+| `WorldBuilding.building` (script string) | `building_type_id: BuildingTypeId` internally. Resolve type `name` / `label` at JSON/SQL edges |
 | Constructions API `building` / `building_name` | `building_type_name` / `building_type_label` |
-| Defs entity `Good.id: String` etc. | `name: String` (script); labels in `GameDefs.labels` or DTO `label` |
+| Defs entity `Good.id: String` etc. | `name: String` (script). Labels in `GameDefs.labels` or DTO `label` |
 | Rust `GoodIdx` / `NeedIdx` | `GoodId` / `NeedId` |

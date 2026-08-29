@@ -29,7 +29,7 @@ Exactly one **active save** (optional until `use_save`) plus a **catalog** of kn
 
 | Mechanism | Role |
 | --- | --- |
-| Host `use_save` | Bind session by stub or selector; may load/solve. See [`mcp.md`](mcp.md). |
+| Host `use_save` | Bind session by stub or selector. May load/solve. See [`mcp.md`](mcp.md). |
 | Table `saves` | Read-only catalog (stubs + metadata). |
 | Views `active.*` | Fact tables for the bound session (no `save_id` column). |
 | Views `latest.*` | Convenience: same shape as `active.*`, but pinned to “most recent by `mtime`” at **read** time without mutating session. Document that `mtime` ≠ in-game date. |
@@ -41,9 +41,9 @@ Default search path after `use_save`: unqualified `states` means `active.states`
 | Rule | Detail |
 | --- | --- |
 | Form | Basename only. No `/`, `\`, or parent segments. |
-| Matching | Accept `autosave` or `autosave.v3`; normalize by stripping one trailing `.v3`. |
+| Matching | Accept `autosave` or `autosave.v3`. Normalize by stripping one trailing `.v3`. |
 | Ambiguity | Same stub in local Documents vs Steam Cloud → error listing `name`, `kind`, `mtime`, `location` (`local` \| `steam_cloud`). Caller disambiguates with those fields — still no UUID in the happy path. |
-| Internal | Absolute `path`, fingerprint, cache id exist in Rust only; not agent-facing columns by default. |
+| Internal | Absolute `path`, fingerprint, cache id exist in Rust only. Not agent-facing columns by default. |
 
 Selectors (host API, not SQL): `latest`, `latest_autosave`, `latest_named`.
 
@@ -64,7 +64,7 @@ Agent-facing columns:
 | `name` | UTF-8 text | Filename stub (primary handle) |
 | `kind` | text | `autosave` \| `named` \| `ironman` \| … |
 | `mtime` | timestamp | Filesystem mtime |
-| `in_game_date` | text or date | From cheap parse or last load; null if unknown |
+| `in_game_date` | text or date | From cheap parse or last load. Null if unknown |
 | `country` | text | Player tag if known |
 | `location` | text | `local` \| `steam_cloud` \| … |
 | `loaded` | bool | True if this stub is the active session |
@@ -102,11 +102,11 @@ Happy path no longer needs `WHERE owner_tag = player_tag()` — `SELECT … FROM
 
 ### `states`
 
-Identity and geography for states in scope of the active save (player-owned under the short name; full save via `world_states`).
+Identity and geography for states in scope of the active save (player-owned under the short name. Full save via `world_states`).
 
 | Column | Notes |
 | --- | --- |
-| `state_id` | Integer Paradox id; **primary key** for joins |
+| `state_id` | Integer Paradox id. **primary key** for joins |
 | `region_name` | Non-localized region/script key when available (`region` string as stored) |
 | `region_label` | Bare geographic label from defs (`region_name` → loc / humanize). Same for all co-owners of a split region |
 | `label` | Per-slice display label from prices emit (bare region, or demonym-prefixed for minority holders, e.g. `Prussian Rhineland`) |
@@ -125,9 +125,9 @@ Market-level goods from `PricesResult.goods` / `GameDefs`.
 
 | Column | Notes |
 | --- | --- |
-| `name` | Script id; **key** — `goods_order` + `index_of` (Exact `=`). Defs also keep a `BTreeMap` by script id → if that map is the scan source, Exact **range** on `name` is allowed |
-| `label` | Localized (`labels`); Exact `=` via inverse hash if built — **no** range Exact unless a btree of labels exists |
-| `base` / `price` / `buy` / `sell` / `shortage` | As modeled; document shortage formula in implementation |
+| `name` | Script id. **key** — `goods_order` + `index_of` (Exact `=`). Defs also keep a `BTreeMap` by script id → if that map is the scan source, Exact **range** on `name` is allowed |
+| `label` | Localized (`labels`). Exact `=` via inverse hash if built — **no** range Exact unless a btree of labels exists |
+| `base` / `price` / `buy` / `sell` / `shortage` | As modeled. Document shortage formula in implementation |
 
 ### `goods_by_state`
 
@@ -152,7 +152,7 @@ From `state_goods` (state-attributed orders / MAPI blend).
 
 **Arrays stand in for junction tables.** DataFusion can explode lists into rows with `unnest` / `UNNEST` (and `unnest_outer` when empty/NULL parents should keep a row).
 
-Goods IO and PM recipes use **`List<Struct{good_name, good_label, qty}>`** (script id — never bare `GoodId` as the only key; localized label is required; quantity):
+Goods IO and PM recipes use **`List<Struct{good_name, good_label, qty}>`** (script id — never bare `GoodId` as the only key. Localized label is required. Quantity):
 
 ```sql
 -- One unnest → rows of structs; double unnest → multi-column (list then struct)
@@ -186,7 +186,7 @@ Per-building modeled economy (from `BuildingEconomics` / `WorldBuilding`).
 | --- | --- |
 | `building_id` | **key** |
 | `state_id` | FK → states |
-| `building_type_name` | Script building type (`building_rye_farm`, …); FK → `building_types.name` |
+| `building_type_name` | Script building type (`building_rye_farm`, …). FK → `building_types.name` |
 | `building_type_label` | Localized when available |
 | `level` / `staffing` | Levels vs staffed levels |
 | `employees` | Summary or join to `building_staffing` TVF |
@@ -212,25 +212,25 @@ WHERE array_has(short_inputs, 'tools');
 
 ### Defs: `building_types`, `production_methods`
 
-Static catalog from `GameDefs` (same for all saves once defs are loaded). Prefer these for “what *can* a rye farm make?”; use instance `input_goods`/`output_goods` for “what is this building actually ordering?”
+Static catalog from `GameDefs` (same for all saves once defs are loaded). Prefer these for “what *can* a rye farm make?”. Use instance `input_goods`/`output_goods` for “what is this building actually ordering?”
 
 #### `building_types`
 
 | Column | Notes |
 | --- | --- |
-| `name` | Script id; **key** (`BTreeMap` → Exact `=` and range) |
+| `name` | Script id. **key** (`BTreeMap` → Exact `=` and range) |
 | `label` | Localized |
 | `group_id` | Building group |
 | `city_type` | If present |
-| `production_method_groups` | `TEXT[]` — already a `Vec` on `BuildingType`; Exact contains/`array_has` if we bother, else scan+filter |
+| `production_method_groups` | `TEXT[]` — already a `Vec` on `BuildingType`. Exact contains/`array_has` if we bother, else scan+filter |
 
 #### `production_methods`
 
 | Column | Notes |
 | --- | --- |
-| `pm` | Script id; **key** (`BTreeMap` → Exact `=` and range) |
+| `pm` | Script id. **key** (`BTreeMap` → Exact `=` and range) |
 | `pm_name` | Localized |
-| `inputs` / `outputs` | `List<Struct{good_name, good_label, qty}>` — project `GoodId` → script id + required `good_label`; never expose bare idx as the only key |
+| `inputs` / `outputs` | `List<Struct{good_name, good_label, qty}>` — project `GoodId` → script id + required `good_label`. Never expose bare idx as the only key |
 
 ```sql
 -- Double unnest: list → rows, then struct → columns
@@ -256,7 +256,7 @@ Collapsed state pops from the prices/JSON `state_pops` list (that name is **not*
 | Column | Notes |
 | --- | --- |
 | `state_id` | **key** (part) |
-| `profession` | Script id (game/defs often say `pop_type`; SQL column is `profession`) |
+| `profession` | Script id (game/defs often say `pop_type`. SQL column is `profession`) |
 | `workforce` / `dependents` | |
 | `literacy` | |
 | Need basket fields | Or separate `state_needs` table |
@@ -276,7 +276,7 @@ Profession stock vs jobs (from `state_qualifications`).
 | Column | Notes |
 | --- | --- |
 | `country_id` | |
-| `name` | Tag / script key; **key** |
+| `name` | Tag / script key. **key** |
 | `label` | Localized display name |
 
 ### `constructions`
@@ -288,9 +288,9 @@ Full private + government construction queues from save IR (`World.constructions
 | `order_id` | Paradox construction id (**key** part with `queue`) |
 | `queue` | `private` or `government` |
 | `position` | Dense 0-based index within `(country_id, queue)` (scan order) |
-| `country_id` | Owner resolved from the order's state; nullable if unknown |
-| `state_id` | Target state; nullable if missing on the order |
-| `building_type_name` | Script building type; FK → `building_types.name` |
+| `country_id` | Owner resolved from the order's state. Nullable if unknown |
+| `state_id` | Target state. Nullable if missing on the order |
+| `building_type_name` | Script building type. FK → `building_types.name` |
 | `building_type_label` | Localized label when defs provide one |
 | `remaining` | Remaining construction points when present |
 
@@ -310,7 +310,7 @@ Conservative military snapshot fields once exposed by the analysis API (manpower
 ### Optional later
 
 - `building_groups`, `state_needs` as first-class tables
-- Multi-save compares via internal `save_id` (advanced; omit from default docs prompts)
+- Multi-save compares via internal `save_id` (advanced. Omit from default docs prompts)
 
 ## Keys, indexes, and joins
 
@@ -325,28 +325,28 @@ Do not tell agents to `CREATE INDEX`. Speed comes from **provider pushdown** int
 
 Examples:
 
-- Goods/needs script ids via `goods_order` / `index_of`: Exact on `=`; no range Exact unless we add an ordered id index.
+- Goods/needs script ids via `goods_order` / `index_of`: Exact on `=`. No range Exact unless we add an ordered id index.
 - Localized labels (`labels`, display names) and state **region/name** hash indexes: Exact on `=` only.
-- Any existing `BTreeMap` keyed by something we expose as a column (e.g. defs keyed by script id if we treat that map as ordered): Exact on `=` **and** Exact on ranges; declare scan ordering on that key.
+- Any existing `BTreeMap` keyed by something we expose as a column (e.g. defs keyed by script id if we treat that map as ordered): Exact on `=` **and** Exact on ranges. Declare scan ordering on that key.
 
 **Exact vs Inexact:** Exact means every returned row satisfies the predicate (DF will not re-filter). Prefer Exact for our lookups. Use Inexact only for true over-fetch pruning, not because the structure is a hash map.
 
-**Labels:** Expose **both** non-localized script/region ids and localized display names as separate columns (e.g. `good_name` + `good_label`, `region_name` + `region_label` for bare geography, `label` for the owned-slice display label). Index pushdown on whichever side we have a map for; typically script id is denser/stabler for joins, localized name for human/`WHERE` filters (Exact equality only unless a btree exists).
+**Labels:** Expose **both** non-localized script/region ids and localized display names as separate columns (e.g. `good_name` + `good_label`, `region_name` + `region_label` for bare geography, `label` for the owned-slice display label). Index pushdown on whichever side we have a map for. Typically script id is denser/stabler for joins, localized name for human/`WHERE` filters (Exact equality only unless a btree exists).
 
 Other rules:
 
-- Prefer joins on `state_id` / `good_name` / `building_id` (script ids); use localized names in `WHERE`.
+- Prefer joins on `state_id` / `good_name` / `building_id` (script ids). Use localized names in `WHERE`.
 - Declare **output ordering** when a scan walks a btree or a vec sorted by id so sort-merge can apply.
-- Building a **HashMap** name→id at `use_save` for states is fine (states have no btree today); that enables Exact `=` only, not range.
-- List/`array_has` filters: Exact pushdown only if we implement contains against the in-memory vec (cheap for small lists); otherwise Unsupported and DF filters after projection.
+- Building a **HashMap** name→id at `use_save` for states is fine (states have no btree today). That enables Exact `=` only, not range.
+- List/`array_has` filters: Exact pushdown only if we implement contains against the in-memory vec (cheap for small lists). Otherwise Unsupported and DF filters after projection.
 
 ## Scalar functions
 
 | Function | Returns | Notes |
 | --- | --- | --- |
-| `good_price(good TEXT)` | FLOAT | Active-session market price; NULL if unknown good |
+| `good_price(good TEXT)` | FLOAT | Active-session market price. NULL if unknown good |
 | `army_power()` | FLOAT | Player country's `army_power_projection` when known. **NULL** only if the bound world has no `player_tag`. **Errors** (logged) if a player is bound but save IR has no projection fields — never a silent `0` / NULL for “unknown.” |
-| `player_tag()` | TEXT | Bound world's played country tag (`World.player_tag`). **NULL** if unset — no first-country fallback. Short fact-table names already filter to this tag; use `world_*` for save-wide rows. |
+| `player_tag()` | TEXT | Bound world's played country tag (`World.player_tag`). **NULL** if unset — no first-country fallback. Short fact-table names already filter to this tag. Use `world_*` for save-wide rows. |
 | `is_underemployed(state_id BIGINT)` | BOOLEAN | **True** when the bound session has an `underemployed` alert for that state (`AlertKind::Underemployed` — same detector as `alerts()` / `alerts('all')`). **NULL** if `state_id` is NULL. Runtime columnar OK (e.g. `SELECT is_underemployed(state_id) FROM states`). |
 
 ## Table-valued functions (diagnostics)
@@ -357,7 +357,7 @@ All read the **active** session unless noted. Column contracts should stay stabl
 
 One row per alert from `vic3-prices::alerts` ([`AlertsResult`](json-schema.md)).
 
-- **`alerts()`** (default) — player-scoped: keep rows whose `state_id` is **NULL** or owned by `World.player_tag` (strict tag; no first-country fallback). Foreign-state rows are dropped.
+- **`alerts()`** (default) — player-scoped: keep rows whose `state_id` is **NULL** or owned by `World.player_tag` (strict tag. No first-country fallback). Foreign-state rows are dropped.
 - **`alerts('all')`** — unfiltered full-save set (previous default).
 - Any other argument is a plan error. Only the string literal `'all'` is accepted as the one-arg form.
 
@@ -376,7 +376,7 @@ One row per alert from `vic3-prices::alerts` ([`AlertsResult`](json-schema.md)).
 
 Nested `staffing` on employment alerts is not inlined here — use `building_staffing(state_id)`.
 
-**Projection / filter / LIMIT (agents):** Detectors are cheap; mitigation builders are not. The provider:
+**Projection / filter / LIMIT (agents):** Detectors are cheap. Mitigation builders are not. The provider:
 
 - Runs **lean** alerts (empty `mitigations`) unless the projection includes `mitigations` or is `SELECT *`. Projecting `evidence` alone does **not** turn mitigations on.
 - Advertises Exact equality pushdown on `severity`, `kind`, `good_name`, `state_id`, `building_id`, and `id`. Those predicates filter **before** mitigations are built.
@@ -420,7 +420,7 @@ SELECT * FROM suggest_mitigations('all') WHERE action = 'build';
 
 ### `shortage_analysis(good TEXT)`
 
-Expands goods-shortage alerts for one good (`NULL` = all electricity / transportation / goods shortage alerts). Magnitudes come from the market `goods` row; evidence/mitigations are JSON from the alert expander (no invented economics).
+Expands goods-shortage alerts for one good (`NULL` = all electricity / transportation / goods shortage alerts). Magnitudes come from the market `goods` row. Evidence/mitigations are JSON from the alert expander (no invented economics).
 
 Same projection / Exact filter (`severity`, `kind`, `good_name`, `alert_id`, `state_id`, `building_id`) / LIMIT-before-mitigations rules as [`alerts()`](#alertsscope).
 
@@ -434,7 +434,7 @@ Same projection / Exact filter (`severity`, `kind`, `good_name`, `alert_id`, `st
 | `summary` | text | |
 | `state_id` | int nullable | Hint from short-input buildings when present |
 | `building_id` | int nullable | |
-| `buy` / `sell` / `shortage` / `price` / `base` | float nullable | Market row; `shortage = max(0, buy − sell)` |
+| `buy` / `sell` / `shortage` / `price` / `base` | float nullable | Market row. `shortage = max(0, buy − sell)` |
 | `evidence` | text | JSON |
 | `mitigations` | text | JSON |
 
@@ -448,7 +448,7 @@ One row per building×profession gap for buildings in that state (same professio
 | `building_type_label` | text | Localized type label when available |
 | `building_type_name` | text | Script building type key |
 | `staffing` / `level` | float | |
-| `profession_name` | text nullable | Script key; null when no employee rows are emitted (empty list, or every row filtered by staffing thresholds) |
+| `profession_name` | text nullable | Script key. Null when no employee rows are emitted (empty list, or every row filtered by staffing thresholds) |
 | `profession_label` | text nullable | Localized display name when available |
 | `employed_here` / `jobs_here` / `missing_here` | float nullable | |
 | `state_jobs` / `state_stock` / `state_shortage` | float nullable | From `state_qualifications` |
@@ -477,7 +477,7 @@ FROM plan('research(tech=nitroglycerin)')
 ORDER BY step;
 ```
 
-`limitations` is populated on **step 0 only** (joined with `"; "`); later steps are NULL.
+`limitations` is populated on **step 0 only** (joined with `"; "`). Later steps are NULL.
 
 ### `gaps(goal TEXT)`
 
@@ -486,7 +486,7 @@ One row per simple subgoal for readiness (mirrors gaps CLI/UI).
 | Column | Notes |
 | --- | --- |
 | `predicate` | |
-| `status` | `cleared` \| `failing` \| `unknown` (metric missing from save IR — not a measured shortfall; e.g. army PP) |
+| `status` | `cleared` \| `failing` \| `unknown` (metric missing from save IR — not a measured shortfall. E.g. army PP) |
 | `detail` | |
 
 ## Example queries
@@ -556,16 +556,16 @@ SELECT name, kind, mtime FROM saves ORDER BY mtime DESC LIMIT 5;
 The Tauri **Advanced Query** tab uses this same dialect:
 
 - SQL editor → same engine as MCP `query` (`sql_query` invoke → `vic3-sql`)
-- Results grid; clicking cells with recognized keys navigates to companion panes (`state_id` / `building_id` → States, `name` / `good_name` → Prices, plan `step` → Timeline highlight)
+- Results grid. Clicking cells with recognized keys navigates to companion panes (`state_id` / `building_id` → States, `name` / `good_name` → Prices, plan `step` → Timeline highlight)
 - In-app docs panel renders this document (and a UDF index) via `sql_docs` — same markdown MCP serves as `vic3://docs/sql`
 
 ## Open questions for review
 
 1. **Shortage formula (v1 locked):** `goods.shortage` / `goods_by_state.shortage` = `max(0, buy − sell)` (unmet demand volume). Not Paradox’s shortage flag.
-2. ~~Mitigations as JSON columns vs child TVFs.~~ **Locked:** `evidence` / `mitigations` JSON text on `alerts()` / `shortage_analysis()`; staffing via `building_staffing(state_id)`.
-3. ~~Whether unqualified names require `use_save` or may fall back to `latest.*` automatically.~~ **Locked:** unqualified ≡ `active.*`; require `use_save` / `bind` (`SqlError::Unbound`). No auto-fallback to `latest.*`.
+2. ~~Mitigations as JSON columns vs child TVFs.~~ **Locked:** `evidence` / `mitigations` JSON text on `alerts()` / `shortage_analysis()`. Staffing via `building_staffing(state_id)`.
+3. ~~Whether unqualified names require `use_save` or may fall back to `latest.*` automatically.~~ **Locked:** unqualified ≡ `active.*`. Require `use_save` / `bind` (`SqlError::Unbound`). No auto-fallback to `latest.*`.
 4. Military `formations` column list (wait for stable military JSON).
-5. Split-state display: use `label` for UI/titles; `region_label` is bare geography shared by co-owners (`region_name` is the join key). Short names are already player-owned; `world_states` remains full-save.
+5. Split-state display: use `label` for UI/titles. `region_label` is bare geography shared by co-owners (`region_name` is the join key). Short names are already player-owned. `world_states` remains full-save.
 6. Which DF array helpers we document for `TEXT[]` contains (`array_has` vs `array_has_any` vs custom UDF) — IO element type is locked: `List<Struct{good_name, good_label, qty}>` + `unnest(unnest(…))`.
 7. Whether convenience UNNEST views (`building_goods`, `production_method_goods`) ship in v1 or stay doc-only patterns.
 
@@ -576,8 +576,8 @@ The Tauri **Advanced Query** tab uses this same dialect:
 
 ## Implementation notes (non-normative)
 
-- Crate: `vic3-sql` registers providers on a `SessionContext` over an in-memory `SessionBinding` (`GameDefs` + `World` + `PricesResult`). Hosts hold the engine next to `vic3-api` session state and call Rust `SqlEngine::use_save` (never a mutating `SELECT`); `saves` reads `vic3-catalog`; `latest.*` loads via `vic3-api` without installing the active session.
-- Result shaping: Advanced Query uses `vic3_sql::batches_to_json` (`columns` / `rows` / `row_count`). MCP `query` uses the same JSON shape (formatter currently lives in `vic3-mcp`; keep aligned). `vic3://schema` → `schema_catalog_json()` (facts + diagnostics/planning TVFs + scalars).
+- Crate: `vic3-sql` registers providers on a `SessionContext` over an in-memory `SessionBinding` (`GameDefs` + `World` + `PricesResult`). Hosts hold the engine next to `vic3-api` session state and call Rust `SqlEngine::use_save` (never a mutating `SELECT`). `saves` reads `vic3-catalog`. `latest.*` loads via `vic3-api` without installing the active session.
+- Result shaping: Advanced Query uses `vic3_sql::batches_to_json` (`columns` / `rows` / `row_count`). MCP `query` uses the same JSON shape (formatter currently lives in `vic3-mcp`. Keep aligned). `vic3://schema` → `schema_catalog_json()` (facts + diagnostics/planning TVFs + scalars).
 - Diagnostics: `alerts()` (player-scoped) / `alerts('all')`, `suggest_mitigations()` / `('player')` / `('all')` (heuristic mitigations as rows — **not** sized-to-fix), `shortage_analysis(good)`, `building_staffing(state_id)`, `good_price` / `army_power` / `player_tag` / `is_underemployed` wrap `vic3-prices` alerts + market rows + session identity. TVF args must be plan-time literals (`NULL` allowed for `shortage_analysis`).
 - Planning TVFs: `plan(goal [, max_days [, label]])` and `gaps(goal)` call `vic3-planning` against the bound snapshot. `label` is accepted for [`PlanOpts`](json-schema.md) parity and ignored in the result set. `limitations` is emitted on step 0 only.
 - Pages/wasm continues without this engine in v1.

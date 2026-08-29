@@ -218,7 +218,7 @@ Preview mutation applied to a cloned world (extra levels, then production method
 `status = converged` implies `residual < SolveOpts.residual_eps` (I5).
 `state_goods.price` blends `market_price` and `state_price` using
 `effective_mapi = 0.75 * market_access`. Wage pops shop at that local price
-inside the residual; access then scales their orders into the single market.
+inside the residual. Access then scales their orders into the single market.
 Access is infrastructure-only in this milestone. Post-1.9 trade is read from
 each state. Extra MAPI modifiers and overseas constraints are not yet modeled.
 
@@ -249,7 +249,7 @@ an empty market from a balanced one.
 }
 ```
 
-Save bytes are **not** in this JSON when talking to the UI list endpoint; they live in IndexedDB / sibling blob files keyed by `fingerprint`.
+Save bytes are **not** in this JSON when talking to the UI list endpoint. They live in IndexedDB / sibling blob files keyed by `fingerprint`.
 
 ## CompareResult (P11)
 
@@ -358,7 +358,7 @@ Greedy production-method suggestion. `world_delta` is a [`WorldDelta`] for a lat
 
 ## AlertsResult
 
-Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent; underemployed buildings are `2`. Mitigations may include a tagged `action` used by Apply. Shortage interventions include an `effect` from a local IO perturbation (pop demand held, closed-form price step). PM advice names a specific method already in use on that building type. Qualification advice is filtered from `pop_types` + the state's mix; copy is in `crates/vic3-prices/advice/qualifications/`. Employment alerts are per state and may include a `staffing` array of buildings with per-profession gaps (`employed_here` / `jobs_here` / `missing_here` and state `jobs` / `stock` / `shortage`).
+Shortage expanders from `alerts(world, defs, prices)`. `severity` `1` is urgent. Underemployed buildings are `2`. Mitigations may include a tagged `action` used by Apply. Shortage interventions include an `effect` from a local IO perturbation (pop demand held, closed-form price step). PM advice names a specific method already in use on that building type. Qualification advice is filtered from `pop_types` + the state's mix. Copy is in `crates/vic3-prices/advice/qualifications/`. Employment alerts are per state and may include a `staffing` array of buildings with per-profession gaps (`employed_here` / `jobs_here` / `missing_here` and state `jobs` / `stock` / `shortage`).
 
 ```json
 {
