@@ -125,7 +125,10 @@ fn mil_levels(state: &PlanningState, pred: fn(&str) -> bool) -> u32 {
 }
 
 /// Default production methods: first PM id in each production-method group.
-fn default_pms_for_building(defs: &GameDefs, building_type: &BuildingType) -> Vec<String> {
+pub(crate) fn default_pms_for_building(
+    defs: &GameDefs,
+    building_type: &BuildingType,
+) -> Vec<String> {
     building_type
         .production_method_groups
         .iter()
@@ -139,7 +142,7 @@ fn default_pms_for_building(defs: &GameDefs, building_type: &BuildingType) -> Ve
 }
 
 /// Per-level IO from default PMs (scale = 1.0 staffed level).
-fn default_building_io_per_level(
+pub(crate) fn default_building_io_per_level(
     defs: &GameDefs,
     building_type: &BuildingType,
 ) -> (vic3_defs::GoodsVec, vic3_defs::GoodsVec) {
