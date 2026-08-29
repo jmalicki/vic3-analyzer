@@ -526,10 +526,17 @@ impl SearchNode for Vic3Node {
         edges
             .into_iter()
             .map(|successor| {
-                (
-                    Self::with_context(successor.state, Rc::clone(&self.cache.context)),
-                    u32::from(successor.days),
-                )
+                let cost = u32::from(successor.days);
+                let next = Self::with_context(successor.state, Rc::clone(&self.cache.context));
+                // A* Consistency Check: h(parent) <= cost + h(child)
+                debug_assert!(
+                    self.heuristic() <= cost.saturating_add(next.heuristic()),
+                    "Consistency violation in Vic3Node: h(parent)={} > cost={} + h(child)={}",
+                    self.heuristic(),
+                    cost,
+                    next.heuristic()
+                );
+                (next, cost)
             })
             .collect()
     }

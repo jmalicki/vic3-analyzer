@@ -251,13 +251,19 @@ impl SearchNode for TimedNode {
             .edges(self.id)
             .iter()
             .map(|edge| {
-                (
-                    Self {
-                        id: edge.to(),
-                        graph: Arc::clone(&self.graph),
-                    },
-                    edge.days(),
-                )
+                let cost = edge.days();
+                let next = Self {
+                    id: edge.to(),
+                    graph: Arc::clone(&self.graph),
+                };
+                debug_assert!(
+                    self.heuristic() <= cost.saturating_add(next.heuristic()),
+                    "Consistency violation in TimedNode: h(parent)={} > cost={} + h(child)={}",
+                    self.heuristic(),
+                    cost,
+                    next.heuristic()
+                );
+                (next, cost)
             })
             .collect()
     }
