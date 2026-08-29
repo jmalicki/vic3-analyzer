@@ -119,6 +119,7 @@ fn equilibrate_from_cache(
     }
 }
 
+/// Generates zeroed out `SolveStats` for when a market has no goods.
 fn empty_stats(strategy: SolveStrategy) -> SolveStats {
     SolveStats {
         strategy,
@@ -128,6 +129,11 @@ fn empty_stats(strategy: SolveStrategy) -> SolveStats {
     }
 }
 
+/// Core solver implementation using a nested approach.
+///
+/// In this approach, only the global market relative prices (`rel`) are treated as independent
+/// variables by the TRF solver. Local state prices are resolved via an inner successive
+/// substitution loop during every residual evaluation.
 fn equilibrate_nested(
     cache: &ShopCache,
     defs: &GameDefs,
