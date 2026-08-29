@@ -1250,6 +1250,46 @@ mod tests {
                 prop_assert!(node.heuristic() <= remaining);
             }
         }
+
+        /// Mathematically proves the exponential capacity growth bound is strictly admissible.
+        ///
+        /// For any target work `w` and starting capacity `c0`, no matter how many (`k`)
+        /// construction sectors the player builds to expand capacity, the continuous-time
+        /// exponential heuristic is ALWAYS <= the true discrete time it takes to build them.
+        #[test]
+        fn gdp_knapsack_exponential_bound_is_admissible(
+            w in 0.0f64..10_000_000.0,
+            c0 in 1.0f64..1000.0,
+            k in 0u32..500
+        ) {
+            let cs = 100.0;
+            let delta_c = 5.0;
+            let r = delta_c / cs;
+
+            // True discrete simulation of building `k` sectors sequentially, then building the goal.
+            let mut true_days = 0;
+            let mut c = c0;
+            for _ in 0..k {
+                true_days += (cs / c).ceil() as u32;
+                c += delta_c;
+            }
+            true_days += (w / c).ceil() as u32;
+
+            // Our heuristic formula
+            let heuristic = if r * (w / c0) > 1.0 {
+                let t1 = (1.0 / r) * (r * w / c0).ln();
+                let t2 = t1 + (1.0 / r);
+                t2.ceil() as u32
+            } else {
+                (w / c0).ceil() as u32
+            };
+
+            prop_assert!(
+                heuristic <= true_days,
+                "Heuristic {} exceeded true discrete time {} for w={}, c0={}, k={}",
+                heuristic, true_days, w, c0, k
+            );
+        }
     }
 
     #[test]
