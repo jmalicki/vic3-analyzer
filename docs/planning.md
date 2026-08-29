@@ -8,7 +8,7 @@ The planner evaluates goal predicates and discovers time-optimal action sequence
 
 A **simple subgoal** is a compiled goal node with no further goal children in the
 current tree (`Goal::Simple` / `SimpleSubgoal` in Rust). Compound goals
-(AND / OR / NOT) refine into simple subgoals; future sugar may refine them
+(AND / OR / NOT) refine into simple subgoals. Future sugar may refine them
 further — the name means “simple in this compile,” not forever irreducible.
 
 ---
@@ -34,7 +34,7 @@ A `PlanningState` is a compact, deterministic projection of the save file and th
 | `construction_rate` / `construction_points_per_day` | **Government** construction points/day (CS output × government share from economic laws) |
 
 **Invariants:**
-- **Deterministic State Hashing (I8):** Identical planning states produce identical hashes; applying an action is strictly deterministic.
+- **Deterministic State Hashing (I8):** Identical planning states produce identical hashes. Applying an action is strictly deterministic.
 - **Node Compaction:** The search node wraps `Arc<PlanningState>` or a compact hash to minimize memory footprint during priority queue expansions.
 
 ---
@@ -61,7 +61,7 @@ Transitions between states consist of **zero-day decisions** and **event-wait ed
 
 Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rust-advanced-heaps`, wrapped by a PEA* adapter ([`planning-search.md`](planning-search.md)):
 
-- **Partial expansion:** domain successors are ranked by \(f-g\); only a fixed beam (16) is inserted per expand, with the parent re-queued via an expansion cursor.
+- **Partial expansion:** domain successors are ranked by \(f-g\). Only a fixed beam (16) is inserted per expand, with the parent re-queued via an expansion cursor.
 - **Admissible Heuristic $h$:** Estimates remaining calendar days by relaxing the remaining goal conjuncts into a dependency DAG:
   - Open tech, interest, military training, and law simple subgoals contribute their minimum model durations.
   - Conjunctions (`AND`) take the maximum bound of parallelizable tracks.
@@ -75,7 +75,7 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
 
 ### 1. Compact Payday Model (Fiscal Goals)
 - When `solvent`, `credit_headroom`, or `debt_principal` is an open simple subgoal, successors emit weekly payday waits (7 days).
-- Surplus weekly balance pays down principal before accumulating cash; deficits draw down treasury before borrowing.
+- Surplus weekly balance pays down principal before accumulating cash. Deficits draw down treasury before borrowing.
 - Tax adjustments shift the weekly balance sample by discrete increments (`tax_balance_per_step`).
 
 ### 2. Military Power Projection
@@ -91,17 +91,16 @@ Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rus
 - **National pool only:** Victoria 3 does not allocate construction by geographic state. The planner models national throughput split into **government** vs **private** (`1 − country_private_construction_allocation_mult` from economic-system laws). Private queue rows do not consume government feed slots.
 - **Cost** per queued level uses save `remaining`, else defs `required_construction`, else `default_construction_cost`.
 - **Allocation cap** defaults to max weekly construction progress ÷ 7 (vanilla base 10/week + owned tech adds such as urbanization). `SimConfig::max_construction_allocation = Some(n)` overrides for tests. Leftover government capacity fills later government queue entries, so enough capacity yields parallel builds. Wait edges advance to the soonest **fed** government completion.
-- **Heuristic ETA** (`construction_eta_days`): default = time until a free government feed slot / usable leftover capacity (one default-cost level at that rate when slots are open); when slots are full = next fed finish. Explicit next-finish mode remains available for wait-with-spare-slots semantics. Open GDP / price simple subgoals no longer clamp every bound through a blanket `.max(1)` on next-completion alone.
+- **Heuristic ETA** (`construction_eta_days`): default = time until a free government feed slot / usable leftover capacity (one default-cost level at that rate when slots are open). When slots are full = next fed finish. Explicit next-finish mode remains available for wait-with-spare-slots semantics. Open GDP / price simple subgoals no longer clamp every bound through a blanket `.max(1)` on next-completion alone.
 - **Building candidates** are `(building_type, state_id)` for `QueueBuildingLevel` (Vic3 placement):
   - **Direct:** defs building types whose default PM IO helps open `good_price` / raising `gdp`, plus barracks/shipyards/naval admin when PP needs levels (hire stays on the military simple-subgoal arm). Each type expands to states that already have that building, or every owned state for first-of-type / greenfield. Completion bumps levels in that state (synthetic row when absent) so prices move.
   - **No type-level dominance prune:** modeled benefit/cost axes omit slots, local markets, and unlocks, so “strictly better type” is not sound.
   - **Meta:** Construction Sector when any other build candidate already exists (capacity lever, not IO), also placed by state.
-  - **Deferred:** free slots / potentials and building unlock techs (`TODO(buildability)`). Incumbent $U$ via greedy (including construction; always ≥1 government slot) + `max_cost` prune is wired (`plan::greedy`); see [`planning-progress-heuristic.md`](planning-progress-heuristic.md).
-- Approximations: full staffing assumed for CS output; building-group `construction_efficiency_*` and most non-tech weekly-progress modifiers ignored; economic-law private mult table is vanilla-only. Still not full Paradox construction-goods demand or script cost tables beyond loaded `required_construction`.
+  - **Deferred:** free slots / potentials and building unlock techs (`TODO(buildability)`). Incumbent $U$ via greedy (including construction. Always ≥1 government slot) + `max_cost` prune is wired (`plan::greedy`). See [`planning-progress-heuristic.md`](planning-progress-heuristic.md).
+- Approximations: full staffing assumed for CS output. Building-group `construction_efficiency_*` and most non-tech weekly-progress modifiers ignored. Economic-law private mult table is vanilla-only. Still not full Paradox construction-goods demand or script cost tables beyond loaded `required_construction`.
 - **PM identity:** world/planning buildings store production methods as string script ids that **must** resolve in defs. Whether to replace those with indices into a bidirectional name↔id map remains an open design question.
 - **Progress ranking** (wired into search): residual-days / cheap-bag scorers in
-  `plan/progress_h.rs`, orchestrated by `plan/bag_rank.rs` for candidate bags;
-  emit uses speculative complete + `gdp_for_rates` — see
+  `plan/progress_h.rs`, orchestrated by `plan/bag_rank.rs` for candidate bags. Emit uses speculative complete + `gdp_for_rates` — see
   [`planning-progress-heuristic.md`](planning-progress-heuristic.md)
   and [`planning-search.md`](planning-search.md). Greedy incumbent $U$ is wired
   into `plan()` (`TODO(anytime-ub)` cleared).
@@ -129,5 +128,5 @@ flowchart TD
 
 ## Future work: search scaling
 
-PEA* fixed-beam adapter is wired into `plan()`; EPEA* / POR notes and rejected
+PEA* fixed-beam adapter is wired into `plan()`. EPEA* / POR notes and rejected
 dominance ideas: [`planning-search.md`](planning-search.md).

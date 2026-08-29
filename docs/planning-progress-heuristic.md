@@ -26,7 +26,7 @@ successors matter). That plug-in table lives at the end:
 Symbols are **introduced where first used**, in Math | Definition | Rust
 tables. Later sections reuse earlier symbols without repeating the table.
 
-**Timeline states:** $\mathrm{state}_t$ is the node being expanded (current);
+**Timeline states:** $\mathrm{state}_t$ is the node being expanded (current).
 $\mathrm{state}_{t'}$ is the successor after action $a$. Calendar day may be
 unchanged when $e(a)=0$. Rust suffixes: `*_curr` / `*_succ`. Reserve “parent”
 for plan-tree ancestry only (e.g. explanation `parent_id`), not bag GDP math.
@@ -46,21 +46,20 @@ A **simple subgoal** is a compiled goal node with no further goal children
 | $g$ | A* path cost so far (sum of edge days) | pathfinder path cost |
 | $e(a)$ | Edge cost of action $a$ (often $0$ for queue decisions) | `Successor::days` |
 | $h_{\mathrm{adm}}$ | Admissible remaining-days lower bound (timing DAG) | `Vic3Node::heuristic` |
-| $h$, $h_{\mathrm{rank}}$ | Progress residual-days estimate; **ranking bias**, not a proven admissible bound | `rank_heuristic` / `rank_heuristic_with_gdp_for_rates` |
+| $h$, $h_{\mathrm{rank}}$ | Progress residual-days estimate. **ranking bias**, not a proven admissible bound | `rank_heuristic` / `rank_heuristic_with_gdp_for_rates` |
 | $U$ | Incumbent feasible plan length in days | `greedy_upper_bound` |
-| $t_{\mathrm{goal}}^{\mathrm{greedy}}$ | Calendar day when greedy first satisfies the goal; $U$ equals this from the root | — |
+| $t_{\mathrm{goal}}^{\mathrm{greedy}}$ | Calendar day when greedy first satisfies the goal. $U$ equals this from the root | — |
 
 1. **Cost is calendar days.** Find a shortest path in days until GDP reaches
    the target (`evaluate` true).
 2. **A\*** / open-set search use $f = g + h$ with $g$ = days so far and edge costs in days
-   (0-day decisions, positive waits). Ready keys still report $h_{\mathrm{adm}}$;
-   candidate bags / Expanding cursor use $h_{\mathrm{rank}}$ / cheap scores (mixed $f$ —
+   (0-day decisions, positive waits). Ready keys still report $h_{\mathrm{adm}}$. Candidate bags / Expanding cursor use $h_{\mathrm{rank}}$ / cheap scores (mixed $f$ —
    see [`planning-search.md`](planning-search.md)).
 3. **Upper bound $U$ comes from greedy.** Run a feasible greedy simulation to
-   the GDP goal; $U$ is **only** that run’s day length (decisions are not kept).
+   the GDP goal. $U$ is **only** that run’s day length (decisions are not kept).
    Prune any node with $g \ge U$ (`PathFinderBuilder::max_cost` in `plan()`).
    **v1:** when $U$ must be refreshed, **rebuild the whole greedy simulation**
-   (no retained plan to edit; no incremental membership).
+   (no retained plan to edit. No incremental membership).
 4. **$h_{\mathrm{rank}}$ only orders.** Progress residual scores rank the
    candidate bag / open bias. They are **not** a proven admissible lower bound and do
    **not** define $U$.
@@ -69,7 +68,7 @@ $$
 U = t_{\mathrm{goal}}^{\mathrm{greedy}}
 $$
 
-The same day-cost / $U$ / prune skeleton applies to other goals; only the
+The same day-cost / $U$ / prune skeleton applies to other goals. Only the
 progress meter changes — see [Other goal types](#other-goal-types-how-the-gdp-story-changes).
 
 ---
@@ -83,7 +82,7 @@ satisfies the goal (`evaluate` true). It is **not** derived from $h_{\mathrm{ran
 only. It does **not** return or retain the decision sequence. Search does not
 edit, simplify, or splice greedy picks — the loop invents decisions while
 simulating, then **discards** them once $U$ is known. A later “incremental
-membership” pass may keep an editable intended sequence; that is **not** this
+membership” pass may keep an editable intended sequence. That is **not** this
 PR / not v1.
 
 - From the **root**, greedy runs to completion → $U$ is total plan days.
@@ -94,7 +93,7 @@ PR / not v1.
 
 Before or interleaved with planning search, run a **full** greedy from the root to
 seed $U$. **v1:** any later refresh **re-runs the whole greedy simulation** from
-the chosen start state (no patching a stored decision list; no incremental
+the chosen start state (no patching a stored decision list. No incremental
 membership).
 
 - A feasible plan of length $U$ proves $\mathrm{optimal} \le U$.
@@ -103,14 +102,14 @@ membership).
   not produce the scarce good) and **protects** future incremental greedy
   assumptions (when/if we keep a membership set — not required for scalar $U$).
 - When rebuilding greedy from a world that **already has CS enqueued** by
-  search, greedy still does not pick a *new* CS; it waits the real
+  search, greedy still does not pick a *new* CS. It waits the real
   construction timeline (slots / points) until that job completes.
-- Ordinary productive builds are allowed; capacity always has at least one
+- Ordinary productive builds are allowed. Capacity always has at least one
   government feed slot floor
   (base capacity floor). So GDP greedy can get a finite $U$ by enqueueing a
   logging camp (etc.) even when Construction Sector is never chosen.
 
-### Greedy loop (simulates days; v1 discards the path)
+### Greedy loop (simulates days. V1 discards the path)
 
 The steps below describe how the day count is produced. **v1 does not persist**
 this timeline as an editable plan — only $U$ is returned to search.
@@ -118,7 +117,7 @@ this timeline as an editable plan — only $U$ is returned to search.
 1. If `evaluate(goal)` already holds → $U = 0$.
 2. While a track has a spare slot, enqueue the greedy pick among allowed
    0-day decisions (edge cost $0$). Allowed picks include ordinary
-   `QueueBuildingLevel` jobs; **exclude** Construction Sector.
+   `QueueBuildingLevel` jobs. **exclude** Construction Sector.
 3. **Advance time** to the next completion (or payday), apply, and count the
    landing day (v1 need not store a timeline row — only the running day total).
 4. When the GDP goal is satisfied, stop. **$U = t$** (current day).
@@ -156,7 +155,7 @@ That is the greedy build policy — not rate-on-gap scoring, and not an
 optional tie-break.
 
 **PM / tax / other instant decisions:** if a 0-day option helps GDP (or clears
-the gap), take it before waiting; otherwise fall through to builds / waits.
+the gap), take it before waiting. Otherwise fall through to builds / waits.
 
 ### Pruning with $U$ (safe)
 
@@ -169,7 +168,7 @@ the gap), take it before waiting; otherwise fall through to builds / waits.
 | Quantity | Role |
 | --- | --- |
 | $h_{\mathrm{rank}}$ | Order open-set candidates (wired via `bag_rank`) |
-| $U = t_{\mathrm{goal}}^{\mathrm{greedy}}$ | Feasible plan days; prune with $g$ |
+| $U = t_{\mathrm{goal}}^{\mathrm{greedy}}$ | Feasible plan days. Prune with $g$ |
 | Partial-expansion cursor | Eventually emits deferred candidates |
 
 ### Improving $U$ later
@@ -190,10 +189,9 @@ again if a new incumbent path is needed.
 “Skip construction on greedy” means **skip Construction Sector only**, not
 skip every `QueueBuildingLevel`.
 
-Why exclude CS: (1) shortage-greedy would not pick it anyway; (2) a CS enqueue
+Why exclude CS: (1) shortage-greedy would not pick it anyway. (2) a CS enqueue
 changes construction capacity for everything after it, which would make
-incremental greedy refresh unreliable. Search may still enqueue CS;
-greedy must not *pick* new CS (but honors search-enqueued CS on rebuild).
+incremental greedy refresh unreliable. Search may still enqueue CS. Greedy must not *pick* new CS (but honors search-enqueued CS on rebuild).
 
 [`ConstructionSlots::ONE`](../crates/vic3-planning/src/construction.rs) is the
 parallel-feed floor so a productive building can always be considered when
@@ -260,7 +258,7 @@ It is built from option rates $r_i$ and per-track spare capacity.
 **Option kinds** for GDP (each has $\Delta_i$, $T_i$, hence $r_i$):
 
 - Construction (`QueueBuildingLevel`, in-flight government builds)
-- Production methods (`SwitchPm` when enabled; prefer immediate $\Delta$ credit)
+- Production methods (`SwitchPm` when enabled. Prefer immediate $\Delta$ credit)
 - Other zero-day GDP moves (immediate $\Delta$ credit)
 
 **Parallelism is per track:**
@@ -281,7 +279,7 @@ Special cases:
 
 - $S_{\mathrm{build}} = 1$ ⇒ $R^{*}_{\mathrm{build}} = \max_i r_i^{\mathrm{build}}$
 - $S_{\mathrm{build}} = 2$ ⇒ best + second-best build rates
-- $S_{\mathrm{build}} = 0$ ⇒ do not divide by zero; advance time on the
+- $S_{\mathrm{build}} = 0$ ⇒ do not divide by zero. Advance time on the
   in-flight schedule until a slot frees, then recompute
 
 Non-construction GDP progress that can run alongside builds is credited on the
@@ -327,14 +325,14 @@ Bag order is a **bias**, not a true PEA $f$-layer — see
 Do **not** prune on $g + h_{\mathrm{rank}} \ge U$.
 
 New symbols for cheap vs emit scoring (quantities on $\mathrm{state}_t$ use
-subscript $t$ / Rust `*_curr`; successor worlds use $t'$ / `*_succ`):
+subscript $t$ / Rust `*_curr`. Successor worlds use $t'$ / `*_succ`):
 
 | Math | Definition | Rust |
 | --- | --- | --- |
-| $\widetilde{\Delta\mathrm{gdp}}(a)$ | **Cheap** GDP change guesstimate for $a$ (not a full price solve; not a bag key by itself) | `cheap_gdp_delta_guesstimate` |
+| $\widetilde{\Delta\mathrm{gdp}}(a)$ | **Cheap** GDP change guesstimate for $a$ (not a full price solve. Not a bag key by itself) | `cheap_gdp_delta_guesstimate` |
 | $\widehat{\Delta\mathrm{gdp}}(a)$ | **Emit-time** GDP change from a full price/GDP solve on the speculative completed successor | `speculative_completed_state` → `gdp_succ - gdp_curr` |
 | $\mathrm{gdp}_t$ | GDP used for rates on $\mathrm{state}_t$ | `gdp_curr` / domain `gdp_for_rates()` |
-| $\mathrm{gdp}_{\mathrm{for\_rates}}$ | GDP input to residual math on a node; after emit, $\mathrm{gdp}_t + \widehat{\Delta\mathrm{gdp}}$ so the successor anticipates completion before `state.gdp` updates | `Vic3Node::gdp_for_rates` |
+| $\mathrm{gdp}_{\mathrm{for\_rates}}$ | GDP input to residual math on a node. After emit, $\mathrm{gdp}_t + \widehat{\Delta\mathrm{gdp}}$ so the successor anticipates completion before `state.gdp` updates | `Vic3Node::gdp_for_rates` |
 | $G_t$, $R^{*}_t$, $H_{\mathrm{follow}}$ | Gap, aggregate rate, and follow-on days on $\mathrm{state}_t$ (one bag) | [`BagResidualCurr`](../crates/vic3-planning/src/plan/progress_h.rs) |
 | $T_b$, $T_{\mathrm{CS}}$ | Days until ordinary build / Construction Sector completion | construction ETA helpers |
 | $C$ | Construction points/day on $\mathrm{state}_t$ | `PlanningState::construction_points_per_day` |
@@ -344,14 +342,14 @@ subscript $t$ / Rust `*_curr`; successor worlds use $t'$ / `*_succ`):
 | $\mathrm{score}_{\mathrm{emit}}(a)$ | Emit key $e(a) + h(W_a)$ | `emit_bag_score` |
 | $W_a$ | Speculative successor after $a$’s economics land ($\mathrm{state}_{t'}$ with completion applied) | `speculative_completed_state` |
 
-**Tilde vs hat:** $\widetilde{\cdot}$ = cheap bag approximation; $\widehat{\cdot}$ = emit full solve. Neither redefines path cost $g$.
+**Tilde vs hat:** $\widetilde{\cdot}$ = cheap bag approximation. $\widehat{\cdot}$ = emit full solve. Neither redefines path cost $g$.
 
 Always $\mathrm{score}(a) = e(a) + \text{(follow-on days after } a\text{)}$.
 **Cheap bag** and **emit** use different follow-on estimates.
 
 ### Cheap bag (order only)
 
-Ordinary productive build (capacity unchanged; credit
+Ordinary productive build (capacity unchanged. Credit
 $\widetilde{\Delta\mathrm{gdp}}$):
 
 $$
@@ -360,7 +358,7 @@ $$
 $$
 
 Construction Sector (guesstimate — construction-unit scale of follow-on on
-$\mathrm{state}_t$; ignores CS $\widetilde{\Delta\mathrm{gdp}}$ /
+$\mathrm{state}_t$. Ignores CS $\widetilde{\Delta\mathrm{gdp}}$ /
 $\widehat{\Delta\mathrm{gdp}}$):
 
 $$
@@ -369,8 +367,8 @@ $$
 $$
 
 **Deficiencies vs emit / formal greedy** (also in code comments on
-`cheap_bag_score`): CS scale ≠ actual slots + CS finish day; cheap GDP
-guesstimate ≠ full price solve; bag does not re-run greedy; the delayed /
+`cheap_bag_score`): CS scale ≠ actual slots + CS finish day. Cheap GDP
+guesstimate ≠ full price solve. Bag does not re-run greedy. The delayed /
 follow-on portion can score **lower (better)** than this heuristic once slots,
 prices, and greedy order are real.
 
@@ -409,7 +407,7 @@ Target order when expanding $\mathrm{state}_t$:
 
 1. **Apply the action to planning fields only** — copy-on-write the queues,
    PMs, building levels, dates, etc. Do **not** run the price solver yet.
-   Prices and GDP are derived; they are not part of A* identity.
+   Prices and GDP are derived. They are not part of A* identity.
 2. **Look up that world in the open/closed map** keyed by fingerprint (and
    full state equality on collision). Remember the best path cost $g$ seen for
    that world so far.
@@ -441,7 +439,7 @@ $G = 1000$ (GDP shortfall), $r_A = 10$, $r_B = 20$, $S_{\mathrm{build}} = 2$.
 - One imagined slot at A-rate: $h \approx 1000 / 10 = 100$
 - Two spare slots at B-rate: $R^{*}_{\mathrm{build}} = 20 + 20 = 40$,
   $h \approx 1000 / 40 = 25$
-- Queue A and B together: $+200$ lands at day 10 while A continues; a free
+- Queue A and B together: $+200$ lands at day 10 while A continues. A free
   slot can take another B. After the second enqueue, predicted in-flight must
   include A so $h$ beats “A alone with idle spare capacity.”
 
@@ -459,7 +457,7 @@ relevant, GDP-specific cheap formulas.
 | **GDP** (body of this doc) | $\max(0,\ \mathrm{target}-\mathrm{gdp})$ | Predicted GDP from build / PM / … |
 | `good_price` band | Distance outside $[\mathrm{lo},\mathrm{hi}]$ | Move toward band (or $1$ if enters) |
 | Army / navy power projection | $\max(0,\ \mathrm{target}-\mathrm{power})$ | Power projection from hire / mil build |
-| Research | Remaining research work on leaf (+ missing prereqs); in-flight uses `tech_days_left` / innovation remaining | Research progress drained on that track |
+| Research | Remaining research work on leaf (+ missing prereqs). In-flight uses `tech_days_left` / innovation remaining | Research progress drained on that track |
 | Law | Remaining enactment work (`law_days_left` when in flight) | Enactment progress toward passage |
 | Interest | Remaining establishment work (`interest_days_left` when in flight) | Interest progress toward declared |
 | Hire-to-full | Staffing gap or remaining hire days | Staffing / hire progress |
@@ -468,8 +466,8 @@ relevant, GDP-specific cheap formulas.
 ### Notes per kind
 
 **Price band / power projection.** Same $G/R^{*}$ shape as GDP. Replace GDP
-deltas with price-progress or power-projection deltas; $h$ stays in **days**.
-GDP hat/tilde formulas do not apply; use the corresponding meter’s cheap
+deltas with price-progress or power-projection deltas. $h$ stays in **days**.
+GDP hat/tilde formulas do not apply. Use the corresponding meter’s cheap
 guesstimate if needed.
 
 **Research / law / interest.** `evaluate` is still boolean (`has_tech` /
@@ -477,13 +475,13 @@ guesstimate if needed.
 work**, not that boolean — partial progress shortens $h$ and $T_i$. Today
 `simple_subgoal_gap` still returns $0$/$1$ for those leaves and ranking often
 jumps straight to ETA (`research_eta_for_rank`, fixed `law_days` /
-`interest_days`); the table above is the intended meter.
+`interest_days`). The table above is the intended meter.
 
 Consistency: do not drop $h$ to $0$ merely because an item is queued on a 0-day
 decision edge.
 
 **Hire.** Same idea as other timed tracks: remaining staffing / hire days as
-$G$; progress on complete as $\Delta$.
+$G$. Progress on complete as $\Delta$.
 
 **Composites (goal DAG).**
 

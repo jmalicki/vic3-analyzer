@@ -13,16 +13,16 @@ Contributor field-naming rules (`*_id` / `*_name` / `*_label`) live in
 
 | Crate | Responsibility | Dependencies / Target |
 | --- | --- | --- |
-| **`vic3-load`** | Parsing `.v3` save files (using `jomini` and `pdx-tools` `vic3save`) into intermediate representation (`WorldSave`); surgical plaintext patch export (`SavePatch`). | Pure Rust, WASM-safe |
-| **`vic3-defs`** | Extracting and indexing game definitions (goods, PMs, pop needs, buy packages) from installs or precompiled blobs; decoding game UI icons. | Pure Rust, WASM-safe |
+| **`vic3-load`** | Parsing `.v3` save files (using `jomini` and `pdx-tools` `vic3save`) into intermediate representation (`WorldSave`). Surgical plaintext patch export (`SavePatch`). | Pure Rust, WASM-safe |
+| **`vic3-defs`** | Extracting and indexing game definitions (goods, PMs, pop needs, buy packages) from installs or precompiled blobs. Decoding game UI icons. | Pure Rust, WASM-safe |
 | **`vic3-prices`** | Market price equilibrium solver (Basin non-linear least squares + successive substitution warm start), pop consumption, [MAPI](https://vic3.paradoxwikis.com/Market#Market_access_price_impact) blending, and qualification bottleneck alerts. | Pure Rust, WASM-safe |
 | **`vic3-planning`** | Compact `PlanningState` projection, Goal DSL parsing (`chumsky`), goal-relevant successor generation, and A* search engine (`rust-advanced-heaps`). | Pure Rust, WASM-safe |
 | **`vic3-api`** | Transport-free API facade. Accepts raw bytes or filesystem paths and produces uniform analytical JSON. | Pure Rust |
 | **`vic3-catalog`** | File system discovery and watcher for local/Steam save directories and shared application configuration (`config.toml`). | Native OS |
 | **`vic3-sql`** | Embedded read-only [Apache DataFusion](https://datafusion.apache.org/) SQL query engine over the save catalog and active save fact tables. | Native OS |
 | **`vic3-mcp`** | Model Context Protocol server (`rmcp`) exposing query tools, campaign briefs, and prompts to desktop AI assistants. | Native OS |
-| **`vic3-cli`** | Command-line interface (`clap`). Clap wrappers exist only in this crate; core structs remain filesystem-free. | Native CLI binary |
-| **`vic3-analyzer`** | Fat desktop binary (Tauri 2). Default launch runs the GUI companion; `vic3-analyzer mcp` launches the headless MCP server. | Native Desktop binary |
+| **`vic3-cli`** | Command-line interface (`clap`). Clap wrappers exist only in this crate. Core structs remain filesystem-free. | Native CLI binary |
+| **`vic3-analyzer`** | Fat desktop binary (Tauri 2). Default launch runs the GUI companion. `vic3-analyzer mcp` launches the headless MCP server. | Native Desktop binary |
 | **`vic3-wasm`** | Thin `wasm-bindgen` wrapper exposing `vic3-api` functionality to browser JavaScript. | WebAssembly |
 | **`web/`** | Browser client built with React and Vite. Uses IndexedDB for offline persistence and generates forms dynamically from JSON Schema. | Browser / Web |
 

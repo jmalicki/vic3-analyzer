@@ -9,7 +9,7 @@ planning apply (`EconomyContext::shop_cache` + `shops_for_planning` →
 ## Problem
 
 A* / PEA* planning re-solves prices on many economy edges. After moving UI/SQL
-packaging out of the hot path (`equilibrate` → `SolveOutcome`; `solve` →
+packaging out of the hot path (`equilibrate` → `SolveOutcome`. `solve` →
 `report`), a cold Prussia 1836 equilibrate is still ~**19 ms**, while a full
 `solve` (with report) is ~**146 ms**.
 
@@ -65,7 +65,7 @@ world projection). Price refresh does not.
 
 - Do not fold UI/`PricesResult` packaging back into the hot path (`report` stays
   off A*).
-- Do not rely on `warm_rel` for wall-time wins on current profiles; keep it for
+- Do not rely on `warm_rel` for wall-time wins on current profiles. Keep it for
   API parity / tiny residuals if desired.
 - Infra / trade / pop edits still need a full rebuild (or future patches).
 
