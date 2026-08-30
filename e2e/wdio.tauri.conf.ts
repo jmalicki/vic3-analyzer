@@ -4,12 +4,17 @@ import { config as baseConfig } from './wdio.web.conf.js'
 // Override after importing web conf (which sets VIC3_E2E_RUNTIME=web).
 process.env.VIC3_E2E_RUNTIME = 'tauri'
 
-// Workspace cargo target; matches scripts/docs-screenshots/desktop-tauri/prepare.mjs
+// Workspace cargo target; CI sets CARGO_PROFILE=ci → target/ci/
+function cargoTargetDir(): string {
+    const profile = process.env.CARGO_PROFILE || 'dev'
+    return profile === 'dev' ? 'debug' : profile
+}
+
 const binary = join(
     process.cwd(),
     '..',
     'target',
-    'debug',
+    cargoTargetDir(),
     process.platform === 'win32' ? 'vic3-analyzer.exe' : 'vic3-analyzer',
 )
 

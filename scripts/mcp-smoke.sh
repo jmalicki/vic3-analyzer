@@ -19,13 +19,24 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+cargo_target_profile() {
+  case "${CARGO_PROFILE:-dev}" in
+    dev) echo debug ;;
+    *) echo "${CARGO_PROFILE:-dev}" ;;
+  esac
+}
+
 BIN="${VIC3_ANALYZER_BIN:-}"
 if [[ -z "$BIN" ]]; then
   # Prefer an explicit cargo (CI / rustup toolchain) when the environment wraps
   # `cargo` as a rustup shim that does not forward subcommands.
   CARGO_BIN="${CARGO:-cargo}"
-  "$CARGO_BIN" build -p vic3-analyzer --quiet
-  BIN="$ROOT/target/debug/vic3-analyzer"
+  profile_args=()
+  if [[ -n "${CARGO_PROFILE:-}" && "${CARGO_PROFILE}" != dev ]]; then
+    profile_args=(--profile "$CARGO_PROFILE")
+  fi
+  "$CARGO_BIN" build -p vic3-analyzer --quiet "${profile_args[@]}"
+  BIN="$ROOT/target/$(cargo_target_profile)/vic3-analyzer"
 fi
 
 if [[ ! -x "$BIN" ]]; then
