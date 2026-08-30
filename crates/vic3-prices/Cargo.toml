@@ -3,6 +3,7 @@ name = "vic3-prices"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 repository.workspace = true
 description = "Victoria 3 market price equilibrium (Basin NLS + pop consumption)"
 

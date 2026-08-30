@@ -3,6 +3,7 @@ name = "vic3-analyzer"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 repository.workspace = true
 description = "Tauri desktop shell (GUI + stdio MCP via vic3-mcp)"
 default-run = "vic3-analyzer"

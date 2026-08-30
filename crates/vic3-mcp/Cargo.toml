@@ -3,6 +3,7 @@ name = "vic3-mcp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 repository.workspace = true
 description = "Stdio MCP server (rmcp) over vic3-sql + shared desktop config"
 

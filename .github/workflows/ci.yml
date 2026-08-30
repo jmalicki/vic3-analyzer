@@ -12,6 +12,28 @@ permissions:
   contents: read
 
 jobs:
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.18
+      - name: Rust supply chain (cargo-deny)
+        run: ./scripts/deny.sh
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: JS supply chain (npm audit)
+        working-directory: web
+        run: |
+          npm ci
+          npm audit --omit=dev --audit-level=high
+
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -68,15 +90,10 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci
-      - name: Audit production dependencies
-        working-directory: web
-        run: npm audit --omit=dev --audit-level=high
-      - name: Test and build web
+      - name: Install and test web
         working-directory: web
         run: |
+          npm ci
           npm test
           npm run test:wasm
           npm run build

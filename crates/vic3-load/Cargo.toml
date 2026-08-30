@@ -3,6 +3,7 @@ name = "vic3-load"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 repository.workspace = true
 description = "Load Victoria 3 saves into an IR (jomini + vic3save)"
 
