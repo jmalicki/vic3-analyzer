@@ -15,7 +15,8 @@ Production `plan` / `plan_with_economy` wrap [`Vic3Node`] in [`PeaNode`]
 
 - Build one **national** candidate bag from domain successors (all placements /
   actions for that current node), scored by cheap bag keys for generation and
-  by open-set `edge + h(child)` after speculative apply for beam partition.
+  by open-set `edge + h(child)` after speculative apply for beam partition
+  (**once per row**, then `select_nth` on cached keys).
 - Choose top [`DEFAULT_PEA_BEAM`] (**16**) with `select_nth` on the open delta
   (sort only that prefix). Defer the rest in one `Expanding` cursor (`Rc<[Candidate]>`).
 - **Apply child only on emit** — bag rows store `action` / `days` / cheap score /
