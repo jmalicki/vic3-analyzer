@@ -25,6 +25,7 @@ allow = [
     "MPL-2.0",
     "OpenSSL",
     "AGPL-3.0-only",
+    "AGPL-3.0-or-later",
     "bzip2-1.0.6",
 ]
 confidence-threshold = 0.8
@@ -32,7 +33,7 @@ confidence-threshold = 0.8
 
 [[licenses.clarify]]
 name = "vic3save"
-expression = "AGPL-3.0-only"
+expression = "AGPL-3.0-or-later"
 license-files = [
     { path = "../../LICENSE", hash = 0x00000000 },
 ]

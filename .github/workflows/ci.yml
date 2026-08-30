@@ -12,6 +12,17 @@ permissions:
   contents: read
 
 jobs:
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.18
+      - run: ./scripts/deny.sh
+
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -42,12 +53,6 @@ jobs:
         with:
           shared-key: ci-native
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install cargo-deny
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-deny@0.18
-      - name: Supply chain (cargo-deny)
-        run: ./scripts/deny.sh
       - run: ./scripts/lint-rust.sh
       - run: cargo test --workspace
       - name: MCP stdio smoke (no display)
