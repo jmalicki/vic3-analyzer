@@ -350,6 +350,8 @@ impl SearchNode for PeaNode {
             PeaInner::Ready(domain) => {
                 let bag = bag_rank::cheap_rank_bag(domain);
                 domain.note_pea_ready(bag.len());
+                // Keep `[astar] pea-ready` fields in sync with
+                // docs/planning-search.md#debug-expand-tracing-vic3_plan_trace.
                 super::astar_trace::on_expand("pea-ready", || {
                     let (fp_dups, fp_uniques) = domain.fingerprint_dup_stats();
                     format!(
@@ -375,6 +377,8 @@ impl SearchNode for PeaNode {
                 deferred_open_h,
             } => {
                 domain.note_pea_resume();
+                // Keep `[astar] pea-resume` fields in sync with
+                // docs/planning-search.md#debug-expand-tracing-vic3_plan_trace.
                 super::astar_trace::on_expand("pea-resume", || {
                     let (fp_dups, fp_uniques) = domain.fingerprint_dup_stats();
                     format!(

@@ -75,6 +75,63 @@ helpful-operator ordering may return later as heuristics only.
 
 ---
 
+## Debug expand tracing (`VIC3_PLAN_TRACE`)
+
+Env-gated stderr diagnostics for A* / PEA* expansions. Implementation:
+[`astar_trace.rs`](../crates/vic3-planning/src/plan/astar_trace.rs). Lines are
+**not** part of `PlanResult` JSON.
+
+| Variable | Effect |
+| --- | --- |
+| `VIC3_PLAN_TRACE=1` | Enable (any non-empty value except `0` / `false`) |
+| `VIC3_PLAN_TRACE_EVERY=N` | Log expand `#1` and every *N*-th expand after that (default **100**) |
+
+Example:
+
+```bash
+VIC3_PLAN_TRACE=1 VIC3_PLAN_TRACE_EVERY=1 \
+  vic3-cli plan --save … --game … --goal "gdp >= 450000"
+```
+
+### Line kinds
+
+| Prefix / kind | When | Meaning |
+| --- | --- | --- |
+| `[astar] trace on (every N)` | Plan start | Trace enabled; expand counter reset. |
+| `[astar] plan start …` | Before search | Root **gdp**, admissible **h** (days), **sim_branch** (immediate simulator successors), **max_days**. |
+| `[astar] greedy_u=…` | Before search | Greedy upper bound on day cost (`Some(0)` ⇒ already at goal; `None` ⇒ no cap). Caps `PathFinderBuilder::max_cost` when `Some(u)` with `u > 0`. |
+| `[astar] #N +Ts pea-ready …` | PEA Ready expand | National candidate bag scored; beam of `DEFAULT_PEA_BEAM` (16) emitted. Fields: **fp**, **gdp**, **h**, **candidates**, **beam**, **fp_dups** / **fp_uniques**. |
+| `[astar] #N +Ts pea-resume …` | PEA Expanding cursor | Resume deferred bag. **h** here is the cursor’s deferred open heuristic (`edge + h(child)`), not domain `heuristic()`. **emitted** / **remaining** track beam progress. |
+| `[astar] #N +Ts vic3 …` | Direct `Vic3Node` expand | Used when searching domain nodes without the PEA wrapper (tests / helpers). **branch** and action-kind histogram of `sim_successors`. |
+| `[astar] GOAL after N …` | Goal closed | Domain **fp**, **gdp**, **date** at the satisfying node. |
+| `[astar] plan done …` | After search | **expands**, **day_cost**, **path_len**, plus cumulative `SearchTraceStats` (below). |
+
+Common expand fields:
+
+| Field | Meaning |
+| --- | --- |
+| `#N` | 1-based expand index (throttled by `EVERY`). |
+| `+Ts` | Seconds since `reset()`. |
+| `fp` | Domain fingerprint (hex). |
+| `gdp` | Modeled GDP at that node. |
+| `h` | Timing lower bound (days), or deferred open *h* on `pea-resume`. |
+| `fp_dups` / `fp_uniques` | Running domain-fingerprint reconvergence counters for the shared search context. |
+
+`plan done` summary (`SearchTraceStats`):
+
+| Field | Meaning |
+| --- | --- |
+| `fp_dups` / `fp_uniques` / `fp_emitted` | Fingerprint reuse vs first-seen; `fp_emitted = dups + uniques`. |
+| `pea_ready` / `pea_resume` | Counts of Ready vs Expanding expands. |
+| `ranked_max` / `ranked_avg` / `ranked_sum` | Candidate-bag sizes at Ready expands. |
+| `beam_emitted` / `beam_deferred` | Successors pushed into the beam vs times an Expanding cursor was re-queued. |
+
+True A* open/closed set sizes are unavailable (`rust-advanced-heaps` keeps them private); the note on the summary line is intentional.
+
+**Keep in sync:** if you change `[astar]` line formats or field names, update this section and the emit sites that link here.
+
+---
+
 ## Suggested later ladder
 
 1. Measure PEA* OPEN size / wall time vs full expand on real goals. Retune beam.

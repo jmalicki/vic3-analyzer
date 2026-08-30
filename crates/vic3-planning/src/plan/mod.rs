@@ -52,6 +52,7 @@ mod pea;
 pub use pea::{PeaNode, DEFAULT_PEA_BEAM};
 
 /// Temporary A* expand logging (`VIC3_PLAN_TRACE=1`).
+/// Field glossary: [`docs/planning-search.md`](../../../docs/planning-search.md#debug-expand-tracing-vic3_plan_trace).
 pub mod astar_trace;
 
 mod result;

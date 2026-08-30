@@ -14,6 +14,8 @@ It operates directly over the core analysis engine ([`vic3-api`](../crates/vic3-
 | `VIC3_GAME` | Path to installed `Victoria 3/game` folder | Used to read raw game definitions |
 | `VIC3_DEFS` | Path to a precompiled `defs.postcard` blob | Faster alternative to reading the live game directory |
 | `VIC3_TOKENS` | Path to token mapping file | Required only for binary Ironman saves |
+| `VIC3_PLAN_TRACE` | Log A* / PEA* expansions to stderr | See [planning-search.md](planning-search.md#debug-expand-tracing-vic3_plan_trace) |
+| `VIC3_PLAN_TRACE_EVERY` | Throttle expand logs (default 100) | Logs `#1` and every *N*-th expand |
 
 ---
 

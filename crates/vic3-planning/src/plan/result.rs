@@ -326,6 +326,8 @@ fn plan_from_root(
     residual: f64,
     limitations: Vec<String>,
 ) -> Result<PlanResult, PlanError> {
+    // `[astar] plan start` / `greedy_u` / `plan done`: keep formats in sync with
+    // docs/planning-search.md#debug-expand-tracing-vic3_plan_trace.
     super::astar_trace::reset();
     if super::astar_trace::enabled() {
         let branch = root.sim_successors().len();
