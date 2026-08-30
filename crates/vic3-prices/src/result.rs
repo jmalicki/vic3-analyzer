@@ -385,11 +385,15 @@ pub struct StateGood {
     pub name: String,
     pub buy: f64,
     pub sell: f64,
-    /// Final local price after blending market and pure state prices.
+    /// Final local price after blending market and pure state prices
+    /// (`local_price(effective_mapi, market_price, state_price)`).
     pub price: f64,
     /// Solved whole-save market price (Milestone 1; per-market solves follow).
     pub market_price: f64,
-    /// Pure state price from this state's attributed buy and sell orders.
+    /// Pure-state price used as the MAPI blend input (box-constrained; game band).
+    ///
+    /// Joint: free NLS unknown. Nested: reconstructed from the settled local so
+    /// the MAPI identity holds on the emitted row.
     pub state_price: f64,
     /// Infrastructure-only state market access in `[0, 1]`.
     pub market_access: f64,

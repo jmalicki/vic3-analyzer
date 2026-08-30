@@ -77,14 +77,22 @@ Q_g = Q^{\mathrm{nat,0}}_g
 
 (where \(B^{\mathrm{nat,0}}_g\) and \(Q^{\mathrm{nat,0}}_g\) aggregate state-building, trade, and frozen-population orders weighted by \(\alpha_s\), while world-level frozen extras and stateless orders use access 1.0, matching ShopCache).
 
-**Local residual** (relative-price units):
+**Local residual** (relative-price units) on the **pure-state** unknown \(\sigma_{s,g}\)
+(box-constrained to the game band). Blended local price is derived:
 
 \[
-R^{\mathrm{loc}}_{s,g}(x) = \frac{1}{b_g}\Bigl[
-p^{\mathrm{loc}}_{s,g}
-- \bigl(m_s p^{\mathrm{mkt}}_g(r) + (1-m_s)\, b_g \tau(B_{s,g}, Q_{s,g})\bigr)
+p^{\mathrm{loc}}_{s,g} = m_s\, p^{\mathrm{mkt}}_g(r) + (1-m_s)\,\sigma_{s,g}
+\]
+
+\[
+R^{\sigma}_{s,g}(x) = \frac{1}{b_g}\Bigl[
+\sigma_{s,g}
+- b_g \tau(B_{s,g}(p^{\mathrm{loc}}_s), Q_{s,g})
 \Bigr]
 \]
+
+(Nested still settles blended locals with an inner loop and reconstructs \(\sigma\)
+at emit so `StateGood` matches this identity.)
 
 **Market (national) residual:**
 

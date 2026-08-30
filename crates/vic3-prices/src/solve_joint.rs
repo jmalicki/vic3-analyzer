@@ -1,26 +1,35 @@
-//! Joint (coupled) market + local price equilibrium solver.
+//! Joint (coupled) market + pure-state price equilibrium solver.
 //!
-//! Unlike [`crate::solve::equilibrate_nested`], which alternates market and local
-//! fixed-point steps, this module solves for worldwide relative prices `r_g` and
-//! every state's local absolute prices `p_{s,g}` in one bound-constrained NLS
-//! problem. Basin's trust-region-reflective solver (`Trf`) drives the combined
-//! residual to zero.
+//! Unlike [`crate::solve::equilibrate_nested`], which alternates market clearing
+//! with an inner local settle, this module solves for worldwide relative prices
+//! `r_g` and every state's **pure-state** absolute prices `σ_{s,g}` in one
+//! bound-constrained NLS. Blended local prices (what pops pay) are derived:
+//!
+//! ```text
+//! p_{s,g} = local_price(m_s, market(r)_g, σ_{s,g})
+//! ```
+//!
+//! Basin's trust-region-reflective solver (`Trf`) drives the combined residual
+//! to zero.
 //!
 //! # State vector
 //!
 //! ```text
-//! x = [ r_0, …, r_{G-1},  p_{0,0}, …, p_{0,G-1},  p_{1,0}, …, p_{S-1,G-1} ]
+//! x = [ r_0, …, r_{G-1},  σ_{0,0}, …, σ_{0,G-1},  σ_{1,0}, …, σ_{S-1,G-1} ]
 //! ```
 //!
-//! Market rows use relative prices; local rows use absolute prices scaled by
-//! `1 / base_g` so both blocks have comparable magnitude.
+//! Market rows use relative prices; pure-state rows use absolute prices with
+//! residual scaled by `1 / base_g` so both blocks have comparable magnitude.
+//! Box bounds on `r` and `σ` enforce ±`PRICE_RANGE`; order-implied targets stay
+//! unclipped (same pattern as the nested market residual).
 //!
 //! # Jacobian
 //!
 //! Market rows couple all states through aggregate pop consumption, so batched
-//! finite-difference perturbations of local prices cannot be reused for market
-//! derivatives. The implementation keeps batched FD for separable local rows and
-//! derives market-row columns analytically from per-state pop-buy deltas.
+//! finite-difference perturbations of pure-state prices cannot be reused for
+//! market derivatives. The implementation keeps batched FD for separable
+//! pure-state rows and derives market-row columns analytically from per-state
+//! pop-buy deltas.
 
 use std::cell::Cell;
 use std::convert::Infallible;
@@ -40,7 +49,7 @@ use crate::solve::{empty_stats, market_goods, ShopSnapshot};
 /// Central finite-difference step for Jacobian columns that use explicit FD.
 const FD_STEP: f64 = 1e-7;
 
-/// Basin problem: joint market + per-state local price residuals.
+/// Basin problem: joint market + per-state pure-state price residuals.
 ///
 /// Implements [`CostFunction`], [`Residual`], [`Jacobian`], and [`BoxConstraints`]
 /// for the trust-region solver. Counter cells track evaluation counts for
@@ -70,8 +79,10 @@ impl<'a> PriceResidualJoint<'a> {
     }
 
     /// Returns the total dimension of the joint state vector `x`.
-    /// The state `x` consists of the market relative prices `r_g` (length `G`),
-    /// followed by the local absolute prices `p_{s,g}` for each state `s` (length `S * G`).
+    ///
+    /// `x` is market relative prices `r_g` (length `G`), then pure-state absolute
+    /// prices `σ_{s,g}` for each state (length `S * G`). Blended locals are not
+    /// free unknowns.
     fn state_dim(&self) -> usize {
         let g = self.n_goods();
         let s = self.n_states();
@@ -95,13 +106,9 @@ impl<'a> PriceResidualJoint<'a> {
 
     /// Evaluates the full joint residual block `R(x)`.
     ///
-    /// Computes the residual for the market prices `R_g` and the local prices `R_{s,g}`.
-    ///
-    /// # Arguments
-    /// * `x` - The joint state vector containing market and local prices.
-    ///
-    /// # Returns
-    /// A column vector `R(x)` matching the dimension of `x`.
+    /// Market block: `R_g = r_g - τ_mkt`. Pure-state block:
+    /// `R_{s,g} = (σ_{s,g} - τ_state(orders at p_{s})) / base_g` with
+    /// `p_s = blend(m_s, market(r), σ_s)`.
     fn residual_at(&self, x: &Col<f64>) -> Col<f64> {
         self.eval_residual(x, None)
     }
@@ -121,8 +128,7 @@ impl<'a> PriceResidualJoint<'a> {
         let market_rel: Vec<f64> = (0..g).map(|i| x[i]).collect();
         let market_prices = self.prices_from_rel(&market_rel);
 
-        // Calculate stateless consumption (e.g., from investments or global pop mechanics)
-        // using the global market prices.
+        // Stateless consumption at market prices.
         let mut world_pop_buy = self.cache.frozen_pop_buy.clone();
         add_wage_bins(
             &mut world_pop_buy,
@@ -136,18 +142,19 @@ impl<'a> PriceResidualJoint<'a> {
         let mut pop_buy_scratch = GoodsVec::zeros(self.cache.base_prices.len());
         let mut local_prices_scratch = GoodsVec::zeros(self.cache.base_prices.len());
 
-        // Evaluate the local residual R^{loc}_{s,g} for each state and good.
+        // Pure-state residual R^{σ}_{s,g} for each state and good.
         for (s_idx, shop) in self.cache.shops.iter().enumerate() {
             local_prices_scratch.copy_from(&self.cache.base_prices);
             let s_offset = g + s_idx * g;
 
-            // Extract the local absolute prices p_{s,g} from x for this state.
+            // Derive blended local prices from free pure-state σ_{s,g}.
             for i in 0..g {
                 let good = self.goods[i];
-                local_prices_scratch[good] = x[s_offset + i];
+                let sigma = x[s_offset + i];
+                local_prices_scratch[good] = local_price(shop.mapi, market_prices[good], sigma);
             }
 
-            // Calculate the population consumption in this state based on the local prices.
+            // Pops shop at blended locals, not at σ.
             pop_buy_scratch.copy_from(&shop.frozen_pop_buy);
             add_wage_bins(
                 &mut pop_buy_scratch,
@@ -165,22 +172,16 @@ impl<'a> PriceResidualJoint<'a> {
                 }
             }
 
-            // Compute local target price and MAPI-blended price, comparing it to the guessed local price.
             for i in 0..g {
                 let good = self.goods[i];
                 let buy = shop.frozen_buy[good] + pop_buy_scratch[good];
                 let sell = shop.frozen_sell[good];
                 let base = self.bases[i];
-
                 let state_target = target_price(base, buy, sell, self.price_range);
-                let blended = local_price(shop.mapi, market_prices[good], state_target);
 
-                // The local residual is scaled by 1/base_price so that it has the same magnitude
-                // as the relative market residuals.
-                // R^{loc}_{s,g} = (p_{s,g} - blended) / base_g
-                res[s_offset + i] = (x[s_offset + i] - blended) / base;
+                // R^{σ}_{s,g} = (σ_{s,g} - τ_state) / base_g
+                res[s_offset + i] = (x[s_offset + i] - state_target) / base;
 
-                // Accumulate the global world consumption for the market residual later.
                 world_pop_buy.add(
                     good,
                     shop.access * (pop_buy_scratch[good] - shop.frozen_pop_buy[good]),
@@ -188,41 +189,27 @@ impl<'a> PriceResidualJoint<'a> {
             }
         }
 
-        // Evaluate the global market residual R_g.
+        // Global market residual R_g.
         for i in 0..g {
             let good = self.goods[i];
             let buy = self.cache.frozen_buy[good] + world_pop_buy[good];
             let sell = self.cache.frozen_sell[good];
-
-            // The global target relative price τ(c(r))
             let target = unclipped_target_relative_price(buy, sell, self.price_range);
-
-            // R_g = r_g - τ(c(r))
             res[i] = market_rel[i] - target;
         }
 
         res
     }
 
-    /// Full evaluation of the market state at the given joint state vector `x`.
+    /// Full evaluation at `x`: market rows, blended locals, pop buys, snapshot.
     ///
-    /// Computes pop consumption, the scalar objective value (root sum of squared residuals),
-    /// and constructs the final output models.
-    ///
-    /// # Arguments
-    /// * `x` - The joint state vector.
-    ///
-    /// # Returns
-    /// A tuple containing:
-    /// 1. A vector of `GoodPrice` rows summarizing the final volumes and prices.
-    /// 2. The scalar residual `‖R(x)‖`.
-    /// 3. A `ShopSnapshot` of local prices and worldwide pop consumption.
+    /// Snapshot stores both free pure-state prices `σ` and derived locals
+    /// `p = blend(m, market, σ)` so emit can publish a coherent `StateGood` row.
     fn evaluate(&self, x: &Col<f64>) -> (Vec<GoodPrice>, f64, ShopSnapshot) {
         let g = self.n_goods();
         let market_rel: Vec<f64> = (0..g).map(|i| x[i]).collect();
         let market_prices = self.prices_from_rel(&market_rel);
 
-        // Stateless (country-wide) pop consumption at market prices.
         let mut world_pop_buy = self.cache.frozen_pop_buy.clone();
         add_wage_bins(
             &mut world_pop_buy,
@@ -236,16 +223,21 @@ impl<'a> PriceResidualJoint<'a> {
         let mut snapshot = ShopSnapshot::default();
         let mut pop_buy_scratch = GoodsVec::zeros(self.cache.base_prices.len());
         let mut local_prices_scratch = GoodsVec::zeros(self.cache.base_prices.len());
+        let mut pure_state_scratch = GoodsVec::zeros(self.cache.base_prices.len());
 
-        // Walk each state shop: record local prices, per-state pop buy, and
-        // accumulate access-weighted consumption into the worldwide total.
         for (s_idx, shop) in self.cache.shops.iter().enumerate() {
             local_prices_scratch.copy_from(&self.cache.base_prices);
+            pure_state_scratch.copy_from(&self.cache.base_prices);
             let s_offset = g + s_idx * g;
             for i in 0..g {
                 let good = self.goods[i];
-                local_prices_scratch[good] = x[s_offset + i];
+                let sigma = x[s_offset + i];
+                pure_state_scratch[good] = sigma;
+                local_prices_scratch[good] = local_price(shop.mapi, market_prices[good], sigma);
             }
+            snapshot
+                .pure_state_by_state
+                .insert(shop.id, pure_state_scratch.clone());
             snapshot
                 .local_by_state
                 .insert(shop.id, local_prices_scratch.clone());
@@ -273,7 +265,6 @@ impl<'a> PriceResidualJoint<'a> {
         }
         snapshot.world_pop_buy = world_pop_buy.clone();
 
-        // Re-use residual_at for the scalar ‖R(x)‖ reported in SolveOutcome.
         let residual = self
             .residual_at(x)
             .iter()
@@ -333,8 +324,8 @@ impl Jacobian for PriceResidualJoint<'_> {
 
     /// Sparse Jacobian `∂R/∂x` at `param`.
     ///
-    /// Market columns (`r_j`) use standard finite differences. Local columns
-    /// (`p_{s,j}`) batch FD for the separable local block and analytical τ
+    /// Market columns (`r_j`) use standard finite differences. Pure-state columns
+    /// (`σ_{s,j}`) batch FD for the separable state block and analytical τ
     /// derivatives for market rows (see module docs).
     fn jacobian(&self, param: &Col<f64>) -> Result<SparseColMat<usize, f64>, Infallible> {
         self.n_jacobian_evals.set(self.n_jacobian_evals.get() + 1);
@@ -391,18 +382,14 @@ impl Jacobian for PriceResidualJoint<'_> {
 
         let mut stepped_pop_buys = vec![0.0; self.n_states() * g];
 
-        // 2. Perturb local prices p_{s,j}
-        // States are entirely independent from each other for their local residuals (R^{loc}_{s,g}),
-        // because the local price of state A does not affect pop consumption in state B.
-        // Therefore, we can perturb p_{s,j} for ALL states simultaneously (a "batched" finite-difference step).
+        // 2. Perturb pure-state prices σ_{s,j}
+        // States are independent for pure-state residuals (R^σ_{s,g}): σ in state A
+        // does not affect pop consumption in state B (only through the market hub).
+        // Therefore we can perturb σ_{s,j} for ALL states in one batched FD step.
         //
-        // However, the global market residual (R_g) DOES depend on the aggregate consumption of all states.
-        // If we perturb all states at once, the `batched_x1` evaluation will contain the sum of the consumption
-        // changes across all states, entangling the market residual effects.
-        //
-        // OPTIMIZATION: Instead of evaluating S separate perturbations just for the market rows (which would
-        // take O(S * G) evaluations), we extract the intermediate `pop_buy` differences directly from the
-        // batched evaluation! We can then calculate the exact analytical derivative of the market row using just this Delta buy.
+        // The global market residual DOES depend on aggregate consumption. Batched
+        // pop-buy deltas plus an analytical τ derivative recover per-state market
+        // columns without S separate evaluations.
         for j in 0..g {
             let mut batched_stepped = param.clone();
             let mut denoms = vec![0.0; self.n_states()];
@@ -423,11 +410,8 @@ impl Jacobian for PriceResidualJoint<'_> {
             for (s_idx, &denom) in denoms.iter().enumerate() {
                 let idx = g + s_idx * g + j;
 
-                // Affects market residuals: calculate analytically via Delta buy
-                // R_m = r_m - \tau(world_buy, world_sell)
-                // \partial(R_m) / \partial(p_{s,j}) = - \partial(\tau) / \partial(world_buy) * \partial(world_buy) / \partial(p_{s,j})
-                // Since \partial(world_buy) for this state is exactly `actual_delta_buy`, we can analytically
-                // evaluate the slope of \tau by plugging the delta directly into the target_price formula!
+                // Affects market residuals: analytical via Δbuy at blended locals.
+                // R_m = r_m - τ(world_buy, world_sell)
                 for (i, &good) in self.goods.iter().enumerate() {
                     let delta_buy = stepped_pop_buys[s_idx * g + i] - base_pop_buys[s_idx * g + i];
                     let actual_delta_buy = delta_buy * self.cache.shops[s_idx].access;
@@ -452,7 +436,7 @@ impl Jacobian for PriceResidualJoint<'_> {
                     }
                 }
 
-                // Affects THIS state's local residuals: use batched evaluation
+                // Affects THIS state's pure-state residuals: batched evaluation
                 for i in 0..g {
                     let r_idx = g + s_idx * g + i;
                     let deriv = (batched_x1[r_idx] - r0[r_idx]) / denom;
@@ -471,7 +455,7 @@ impl Jacobian for PriceResidualJoint<'_> {
 }
 
 impl BoxConstraints for PriceResidualJoint<'_> {
-    /// Lower bounds on `x` (relative market prices and absolute local prices).
+    /// Lower bounds on `x` (relative market prices and absolute pure-state prices).
     fn lower(&self) -> &Col<f64> {
         &self.lower
     }
@@ -482,12 +466,12 @@ impl BoxConstraints for PriceResidualJoint<'_> {
     }
 }
 
-/// Solve market + local prices jointly via Basin TRF.
+/// Solve market + pure-state prices jointly via Basin TRF.
 ///
 /// Returns the same `(SolveOutcome, Option<ShopSnapshot>)` pair as
-/// [`crate::solve::equilibrate_nested`]. `max_iters == 0` is intentional: it
-/// allows dry-run / debug invocations that evaluate the start point without
-/// spending Basin iterations.
+/// [`crate::solve::equilibrate_nested`]. Snapshot locals are MAPI blends of
+/// market and free pure-state unknowns. `max_iters == 0` evaluates the start
+/// point without Basin iterations.
 pub(crate) fn equilibrate_joint(
     cache: &ShopCache,
     defs: &GameDefs,
@@ -540,7 +524,7 @@ pub(crate) fn equilibrate_joint(
         upper[i] = 1.0 + price_range;
     }
 
-    // Local bounds
+    // Pure-state σ bounds (same ±PRICE_RANGE band as game state prices).
     for s_idx in 0..s {
         for (i, &base) in bases.iter().enumerate() {
             let idx = g + s_idx * g + i;
@@ -562,7 +546,7 @@ pub(crate) fn equilibrate_joint(
     for s_idx in 0..s {
         for (i, &base) in bases.iter().enumerate() {
             let idx = g + s_idx * g + i;
-            // Local prices start at base (relative price 1.0).
+            // Pure-state σ starts at base (relative price 1.0).
             x[idx] = base;
         }
     }
