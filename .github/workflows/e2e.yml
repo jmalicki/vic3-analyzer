@@ -43,7 +43,7 @@ jobs:
         run: npm run build
       - name: Install E2E Deps
         working-directory: e2e
-        run: npm install
+        run: npm ci
       - name: Run WebdriverIO Web Tests
         run: |
           cd web
@@ -95,7 +95,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Install E2E Deps
         working-directory: e2e
-        run: npm install
+        run: npm ci
       - name: Build desktop web UI
         working-directory: web
         run: |
