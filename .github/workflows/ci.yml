@@ -38,6 +38,8 @@ jobs:
 
   rust:
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE: ci
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
@@ -59,19 +61,19 @@ jobs:
             librsvg2-dev
       # Only this job on pushes to main *saves* rust-cache (see #110).
       # shared-key `ci-native` is the single writer key for native Linux builds;
-      # Linux e2e restores it with save-if: false. If e2e ever saves again, it
-      # must use a separate Tauri-scoped key — never write back to `ci-native`.
-      # Other jobs' rust-cache steps are commented out or restore-only; their
-      # dedicated saves were too big for the ~10GB Actions cache quota.
+      # Linux e2e restores it with save-if: false. macOS/Windows e2e use separate
+      # keys (`e2e-tauri-macos` / `e2e-tauri-windows`). Never write `ci-native` from e2e.
+      # CARGO_PROFILE=ci (debug=1) is part of the cache key via env-vars.
       - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
         with:
           prefix-key: v0-rust-zstd10-long31
           zstd-level: "10"
           zstd-long: "31"
           shared-key: ci-native
+          env-vars: CARGO_PROFILE
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: ./scripts/lint-rust.sh
-      - run: cargo test --workspace
+      - run: cargo test --workspace --profile ci
       - name: MCP stdio smoke (no display)
         env:
           # Unset so an accidental Tauri window would fail on Linux runners.

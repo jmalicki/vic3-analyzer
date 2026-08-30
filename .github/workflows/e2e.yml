@@ -52,6 +52,8 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-14, windows-2022]
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_PROFILE: ci
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -76,10 +78,7 @@ jobs:
             webkit2gtk-driver \
             xvfb \
             dbus-x11
-      # Disabled *save* (too big for ~10GB quota; see #110). If re-enabled, use a
-      # Tauri-scoped key (no shared-key) — never save to `ci-native`.
-      # - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
-      # Linux only: restore CI `rust`'s `ci-native` cache; never write it from e2e.
+      # Linux: restore CI `rust`'s `ci-native` cache only — never write from e2e.
       - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
         if: runner.os == 'Linux'
         with:
@@ -87,7 +86,27 @@ jobs:
           zstd-level: "10"
           zstd-long: "31"
           shared-key: ci-native
+          env-vars: CARGO_PROFILE
           save-if: "false"
+      # macOS / Windows: own keys (never `ci-native`); save on main only (#110).
+      - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
+        if: runner.os == 'macOS'
+        with:
+          prefix-key: v0-rust-zstd10-long31
+          zstd-level: "10"
+          zstd-long: "31"
+          shared-key: e2e-tauri-macos
+          env-vars: CARGO_PROFILE
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
+        if: runner.os == 'Windows'
+        with:
+          prefix-key: v0-rust-zstd10-long31
+          zstd-level: "10"
+          zstd-long: "31"
+          shared-key: e2e-tauri-windows
+          env-vars: CARGO_PROFILE
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: corepack enable
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -105,7 +124,7 @@ jobs:
           TAURI_CONFIG: '{"app":{"security":{"capabilities":["webdriver"]}}}'
         run: |
           node -e "require('fs').writeFileSync('capabilities/webdriver.json', JSON.stringify({identifier:'webdriver',description:'Companion UI + embedded WebDriver (E2E only).',windows:['main'],permissions:['core:default','allow-companion','wdio-webdriver:default','wdio:default']}, null, 2))"
-          cargo build -p vic3-analyzer --features webdriver
+          cargo build -p vic3-analyzer --features webdriver --profile ci
           node -e "try { require('fs').unlinkSync('capabilities/webdriver.json') } catch (_) {}"
       - name: Run WebdriverIO Tauri Tests (Linux / xvfb)
         if: runner.os == 'Linux'

@@ -56,6 +56,12 @@ unexpected_cfgs = "warn"
 [profile.release]
 lto = "thin"
 
+# CI / e2e debug builds: line tables for panics/backtraces, smaller than debug=2.
+[profile.ci]
+inherits = "dev"
+debug = 1
+incremental = false
+
 [profile.profiling]
 inherits = "release"
 debug = 2
