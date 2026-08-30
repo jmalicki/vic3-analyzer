@@ -43,7 +43,7 @@ use vic3_defs::{GameDefs, GoodId, GoodsVec};
 use crate::consumption::add_wage_bins;
 use crate::formula::{local_price, target_price, unclipped_target_relative_price};
 use crate::result::{GoodPrice, SolveOpts, SolveOutcome, SolveStats, SolveStatus};
-use crate::shop_cache::ShopCache;
+use crate::shop_cache::{ShopCache, StateShop};
 use crate::solve::{empty_stats, market_goods, ShopSnapshot};
 
 /// Central finite-difference step for Jacobian columns that use explicit FD.
@@ -472,6 +472,25 @@ impl BoxConstraints for PriceResidualJoint<'_> {
 /// [`crate::solve::equilibrate_nested`]. Snapshot locals are MAPI blends of
 /// market and free pure-state unknowns. `max_iters == 0` evaluates the start
 /// point without Basin iterations.
+/// Flat pure-state prices for Joint warm-start (shop order × goods order).
+fn pack_warm_sigma(
+    snapshot: &ShopSnapshot,
+    shops: &[Arc<StateShop>],
+    goods: &[GoodId],
+) -> Vec<f64> {
+    let mut out = Vec::with_capacity(shops.len() * goods.len());
+    for shop in shops {
+        let pure = snapshot
+            .pure_state_by_state
+            .get(&shop.id)
+            .expect("snapshot missing pure-state prices for shop");
+        for &gid in goods {
+            out.push(pure[gid]);
+        }
+    }
+    out
+}
+
 pub(crate) fn equilibrate_joint(
     cache: &ShopCache,
     defs: &GameDefs,
@@ -488,6 +507,7 @@ pub(crate) fn equilibrate_joint(
                 residual: 0.0,
                 status: SolveStatus::Converged,
                 relative: Vec::new(),
+                warm_sigma: None,
                 building_revenues: Vec::new(),
                 stats: empty_stats(strategy),
             },
@@ -503,6 +523,7 @@ pub(crate) fn equilibrate_joint(
                 residual: f64::INFINITY,
                 status: SolveStatus::Failed,
                 relative: Vec::new(),
+                warm_sigma: None,
                 building_revenues: Vec::new(),
                 stats: empty_stats(strategy),
             },
@@ -535,9 +556,10 @@ pub(crate) fn equilibrate_joint(
 
     let mut x = Col::zeros(n);
     // Warm-start market relative prices when the caller supplies a matching vector.
-    let use_warm = opts.warm_rel.as_ref().is_some_and(|w| w.len() == g);
+    let use_warm_rel = opts.warm_rel.as_ref().is_some_and(|w| w.len() == g);
+    let use_warm_sigma = opts.warm_sigma.as_ref().is_some_and(|w| w.len() == s * g);
     for (i, &_base) in bases.iter().enumerate() {
-        x[i] = if use_warm {
+        x[i] = if use_warm_rel {
             opts.warm_rel.as_ref().unwrap()[i].clamp(lower[i], upper[i])
         } else {
             1.0
@@ -546,8 +568,11 @@ pub(crate) fn equilibrate_joint(
     for s_idx in 0..s {
         for (i, &base) in bases.iter().enumerate() {
             let idx = g + s_idx * g + i;
-            // Pure-state σ starts at base (relative price 1.0).
-            x[idx] = base;
+            x[idx] = if use_warm_sigma {
+                opts.warm_sigma.as_ref().unwrap()[s_idx * g + i].clamp(lower[idx], upper[idx])
+            } else {
+                base
+            };
         }
     }
 
@@ -588,12 +613,15 @@ pub(crate) fn equilibrate_joint(
         _ => SolveStatus::MaxIters,
     };
 
+    let warm_sigma = Some(pack_warm_sigma(&snapshot, &cache.shops, &goods));
+
     (
         SolveOutcome {
             goods: rows,
             residual,
             status,
             relative: (0..g).map(|i| x[i]).collect(),
+            warm_sigma,
             building_revenues,
             stats: SolveStats {
                 strategy,
@@ -711,6 +739,45 @@ mod tests {
                 analytical_val,
                 expected_val,
                 diff
+            );
+        }
+    }
+
+    #[test]
+    fn warm_sigma_round_trip_matches_cold_solve() {
+        let defs = vic3_defs::load_from_path(toy_defs_root()).expect("toy economy defs");
+        let save = vic3_load::load_path(toy_save_path(), vic3_load::empty_tokens())
+            .expect("toy economy save");
+        let world = World::from_save(&save, &defs);
+        let cache = ShopCache::from_world(&world, &defs);
+        let cold_opts = SolveOpts {
+            strategy: crate::result::SolveStrategy::Joint,
+            ..SolveOpts::default()
+        };
+        let cold = super::equilibrate_joint(&cache, &defs, cold_opts.clone()).0;
+        let warm_sigma = cold
+            .warm_sigma
+            .clone()
+            .expect("joint solve exports warm_sigma");
+        let warm = super::equilibrate_joint(
+            &cache,
+            &defs,
+            SolveOpts {
+                warm_rel: Some(cold.relative.clone()),
+                warm_sigma: Some(warm_sigma),
+                ..cold_opts
+            },
+        )
+        .0;
+        assert_eq!(cold.goods.len(), warm.goods.len());
+        for (left, right) in cold.goods.iter().zip(warm.goods.iter()) {
+            assert_eq!(left.name, right.name);
+            assert!(
+                (left.price - right.price).abs() < 1e-9,
+                "{} cold {} vs warm {}",
+                left.name,
+                left.price,
+                right.price
             );
         }
     }

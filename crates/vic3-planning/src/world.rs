@@ -17,6 +17,8 @@
 //! | `techs`, `queued_tech`, `queued_building`, `constructions` | tech manager + construction queues | empty |
 //! | `laws`, `infamy` | law manager / country | empty / `None` |
 //! | `good_prices` | last price solve | empty map |
+//! | `warm_relative` | prior solve `relative` for [`SolveOpts::warm_rel`] | empty |
+//! | `warm_pure_state` | prior Joint σ for [`SolveOpts::warm_sigma`] | empty |
 //! | `gdp` | `0` unless `*_with_prices` (owned building revenue) | `0` |
 //! | budget / `solvent` / SoL proxy | country budget + owned-state pops | false / `0` / `None` |
 //! | army / navy / interest | country cache + formations; PP `None` when IR omits | `None` / empty |
@@ -152,6 +154,10 @@ pub struct PlanningParts {
     pub country: String,
     pub techs: Vec<String>,
     pub good_prices: Vec<(String, f64)>,
+    /// Prior market `relative` vector for solver warm-start (tests).
+    pub warm_relative: Vec<f64>,
+    /// Prior Joint pure-state prices (flat shop × goods) for σ warm-start.
+    pub warm_pure_state: Vec<f64>,
     pub solvent: bool,
     pub treasury: f64,
     /// Known army power projection; `None` when save IR omits it (not zero).
@@ -217,6 +223,8 @@ impl Default for PlanningParts {
             country: String::new(),
             techs: Vec::new(),
             good_prices: Vec::new(),
+            warm_relative: Vec::new(),
+            warm_pure_state: Vec::new(),
             solvent: false,
             treasury: 0.0,
             army_power_projection: None,
@@ -256,9 +264,9 @@ impl Default for PlanningParts {
 ///
 /// Fields cover every simple subgoal `crate::goals` can read, plus queue / delta slots
 /// `crate::sim` needs for waits and re-solves. Hash/eq use `f64::to_bits` (I8)
-/// for discrete floats that are part of identity. **`good_prices` and `gdp` are
-/// omitted** from Hash/Eq by default (derived solve outputs); set
-/// `VIC3_PLAN_FP_INCLUDE_PRICES=1` to restore the old include-for-A/B traces.
+/// for discrete floats that are part of identity. **`good_prices`, `gdp`,
+/// `warm_relative`, and `warm_pure_state` are omitted** from Hash/Eq by default
+/// set `VIC3_PLAN_FP_INCLUDE_PRICES=1` to restore the old include-for-A/B traces.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningState {
     pub date: Vic3Date,
@@ -268,6 +276,15 @@ pub struct PlanningState {
     pub techs: BTreeSet<String>,
     /// Market prices after the last solve (good id → price).
     pub good_prices: BTreeMap<String, f64>,
+    /// Prior market relative prices (`price / base`) for [`SolveOpts::warm_rel`].
+    ///
+    /// Not part of A* identity (same as [`Self::good_prices`]). Updated by
+    /// [`crate::sim::refresh_prices`] after each economy re-solve.
+    #[serde(default)]
+    pub warm_relative: Vec<f64>,
+    /// Prior Joint pure-state prices for [`SolveOpts::warm_sigma`] (not A* identity).
+    #[serde(default)]
+    pub warm_pure_state: Vec<f64>,
     /// True only when known `credit_headroom > 0` (not treasury sign).
     pub solvent: bool,
     pub treasury: f64,
@@ -543,6 +560,8 @@ impl PlanningState {
             country: parts.country,
             techs: parts.techs.into_iter().collect(),
             good_prices: parts.good_prices.into_iter().collect(),
+            warm_relative: parts.warm_relative,
+            warm_pure_state: parts.warm_pure_state,
             solvent: parts.solvent,
             treasury: parts.treasury,
             army_power_projection: parts.army_power_projection,
@@ -889,6 +908,8 @@ impl PlanningState {
             country: country.definition.clone(),
             techs: save.researched_techs_for(country_id).into_iter().collect(),
             good_prices: prices.into_price_map(),
+            warm_relative: Vec::new(),
+            warm_pure_state: Vec::new(),
             solvent: country.budget.is_solvent(),
             treasury,
             army_power_projection: save.army_power_projection_for(country_id),
@@ -993,6 +1014,8 @@ impl PlanningState {
             country: country.tag.clone(),
             techs: country.techs.iter().cloned().collect(),
             good_prices: prices.into_price_map(),
+            warm_relative: Vec::new(),
+            warm_pure_state: Vec::new(),
             solvent: country.solvent,
             treasury: country.treasury,
             army_power_projection: country.army_power_projection,
