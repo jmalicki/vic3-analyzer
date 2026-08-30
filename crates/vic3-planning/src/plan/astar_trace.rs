@@ -3,6 +3,10 @@
 //! Set `VIC3_PLAN_TRACE=1` (or any non-empty value except `0`/`false`) to log
 //! each search expansion. Optional `VIC3_PLAN_TRACE_EVERY=N` (default 100).
 //!
+//! Field glossary for `[astar]` stderr lines:
+//! [`docs/planning-search.md`](../../../../docs/planning-search.md#debug-expand-tracing-vic3_plan_trace).
+//! Keep that section in sync when changing line formats here or at call sites.
+//!
 //! // TODO: remove this module once GDP search blow-up is diagnosed.
 
 use std::sync::atomic::{AtomicU64, Ordering};

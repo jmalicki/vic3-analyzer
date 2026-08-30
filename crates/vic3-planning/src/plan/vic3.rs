@@ -59,6 +59,8 @@ impl FingerprintDupStats {
 /// Includes domain-fingerprint reconvergence (`fp_*`) and PEA* expand/frontier
 /// proxies (`ranked_*`, `beam_*`). The pathfinder's true open/closed set sizes
 /// are unavailable (`rust-advanced-heaps` keeps them private).
+///
+/// Field glossary: [`docs/planning-search.md`](../../../../docs/planning-search.md#debug-expand-tracing-vic3_plan_trace).
 #[derive(Debug, Default)]
 struct SearchTraceStats {
     /// Seen domain fingerprints + duplicate creation count.
@@ -759,6 +761,8 @@ impl SearchNode for Vic3Node {
 
     fn successors(&self) -> Vec<(Self, Self::Cost)> {
         let edges = self.sim_successors();
+        // Keep `[astar] vic3` fields in sync with
+        // docs/planning-search.md#debug-expand-tracing-vic3_plan_trace.
         super::astar_trace::on_expand("vic3", || {
             let mut kinds = std::collections::BTreeMap::<&str, u32>::new();
             for e in &edges {
@@ -804,6 +808,8 @@ impl SearchNode for Vic3Node {
     fn is_goal(&self) -> bool {
         let ok = evaluate(&self.cache.context.goal, &self.identity.state);
         if ok {
+            // Keep `[astar] GOAL` fields in sync with
+            // docs/planning-search.md#debug-expand-tracing-vic3_plan_trace.
             super::astar_trace::on_goal("vic3", || {
                 format!(
                     "fp={:016x} gdp={:.0} date={:?}",

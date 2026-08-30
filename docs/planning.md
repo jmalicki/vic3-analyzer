@@ -59,7 +59,7 @@ Transitions between states consist of **zero-day decisions** and **event-wait ed
 
 ## A* Heuristics & Consistency
 
-Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rust-advanced-heaps`, wrapped by a PEA* adapter ([`planning-search.md`](planning-search.md)):
+Search uses priority queue pathfinding (`SearchNode`, `shortest_path`) from `rust-advanced-heaps`, wrapped by a PEA* adapter ([`planning-search.md`](planning-search.md)); stderr expand diagnostics (`VIC3_PLAN_TRACE`) are documented under [Debug expand tracing](planning-search.md#debug-expand-tracing-vic3_plan_trace):
 
 - **Partial expansion:** domain successors are ranked by \(f-g\). Only a fixed beam (16) is inserted per expand, with the parent re-queued via an expansion cursor.
 - **Admissible Heuristic $h$:** Estimates remaining calendar days by relaxing the remaining goal conjuncts into a dependency DAG:
