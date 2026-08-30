@@ -12,7 +12,8 @@ Canonical formulation for the multi-region price NLS in [`vic3-prices`](../crate
 | Jacobian | Dense FD on \(r\) | **Sparse / arrowhead only** — never a dense \(N\times N\) Joint Jac |
 | Market scope | One whole-save price blob | One **market** star (Vic3 market / CU). Multi-market later |
 
-Until the Joint path ships and becomes default, treat the Target column as design intent. Code links below point at current modules.
+Until Joint becomes the default, production paths use Nested; pass `--strategy joint`
+(or `solve_opts.strategy = "joint"`) to exercise the coupled solver.
 
 ---
 

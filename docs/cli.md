@@ -158,6 +158,18 @@ For release-speed binaries with debug info (symbols + frame pointers) suitable f
 RUSTFLAGS='-C force-frame-pointers=yes' cargo build --profile profiling -p vic3-cli
 ```
 
+Compare Nested vs Joint on a plan run:
+
+```bash
+# Nested (default)
+target/profiling/vic3-cli plan --save … --game … --goal 'gdp >= 450000'
+
+# Joint (opt-in)
+target/profiling/vic3-cli plan --save … --game … --goal 'gdp >= 450000' --strategy joint
+```
+
+Optional markers (stacks on this branch): add `--features profiling-markers` and use `samply record …` (see PR #170).
+
 ---
 
 ## Machine-Readable Output (`--json`)
