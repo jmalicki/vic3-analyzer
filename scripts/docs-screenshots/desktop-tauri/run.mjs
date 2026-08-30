@@ -24,13 +24,13 @@ const { env, binary } = prepareAndBuild()
 
 const { existsSync } = await import('node:fs')
 if (!existsSync(join(here, 'node_modules', '@wdio', 'tauri-service'))) {
-  const npmInstall = spawnSync('npm', ['install', '--no-fund', '--no-audit'], {
+  const pnpmInstall = spawnSync('pnpm', ['install', '--no-fund'], {
     cwd: here,
     stdio: 'inherit',
     env,
   })
-  if (npmInstall.status !== 0) {
-    process.exit(npmInstall.status ?? 1)
+  if (pnpmInstall.status !== 0) {
+    process.exit(pnpmInstall.status ?? 1)
   }
 }
 

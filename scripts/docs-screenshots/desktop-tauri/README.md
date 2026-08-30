@@ -8,14 +8,14 @@ Ubuntu CI keeps using [`capture-desktop-mock.mjs`](../capture-desktop-mock.mjs) 
 
 - macOS (Screen Recording permission for Terminal/Cursor so `screencapture -l` works)
 - Rust + Node 22+
-- One-time: `npm ci` in `scripts/docs-screenshots` and in this folder
+- One-time: `pnpm install` at repo root (includes this folder and `scripts/docs-screenshots`)
 
 ## Run
 
 From `scripts/docs-screenshots/`:
 
 ```bash
-npm run docs:screenshots:desktop:tauri
+pnpm --filter vic3-docs-screenshots run docs:screenshots:desktop:tauri
 ```
 
 That script:

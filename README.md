@@ -84,7 +84,7 @@ Recommendation: Expand the Arms Industry in Silesia by 2 levels (or set an impor
 * See the full **[Desktop App Guide](docs/desktop.md)**.
 
 ```bash
-npm run build:desktop --prefix web
+pnpm --filter web run build:desktop
 cargo run -p vic3-analyzer
 ```
 

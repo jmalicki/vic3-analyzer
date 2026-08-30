@@ -30,27 +30,21 @@ jobs:
       #     prefix-key: e2e-web-wasm
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.12.1 --locked --force
+      - run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Install Web Deps
-        working-directory: web
-        run: npm ci
-      - name: Build Web
-        working-directory: web
-        run: npm run build
-      - name: Install E2E Deps
-        working-directory: e2e
-        run: npm ci
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install deps and build web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter web run build
       - name: Run WebdriverIO Web Tests
         run: |
-          cd web
-          npm run dev &
+          pnpm --filter web run dev &
           npx wait-on http://localhost:5173/vic3-analyzer/
-          cd ../e2e
-          npm test
+          pnpm --filter vic3-analyzer-e2e test
   tauri:
     strategy:
       fail-fast: false
@@ -88,19 +82,16 @@ jobs:
         with:
           shared-key: ci-native
           save-if: "false"
+      - run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Install E2E Deps
-        working-directory: e2e
-        run: npm ci
-      - name: Build desktop web UI
-        working-directory: web
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install deps and build desktop web UI
         run: |
-          npm ci
-          npm run build:desktop
+          pnpm install --frozen-lockfile
+          pnpm --filter web run build:desktop
       - name: Build Tauri App (Debug, WebDriver)
         working-directory: crates/vic3-analyzer
         env:
@@ -112,7 +103,6 @@ jobs:
           node -e "try { require('fs').unlinkSync('capabilities/webdriver.json') } catch (_) {}"
       - name: Run WebdriverIO Tauri Tests (Linux / xvfb)
         if: runner.os == 'Linux'
-        working-directory: e2e
         env:
           GDK_BACKEND: x11
           WEBKIT_DISABLE_COMPOSITING_MODE: '1'
@@ -120,8 +110,7 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: '1'
         # Wrap the whole WDIO process so the spawned Tauri/WebKit child inherits a
         # real X display. Auto-xvfb inside WDIO alone was not enough (app exit 101).
-        run: xvfb-run -a dbus-run-session -- npm run test:tauri
+        run: xvfb-run -a dbus-run-session -- pnpm --filter vic3-analyzer-e2e run test:tauri
       - name: Run WebdriverIO Tauri Tests
         if: runner.os != 'Linux'
-        working-directory: e2e
-        run: npm run test:tauri
+        run: pnpm --filter vic3-analyzer-e2e run test:tauri
