@@ -61,7 +61,7 @@ export function outDir() {
 export function requireDefsBlob() {
   if (!existsSync(defsFixture)) {
     throw new Error(
-      `Missing ${defsFixture}. Run: (cd web && npm run build:defs) or npm run build`,
+      `Missing ${defsFixture}. Run: pnpm --filter web run build:defs or pnpm --filter web run build`,
     )
   }
 }
@@ -70,7 +70,7 @@ export function requireWasm() {
   const wasmJs = resolve(webRoot, 'public/wasm/vic3_wasm.js')
   if (!existsSync(wasmJs)) {
     throw new Error(
-      `Missing wasm at ${wasmJs}. Run: (cd web && npm run build:wasm) or npm run build`,
+      `Missing wasm at ${wasmJs}. Run: pnpm --filter web run build:wasm or pnpm --filter web run build`,
     )
   }
 }

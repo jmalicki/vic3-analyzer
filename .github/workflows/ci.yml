@@ -23,16 +23,16 @@ jobs:
           tool: cargo-deny@0.18
       - name: Rust supply chain (cargo-deny)
         run: ./scripts/deny.sh
+      - run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: JS supply chain (npm audit)
-        working-directory: web
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: JS supply chain (pnpm audit)
         run: |
-          npm ci
-          npm audit --omit=dev --audit-level=high
+          pnpm install --frozen-lockfile
+          pnpm audit --prod --audit-level=high
 
   rust:
     runs-on: ubuntu-latest
@@ -85,18 +85,18 @@ jobs:
       #     prefix-key: web-wasm
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.12.1 --locked --force
+      - run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
       - name: Install and test web
-        working-directory: web
         run: |
-          npm ci
-          npm test
-          npm run test:wasm
-          npm run build
+          pnpm install --frozen-lockfile
+          pnpm --filter web test
+          pnpm --filter web run test:wasm
+          pnpm --filter web run build
       - name: Upload Pages artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v5
@@ -117,36 +117,31 @@ jobs:
       #     prefix-key: docs-screenshots-wasm
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.12.1 --locked --force
+      - run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: |
-            web/package-lock.json
-            scripts/docs-screenshots/package-lock.json
-      - name: Install web deps and build
-        working-directory: web
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install deps and build web
         run: |
-          npm ci
-          npm run build
-      - name: Install screenshot harness
-        working-directory: scripts/docs-screenshots
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
+          pnpm install --frozen-lockfile
+          pnpm --filter web run build
+      - name: Install Playwright Chromium
+        run: pnpm --filter vic3-docs-screenshots exec playwright install --with-deps chromium
       - name: Generate screenshots
         working-directory: scripts/docs-screenshots
         timeout-minutes: 12
         env:
           DOCS_SCREENSHOTS_OUT: ${{ runner.temp }}/docs-screenshots-out
-        run: npm run docs:screenshots
+        run: pnpm run docs:screenshots
       - name: Compare to committed assets (when goldens exist)
         working-directory: scripts/docs-screenshots
         env:
           DOCS_SCREENSHOTS_OUT: ${{ runner.temp }}/docs-screenshots-out
           CI: "true"
           DOCS_SCREENSHOTS_MAX_DIFF_RATIO: "0.15"
-        run: npm run docs:screenshots:compare
+        run: pnpm run docs:screenshots:compare
       - name: Upload screenshot artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v7
