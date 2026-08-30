@@ -507,6 +507,10 @@ fn run_plan(cmd: PlanCli) -> Result<()> {
         .to_string();
     let date = world.game_date.map(|date| date.game_fmt().to_string());
     let state = PlanningState::from_world_with_prices(&world, &country, &prices, &defs)?;
+    let mut state = state;
+    if !prices.relative.is_empty() {
+        state.warm_relative = prices.relative.clone();
+    }
     let goal = vic3_planning::parse(&cmd.goal)?;
     let economy = EconomyContext::new(world, defs, solve_opts);
     let opts = PlanOpts {
