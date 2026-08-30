@@ -10,12 +10,19 @@ description = "Victoria 3 market price equilibrium (Basin NLS + pop consumption)
 [lints]
 workspace = true
 
+[features]
+default = []
+# Samply/`tracing` wall-clock markers around equilibrate + Basin callbacks.
+# Enable from `vic3-cli` profiling builds; normal release/CI leave this off.
+profiling-markers = ["dep:tracing"]
+
 [dependencies]
 basin.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
+tracing = { workspace = true, optional = true }
 vic3-defs = { path = "../vic3-defs" }
 vic3-load = { path = "../vic3-load" }
 

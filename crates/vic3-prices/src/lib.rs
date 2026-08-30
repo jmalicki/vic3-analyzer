@@ -60,6 +60,7 @@ mod consumption;
 mod formula;
 mod label;
 mod optimize;
+mod profile_markers;
 mod qualification_advice;
 mod report;
 mod result;

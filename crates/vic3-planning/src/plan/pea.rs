@@ -348,6 +348,8 @@ impl SearchNode for PeaNode {
     fn successors(&self) -> Vec<(Self, Self::Cost)> {
         match &self.inner {
             PeaInner::Ready(domain) => {
+                #[cfg(feature = "profiling-markers")]
+                let _span = tracing::info_span!("planner_expand", kind = "pea-ready").entered();
                 let bag = bag_rank::cheap_rank_bag(domain);
                 domain.note_pea_ready(bag.len());
                 super::astar_trace::on_expand("pea-ready", || {
@@ -374,6 +376,8 @@ impl SearchNode for PeaNode {
                 emitted,
                 deferred_open_h,
             } => {
+                #[cfg(feature = "profiling-markers")]
+                let _span = tracing::info_span!("planner_expand", kind = "pea-resume").entered();
                 domain.note_pea_resume();
                 super::astar_trace::on_expand("pea-resume", || {
                     let (fp_dups, fp_uniques) = domain.fingerprint_dup_stats();

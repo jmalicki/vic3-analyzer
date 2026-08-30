@@ -39,6 +39,10 @@ same expand. Beam partition, emitted children, and the cursor therefore all use
 bound on [`Vic3Node`]). Cheap bag keys are diagnostic only — mixing them into the
 cursor heuristic caused resume nodes to jump ahead of siblings.
 
+**Profiling markers (optional):** build `vic3-cli` with `--features profiling-markers`
+to emit samply spans around PEA/Vic3 `successors()` expands and nested price solves;
+see [`cli.md`](cli.md) § CPU Profiling.
+
 ---
 
 ## Deferred (not implemented)

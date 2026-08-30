@@ -10,6 +10,11 @@ description = "Planning stack: PlanningState, goal DSL, successors, and A*"
 [lints]
 workspace = true
 
+[features]
+default = []
+# Planner expand + price-solve samply markers (propagates to vic3-prices).
+profiling-markers = ["vic3-prices/profiling-markers"]
+
 [dependencies]
 chumsky.workspace = true
 derivative.workspace = true

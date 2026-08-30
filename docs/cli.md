@@ -156,6 +156,14 @@ For release-speed binaries with debug info (symbols + frame pointers) suitable f
 RUSTFLAGS='-C force-frame-pointers=yes' cargo build --profile profiling -p vic3-cli
 ```
 
+Optional `profiling-markers` feature installs `tracing_samply::SamplyLayer` and emits nested wall-clock spans for planner expands (`pea-ready` / `pea-resume` / `vic3`), price solves (`price_solve` / `refresh_prices`), and jac-delimited fake Basin iterations (`basin_iter` + `residual` / `cost` / `jacobian`). Normal release/CI builds leave the feature off:
+
+```bash
+RUSTFLAGS='-C force-frame-pointers=yes' \
+  cargo build --profile profiling -p vic3-cli --features profiling-markers
+samply record ./target/profiling/vic3-cli plan --save campaign.v3 ...
+```
+
 ---
 
 ## Machine-Readable Output (`--json`)

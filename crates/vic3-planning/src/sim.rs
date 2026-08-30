@@ -2017,6 +2017,8 @@ fn apply_wait_for_event(
 /// Search calls apply only; this runs inside apply. Bookkeeping: baseline shops
 /// → patch from deltas → NLS → node fields.
 fn refresh_prices(state: &mut PlanningState, economy: &EconomyContext) {
+    #[cfg(feature = "profiling-markers")]
+    let _span = tracing::info_span!("refresh_prices").entered();
     let cache = economy.shops_for_planning(state);
     let outcome = equilibrate_cached(&cache, &economy.defs, economy.solve_opts.clone());
     state.gdp = economy.modeled_gdp(state, &outcome);

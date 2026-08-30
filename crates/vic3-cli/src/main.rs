@@ -61,6 +61,9 @@ mod mcp_cli;
 use mcp_cli::{run_mcp, McpCli};
 
 fn main() -> Result<()> {
+    #[cfg(feature = "profiling-markers")]
+    init_profiling_markers();
+
     let cli = Cli::parse();
     match cli.command {
         Commands::Prices(cmd) => {
@@ -776,6 +779,20 @@ fn print_table(result: &PricesResult) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+#[cfg(feature = "profiling-markers")]
+fn init_profiling_markers() {
+    use tracing_subscriber::prelude::*;
+
+    let samply = match tracing_samply::SamplyLayer::new() {
+        Ok(layer) => layer,
+        Err(err) => {
+            eprintln!("warning: failed to init tracing-samply layer: {err}");
+            return;
+        }
+    };
+    let _ = tracing_subscriber::registry().with(samply).try_init();
 }
 
 #[cfg(test)]
