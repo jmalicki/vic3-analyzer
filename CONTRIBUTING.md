@@ -76,6 +76,7 @@ Deep technical specifications and architectural contracts are organized under `d
 | **[JSON Schema Contracts](docs/json-schema.md)** | Schemas | Shared option and analytical result schema contracts (draft 2020-12). |
 | **[Price Equilibrium Methodology](docs/prices.md)** | Economic Engine | Non-linear market solver, MAPI formulas, and pop demand. |
 | **[Strategic Planning Engine](docs/planning.md)** | Planning Engine | State projection, A* graph search, and heuristic bounds. |
+| **[Supply chain security](docs/supply-chain.md)** | Security | cargo-deny policy, Dependabot, and JS audit gates. |
 
 ---
 
