@@ -60,8 +60,11 @@ jobs:
       # must use a separate Tauri-scoped key — never write back to `ci-native`.
       # Other jobs' rust-cache steps are commented out or restore-only; their
       # dedicated saves were too big for the ~10GB Actions cache quota.
-      - uses: Swatinem/rust-cache@v2
+      - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
         with:
+          prefix-key: v1-zstd10-long31
+          zstd-level: "10"
+          zstd-long: "31"
           shared-key: ci-native
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: ./scripts/lint-rust.sh
@@ -80,7 +83,7 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       # Disabled: rust-cache entry was too big for the ~10GB repo quota (#110).
-      # - uses: Swatinem/rust-cache@v2
+      # - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
       #   with:
       #     prefix-key: web-wasm
       - name: Install wasm-pack
@@ -112,7 +115,7 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       # Disabled: rust-cache entry was too big for the ~10GB repo quota (#110).
-      # - uses: Swatinem/rust-cache@v2
+      # - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
       #   with:
       #     prefix-key: docs-screenshots-wasm
       - name: Install wasm-pack
