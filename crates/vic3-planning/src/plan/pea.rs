@@ -9,10 +9,11 @@
 //! # Country-wide top-K bag
 //!
 //! Each Ready expand builds one **national** candidate bag via
-//! [`super::bag_rank::cheap_rank_bag`], scores each row with open-set
+//! [`super::bag_rank::cheap_rank_bag`], scores each row **once** with open-set
 //! `edge + h(child)` after speculative apply, takes top‑[`DEFAULT_PEA_BEAM`]
-//! with `select_nth`, and defers the rest in an `Expanding` cursor whose
-//! heuristic is the best deferred open delta. Cheap bag keys remain for
+//! with `select_nth` on the cached keys, emits children from that cache, and
+//! defers the rest in an `Expanding` cursor whose heuristic is the best
+//! deferred open delta (stored at expand time). Cheap bag keys remain for
 //! diagnostics only.
 //!
 //! Expanding identity is `(domain, emitted)` — the candidate list is
@@ -49,26 +50,43 @@ use std::rc::Rc;
 /// candidates; top 8–16 captured the high-value head). Not a proven optimum.
 pub const DEFAULT_PEA_BEAM: usize = 16;
 
-/// Compare bag rows by open-set priority: `edge + h(child)` after speculative apply.
-///
-/// Rows that fail [`bag_rank::emit_child`] sort last (`u32::MAX`). Tie-break on
-/// [`RankedBagEntry::tie`] for determinism.
-fn entry_open_cmp(domain: &Vic3Node, a: &RankedBagEntry, b: &RankedBagEntry) -> Ordering {
-    let open_key =
-        |entry: &RankedBagEntry| pea_successor_open_delta(domain, entry).unwrap_or(u32::MAX);
-    open_key(a)
-        .cmp(&open_key(b))
-        .then_with(|| a.tie.cmp(&b.tie))
+/// One bag row scored once for beam partition and emit.
+struct ScoredBagRow {
+    entry: RankedBagEntry,
+    /// Open-set `edge + h(child)` after speculative apply.
+    open_delta: u32,
+    child: Vic3Node,
+    edge: u32,
+}
+
+/// Apply each bag row once and record open-set priority plus the emitted child.
+fn score_bag_rows(domain: &Vic3Node, bag: Vec<RankedBagEntry>) -> Vec<ScoredBagRow> {
+    bag.into_iter()
+        .filter_map(|entry| {
+            let (child, edge) = bag_rank::emit_child(domain, &entry)?;
+            Some(ScoredBagRow {
+                open_delta: edge.saturating_add(child.heuristic()),
+                entry,
+                child,
+                edge,
+            })
+        })
+        .collect()
+}
+
+fn scored_open_cmp(a: &ScoredBagRow, b: &ScoredBagRow) -> Ordering {
+    a.open_delta
+        .cmp(&b.open_delta)
+        .then_with(|| a.entry.tie.cmp(&b.entry.tie))
 }
 
 /// Partition `bag` so the best `k` rows by `cmp` land in `bag[..k]` (sorted).
 ///
 /// The suffix `bag[k..]` is unordered except that `bag[k]` is the `select_nth`
-/// boundary — the best deferred score when `bag.len() > k`. Unit tests pass a
-/// cheap-key comparator; production uses [`entry_open_cmp`].
-fn select_top_k_by<F>(bag: &mut [RankedBagEntry], k: usize, mut cmp: F)
+/// boundary — the best deferred score when `bag.len() > k`.
+fn select_top_k_by<T, F>(bag: &mut [T], k: usize, mut cmp: F)
 where
-    F: FnMut(&RankedBagEntry, &RankedBagEntry) -> Ordering,
+    F: FnMut(&T, &T) -> Ordering,
 {
     if bag.is_empty() || k == 0 {
         return;
@@ -82,9 +100,9 @@ where
     }
 }
 
-/// [`select_top_k_by`] with [`entry_open_cmp`] — production beam partition.
-fn select_top_k(domain: &Vic3Node, bag: &mut [RankedBagEntry], k: usize) {
-    select_top_k_by(bag, k, |a, b| entry_open_cmp(domain, a, b));
+/// [`select_top_k_by`] on cached open deltas — production beam partition.
+fn select_top_k_scored(bag: &mut [ScoredBagRow], k: usize) {
+    select_top_k_by(bag, k, scored_open_cmp);
 }
 
 /// Open-set \(f - g\) for one bag row after speculative apply: `edge + h(child)`.
@@ -94,6 +112,7 @@ fn select_top_k(domain: &Vic3Node, bag: &mut [RankedBagEntry], k: usize) {
 /// production A*. Ready children and the [`PeaInner::Expanding`] resume cursor
 /// must both rank on this value so the cursor is never ahead of siblings from
 /// the same expand.
+#[cfg(debug_assertions)]
 pub(crate) fn pea_successor_open_delta(domain: &Vic3Node, entry: &RankedBagEntry) -> Option<u32> {
     let (child, edge) = bag_rank::emit_child(domain, entry)?;
     Some(edge.saturating_add(child.heuristic()))
@@ -157,12 +176,13 @@ pub(crate) fn pea_partial_expand_invariant(
 /// Debug-build guard after [`emit_beam`] when a deferred cursor is inserted.
 ///
 /// Asserts [`pea_partial_expand_invariant`] and that [`PeaNode::heuristic`] on the
-/// new cursor equals the best deferred [`pea_successor_open_delta`].
+/// new cursor equals `deferred_open_h` stored at expand time.
 #[cfg(debug_assertions)]
 fn debug_assert_pea_beam_invariant(
     domain: &Vic3Node,
     succs: &[(PeaNode, u32)],
     deferred: &[RankedBagEntry],
+    deferred_open_h: u32,
 ) {
     if let Err(violation) = pea_partial_expand_invariant(succs) {
         debug_assert!(
@@ -175,24 +195,31 @@ fn debug_assert_pea_beam_invariant(
             domain.fingerprint(),
         );
     }
-    let min_deferred_open = deferred
-        .iter()
-        .filter_map(|entry| pea_successor_open_delta(domain, entry))
-        .min();
     if let Some((resume, 0)) = succs
         .iter()
         .find(|(node, edge)| matches!(node.inner, PeaInner::Expanding { .. }) && *edge == 0)
     {
         let resume_h = resume.heuristic();
-        if let Some(min_deferred) = min_deferred_open {
-            debug_assert_eq!(
-                resume_h,
-                min_deferred,
-                "Expanding heuristic must equal best deferred open delta \
-                 (resume_h={resume_h} min_deferred={min_deferred} fp={:016x})",
-                domain.fingerprint(),
-            );
-        }
+        debug_assert_eq!(
+            resume_h,
+            deferred_open_h,
+            "Expanding heuristic must equal best deferred open delta \
+             (resume_h={resume_h} deferred_open_h={deferred_open_h} fp={:016x})",
+            domain.fingerprint(),
+        );
+    }
+    let min_deferred_open = deferred
+        .iter()
+        .filter_map(|entry| pea_successor_open_delta(domain, entry))
+        .min();
+    if let Some(min_deferred) = min_deferred_open {
+        debug_assert_eq!(
+            deferred_open_h,
+            min_deferred,
+            "cached deferred_open_h must match rescored min \
+             (cached={deferred_open_h} rescored={min_deferred} fp={:016x})",
+            domain.fingerprint(),
+        );
     }
 }
 
@@ -220,6 +247,9 @@ enum PeaInner {
         #[derivative(PartialEq = "ignore", Hash = "ignore")]
         candidates: Rc<[RankedBagEntry]>,
         emitted: usize,
+        /// Best deferred open delta at cursor creation (`min` over `candidates`).
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        deferred_open_h: u32,
     },
 }
 
@@ -241,35 +271,36 @@ impl PeaNode {
 
     /// Partition the bag, emit up to [`DEFAULT_PEA_BEAM`] applied children, defer the rest.
     ///
-    /// 1. Rank the full bag with [`select_top_k`] (open delta, not cheap key).
-    /// 2. Push each prefix row through [`bag_rank::emit_child`] as a Ready [`PeaNode`].
+    /// 1. Score each row once ([`score_bag_rows`]), partition with [`select_top_k_scored`].
+    /// 2. Push each prefix row as a Ready [`PeaNode`] from the score cache.
     /// 3. When the bag is larger than the beam, append one 0-cost `Expanding` cursor
-    ///    holding `bag[k..]`; its heuristic is the best deferred open delta.
+    ///    holding deferred entries and [`PeaInner::Expanding::deferred_open_h`].
     ///
     /// `already_emitted` is stored on the cursor identity so resume expands can
     /// continue counting across multiple beams from the same domain state.
     fn emit_beam(
         domain: &Vic3Node,
-        mut bag: Vec<RankedBagEntry>,
+        bag: Vec<RankedBagEntry>,
         already_emitted: usize,
     ) -> Vec<(Self, u32)> {
         let beam = DEFAULT_PEA_BEAM.max(1);
         if bag.is_empty() {
             return Vec::new();
         }
-        select_top_k(domain, &mut bag, beam);
-        let take = beam.min(bag.len());
+        let mut scored = score_bag_rows(domain, bag);
+        if scored.is_empty() {
+            return Vec::new();
+        }
+        select_top_k_scored(&mut scored, beam);
+        let take = beam.min(scored.len());
         // Cheap-key boundary — diagnostic only; beam partition uses open delta above.
-        let deferred_min_cheap = (take < bag.len()).then(|| bag[take].cheap_rank_key);
+        let deferred_min_cheap = (take < scored.len()).then(|| scored[take].entry.cheap_rank_key);
 
         let mut out = Vec::with_capacity(take.saturating_add(1));
-        for entry in &bag[..take] {
-            let Some((child, edge)) = bag_rank::emit_child(domain, entry) else {
-                continue;
-            };
-            let emit_key = bag_rank::emit_rank_key(domain, entry, &child);
+        for row in &scored[..take] {
+            let emit_key = bag_rank::emit_rank_key(domain, &row.entry, &row.child);
             if let Some(mismatch) = bag_rank::emit_deferred_cheap_mismatch(
-                entry.cheap_rank_key,
+                row.entry.cheap_rank_key,
                 emit_key,
                 deferred_min_cheap,
             ) {
@@ -278,31 +309,34 @@ impl PeaNode {
                     cheap_rank_key = mismatch.cheap_rank_key,
                     emit_rank_key = mismatch.emit_rank_key,
                     deferred_min_cheap = mismatch.deferred_min_cheap,
-                    gdp = child.state().gdp,
-                    gdp_for_rates = child.gdp_for_rates(),
-                    action = ?entry.action,
+                    gdp = row.child.state().gdp,
+                    gdp_for_rates = row.child.gdp_for_rates(),
+                    action = ?row.entry.action,
                     "PEA beam emit rank exceeds best deferred cheap rank \
                      (cheap under-ranked a deferred rival; see docs/planning-search.md)"
                 );
             }
-            out.push((Self::ready(child), edge));
+            out.push((Self::ready(row.child.clone()), row.edge));
         }
-        let deferred = take < bag.len();
+        let deferred = take < scored.len();
         domain.note_beam_emit(out.len(), deferred);
         if deferred {
-            let deferred_slice = &bag[take..];
+            let deferred_open_h = scored[take].open_delta;
+            let deferred_entries: Vec<RankedBagEntry> =
+                scored[take..].iter().map(|row| row.entry.clone()).collect();
             out.push((
                 Self {
                     inner: PeaInner::Expanding {
                         domain: domain.clone(),
-                        candidates: Rc::from(deferred_slice.to_vec()),
+                        candidates: Rc::from(deferred_entries.clone()),
                         emitted: already_emitted.saturating_add(take),
+                        deferred_open_h,
                     },
                 },
                 0,
             ));
             #[cfg(debug_assertions)]
-            debug_assert_pea_beam_invariant(domain, &out, deferred_slice);
+            debug_assert_pea_beam_invariant(domain, &out, &deferred_entries, deferred_open_h);
         }
         out
     }
@@ -338,14 +372,16 @@ impl SearchNode for PeaNode {
                 domain,
                 candidates,
                 emitted,
+                deferred_open_h,
             } => {
                 domain.note_pea_resume();
                 super::astar_trace::on_expand("pea-resume", || {
                     let (fp_dups, fp_uniques) = domain.fingerprint_dup_stats();
                     format!(
-                        "fp={:016x} gdp={:.0} emitted={} remaining={} beam={} fp_dups={} fp_uniques={}",
+                        "fp={:016x} gdp={:.0} h={} emitted={} remaining={} beam={} fp_dups={} fp_uniques={}",
                         domain.fingerprint(),
                         domain.state().gdp,
+                        deferred_open_h,
                         emitted,
                         candidates.len(),
                         DEFAULT_PEA_BEAM,
@@ -368,14 +404,9 @@ impl SearchNode for PeaNode {
     fn heuristic(&self) -> Self::Cost {
         match &self.inner {
             PeaInner::Ready(n) => n.heuristic(),
-            // Best deferred open delta — must match min pea_successor_open_delta(deferred).
             PeaInner::Expanding {
-                domain, candidates, ..
-            } => candidates
-                .iter()
-                .filter_map(|entry| pea_successor_open_delta(domain, entry))
-                .min()
-                .unwrap_or(0),
+                deferred_open_h, ..
+            } => *deferred_open_h,
         }
     }
 }
