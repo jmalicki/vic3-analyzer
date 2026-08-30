@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 82be0b1b21e19b3f0a8b602f80cebcac0642f3563d32946abe828e3fe89a509e # shrinks to state_count = 6, building_kinds = 3

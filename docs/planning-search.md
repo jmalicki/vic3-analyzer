@@ -14,12 +14,13 @@ Production `plan` / `plan_with_economy` wrap [`Vic3Node`] in [`PeaNode`]
 (`crates/vic3-planning/src/plan/pea.rs`):
 
 - Build one **national** candidate bag from domain successors (all placements /
-  actions for that current node), scored by \(f - g = \mathrm{edge} + h(\mathrm{child})\).
-- Choose top [`DEFAULT_PEA_BEAM`] (**16**) with `select_nth` (sort only that
-  prefix). Defer the rest in one `Expanding` cursor (`Rc<[Candidate]>`).
-- **Apply child only on emit** — bag rows store `action` / `days` / score /
+  actions for that current node), scored by cheap bag keys for generation and
+  by open-set `edge + h(child)` after speculative apply for beam partition.
+- Choose top [`DEFAULT_PEA_BEAM`] (**16**) with `select_nth` on the open delta
+  (sort only that prefix). Defer the rest in one `Expanding` cursor (`Rc<[Candidate]>`).
+- **Apply child only on emit** — bag rows store `action` / `days` / cheap score /
   deps, not a live [`Vic3Node`].
-- Cursor heuristic is the best deferred \(f - g\) (boundary after `select_nth`).
+- Cursor heuristic is the best deferred open delta (`edge + h` on speculative child).
 - ShopCache stays unranked (score/apply substrate only).
 
 **Beam policy (locked for v1):** fixed width 16 (not ties-only). Motivated by a
@@ -29,6 +30,13 @@ with real planner histograms later.
 
 This **defers OPEN insertion** per node expand. It is **not** a shared slot
 budget across the whole A* frontier (that would need heaps-crate changes).
+
+**Open-set ordering invariant:** after each partial expand, A* must dequeue
+every emitted Ready child before the 0-cost `Expanding` resume cursor from that
+same expand. Beam partition, emitted children, and the cursor therefore all use
+`edge + h(child)` after speculative apply (production `h` is the admissible timing
+bound on [`Vic3Node`]). Cheap bag keys are diagnostic only — mixing them into the
+cursor heuristic caused resume nodes to jump ahead of siblings.
 
 ---
 
