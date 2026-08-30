@@ -12,7 +12,8 @@ Canonical formulation for the multi-region price NLS in [`vic3-prices`](../crate
 | Jacobian | Dense FD on \(r\) | **Sparse / arrowhead only** — never a dense \(N\times N\) Joint Jac |
 | Market scope | One whole-save price blob | One **market** star (Vic3 market / CU). Multi-market later |
 
-Until the Joint path ships and becomes default, treat the Target column as design intent. Code links below point at current modules.
+Until Joint becomes the default, production paths use Nested; pass `--strategy joint`
+(or `solve_opts.strategy = "joint"`) to exercise the coupled solver.
 
 ---
 
@@ -77,14 +78,22 @@ Q_g = Q^{\mathrm{nat,0}}_g
 
 (where \(B^{\mathrm{nat,0}}_g\) and \(Q^{\mathrm{nat,0}}_g\) aggregate state-building, trade, and frozen-population orders weighted by \(\alpha_s\), while world-level frozen extras and stateless orders use access 1.0, matching ShopCache).
 
-**Local residual** (relative-price units):
+**Local residual** (relative-price units) on the **pure-state** unknown \(\sigma_{s,g}\)
+(box-constrained to the game band). Blended local price is derived:
 
 \[
-R^{\mathrm{loc}}_{s,g}(x) = \frac{1}{b_g}\Bigl[
-p^{\mathrm{loc}}_{s,g}
-- \bigl(m_s p^{\mathrm{mkt}}_g(r) + (1-m_s)\, b_g \tau(B_{s,g}, Q_{s,g})\bigr)
+p^{\mathrm{loc}}_{s,g} = m_s\, p^{\mathrm{mkt}}_g(r) + (1-m_s)\,\sigma_{s,g}
+\]
+
+\[
+R^{\sigma}_{s,g}(x) = \frac{1}{b_g}\Bigl[
+\sigma_{s,g}
+- b_g \tau(B_{s,g}(p^{\mathrm{loc}}_s), Q_{s,g})
 \Bigr]
 \]
+
+(Nested still settles blended locals with an inner loop and reconstructs \(\sigma\)
+at emit so `StateGood` matches this identity.)
 
 **Market (national) residual:**
 

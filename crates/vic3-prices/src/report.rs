@@ -254,20 +254,26 @@ fn detail_rows(
             let good_id = defs.good_by_index(idx)?.to_string();
             let buy = state_buy.get(&(state.id, idx)).copied().unwrap_or(0.0);
             let sell = state_sell.get(&(state.id, idx)).copied().unwrap_or(0.0);
-            let state_price = price(row.base, buy, sell, defs.price_range.max(0.0));
+            let price_range = defs.price_range.max(0.0);
             let market_access = market_access(state.infrastructure, state.infrastructure_usage);
             let effective_mapi = effective_mapi(market_access);
-            let price = snapshot
-                .and_then(|snap| snap.local_by_state.get(&state.id))
-                .map(|local| local[idx])
-                .unwrap_or_else(|| local_price(effective_mapi, row.price, state_price));
+            let market_price = row.price;
+            // Prefer solver pure-state σ (Joint free unknown / Nested reconstruction).
+            // Fallback: clipped wiki state price from attributed orders (game formula).
+            let state_price = snapshot
+                .and_then(|snap| snap.pure_state_by_state.get(&state.id))
+                .map(|pure| pure[idx])
+                .unwrap_or_else(|| price(row.base, buy, sell, price_range));
+            // Always derive local from published columns so the MAPI identity holds.
+            // Building IO still values at snapshot.local_by_state (solver shopping price).
+            let price = local_price(effective_mapi, market_price, state_price);
             Some(StateGood {
                 state_id: state.id,
                 name: good_id,
                 buy,
                 sell,
                 price,
-                market_price: row.price,
+                market_price,
                 state_price,
                 market_access,
                 effective_mapi,

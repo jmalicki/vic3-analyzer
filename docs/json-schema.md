@@ -23,8 +23,8 @@ Core option structs never contain `PathBuf` or OS-specific filesystem fields.
     "strategy": {
       "type": "string",
       "enum": ["nested", "joint"],
-      "default": "nested",
-      "description": "Equilibrium formulation. joint currently aliases nested until the simultaneous solve lands."
+      "default": "joint",
+      "description": "Equilibrium formulation. joint is the coupled national+local solve; nested keeps the legacy inner loop."
     }
   }
 }

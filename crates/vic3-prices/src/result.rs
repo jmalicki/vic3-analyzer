@@ -36,15 +36,15 @@ use crate::world::Intern;
 
 /// Which equilibrium formulation Basin should run.
 ///
-/// [`Self::Joint`] currently aliases [`Self::Nested`] (same residual path)
-/// until a later PR lands the simultaneous national+local solve.
+/// [`Self::Nested`] is the default (legacy inner fixed-point loop).
+/// [`Self::Joint`] is opt-in: simultaneous national relative and per-state local prices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SolveStrategy {
     /// National relative prices only; local settle nested inside each residual.
     #[default]
     Nested,
-    /// Simultaneous national + local (aliases Nested until Joint is real).
+    /// Simultaneous national + local (coupled NLS on native; wasm falls back to nested).
     Joint,
 }
 
@@ -84,7 +84,7 @@ pub struct SolveOpts {
     /// set this automatically from the loaded baseline solve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warm_rel: Option<Vec<f64>>,
-    /// Equilibrium formulation. Default [`SolveStrategy::Nested`].
+    /// Equilibrium formulation. Default [`SolveStrategy::Nested`]; use `joint` to opt in.
     #[serde(default)]
     pub strategy: SolveStrategy,
 }
@@ -103,7 +103,7 @@ impl Default for SolveOpts {
             residual_eps: default_residual_eps(),
             max_iters: default_max_iters(),
             warm_rel: None,
-            strategy: SolveStrategy::Nested,
+            strategy: SolveStrategy::default(),
         }
     }
 }
@@ -385,11 +385,15 @@ pub struct StateGood {
     pub name: String,
     pub buy: f64,
     pub sell: f64,
-    /// Final local price after blending market and pure state prices.
+    /// Final local price after blending market and pure state prices
+    /// (`local_price(effective_mapi, market_price, state_price)`).
     pub price: f64,
     /// Solved whole-save market price (Milestone 1; per-market solves follow).
     pub market_price: f64,
-    /// Pure state price from this state's attributed buy and sell orders.
+    /// Pure-state price used as the MAPI blend input (box-constrained; game band).
+    ///
+    /// Joint: free NLS unknown. Nested: reconstructed from the settled local so
+    /// the MAPI identity holds on the emitted row.
     pub state_price: f64,
     /// Infrastructure-only state market access in `[0, 1]`.
     pub market_access: f64,

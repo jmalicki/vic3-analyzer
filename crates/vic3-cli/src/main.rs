@@ -52,7 +52,7 @@ use vic3_planning::SimpleSubgoal;
 use vic3_planning::{compare, AnalysisRecord, EconomyContext, PlanOpts, PlanResult};
 use vic3_prices::{
     alerts, optimize_pms, preview, solve, what_if, AlertsResult, OptimizeAxis as PriceOptimizeAxis,
-    OptimizeResult, PricesResult, SolveOpts, WhatIfOpts, World, WorldDelta,
+    OptimizeResult, PricesResult, SolveOpts, SolveStrategy, WhatIfOpts, World, WorldDelta,
 };
 use vic3save::PdsDate;
 
@@ -166,6 +166,21 @@ struct IoArgs {
 }
 
 /// Flatten of [`SolveOpts`] — clap wrapper so wasm never links clap.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum StrategyArg {
+    Nested,
+    Joint,
+}
+
+impl From<StrategyArg> for SolveStrategy {
+    fn from(value: StrategyArg) -> Self {
+        match value {
+            StrategyArg::Nested => SolveStrategy::Nested,
+            StrategyArg::Joint => SolveStrategy::Joint,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Args)]
 struct SolveArgs {
     /// Residual threshold for converged status (I5).
@@ -174,6 +189,9 @@ struct SolveArgs {
     /// Combined successive-substitution + Basin iteration cap.
     #[arg(long, default_value_t = SolveOpts::default().max_iters, value_parser = clap::value_parser!(u32).range(1..))]
     max_iters: u32,
+    /// Equilibrium solver (`nested` default; `joint` opt-in on native).
+    #[arg(long, value_enum, default_value_t = StrategyArg::Nested)]
+    strategy: StrategyArg,
 }
 
 impl From<SolveArgs> for SolveOpts {
@@ -182,7 +200,7 @@ impl From<SolveArgs> for SolveOpts {
             residual_eps: args.residual_eps,
             max_iters: args.max_iters,
             warm_rel: None,
-            strategy: Default::default(),
+            strategy: args.strategy.into(),
         }
     }
 }

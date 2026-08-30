@@ -115,7 +115,10 @@ fn equilibrate_from_cache(
 ) -> (SolveOutcome, Option<ShopSnapshot>) {
     match opts.strategy {
         SolveStrategy::Nested => equilibrate_nested(cache, defs, opts),
-        // [`SolveStrategy::Joint`] aliases nested until the coupled solver lands.
+        // Native only: wasm falls back to nested (Basin + faer sparse unavailable).
+        #[cfg(not(target_arch = "wasm32"))]
+        SolveStrategy::Joint => crate::solve_joint::equilibrate_joint(cache, defs, opts),
+        #[cfg(target_arch = "wasm32")]
         SolveStrategy::Joint => equilibrate_nested(cache, defs, opts),
     }
 }
@@ -202,7 +205,7 @@ fn equilibrate_nested(
 
     let mut termination = None;
     if price_range > 0.0 {
-        let basin_iters = u64::from(opts.max_iters.saturating_sub(warm_iters)).max(1);
+        let basin_iters = u64::from(opts.max_iters.saturating_sub(warm_iters));
         match Executor::from_start(problem.clone(), Trf::new(), rel.clone())
             .max_iter(basin_iters)
             .run()
@@ -281,7 +284,13 @@ impl SettleScratch {
 #[derive(Clone, Default)]
 pub(crate) struct ShopSnapshot {
     pub(crate) world_pop_buy: GoodsVec,
+    /// Blended local prices (what pops / buildings pay).
     pub(crate) local_by_state: BTreeMap<u32, GoodsVec>,
+    /// Pure-state prices used as the MAPI blend input (`σ`).
+    ///
+    /// Joint: free box-constrained unknowns. Nested: reconstructed so
+    /// `local ≈ local_price(mapi, market, pure_state)` for schema parity.
+    pub(crate) pure_state_by_state: BTreeMap<u32, GoodsVec>,
     pub(crate) pop_buy_by_state: BTreeMap<u32, GoodsVec>,
 }
 
@@ -428,18 +437,38 @@ impl PriceResidual<'_> {
             1.0,
         );
         let mut local_by_state = BTreeMap::new();
+        let mut pure_state_by_state = BTreeMap::new();
         let mut pop_buy_by_state = BTreeMap::new();
         for shop in &self.cache.shops {
             self.settle_state(shop, market, scratch);
             for (good, quantity) in scratch.pop_buy.iter_indexed() {
                 world_pop_buy.add(good, shop.access * (quantity - shop.frozen_pop_buy[good]));
             }
+            // Reconstruct pure-state σ so Nested emit matches Joint's schema:
+            // back out from p = m·market + (1−m)·σ when MAPI is not full.
+            let mut pure = scratch.local.clone();
+            for (good, local) in scratch.local.iter_indexed() {
+                let base = self.cache.base_prices[good];
+                let lo = base * (1.0 - self.price_range);
+                let hi = base * (1.0 + self.price_range);
+                const MAPI_BACKOUT_EPS: f64 = 1e-9;
+                let sigma = if (1.0 - shop.mapi) > MAPI_BACKOUT_EPS {
+                    (local - shop.mapi * market[good]) / (1.0 - shop.mapi)
+                } else {
+                    let buy = shop.frozen_buy[good] + scratch.pop_buy[good];
+                    let sell = shop.frozen_sell[good];
+                    crate::formula::price(base, buy, sell, self.price_range)
+                };
+                pure[good] = sigma.clamp(lo, hi);
+            }
             local_by_state.insert(shop.id, scratch.local.clone());
+            pure_state_by_state.insert(shop.id, pure);
             pop_buy_by_state.insert(shop.id, scratch.pop_buy.clone());
         }
         ShopSnapshot {
             world_pop_buy,
             local_by_state,
+            pure_state_by_state,
             pop_buy_by_state,
         }
     }

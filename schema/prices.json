@@ -443,7 +443,7 @@
           "type": "string"
         },
         "price": {
-          "description": "Final local price after blending market and pure state prices.",
+          "description": "Final local price after blending market and pure state prices\n(`local_price(effective_mapi, market_price, state_price)`).",
           "format": "double",
           "type": "number"
         },
@@ -457,7 +457,7 @@
           "type": "integer"
         },
         "state_price": {
-          "description": "Pure state price from this state's attributed buy and sell orders.",
+          "description": "Pure-state price used as the MAPI blend input (box-constrained; game band).\n\nJoint: free NLS unknown. Nested: reconstructed from the settled local so\nthe MAPI identity holds on the emitted row.",
           "format": "double",
           "type": "number"
         }
