@@ -17,6 +17,24 @@
 //!
 //! Expanding identity is `(domain, emitted)` — the candidate list is
 //! `Rc<[…]>` so [`SearchNode`] clones are refcount bumps, and is not hashed.
+//!
+//! # Open-set ordering invariant
+//!
+//! After each partial expand the pathfinder inserts up to [`DEFAULT_PEA_BEAM`]
+//! Ready children plus one 0-cost `Expanding` cursor. A* must dequeue **every**
+//! emitted sibling before that cursor. With a shared parent \(g\):
+//!
+//! ```text
+//! f(resume) = g + h(resume)
+//! f(child)  = g + edge + h(child)
+//! ```
+//!
+//! Both sides must use the same `h` scale ([`Vic3Node::heuristic`] on applied
+//! children). Partitioning the bag by [`RankedBagEntry::cheap_rank_key`] while
+//! ranking open nodes by `h_adm` violated this — resume cursors could jump ahead
+//! of siblings emitted in the same beam. Beam partition, [`Expanding`] heuristic,
+//! and [`pea_successor_open_delta`] therefore all use `edge + h(child)` after
+//! speculative apply. Cheap keys remain for tracing only.
 
 use super::bag_rank::{self, RankedBagEntry};
 use super::pathfinding::SearchNode;
@@ -31,6 +49,10 @@ use std::rc::Rc;
 /// candidates; top 8–16 captured the high-value head). Not a proven optimum.
 pub const DEFAULT_PEA_BEAM: usize = 16;
 
+/// Compare bag rows by open-set priority: `edge + h(child)` after speculative apply.
+///
+/// Rows that fail [`bag_rank::emit_child`] sort last (`u32::MAX`). Tie-break on
+/// [`RankedBagEntry::tie`] for determinism.
 fn entry_open_cmp(domain: &Vic3Node, a: &RankedBagEntry, b: &RankedBagEntry) -> Ordering {
     let open_key =
         |entry: &RankedBagEntry| pea_successor_open_delta(domain, entry).unwrap_or(u32::MAX);
@@ -39,8 +61,11 @@ fn entry_open_cmp(domain: &Vic3Node, a: &RankedBagEntry, b: &RankedBagEntry) -> 
         .then_with(|| a.tie.cmp(&b.tie))
 }
 
-/// Partition so the best `k` candidates are in `bag[..k]` (sorted); the rest
-/// stay unordered with `bag[k]` equal to the best deferred score when present.
+/// Partition `bag` so the best `k` rows by `cmp` land in `bag[..k]` (sorted).
+///
+/// The suffix `bag[k..]` is unordered except that `bag[k]` is the `select_nth`
+/// boundary — the best deferred score when `bag.len() > k`. Unit tests pass a
+/// cheap-key comparator; production uses [`entry_open_cmp`].
 fn select_top_k_by<F>(bag: &mut [RankedBagEntry], k: usize, mut cmp: F)
 where
     F: FnMut(&RankedBagEntry, &RankedBagEntry) -> Ordering,
@@ -57,14 +82,18 @@ where
     }
 }
 
+/// [`select_top_k_by`] with [`entry_open_cmp`] — production beam partition.
 fn select_top_k(domain: &Vic3Node, bag: &mut [RankedBagEntry], k: usize) {
     select_top_k_by(bag, k, |a, b| entry_open_cmp(domain, a, b));
 }
 
 /// Open-set \(f - g\) for one bag row after speculative apply: `edge + h(child)`.
 ///
-/// Ready [`SearchNode::heuristic`] and the resume cursor must use this same
-/// scale so A* pops every emitted sibling before the deferred cursor.
+/// [`bag_rank::emit_child`] applies the action and sets anticipated complete GDP
+/// on the child; [`Vic3Node::heuristic`] is the admissible timing bound used in
+/// production A*. Ready children and the [`PeaInner::Expanding`] resume cursor
+/// must both rank on this value so the cursor is never ahead of siblings from
+/// the same expand.
 pub(crate) fn pea_successor_open_delta(domain: &Vic3Node, entry: &RankedBagEntry) -> Option<u32> {
     let (child, edge) = bag_rank::emit_child(domain, entry)?;
     Some(edge.saturating_add(child.heuristic()))
@@ -74,12 +103,19 @@ pub(crate) fn pea_successor_open_delta(domain: &Vic3Node, entry: &RankedBagEntry
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg(any(test, debug_assertions))]
 pub(crate) struct PeaExpandInvariantViolation {
+    /// `f - g` for the resume cursor (`h` with 0-cost self-edge).
     pub resume_open_delta: u32,
+    /// `max(edge + h)` over Ready siblings emitted in the same beam.
     pub max_emitted_open_delta: u32,
+    /// Number of Ready siblings in the expand (excluding the cursor).
     pub emitted_count: usize,
 }
 
-/// After one beam expand, the resume cursor must not outrank any emitted sibling.
+/// Check that a partial expand respects PEA* open-set ordering.
+///
+/// After one [`emit_beam`] call, every emitted Ready child must have
+/// `edge + h(child) <= h(resume)` so A* dequeues the full beam before resuming.
+/// Returns [`Ok`] when there is no cursor or the invariant holds.
 ///
 /// With shared parent \(g\): \(\min_{deferred}(f-g) \ge \max_{emitted}(f-g)\).
 #[cfg(any(test, debug_assertions))]
@@ -118,6 +154,10 @@ pub(crate) fn pea_partial_expand_invariant(
     }
 }
 
+/// Debug-build guard after [`emit_beam`] when a deferred cursor is inserted.
+///
+/// Asserts [`pea_partial_expand_invariant`] and that [`PeaNode::heuristic`] on the
+/// new cursor equals the best deferred [`pea_successor_open_delta`].
 #[cfg(debug_assertions)]
 fn debug_assert_pea_beam_invariant(
     domain: &Vic3Node,
@@ -199,7 +239,15 @@ impl PeaNode {
         }
     }
 
-    /// Select top‑K from `bag`, emit applied children, defer the rest.
+    /// Partition the bag, emit up to [`DEFAULT_PEA_BEAM`] applied children, defer the rest.
+    ///
+    /// 1. Rank the full bag with [`select_top_k`] (open delta, not cheap key).
+    /// 2. Push each prefix row through [`bag_rank::emit_child`] as a Ready [`PeaNode`].
+    /// 3. When the bag is larger than the beam, append one 0-cost `Expanding` cursor
+    ///    holding `bag[k..]`; its heuristic is the best deferred open delta.
+    ///
+    /// `already_emitted` is stored on the cursor identity so resume expands can
+    /// continue counting across multiple beams from the same domain state.
     fn emit_beam(
         domain: &Vic3Node,
         mut bag: Vec<RankedBagEntry>,
@@ -211,6 +259,7 @@ impl PeaNode {
         }
         select_top_k(domain, &mut bag, beam);
         let take = beam.min(bag.len());
+        // Cheap-key boundary — diagnostic only; beam partition uses open delta above.
         let deferred_min_cheap = (take < bag.len()).then(|| bag[take].cheap_rank_key);
 
         let mut out = Vec::with_capacity(take.saturating_add(1));
@@ -319,6 +368,7 @@ impl SearchNode for PeaNode {
     fn heuristic(&self) -> Self::Cost {
         match &self.inner {
             PeaInner::Ready(n) => n.heuristic(),
+            // Best deferred open delta — must match min pea_successor_open_delta(deferred).
             PeaInner::Expanding {
                 domain, candidates, ..
             } => candidates
@@ -342,7 +392,7 @@ mod tests {
     use vic3_defs::{BuildingType, GameDefs, Good, GoodId, GoodsVec, ProductionMethod};
     use vic3_prices::{SolveOpts, World, WorldCountry, WorldState};
 
-    /// Check partial-expand ordering on `succs` and, when present, one resume re-expand.
+    /// Recursively assert [`pea_partial_expand_invariant`] on one expand and its resume child.
     fn assert_partial_expand_invariant_on_successors(succs: &[(PeaNode, u32)]) {
         pea_partial_expand_invariant(succs)
             .unwrap_or_else(|v| panic!("PEA* resume ahead of emitted sibling: {v:?}"));
@@ -354,13 +404,18 @@ mod tests {
         }
     }
 
-    /// GDP root with `state_count` owned states and `building_kinds` greenfield output types.
+    /// GDP planning root with enough queue-building branch factor to force beam deferral.
     ///
-    /// Branching is roughly `state_count * building_kinds` queue-building successors.
+    /// Each of `building_kinds` output types can be queued in each of `state_count`
+    /// owned states (~`state_count * building_kinds` successors). Requires
+    /// `state_count * building_kinds > DEFAULT_PEA_BEAM` for an `Expanding` cursor.
     fn gdp_many_placements_fixture(state_count: usize, building_kinds: usize) -> Vic3Node {
         assert!(state_count >= 1);
         assert!(building_kinds >= 1);
 
+        // --- GameDefs: one traded good, several greenfield output building types ---
+        // No world rows yet — every type is first-of-type in every owned state, so
+        // sim offers `state_count * building_kinds` QueueBuildingLevel successors.
         let mut defs = GameDefs {
             price_range: 0.75,
             ..GameDefs::default()
@@ -371,6 +426,8 @@ mod tests {
             .map(|i| format!("building_output_{i}"))
             .collect();
         for (i, id) in building_ids.iter().enumerate() {
+            // Slightly different output / build cost per type so cheap-rank and
+            // open-delta orderings are not identical (catches scale-mismatch bugs).
             register_output_building_fixture(
                 &mut defs,
                 id,
@@ -382,6 +439,7 @@ mod tests {
         register_construction_sector_fixture(&mut defs, 5.0, 10.0);
         defs.rebuild_building_types_order();
 
+        // --- World: one country, `state_count` owned states, no buildings ---
         let states: Vec<WorldState> = (1..=state_count as u32)
             .map(|id| WorldState {
                 id,
@@ -399,6 +457,9 @@ mod tests {
             frozen_buy: GoodsVec::from_vec(vec![15.0]),
             ..World::default()
         };
+
+        // --- Economy + baseline price solve ---
+        // GDP and wood price on the planning state must match what successors will see.
         let economy = EconomyContext::new(world, defs, SolveOpts::default());
         let baseline = vic3_prices::solve(
             &economy.base_world,
@@ -406,7 +467,9 @@ mod tests {
             economy.solve_opts.clone(),
         );
         let gdp_curr = baseline.buildings.iter().map(|b| b.revenue).sum::<f64>();
+        // Modest bump: reachable by one or two enqueues, keeps search shallow in tests.
         let target = gdp_curr + 500.0;
+
         let state = PlanningState::from_parts(PlanningParts {
             country: "GER".into(),
             gdp: gdp_curr,
@@ -417,6 +480,7 @@ mod tests {
         let config = SimConfig {
             construction_days: 30,
             default_construction_cost: 30,
+            // Allow a second level per type/state without exploding branch factor.
             max_added_levels_per_type: 2,
             ..SimConfig::default()
         };
@@ -428,6 +492,7 @@ mod tests {
         )
     }
 
+    /// Minimal good registration for [`gdp_many_placements_fixture`].
     fn register_good_fixture(defs: &mut GameDefs, id: &str, base_price: f64) {
         let idx = GoodId::from_usize(defs.goods_order.len());
         defs.goods_order.push(id.into());
@@ -443,6 +508,7 @@ mod tests {
         let _ = idx;
     }
 
+    /// Output building def + PM wiring (no world row — greenfield placements only).
     fn register_output_building_fixture(
         defs: &mut GameDefs,
         building: &str,
@@ -477,6 +543,7 @@ mod tests {
         );
     }
 
+    /// Construction Sector type def for [`gdp_many_placements_fixture`].
     fn register_construction_sector_fixture(
         defs: &mut GameDefs,
         construction_add: f64,
@@ -515,6 +582,8 @@ mod tests {
         );
     }
 
+    /// First expand on a fat GDP root must emit a beam plus a deferred cursor whose
+    /// open priority is behind every emitted sibling (and on the resume re-expand).
     #[test]
     fn pea_partial_expand_resume_not_ahead_of_emitted_siblings() {
         let root = gdp_many_placements_fixture(6, 4);

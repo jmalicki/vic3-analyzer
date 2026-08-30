@@ -31,6 +31,13 @@ with real planner histograms later.
 This **defers OPEN insertion** per node expand. It is **not** a shared slot
 budget across the whole A* frontier (that would need heaps-crate changes).
 
+**Open-set ordering invariant:** after each partial expand, A* must dequeue
+every emitted Ready child before the 0-cost `Expanding` resume cursor from that
+same expand. Beam partition, emitted children, and the cursor therefore all use
+`edge + h(child)` after speculative apply (production `h` is the admissible timing
+bound on [`Vic3Node`]). Cheap bag keys are diagnostic only — mixing them into the
+cursor heuristic caused resume nodes to jump ahead of siblings.
+
 ---
 
 ## Deferred (not implemented)
