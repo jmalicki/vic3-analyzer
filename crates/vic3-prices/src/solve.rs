@@ -115,7 +115,10 @@ fn equilibrate_from_cache(
 ) -> (SolveOutcome, Option<ShopSnapshot>) {
     match opts.strategy {
         SolveStrategy::Nested => equilibrate_nested(cache, defs, opts),
-        // [`SolveStrategy::Joint`] aliases nested until the coupled solver lands.
+        // Native only: wasm falls back to nested (Basin + faer sparse unavailable).
+        #[cfg(not(target_arch = "wasm32"))]
+        SolveStrategy::Joint => crate::solve_joint::equilibrate_joint(cache, defs, opts),
+        #[cfg(target_arch = "wasm32")]
         SolveStrategy::Joint => equilibrate_nested(cache, defs, opts),
     }
 }
@@ -202,7 +205,7 @@ fn equilibrate_nested(
 
     let mut termination = None;
     if price_range > 0.0 {
-        let basin_iters = u64::from(opts.max_iters.saturating_sub(warm_iters)).max(1);
+        let basin_iters = u64::from(opts.max_iters.saturating_sub(warm_iters));
         match Executor::from_start(problem.clone(), Trf::new(), rel.clone())
             .max_iter(basin_iters)
             .run()

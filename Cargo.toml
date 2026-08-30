@@ -26,7 +26,7 @@ rust-version = "1.98"
 anyhow = "1"
 arc-swap = "1.9"
 basin = { version = "1.7", features = ["faer"] }
-faer = { version = "0.19", features = ["sparse"] }
+faer = "0.24"
 bcdec_rs = "0.2"
 chumsky = "0.13"
 clap = { version = "4", features = ["derive", "env"] }

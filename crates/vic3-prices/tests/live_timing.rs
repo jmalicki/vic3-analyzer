@@ -267,7 +267,7 @@ fn live_nested_vs_joint_equilibrate() {
         ..SolveOpts::default()
     };
 
-    // Warm up once each (Joint aliases Nested until a later PR).
+    // Warm up once each.
     let _ = equilibrate(&world, &defs, nested_opts.clone());
     let _ = equilibrate(&world, &defs, joint_opts.clone());
 
