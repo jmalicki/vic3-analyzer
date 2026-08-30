@@ -46,6 +46,7 @@ tauri-build = { version = "2", features = [] }
 tokio = { version = "1", features = ["rt", "macros"] }
 rmcp = { version = "3.1", default-features = false, features = ["server", "macros", "transport-io"] }
 tracing = "0.1"
+tracing-samply = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 vic3save = { git = "https://github.com/pdx-tools/pdx-tools", rev = "092edec7a853f67eea892c0d3a145329b924e103", package = "vic3save" }
 rust-advanced-heaps = { git = "https://github.com/jmalicki/rust-advanced-heaps", rev = "445818b845ad8daa1146df4c1215a88fb49f8d8f" }

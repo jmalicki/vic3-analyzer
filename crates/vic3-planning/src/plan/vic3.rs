@@ -758,6 +758,8 @@ impl SearchNode for Vic3Node {
     type Cost = u32;
 
     fn successors(&self) -> Vec<(Self, Self::Cost)> {
+        #[cfg(feature = "profiling-markers")]
+        let _span = tracing::info_span!("planner_expand", kind = "vic3").entered();
         let edges = self.sim_successors();
         super::astar_trace::on_expand("vic3", || {
             let mut kinds = std::collections::BTreeMap::<&str, u32>::new();

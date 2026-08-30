@@ -42,6 +42,7 @@ use vic3_defs::{GameDefs, GoodId, GoodsVec};
 
 use crate::consumption::add_wage_bins;
 use crate::formula::{local_price, target_price, unclipped_target_relative_price};
+use crate::profile_markers::{self, BasinIterTracker};
 use crate::report::{building_revenues_from_cache, report_from_solve};
 use crate::result::{
     GoodPrice, PricesResult, SolveOpts, SolveOutcome, SolveStats, SolveStatus, SolveStrategy,
@@ -144,9 +145,12 @@ fn equilibrate_nested(
     opts: SolveOpts,
 ) -> (SolveOutcome, Option<ShopSnapshot>) {
     let strategy = opts.strategy;
+    let span = profile_markers::PriceSolveSpan::new(strategy);
+    let _enter = span.enter();
+
     let goods = market_goods(&cache.base_prices);
     if goods.is_empty() {
-        return (
+        let out = (
             SolveOutcome {
                 goods: Vec::new(),
                 residual: 0.0,
@@ -157,11 +161,13 @@ fn equilibrate_nested(
             },
             None,
         );
+        span.record(&out.0);
+        return out;
     }
 
     let bases: Vec<f64> = goods.iter().map(|&idx| cache.base_prices[idx]).collect();
     if bases.iter().any(|b| *b <= 0.0) {
-        return (
+        let out = (
             SolveOutcome {
                 goods: Vec::new(),
                 residual: f64::INFINITY,
@@ -172,12 +178,15 @@ fn equilibrate_nested(
             },
             None,
         );
+        span.record(&out.0);
+        return out;
     }
 
     let price_range = defs.price_range.max(0.0);
     let n = goods.len();
     let n_residual_evals = Cell::new(0);
     let n_jacobian_evals = Cell::new(0);
+    let basin_iter = BasinIterTracker::new();
     let problem = PriceResidual {
         defs,
         goods: &goods,
@@ -188,6 +197,7 @@ fn equilibrate_nested(
         cache: Arc::new(cache.clone()),
         n_residual_evals: &n_residual_evals,
         n_jacobian_evals: &n_jacobian_evals,
+        basin_iter: &basin_iter,
     };
 
     let mut rel = vec![1.0; n];
@@ -241,7 +251,8 @@ fn equilibrate_nested(
         n_residual_evals: n_residual_evals.get(),
         n_jacobian_evals: n_jacobian_evals.get(),
     };
-    (
+    basin_iter.close();
+    let out = (
         SolveOutcome {
             goods: rows,
             residual,
@@ -251,7 +262,9 @@ fn equilibrate_nested(
             stats,
         },
         Some(snapshot),
-    )
+    );
+    span.record(&out.0);
+    out
 }
 
 /// Goods with positive base price (NLS unknowns).
@@ -302,6 +315,7 @@ pub(crate) struct ShopSnapshot {
 /// * `lower` / `upper` — box bounds on relative prices.
 /// * `cache` — frozen shops/orders (Arc so Basin `Clone` only bumps refcount).
 /// * `n_residual_evals` / `n_jacobian_evals` — shared Basin call counters.
+/// * `basin_iter` — jac-delimited fake-iteration span tracker (profiling).
 #[derive(Clone)]
 struct PriceResidual<'a> {
     defs: &'a GameDefs,
@@ -313,6 +327,7 @@ struct PriceResidual<'a> {
     cache: Arc<ShopCache>,
     n_residual_evals: &'a Cell<u64>,
     n_jacobian_evals: &'a Cell<u64>,
+    basin_iter: &'a BasinIterTracker,
 }
 
 impl PriceResidual<'_> {
@@ -608,6 +623,9 @@ impl CostFunction for PriceResidual<'_> {
     type Error = Infallible;
 
     fn cost(&self, param: &Vec<f64>) -> Result<f64, Infallible> {
+        self.basin_iter.note_residual_or_cost();
+        #[cfg(feature = "profiling-markers")]
+        let _span = tracing::info_span!("cost").entered();
         self.n_residual_evals.set(self.n_residual_evals.get() + 1);
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         Ok(0.5
@@ -625,6 +643,9 @@ impl Residual for PriceResidual<'_> {
     type Error = Infallible;
 
     fn residual(&self, param: &Vec<f64>) -> Result<Vec<f64>, Infallible> {
+        self.basin_iter.note_residual_or_cost();
+        #[cfg(feature = "profiling-markers")]
+        let _span = tracing::info_span!("residual").entered();
         self.n_residual_evals.set(self.n_residual_evals.get() + 1);
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         Ok(self.residual_at(param, &mut scratch))
@@ -635,27 +656,34 @@ impl Jacobian for PriceResidual<'_> {
     type Jacobian = DenseMatrix<f64>;
 
     fn jacobian(&self, param: &Vec<f64>) -> Result<DenseMatrix<f64>, Infallible> {
-        self.n_jacobian_evals.set(self.n_jacobian_evals.get() + 1);
-        let mut scratch = SettleScratch::new(self.cache.base_prices.len());
-        let r0 = self.residual_at(param, &mut scratch);
-        let n = param.len();
-        let m = r0.len();
-        let mut data = vec![0.0; m * n];
-        for j in 0..n {
-            let h = FD_STEP.max(FD_STEP * param[j].abs());
-            let mut stepped = param.clone();
-            let (x1, denom) = if param[j] + h <= self.upper[j] {
-                stepped[j] = param[j] + h;
-                (self.residual_at(&stepped, &mut scratch), h)
-            } else {
-                stepped[j] = param[j] - h;
-                (self.residual_at(&stepped, &mut scratch), -h)
-            };
-            for i in 0..m {
-                data[i * n + j] = (x1[i] - r0[i]) / denom;
+        self.basin_iter.begin_jacobian();
+        let out = {
+            #[cfg(feature = "profiling-markers")]
+            let _span = tracing::info_span!("jacobian").entered();
+            self.n_jacobian_evals.set(self.n_jacobian_evals.get() + 1);
+            let mut scratch = SettleScratch::new(self.cache.base_prices.len());
+            let r0 = self.residual_at(param, &mut scratch);
+            let n = param.len();
+            let m = r0.len();
+            let mut data = vec![0.0; m * n];
+            for j in 0..n {
+                let h = FD_STEP.max(FD_STEP * param[j].abs());
+                let mut stepped = param.clone();
+                let (x1, denom) = if param[j] + h <= self.upper[j] {
+                    stepped[j] = param[j] + h;
+                    (self.residual_at(&stepped, &mut scratch), h)
+                } else {
+                    stepped[j] = param[j] - h;
+                    (self.residual_at(&stepped, &mut scratch), -h)
+                };
+                for i in 0..m {
+                    data[i * n + j] = (x1[i] - r0[i]) / denom;
+                }
             }
-        }
-        Ok(DenseMatrix::from_row_slice(m, n, &data))
+            Ok(DenseMatrix::from_row_slice(m, n, &data))
+        };
+        self.basin_iter.end_jacobian();
+        out
     }
 }
 

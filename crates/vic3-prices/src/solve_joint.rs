@@ -42,6 +42,7 @@ use vic3_defs::{GameDefs, GoodId, GoodsVec};
 
 use crate::consumption::add_wage_bins;
 use crate::formula::{local_price, target_price, unclipped_target_relative_price};
+use crate::profile_markers::{self, BasinIterTracker};
 use crate::result::{GoodPrice, SolveOpts, SolveOutcome, SolveStats, SolveStatus};
 use crate::shop_cache::ShopCache;
 use crate::solve::{empty_stats, market_goods, ShopSnapshot};
@@ -65,6 +66,7 @@ struct PriceResidualJoint<'a> {
     cache: Arc<ShopCache>,
     n_residual_evals: &'a Cell<u64>,
     n_jacobian_evals: &'a Cell<u64>,
+    basin_iter: &'a BasinIterTracker,
 }
 
 impl<'a> PriceResidualJoint<'a> {
@@ -302,6 +304,9 @@ impl CostFunction for PriceResidualJoint<'_> {
 
     /// Half the squared residual norm, for Basin's cost-based stopping hooks.
     fn cost(&self, param: &Col<f64>) -> Result<f64, Infallible> {
+        self.basin_iter.note_residual_or_cost();
+        #[cfg(feature = "profiling-markers")]
+        let _span = tracing::info_span!("cost").entered();
         self.n_residual_evals.set(self.n_residual_evals.get() + 1);
         Ok(0.5 * self.residual_at(param).iter().map(|x| x * x).sum::<f64>())
     }
@@ -314,6 +319,9 @@ impl Residual for PriceResidualJoint<'_> {
 
     /// Joint residual vector `R(x)` passed to the TRF solver.
     fn residual(&self, param: &Col<f64>) -> Result<Col<f64>, Infallible> {
+        self.basin_iter.note_residual_or_cost();
+        #[cfg(feature = "profiling-markers")]
+        let _span = tracing::info_span!("residual").entered();
         self.n_residual_evals.set(self.n_residual_evals.get() + 1);
         Ok(self.residual_at(param))
     }
@@ -328,129 +336,138 @@ impl Jacobian for PriceResidualJoint<'_> {
     /// (`σ_{s,j}`) batch FD for the separable state block and analytical τ
     /// derivatives for market rows (see module docs).
     fn jacobian(&self, param: &Col<f64>) -> Result<SparseColMat<usize, f64>, Infallible> {
-        self.n_jacobian_evals.set(self.n_jacobian_evals.get() + 1);
-        let g = self.n_goods();
-        let n = self.state_dim();
+        self.basin_iter.begin_jacobian();
+        let out = {
+            #[cfg(feature = "profiling-markers")]
+            let _span = tracing::info_span!("jacobian").entered();
+            self.n_jacobian_evals.set(self.n_jacobian_evals.get() + 1);
+            let g = self.n_goods();
+            let n = self.state_dim();
 
-        let mut base_pop_buys = vec![0.0; self.n_states() * g];
-        let r0 = self.eval_residual(param, Some(&mut base_pop_buys));
-        let mut triplets = Vec::new();
+            let mut base_pop_buys = vec![0.0; self.n_states() * g];
+            let r0 = self.eval_residual(param, Some(&mut base_pop_buys));
+            let mut triplets = Vec::new();
 
-        // Compute base world_buy for analytical market derivatives
-        let mut base_world_buy = vec![0.0; g];
-        {
-            let market_rel: Vec<f64> = (0..g).map(|i| param[i]).collect();
-            let market_prices = self.prices_from_rel(&market_rel);
-            let mut world_pop_buy = self.cache.frozen_pop_buy.clone();
-            add_wage_bins(
-                &mut world_pop_buy,
-                &self.cache.stateless_wage_bins,
-                &market_prices,
-                &self.cache.base_prices,
-                &self.cache.units,
-                1.0,
-            );
-            for (i, &good) in self.goods.iter().enumerate() {
-                let mut state_sum = 0.0;
-                for (s, shop) in self.cache.shops.iter().enumerate() {
-                    state_sum +=
-                        shop.access * (base_pop_buys[s * g + i] - shop.frozen_pop_buy[good]);
-                }
-                base_world_buy[i] = self.cache.frozen_buy[good] + world_pop_buy[good] + state_sum;
-            }
-        }
-
-        // 1. Perturb market prices r_j
-        for j in 0..g {
-            let h = FD_STEP.max(FD_STEP * param[j].abs());
-            let mut stepped = param.clone();
-            let (x1, denom) = if param[j] + h <= self.upper[j] {
-                stepped[j] = param[j] + h;
-                (self.residual_at(&stepped), h)
-            } else {
-                stepped[j] = param[j] - h;
-                (self.residual_at(&stepped), -h)
-            };
-
-            for i in 0..n {
-                let deriv = (x1[i] - r0[i]) / denom;
-                if deriv.abs() > 1e-12 {
-                    triplets.push(Triplet::new(i, j, deriv));
-                }
-            }
-        }
-
-        let mut stepped_pop_buys = vec![0.0; self.n_states() * g];
-
-        // 2. Perturb pure-state prices σ_{s,j}
-        // States are independent for pure-state residuals (R^σ_{s,g}): σ in state A
-        // does not affect pop consumption in state B (only through the market hub).
-        // Therefore we can perturb σ_{s,j} for ALL states in one batched FD step.
-        //
-        // The global market residual DOES depend on aggregate consumption. Batched
-        // pop-buy deltas plus an analytical τ derivative recover per-state market
-        // columns without S separate evaluations.
-        for j in 0..g {
-            let mut batched_stepped = param.clone();
-            let mut denoms = vec![0.0; self.n_states()];
-            for (s_idx, denom) in denoms.iter_mut().enumerate() {
-                let idx = g + s_idx * g + j;
-                let h = FD_STEP.max(FD_STEP * param[idx].abs());
-                if param[idx] + h <= self.upper[idx] {
-                    batched_stepped[idx] = param[idx] + h;
-                    *denom = h;
-                } else {
-                    batched_stepped[idx] = param[idx] - h;
-                    *denom = -h;
-                }
-            }
-
-            let batched_x1 = self.eval_residual(&batched_stepped, Some(&mut stepped_pop_buys));
-
-            for (s_idx, &denom) in denoms.iter().enumerate() {
-                let idx = g + s_idx * g + j;
-
-                // Affects market residuals: analytical via Δbuy at blended locals.
-                // R_m = r_m - τ(world_buy, world_sell)
+            // Compute base world_buy for analytical market derivatives
+            let mut base_world_buy = vec![0.0; g];
+            {
+                let market_rel: Vec<f64> = (0..g).map(|i| param[i]).collect();
+                let market_prices = self.prices_from_rel(&market_rel);
+                let mut world_pop_buy = self.cache.frozen_pop_buy.clone();
+                add_wage_bins(
+                    &mut world_pop_buy,
+                    &self.cache.stateless_wage_bins,
+                    &market_prices,
+                    &self.cache.base_prices,
+                    &self.cache.units,
+                    1.0,
+                );
                 for (i, &good) in self.goods.iter().enumerate() {
-                    let delta_buy = stepped_pop_buys[s_idx * g + i] - base_pop_buys[s_idx * g + i];
-                    let actual_delta_buy = delta_buy * self.cache.shops[s_idx].access;
+                    let mut state_sum = 0.0;
+                    for (s, shop) in self.cache.shops.iter().enumerate() {
+                        state_sum +=
+                            shop.access * (base_pop_buys[s * g + i] - shop.frozen_pop_buy[good]);
+                    }
+                    base_world_buy[i] =
+                        self.cache.frozen_buy[good] + world_pop_buy[good] + state_sum;
+                }
+            }
 
-                    if actual_delta_buy.abs() > 1e-12 {
-                        let sell = self.cache.frozen_sell[good];
-                        let target0 = unclipped_target_relative_price(
-                            base_world_buy[i],
-                            sell,
-                            self.price_range,
-                        );
-                        let target1 = unclipped_target_relative_price(
-                            base_world_buy[i] + actual_delta_buy,
-                            sell,
-                            self.price_range,
-                        );
+            // 1. Perturb market prices r_j
+            for j in 0..g {
+                let h = FD_STEP.max(FD_STEP * param[j].abs());
+                let mut stepped = param.clone();
+                let (x1, denom) = if param[j] + h <= self.upper[j] {
+                    stepped[j] = param[j] + h;
+                    (self.residual_at(&stepped), h)
+                } else {
+                    stepped[j] = param[j] - h;
+                    (self.residual_at(&stepped), -h)
+                };
 
-                        let deriv = -(target1 - target0) / denom;
+                for i in 0..n {
+                    let deriv = (x1[i] - r0[i]) / denom;
+                    if deriv.abs() > 1e-12 {
+                        triplets.push(Triplet::new(i, j, deriv));
+                    }
+                }
+            }
+
+            let mut stepped_pop_buys = vec![0.0; self.n_states() * g];
+
+            // 2. Perturb pure-state prices σ_{s,j}
+            // States are independent for pure-state residuals (R^σ_{s,g}): σ in state A
+            // does not affect pop consumption in state B (only through the market hub).
+            // Therefore we can perturb σ_{s,j} for ALL states in one batched FD step.
+            //
+            // The global market residual DOES depend on aggregate consumption. Batched
+            // pop-buy deltas plus an analytical τ derivative recover per-state market
+            // columns without S separate evaluations.
+            for j in 0..g {
+                let mut batched_stepped = param.clone();
+                let mut denoms = vec![0.0; self.n_states()];
+                for (s_idx, denom) in denoms.iter_mut().enumerate() {
+                    let idx = g + s_idx * g + j;
+                    let h = FD_STEP.max(FD_STEP * param[idx].abs());
+                    if param[idx] + h <= self.upper[idx] {
+                        batched_stepped[idx] = param[idx] + h;
+                        *denom = h;
+                    } else {
+                        batched_stepped[idx] = param[idx] - h;
+                        *denom = -h;
+                    }
+                }
+
+                let batched_x1 = self.eval_residual(&batched_stepped, Some(&mut stepped_pop_buys));
+
+                for (s_idx, &denom) in denoms.iter().enumerate() {
+                    let idx = g + s_idx * g + j;
+
+                    // Affects market residuals: analytical via Δbuy at blended locals.
+                    // R_m = r_m - τ(world_buy, world_sell)
+                    for (i, &good) in self.goods.iter().enumerate() {
+                        let delta_buy =
+                            stepped_pop_buys[s_idx * g + i] - base_pop_buys[s_idx * g + i];
+                        let actual_delta_buy = delta_buy * self.cache.shops[s_idx].access;
+
+                        if actual_delta_buy.abs() > 1e-12 {
+                            let sell = self.cache.frozen_sell[good];
+                            let target0 = unclipped_target_relative_price(
+                                base_world_buy[i],
+                                sell,
+                                self.price_range,
+                            );
+                            let target1 = unclipped_target_relative_price(
+                                base_world_buy[i] + actual_delta_buy,
+                                sell,
+                                self.price_range,
+                            );
+
+                            let deriv = -(target1 - target0) / denom;
+                            if deriv.abs() > 1e-12 {
+                                triplets.push(Triplet::new(i, idx, deriv));
+                            }
+                        }
+                    }
+
+                    // Affects THIS state's pure-state residuals: batched evaluation
+                    for i in 0..g {
+                        let r_idx = g + s_idx * g + i;
+                        let deriv = (batched_x1[r_idx] - r0[r_idx]) / denom;
                         if deriv.abs() > 1e-12 {
-                            triplets.push(Triplet::new(i, idx, deriv));
+                            triplets.push(Triplet::new(r_idx, idx, deriv));
                         }
                     }
                 }
-
-                // Affects THIS state's pure-state residuals: batched evaluation
-                for i in 0..g {
-                    let r_idx = g + s_idx * g + i;
-                    let deriv = (batched_x1[r_idx] - r0[r_idx]) / denom;
-                    if deriv.abs() > 1e-12 {
-                        triplets.push(Triplet::new(r_idx, idx, deriv));
-                    }
-                }
             }
-        }
 
-        Ok(
-            SparseColMat::<usize, f64>::try_new_from_triplets(n, n, &triplets)
-                .unwrap_or_else(|_| panic!("invalid sparse Jacobian triplets: {n}×{n}")),
-        )
+            Ok(
+                SparseColMat::<usize, f64>::try_new_from_triplets(n, n, &triplets)
+                    .unwrap_or_else(|_| panic!("invalid sparse Jacobian triplets: {n}×{n}")),
+            )
+        };
+        self.basin_iter.end_jacobian();
+        out
     }
 }
 
@@ -478,11 +495,14 @@ pub(crate) fn equilibrate_joint(
     opts: SolveOpts,
 ) -> (SolveOutcome, Option<ShopSnapshot>) {
     let strategy = opts.strategy;
+    let span = profile_markers::PriceSolveSpan::new(strategy);
+    let _enter = span.enter();
+
     let goods = market_goods(&cache.base_prices);
 
     // Degenerate markets: nothing to price.
     if goods.is_empty() {
-        return (
+        let out = (
             SolveOutcome {
                 goods: Vec::new(),
                 residual: 0.0,
@@ -493,11 +513,13 @@ pub(crate) fn equilibrate_joint(
             },
             None,
         );
+        span.record(&out.0);
+        return out;
     }
 
     let bases: Vec<f64> = goods.iter().map(|&idx| cache.base_prices[idx]).collect();
     if bases.iter().any(|b| *b <= 0.0) {
-        return (
+        let out = (
             SolveOutcome {
                 goods: Vec::new(),
                 residual: f64::INFINITY,
@@ -508,6 +530,8 @@ pub(crate) fn equilibrate_joint(
             },
             None,
         );
+        span.record(&out.0);
+        return out;
     }
 
     let price_range = defs.price_range.max(0.0);
@@ -553,6 +577,7 @@ pub(crate) fn equilibrate_joint(
 
     let n_residual_evals = Cell::new(0);
     let n_jacobian_evals = Cell::new(0);
+    let basin_iter = BasinIterTracker::new();
     let problem = PriceResidualJoint {
         defs,
         goods: &goods,
@@ -563,6 +588,7 @@ pub(crate) fn equilibrate_joint(
         cache: Arc::new(cache.clone()),
         n_residual_evals: &n_residual_evals,
         n_jacobian_evals: &n_jacobian_evals,
+        basin_iter: &basin_iter,
     };
 
     let basin_iters = u64::from(opts.max_iters);
@@ -588,7 +614,8 @@ pub(crate) fn equilibrate_joint(
         _ => SolveStatus::MaxIters,
     };
 
-    (
+    basin_iter.close();
+    let out = (
         SolveOutcome {
             goods: rows,
             residual,
@@ -603,7 +630,9 @@ pub(crate) fn equilibrate_joint(
             },
         },
         Some(snapshot),
-    )
+    );
+    span.record(&out.0);
+    out
 }
 
 #[cfg(test)]
@@ -650,6 +679,7 @@ mod tests {
 
         let res_evals = Cell::new(0);
         let jac_evals = Cell::new(0);
+        let basin_iter = BasinIterTracker::new();
 
         let problem = PriceResidualJoint {
             defs: &defs,
@@ -661,6 +691,7 @@ mod tests {
             price_range: defs.price_range,
             n_residual_evals: &res_evals,
             n_jacobian_evals: &jac_evals,
+            basin_iter: &basin_iter,
         };
 
         let x0 = Col::from_fn(n, |_| 1.5);
