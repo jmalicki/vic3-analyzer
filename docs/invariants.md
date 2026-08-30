@@ -20,7 +20,7 @@ If any underlying assumption is violated, the corresponding property test suite 
 | **I8** | State hashing and transition operators are strictly deterministic | Hash and action application round-trip tests on `PlanningState` |
 | **I9** | `AnalysisRecord` serde round-trips losslessly. Diffing identical records yields an empty diff | Serde property round-trip tests and diff fixtures |
 
-**I5 note:** Under the unclipped target relative price (\(\tau\)) + box stationarity map ([`prices-equilibrium.md`](prices-equilibrium.md)), shortages on a price bound can leave \(\|R\|\) large while Basin’s projected-gradient termination is still valid. I5’s residual-\(\varepsilon\) gate matches the **current** clipped nested path. Expect a documented revision when the Joint solver becomes default.
+**I5 note:** Under the unclipped target relative price (\(\tau\)) + box stationarity map ([`prices-equilibrium.md`](prices-equilibrium.md) §5), shortages on a price bound can leave \(\|R\|\) large while Basin’s projected-gradient termination is still valid. I5’s residual-\(\varepsilon\) gate matches the **current** clipped nested path. Expect a documented revision when the Joint solver becomes default.
 
 ---
 

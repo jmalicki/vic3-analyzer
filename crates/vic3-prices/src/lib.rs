@@ -112,13 +112,13 @@ pub use world::{
 /// 2. Prices are clamped to ±PRICE_RANGE; the clamp is part of the model.
 /// 3. Employment, wages, and trade volumes are frozen except explicit what-if deltas.
 /// 4. Pops shop at each state's MAPI-blended local prices; those orders are access-scaled into one whole-save market. Extra MAPI modifiers and overseas constraints are not modeled.
-/// 5. The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.
+/// 5. The solve residual is always reported. A large residual usually means the solver did not reach an interior price fixed point; it can also mean a bound shortage under a future MCP map (see prices-equilibrium.md §5). Interpret residual together with status and per-good prices.
 pub const LIMITATIONS: &[&str] = &[
     "Wealth is relaxed continuous then rounded; not the discrete in-game ladder during the solve.",
     "Prices are clamped to ±PRICE_RANGE; the clamp is part of the model.",
     "Employment, wages, and trade volumes are frozen except explicit what-if deltas.",
     "Pops shop at each state's MAPI-blended local prices; state orders are infrastructure-access-scaled into one whole-save market; missing access defaults to 100%, and extra MAPI modifiers and overseas convoy constraints are not modeled.",
-    "The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point.",
+    "The solve residual is always reported. A large residual usually means the solver did not reach an interior price fixed point; it can also mean a bound shortage under a future MCP map (see prices-equilibrium.md section 5). Interpret residual together with status and per-good prices.",
 ];
 
 /// Appended to [`PricesResult::limitations`] when a [`WorldDelta`] asks to subsidize.
@@ -498,7 +498,7 @@ mod tests {
         );
         assert_eq!(
             LIMITATIONS[4],
-            "The solve residual is part of the answer; a large residual means the model did not find a consistent pop/price fixed point."
+            "The solve residual is always reported. A large residual usually means the solver did not reach an interior price fixed point; it can also mean a bound shortage under a future MCP map (see prices-equilibrium.md section 5). Interpret residual together with status and per-good prices."
         );
         let result = solve(
             &World::default(),
