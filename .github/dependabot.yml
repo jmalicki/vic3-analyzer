@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - /web
+      - /e2e
+      - /scripts/docs-screenshots
+      - /scripts/docs-screenshots/desktop-tauri
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      web:
+        patterns: ["*"]
+        dependency-type: production
+        update-types: [minor, patch]
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
