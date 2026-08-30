@@ -54,9 +54,9 @@ Imbalance ratio (see [`market_ratio`](../crates/vic3-prices/src/formula.rs) for 
 \tau(B,Q) = 1 + \rho \cdot R(B,Q)
 \]
 
-**Target:** omit \(\mathrm{clip}_{[-1,1]}\) on \(R\) inside the residual so shortage pushes the target relative price (\(\tau\)) outside \([1-\rho, 1+\rho]\). The solver **box** enforces the cap ([Mixed Complementarity](https://en.wikipedia.org/wiki/Mixed_complementarity_problem) / projected gradients).
+**Target & Current:** The unclipped target relative price ($\tau$) omits the clamp on $R$ so that severe shortages push the target price far outside $[1-\rho, 1+\rho]$. The non-linear solver (NLS) minimizes the residual $\|r - \tau(r)\|^2$ strictly subject to the box bounds on $r$.
 
-**Current:** [`price`](../crates/vic3-prices/src/formula.rs) still applies `.clamp(-1, 1)` on the ratio.
+Because the TRF optimizer is an interior-reflective method, it approaches the active bounds asymptotically but cannot mathematically clamp to the exact limit. Therefore, the solver polishes the final TRF output using **successive substitution**, evaluating the exact game formula and clamping the final result. This guarantees that the final answer is an exact fixed-point of the game's actual economy, where `price = clamp(unclipped_target, min, max)` as defined by `NGoods::PRICE_RANGE` in `00_defines.txt` and the [Victoria 3 Wiki](https://vic3.paradoxwikis.com/Market#Market_price).
 
 ---
 
