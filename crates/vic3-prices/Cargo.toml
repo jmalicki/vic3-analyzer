@@ -19,6 +19,9 @@ thiserror.workspace = true
 vic3-defs = { path = "../vic3-defs" }
 vic3-load = { path = "../vic3-load" }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+faer.workspace = true
+
 [dev-dependencies]
 proptest.workspace = true
 serde_json.workspace = true

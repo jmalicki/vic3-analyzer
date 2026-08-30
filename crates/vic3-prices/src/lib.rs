@@ -65,6 +65,8 @@ mod report;
 mod result;
 mod shop_cache;
 mod solve;
+#[cfg(not(target_arch = "wasm32"))]
+mod solve_joint;
 mod world;
 
 use vic3_defs::GameDefs;

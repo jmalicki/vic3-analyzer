@@ -5,8 +5,8 @@
 //! Chain: wheat → flour → bread via farm, mill, bakery, and trade center.
 //!
 //! Each solve / what-if / preview test runs against every entry in
-//! [`test_strategies`] so new [`SolveStrategy`] variants pick up the same
-//! equilibrium checks without duplicating test bodies.
+//! [`test_strategies`] so both [`SolveStrategy::Nested`] and
+//! [`SolveStrategy::Joint`] are held to the same equilibrium checks.
 
 use std::path::PathBuf;
 
@@ -18,10 +18,8 @@ use vic3_prices::{
 };
 
 /// Solver strategies exercised by the toy-economy integration tests.
-///
-/// Add [`SolveStrategy::Joint`] here when the coupled solver lands.
 fn test_strategies() -> &'static [SolveStrategy] {
-    &[SolveStrategy::Nested]
+    &[SolveStrategy::Nested, SolveStrategy::Joint]
 }
 
 fn toy_defs_root() -> PathBuf {
