@@ -5,7 +5,7 @@
   "identifier": "com.jmalicki.vic3-analyzer",
   "mainBinaryName": "vic3-analyzer",
   "build": {
-    "beforeBuildCommand": "npm run build:desktop --prefix ../../web",
+    "beforeBuildCommand": "pnpm --filter web build:desktop",
     "frontendDist": "../../web/dist"
   },
   "app": {

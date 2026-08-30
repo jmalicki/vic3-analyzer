@@ -9,21 +9,21 @@ what-if analysis is stored in IndexedDB. Nothing is uploaded.
 ## Development
 
 ```sh
-npm install
-npm run build:wasm
-npm run build:defs
-npm test
-npm run test:wasm
-npm run build
+pnpm install
+pnpm --filter web run build:wasm
+pnpm --filter web run build:defs
+pnpm --filter web test
+pnpm --filter web run test:wasm
+pnpm --filter web run build
 ```
 
-`npm test` runs mocked App/RTL tests (no wasm required). `npm run test:wasm`
+`pnpm --filter web test` runs mocked App/RTL tests (no wasm required). `pnpm --filter web run test:wasm`
 builds wasm + the fixture defs blob, then exercises the real wrapper against
 in-repo save fixtures.
 
 The Vite `base` is `/vic3-analyzer/` for GitHub Pages
 (`https://jmalicki.github.io/vic3-analyzer/`). Desktop embeds use
-`npm run build:desktop` (`vite build --mode desktop` → `base: '/'`) so Tauri can serve
+`pnpm --filter web run build:desktop` (`vite build --mode desktop` → `base: '/'`) so Tauri can serve
 assets from `tauri://localhost`; the desktop app talks to native Rust via Tauri
 `invoke` (no wasm). Web builds keep `base` root-absolute so `loadWasm` can
 dynamic-import `/wasm/vic3_wasm.js` — a relative `./wasm/…` would resolve under
@@ -34,7 +34,7 @@ Victoria 3 save folder for your OS. Chromium can remember the last chosen save
 folder; other browsers keep the standard file input (sites cannot force an
 arbitrary local path).
 
-A deployed build ships no definitions: `npm run build:defs` writes
+A deployed build ships no definitions: `pnpm --filter web run build:defs` writes
 `fixtures/defs.postcard` outside `public/`, and the fetch for it is behind
 `import.meta.env.DEV`, so it exists for development and tests only. Definitions
 a user builds or picks are stored in IndexedDB (`defsStore.ts`) and restored on
@@ -83,15 +83,15 @@ building cashflow is not save-native.
 
 ## wasm and definitions
 
-`npm run build:wasm` runs `wasm-pack --target web` into `public/wasm/`
+`pnpm --filter web run build:wasm` runs `wasm-pack --target web` into `public/wasm/`
 (`vic3_wasm.js` + `.wasm`). Generated wasm artifacts are gitignored.
 
 The app loads `parse_save`, `prices`, `what_if`, `gaps`, `plan`,
 `what_if_schema`, and `prices_schema`. Those functions return JSON strings.
 
-`npm run build:defs` writes `fixtures/defs.postcard` from the in-repo
+`pnpm --filter web run build:defs` writes `fixtures/defs.postcard` from the in-repo
 `vic3-defs` fixture tree via `emit_fixture_blob`. It backs the wasm wrapper tests
-and gives `npm run dev` something to solve; it is not part of `dist/`, so the
+and gives `pnpm --filter web run dev` something to solve; it is not part of `dist/`, so the
 GitHub Pages site requires user-supplied definitions.
 
 ## Token maps

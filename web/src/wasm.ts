@@ -148,7 +148,7 @@ export function formatAnalysisEngineLoadError(reason: unknown, sourceUrl?: strin
   ) {
     // Chromium says this when the glue URL 404s as HTML (wrong base / missing wasm).
     const fix = desktop
-      ? 'Rebuild the desktop UI (`npm run build:desktop --prefix web`) and run the app again.'
+      ? 'Rebuild the desktop UI (`pnpm --filter web run build:desktop`) and run the app again.'
       : 'The deployed UI is missing `/wasm/` assets or was built with the wrong Vite base.'
     return (
       `Could not load the analysis engine: the WebAssembly script URL returned a web page ` +

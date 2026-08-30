@@ -1,0 +1,5 @@
+packages:
+  - web
+  - e2e
+  - scripts/docs-screenshots
+  - scripts/docs-screenshots/desktop-tauri

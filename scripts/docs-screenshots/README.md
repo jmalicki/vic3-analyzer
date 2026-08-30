@@ -11,34 +11,32 @@ Playwright harness that regenerates locked PNGs under [`docs/assets/`](../../doc
 ## Install
 
 ```bash
-cd scripts/docs-screenshots
-npm ci
-npx playwright install chromium
+pnpm install
+pnpm --filter vic3-docs-screenshots exec playwright install chromium
 ```
 
 Also install and build the web app once (wasm + fixture defs + `dist/`):
 
 ```bash
-cd web
-npm ci
-npm run build
+pnpm install
+pnpm --filter web run build
 ```
 
 ## Regenerate locally
 
-From `scripts/docs-screenshots/`:
+From repo root or `scripts/docs-screenshots/`:
 
 ```bash
-npm run docs:screenshots          # web + desktop mock → docs/assets/
-npm run docs:screenshots:web
-npm run docs:screenshots:desktop:mock
+pnpm --filter vic3-docs-screenshots run docs:screenshots          # web + desktop mock → docs/assets/
+pnpm --filter vic3-docs-screenshots run docs:screenshots:web
+pnpm --filter vic3-docs-screenshots run docs:screenshots:desktop:mock
 ```
 
 Override output directory (CI does this):
 
 ```bash
-DOCS_SCREENSHOTS_OUT=/tmp/docs-shots npm run docs:screenshots
-DOCS_SCREENSHOTS_OUT=/tmp/docs-shots npm run docs:screenshots:compare
+DOCS_SCREENSHOTS_OUT=/tmp/docs-shots pnpm --filter vic3-docs-screenshots run docs:screenshots
+DOCS_SCREENSHOTS_OUT=/tmp/docs-shots pnpm --filter vic3-docs-screenshots run docs:screenshots:compare
 ```
 
 ### Compare policy
@@ -61,7 +59,7 @@ Viewport (web + mock): **1280×800 @ 2×** `deviceScaleFactor`. Tauri shots use 
 ## Real macOS Tauri (committed desktop goldens)
 
 ```bash
-npm run docs:screenshots:desktop:tauri
+pnpm --filter vic3-docs-screenshots run docs:screenshots:desktop:tauri
 ```
 
 Requires Screen Recording permission for your terminal. Details: [`desktop-tauri/README.md`](desktop-tauri/README.md). Ubuntu CI keeps the mock path only.
