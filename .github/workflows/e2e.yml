@@ -16,22 +16,23 @@ jobs:
   web:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
       # Disabled: rust-cache entry was too big for the ~10GB repo quota (#110).
       # Re-enable when we have enough cache space — e2e web builds wasm itself
       # and benefits from this key (it does not load CI `web` job artifacts).
-      # - uses: Swatinem/rust-cache@v2
+      # - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       #   with:
       #     prefix-key: e2e-web-wasm
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.12.1 --locked --force
       - run: corepack enable
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
           cache: pnpm
@@ -52,10 +53,12 @@ jobs:
         os: [ubuntu-24.04, macos-14, windows-2022]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -75,15 +78,15 @@ jobs:
             dbus-x11
       # Disabled *save* (too big for ~10GB quota; see #110). If re-enabled, use a
       # Tauri-scoped key (no shared-key) — never save to `ci-native`.
-      # - uses: Swatinem/rust-cache@v2
+      # - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       # Linux only: restore CI `rust`'s `ci-native` cache; never write it from e2e.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         if: runner.os == 'Linux'
         with:
           shared-key: ci-native
           save-if: "false"
       - run: corepack enable
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
           cache: pnpm
