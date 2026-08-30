@@ -3,6 +3,7 @@ name = "vic3-sql"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 repository.workspace = true
 description = "Read-only DataFusion SQL over a loaded World + PricesResult"
 

@@ -3,6 +3,7 @@ name = "vic3-planning"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 repository.workspace = true
 description = "Planning stack: PlanningState, goal DSL, successors, and A*"
 

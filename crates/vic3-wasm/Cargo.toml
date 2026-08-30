@@ -3,6 +3,7 @@ name = "vic3-wasm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 repository.workspace = true
 description = "wasm-bindgen facade (bytes in, JSON out)"
 
