@@ -23,12 +23,14 @@ jobs:
         with:
           toolchain: 1.98
           targets: wasm32-unknown-unknown
-      # Disabled: rust-cache entry was too big for the ~10GB repo quota (#110).
-      # Re-enable when we have enough cache space — e2e web builds wasm itself
-      # and benefits from this key (it does not load CI `web` job artifacts).
-      # - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
-      #   with:
-      #     prefix-key: e2e-web-wasm
+      # Restore CI `web`'s wasm cache; never write it from e2e (CI web is the writer).
+      - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
+        with:
+          prefix-key: v0-rust-zstd10-long31
+          zstd-level: "10"
+          zstd-long: "31"
+          shared-key: ci-web-wasm
+          save-if: "false"
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.12.1 --locked --force
       - run: corepack enable
@@ -78,33 +80,13 @@ jobs:
             webkit2gtk-driver \
             xvfb \
             dbus-x11
-      # Linux: restore CI `rust`'s `ci-native` cache only — never write from e2e.
+      # Per-OS Tauri keys (never `ci-native`); save on main only (#110).
       - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
-        if: runner.os == 'Linux'
         with:
           prefix-key: v0-rust-zstd10-long31
           zstd-level: "10"
           zstd-long: "31"
-          shared-key: ci-native
-          env-vars: CARGO_PROFILE
-          save-if: "false"
-      # macOS / Windows: own keys (never `ci-native`); save on main only (#110).
-      - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
-        if: runner.os == 'macOS'
-        with:
-          prefix-key: v0-rust-zstd10-long31
-          zstd-level: "10"
-          zstd-long: "31"
-          shared-key: e2e-tauri-macos
-          env-vars: CARGO_PROFILE
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
-        if: runner.os == 'Windows'
-        with:
-          prefix-key: v0-rust-zstd10-long31
-          zstd-level: "10"
-          zstd-long: "31"
-          shared-key: e2e-tauri-windows
+          shared-key: ${{ runner.os == 'Linux' && 'e2e-tauri-linux' || runner.os == 'macOS' && 'e2e-tauri-macos' || 'e2e-tauri-windows' }}
           env-vars: CARGO_PROFILE
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: corepack enable

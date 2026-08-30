@@ -59,10 +59,8 @@ jobs:
             libssl-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev
-      # Only this job on pushes to main *saves* rust-cache (see #110).
-      # shared-key `ci-native` is the single writer key for native Linux builds;
-      # Linux e2e restores it with save-if: false. macOS/Windows e2e use separate
-      # keys (`e2e-tauri-macos` / `e2e-tauri-windows`). Never write `ci-native` from e2e.
+      # Workspace native Linux builds (clippy/test). Save on main only (#110).
+      # Separate from e2e Tauri keys (`e2e-tauri-*`) and wasm (`ci-web-wasm`).
       # CARGO_PROFILE=ci (debug=1) is part of the cache key via env-vars.
       - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
         with:
@@ -88,10 +86,14 @@ jobs:
         with:
           toolchain: 1.98
           targets: wasm32-unknown-unknown
-      # Disabled: rust-cache entry was too big for the ~10GB repo quota (#110).
-      # - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
-      #   with:
-      #     prefix-key: web-wasm
+      # Single writer for wasm builds; docs-screenshots + e2e web restore this key.
+      - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
+        with:
+          prefix-key: v0-rust-zstd10-long31
+          zstd-level: "10"
+          zstd-long: "31"
+          shared-key: ci-web-wasm
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.12.1 --locked --force
       - run: corepack enable
@@ -121,10 +123,14 @@ jobs:
         with:
           toolchain: 1.98
           targets: wasm32-unknown-unknown
-      # Disabled: rust-cache entry was too big for the ~10GB repo quota (#110).
-      # - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
-      #   with:
-      #     prefix-key: docs-screenshots-wasm
+      # Restore CI `web`'s wasm cache; never write it from this job.
+      - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
+        with:
+          prefix-key: v0-rust-zstd10-long31
+          zstd-level: "10"
+          zstd-long: "31"
+          shared-key: ci-web-wasm
+          save-if: "false"
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.12.1 --locked --force
       - run: corepack enable
