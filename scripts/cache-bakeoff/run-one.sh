@@ -13,26 +13,37 @@ WORKDIR="${RUNNER_TEMP:-/tmp}/bakeoff-$NAME"
 mkdir -p "$WORKDIR"
 ARCHIVE="$WORKDIR/out.bin"
 
+# pv -i: throttle progress in CI logs (default 10s; avoid per-second spam).
+PROGRESS_INTERVAL="${BAKEOFF_PROGRESS_INTERVAL:-10}"
+
+pv_in() {
+  local label="$1"
+  local size="$2"
+  shift 2
+  pv -f -i "$PROGRESS_INTERVAL" -F "$label" -s "$size" "$@"
+}
+
 # Materialize uncompressed tar once (shared input for fair compress timing).
 TAR="$WORKDIR/corpus.tar"
+CORPUS_BYTES=$(wc -c <"$CORPUS_ZST" | tr -d ' ')
 echo "Decompressing transport corpus..."
-zstd -d --long=31 -T0 -o "$TAR" "$CORPUS_ZST"
+pv_in transport "$CORPUS_BYTES" "$CORPUS_ZST" | zstd -d --long=31 -T0 -c >"$TAR"
 TAR_BYTES=$(wc -c <"$TAR" | tr -d ' ')
 
 compress() {
   case "$NAME" in
-    zstd-3-long30-actions) zstd -3 --long=30 -T0 -c "$TAR" >"$ARCHIVE" ;;
-    zstd-3-long31)         zstd -3 --long=31 -T0 -c "$TAR" >"$ARCHIVE" ;;
-    zstd-10-long31)        zstd -10 --long=31 -T0 -c "$TAR" >"$ARCHIVE" ;;
-    zstd-19-long31)        zstd -19 --long=31 -T0 -c "$TAR" >"$ARCHIVE" ;;
-    zstd-22-ultra-long31)  zstd -22 --ultra --long=31 -T0 -c "$TAR" >"$ARCHIVE" ;;
-    xz-6)                  xz -6 -T0 -c "$TAR" >"$ARCHIVE" ;;
-    xz-9)                  xz -9 -T0 -c "$TAR" >"$ARCHIVE" ;;
-    xz-9e)                 xz -9e -T0 -c "$TAR" >"$ARCHIVE" ;;
-    brotli-5)              brotli -q 5 -c "$TAR" >"$ARCHIVE" ;;
-    brotli-11)             brotli -q 11 -c "$TAR" >"$ARCHIVE" ;;
-    lz4-9)                 lz4 -9 -c "$TAR" >"$ARCHIVE" ;;
-    pigz-9)                pigz -9 -c "$TAR" >"$ARCHIVE" ;;
+    zstd-3-long30-actions) pv_in "$NAME" "$TAR_BYTES" "$TAR" | zstd -3 --long=30 -T0 -c >"$ARCHIVE" ;;
+    zstd-3-long31)         pv_in "$NAME" "$TAR_BYTES" "$TAR" | zstd -3 --long=31 -T0 -c >"$ARCHIVE" ;;
+    zstd-10-long31)        pv_in "$NAME" "$TAR_BYTES" "$TAR" | zstd -10 --long=31 -T0 -c >"$ARCHIVE" ;;
+    zstd-11-long31)        pv_in "$NAME" "$TAR_BYTES" "$TAR" | zstd -11 --long=31 -T0 -c >"$ARCHIVE" ;;
+    zstd-12-long31)        pv_in "$NAME" "$TAR_BYTES" "$TAR" | zstd -12 --long=31 -T0 -c >"$ARCHIVE" ;;
+    xz-6)                  pv_in "$NAME" "$TAR_BYTES" "$TAR" | xz -6 -T0 -c >"$ARCHIVE" ;;
+    xz-9)                  pv_in "$NAME" "$TAR_BYTES" "$TAR" | xz -9 -T0 -c >"$ARCHIVE" ;;
+    xz-9e)                 pv_in "$NAME" "$TAR_BYTES" "$TAR" | xz -9e -T0 -c >"$ARCHIVE" ;;
+    brotli-5)              pv_in "$NAME" "$TAR_BYTES" "$TAR" | brotli -q 5 -c >"$ARCHIVE" ;;
+    brotli-11)             pv_in "$NAME" "$TAR_BYTES" "$TAR" | brotli -q 11 -c >"$ARCHIVE" ;;
+    lz4-9)                 pv_in "$NAME" "$TAR_BYTES" "$TAR" | lz4 -9 -c >"$ARCHIVE" ;;
+    pigz-9)                pv_in "$NAME" "$TAR_BYTES" "$TAR" | pigz -9 -c >"$ARCHIVE" ;;
     *) echo "unknown codec $NAME" >&2; exit 1 ;;
   esac
 }
@@ -40,7 +51,7 @@ compress() {
 decompress() {
   case "$NAME" in
     zstd-3-long30-actions) zstd -d --long=30 -T0 -c <"$ARCHIVE" >/dev/null ;;
-    zstd-*-long31|zstd-22-ultra-long31) zstd -d --long=31 -T0 -c <"$ARCHIVE" >/dev/null ;;
+    zstd-*-long31) zstd -d --long=31 -T0 -c <"$ARCHIVE" >/dev/null ;;
     xz-*)                  xz -d -T0 -c <"$ARCHIVE" >/dev/null ;;
     brotli-*)              brotli -d -c <"$ARCHIVE" >/dev/null ;;
     lz4-9)                 lz4 -d -c <"$ARCHIVE" >/dev/null ;;

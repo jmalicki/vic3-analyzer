@@ -156,7 +156,7 @@ jobs:
   compress:
     needs: prepare
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -165,12 +165,12 @@ jobs:
           - name: zstd-3-long30-actions
           # Isolates --long=31 at same level (cheap size win)
           - name: zstd-3-long31
-          # Mid / high / max zstd — decompress stays fast; compress only on cache save
+          # Mid levels — bracket -10; dropped -19/-22 (compress >> compile, round 1)
           - name: zstd-10-long31
-          - name: zstd-19-long31
-          - name: zstd-22-ultra-long31
+          - name: zstd-11-long31
+          - name: zstd-12-long31
           # Dropped: lz4/brotli/pigz/weaker xz (not size-competitive);
-          # xz-9e (can win size but decompress is too slow for every-job restore).
+          # zstd-19/22 (compress ≥3× compile); xz-9e (slow decompress).
           # Selection: space-first within reason — big size wins OK if restore stays cheap.
     name: measure / ${{ matrix.name }}
     steps:
@@ -184,7 +184,7 @@ jobs:
       - name: Install compressors
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd
+          sudo apt-get install -y zstd pv
 
       - uses: actions/download-artifact@v4
         with:
