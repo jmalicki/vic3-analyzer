@@ -62,7 +62,7 @@ jobs:
       # dedicated saves were too big for the ~10GB Actions cache quota.
       - uses: jmalicki/rust-cache@a8aabc19f4ebcd1e50766bb09d91c5b60aef21d3 # v2.9.2
         with:
-          prefix-key: v1-zstd10-long11
+          prefix-key: v1-rust-zstd10-long11
           zstd-level: "10"
           zstd-long: "11"
           shared-key: ci-native
