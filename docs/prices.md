@@ -96,7 +96,7 @@ Every analytical result carries structured limitation strings:
 2. Prices are strictly clamped to \(\pm \text{PRICE-RANGE}\) (typically \(\pm 75\%\)) as defined by the game.
 3. Employment, wages, and **trade route volumes are frozen** unless explicitly modified.
 4. State orders are infrastructure-access scaled into a single whole-save market. Overseas convoy limits and separate custom unions (multiple game markets) are not yet partitioned in the IR/solver.
-5. The solve residual is part of the answer: a large residual indicates the model did not find a consistent fixed point (or, under a future MCP map, a bound shortage).
+5. The solve residual is always reported. A large residual usually means the solver did not reach an interior price fixed point; it can also mean a bound shortage under a future MCP map (see [`prices-equilibrium.md`](prices-equilibrium.md) §5). Interpret residual together with `status` and per-good prices.
 
 ---
 
