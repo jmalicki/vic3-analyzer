@@ -108,19 +108,20 @@ pub fn what_if(
 /// Steps: validate goods → build residual → warm start → Basin TRF → polish →
 /// evaluate → building revenues from `cache.buildings`.
 ///
-/// [`SolveStrategy::Joint`] currently aliases [`SolveStrategy::Nested`].
 fn equilibrate_from_cache(
     cache: &ShopCache,
     defs: &GameDefs,
     opts: SolveOpts,
 ) -> (SolveOutcome, Option<ShopSnapshot>) {
     match opts.strategy {
-        SolveStrategy::Nested | SolveStrategy::Joint => equilibrate_nested(cache, defs, opts),
+        SolveStrategy::Nested => equilibrate_nested(cache, defs, opts),
+        // [`SolveStrategy::Joint`] aliases nested until the coupled solver lands.
+        SolveStrategy::Joint => equilibrate_nested(cache, defs, opts),
     }
 }
 
 /// Generates zeroed out `SolveStats` for when a market has no goods.
-fn empty_stats(strategy: SolveStrategy) -> SolveStats {
+pub(crate) fn empty_stats(strategy: SolveStrategy) -> SolveStats {
     SolveStats {
         strategy,
         param_dim: 0,
@@ -253,7 +254,7 @@ fn equilibrate_nested(
 /// Goods with positive base price (NLS unknowns).
 ///
 /// * `base_prices` — aligned to `defs.goods_order`.
-fn market_goods(base_prices: &GoodsVec) -> Vec<GoodId> {
+pub(crate) fn market_goods(base_prices: &GoodsVec) -> Vec<GoodId> {
     base_prices
         .iter_indexed()
         .filter(|(_, base)| *base > 0.0)
