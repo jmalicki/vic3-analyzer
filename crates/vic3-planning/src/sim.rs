@@ -2018,7 +2018,12 @@ fn apply_wait_for_event(
 /// → patch from deltas → NLS → node fields.
 fn refresh_prices(state: &mut PlanningState, economy: &EconomyContext) {
     let cache = economy.shops_for_planning(state);
-    let outcome = equilibrate_cached(&cache, &economy.defs, economy.solve_opts.clone());
+    let mut solve_opts = economy.solve_opts.clone();
+    if !state.warm_relative.is_empty() {
+        solve_opts.warm_rel = Some(state.warm_relative.clone());
+    }
+    let outcome = equilibrate_cached(&cache, &economy.defs, solve_opts);
+    state.warm_relative = outcome.relative.clone();
     state.gdp = economy.modeled_gdp(state, &outcome);
     state.good_prices = outcome
         .goods
@@ -3014,6 +3019,96 @@ mod tests {
                 a.name,
                 a.price,
                 b.price
+            );
+        }
+    }
+
+    #[test]
+    fn refresh_prices_passes_warm_relative_into_solver() {
+        use vic3_defs::ProductionMethod;
+        use vic3_prices::{equilibrate_cached, SolveOpts};
+
+        let wood = GoodId::from_usize(0);
+        let mut defs = GameDefs {
+            goods_order: vec!["wood".into()],
+            goods: BTreeMap::from([(
+                "wood".into(),
+                Good {
+                    name: "wood".into(),
+                    base_price: 20.0,
+                    traded_quantity: 10.0,
+                    texture: None,
+                },
+            )]),
+            price_range: 0.75,
+            ..GameDefs::default()
+        };
+        defs.ensure_building_type("building_logging_camp");
+        defs.production_method_groups
+            .insert("pmg_logging".into(), vec!["pm_sawmills".into()]);
+        defs.production_methods.insert(
+            "pm_sawmills".into(),
+            ProductionMethod {
+                name: "pm_sawmills".into(),
+                outputs: vec![(wood, 10.0)],
+                ..Default::default()
+            },
+        );
+        let world = World {
+            countries: vec![WorldCountry {
+                id: 1,
+                tag: "GER".into(),
+                ..WorldCountry::default()
+            }],
+            states: vec![WorldState {
+                id: 1,
+                country: Some(1),
+                infrastructure: Some(10.0),
+                infrastructure_usage: Some(0.0),
+                ..WorldState::default()
+            }],
+            buildings: vec![WorldBuilding {
+                id: 1,
+                state: Some(1),
+                building_type_id: defs.building_index_of("building_logging_camp").unwrap(),
+                level: 1.0,
+                staffing: 1.0,
+                production_methods: vec!["pm_sawmills".into()],
+                saved_inputs: Vec::new(),
+                saved_outputs: Vec::new(),
+            }],
+            frozen_buy: GoodsVec::from_vec(vec![15.0]),
+            ..World::default()
+        };
+        let economy = EconomyContext::new(world, defs, SolveOpts::default());
+        let mut state = PlanningState::from_parts(PlanningParts {
+            country: "GER".into(),
+            ..PlanningParts::default()
+        });
+
+        refresh_prices(&mut state, &economy);
+        assert!(
+            !state.warm_relative.is_empty(),
+            "first solve should stash relative prices for warm-start"
+        );
+
+        let cache = economy.shops_for_planning(&state);
+        let expected = equilibrate_cached(
+            &cache,
+            &economy.defs,
+            SolveOpts {
+                warm_rel: Some(state.warm_relative.clone()),
+                ..economy.solve_opts.clone()
+            },
+        );
+
+        refresh_prices(&mut state, &economy);
+        assert_eq!(state.warm_relative.len(), expected.relative.len());
+        for ((name, price), expected_good) in state.good_prices.iter().zip(expected.goods.iter()) {
+            assert_eq!(name, &expected_good.name);
+            assert!(
+                (price - expected_good.price).abs() < 1e-9,
+                "warm-started refresh should match explicit warm_rel solve for {name}"
             );
         }
     }
