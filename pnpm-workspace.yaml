@@ -3,3 +3,10 @@ packages:
   - e2e
   - scripts/docs-screenshots
   - scripts/docs-screenshots/desktop-tauri
+
+minimumReleaseAge: 1440
+trustPolicy: no-downgrade
+allowBuilds:
+  esbuild: true
+  edgedriver: true
+  geckodriver: true
