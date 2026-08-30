@@ -68,10 +68,15 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Install and test web
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Audit production dependencies
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high
+      - name: Test and build web
         working-directory: web
         run: |
-          npm ci
           npm test
           npm run test:wasm
           npm run build
