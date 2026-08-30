@@ -84,6 +84,12 @@ pub struct SolveOpts {
     /// set this automatically from the loaded baseline solve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warm_rel: Option<Vec<f64>>,
+    /// Prior pure-state prices for Joint warm-start (flat shop-major × goods order).
+    ///
+    /// Absolute prices in the same layout as Joint's σ block of the parameter
+    /// vector. Ignored by [`SolveStrategy::Nested`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warm_sigma: Option<Vec<f64>>,
     /// Equilibrium formulation. Default [`SolveStrategy::Joint`].
     #[serde(default)]
     pub strategy: SolveStrategy,
@@ -103,6 +109,7 @@ impl Default for SolveOpts {
             residual_eps: default_residual_eps(),
             max_iters: default_max_iters(),
             warm_rel: None,
+            warm_sigma: None,
             strategy: SolveStrategy::default(),
         }
     }
@@ -828,6 +835,8 @@ pub struct SolveOutcome {
     pub status: SolveStatus,
     /// Relative prices `price / base` in the same order as [`Self::goods`].
     pub relative: Vec<f64>,
+    /// Pure-state σ vector for the next Joint warm-start (`None` for Nested).
+    pub warm_sigma: Option<Vec<f64>>,
     /// Building revenues at solved local prices (for modeled GDP).
     pub building_revenues: Vec<BuildingRevenue>,
     /// Basin eval counters and strategy used for this run.

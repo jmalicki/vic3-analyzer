@@ -62,7 +62,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use vic3_defs::{BuildingType, GameDefs};
 use vic3_prices::{
-    equilibrate_cached, ShopCache, SolveOpts, SolveOutcome, World, WorldBuilding, ORDER_EPS,
+    equilibrate_cached, ShopCache, SolveOpts, SolveOutcome, SolveStrategy, World, WorldBuilding,
+    ORDER_EPS,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2022,8 +2023,14 @@ fn refresh_prices(state: &mut PlanningState, economy: &EconomyContext) {
     if !state.warm_relative.is_empty() {
         solve_opts.warm_rel = Some(state.warm_relative.clone());
     }
+    if solve_opts.strategy == SolveStrategy::Joint && !state.warm_pure_state.is_empty() {
+        solve_opts.warm_sigma = Some(state.warm_pure_state.clone());
+    }
     let outcome = equilibrate_cached(&cache, &economy.defs, solve_opts);
     state.warm_relative = outcome.relative.clone();
+    if let Some(sigma) = outcome.warm_sigma.clone() {
+        state.warm_pure_state = sigma;
+    }
     state.gdp = economy.modeled_gdp(state, &outcome);
     state.good_prices = outcome
         .goods
