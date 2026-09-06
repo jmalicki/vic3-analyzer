@@ -26,7 +26,8 @@ This document records the foundational library choices, dependency selection cri
 | **A* Pathfinding** | [`rust-advanced-heaps`](https://github.com/jmalicki/rust-advanced-heaps) | High-performance priority queue heaps (`PairingHeap`) and shortest-path graph search. |
 | **Goal DSL Parser** | [`chumsky`](https://crates.io/crates/chumsky) | Expressive parser combinator library with excellent error reporting. |
 | **Property Testing** | [`proptest`](https://crates.io/crates/proptest) | Robust hypothesis-style property testing for mathematical invariants. |
-| **Non-Linear Solver** | [`basin`](https://crates.io/crates/basin) | Trust-region non-linear least squares solver with pure-Rust vector math (no BLAS needed in WASM). |
+| **Non-Linear Solver** | [`basin`](https://github.com/jmalicki/basin) (fork) | Trust-region NLS for price equilibrium. Fork [`jmalicki/basin`](https://github.com/jmalicki/basin) exports `AddDiagonalVectorInPlace` / `MaxDiagonal` for custom Jacobian backends. |
+| **Joint linear algebra** | [`basin-arrowhead`](../../crates/basin-arrowhead) | Block-arrowhead Jacobian / Gram for Joint TRF: Schur + Woodbury SPD solves at `O(S·G³)` instead of materializing `JᵀJ`. |
 | **Embedded SQL** | [Apache DataFusion](https://datafusion.apache.org/) (`vic3-sql`) | Embedded columnar SQL query engine over in-memory Arrow record batches. |
 | **MCP SDK** | [`rmcp`](https://crates.io/crates/rmcp) | Official Rust Model Context Protocol implementation for stdio AI agent communication. |
 | **Schema Generation** | [`schemars`](https://crates.io/crates/schemars) | Generates JSON Schema draft 2020-12 from shared serde structs to drive UI forms. |

@@ -398,12 +398,12 @@
       "oneOf": [
         {
           "const": "converged",
-          "description": "[`PricesResult::residual`] is below [`SolveOpts::residual_eps`] (I5).",
+          "description": "Residual below [`SolveOpts::residual_eps`]: orders clear inside the price box.",
           "type": "string"
         },
         {
           "const": "max_iters",
-          "description": "Iteration budget exhausted with residual still at or above ε.",
+          "description": "Iteration budget exhausted, or Basin stopped at a face-active KKT with\nresidual still ≥ ε. The latter is expected when unclipped target relative\nprice τ lies outside `[1±ρ]` (capped / disequilibrium clearing).",
           "type": "string"
         },
         {

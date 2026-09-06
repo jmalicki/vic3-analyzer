@@ -210,9 +210,11 @@ impl From<WhatIfOpts> for WorldDelta {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SolveStatus {
-    /// [`PricesResult::residual`] is below [`SolveOpts::residual_eps`] (I5).
+    /// Residual below [`SolveOpts::residual_eps`]: orders clear inside the price box.
     Converged,
-    /// Iteration budget exhausted with residual still at or above ε.
+    /// Iteration budget exhausted, or Basin stopped at a face-active KKT with
+    /// residual still ≥ ε. The latter is expected when unclipped target relative
+    /// price τ lies outside `[1±ρ]` (capped / disequilibrium clearing).
     MaxIters,
     /// Basin reported failure and successive substitution did not recover.
     Failed,

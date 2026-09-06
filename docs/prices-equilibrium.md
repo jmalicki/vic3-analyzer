@@ -109,9 +109,9 @@ Minimize \(\tfrac12 \|R^{\mathrm{full}}(x)\|_2^2\) subject to the box on \(x\). 
 
 ## 5. Bound shortages (Projected-Gradient Stationarity)
 
-Because the model uses an unclipped target price alongside strict box constraints, a severe shortage will pin the market price to its upper bound (\(1+\rho\)). In this state, the mathematical residual \(R_g\) will not reach zero, but the solver will still successfully converge to a stationary point.
+Because the model uses an unclipped target price alongside strict box constraints, a severe shortage will pin the market price to its upper bound (\(1+\rho\)). In this state, the mathematical residual \(R_g\) will not reach zero, but the solver will still successfully converge to a stationary point. **That nonzero residual is the intended capped outcome**, not a failed clear.
 
-As a result, callers cannot rely solely on a near-zero residual (\(\|R\| \approx 0\)) to verify success. Instead, they should check the solver's termination flags (Note: **I5** may evolve accordingly. See [`invariants.md`](invariants.md)).
+As a result, callers cannot rely solely on a near-zero residual (\(\|R\| \approx 0\)) to verify success. [`SolveStatus::Converged`](../crates/vic3-prices/src/result.rs) means \(\|R\| < \varepsilon\) (orders clear inside the box). A face-active Basin stop with \(\|R\| \ge \varepsilon\) maps to [`SolveStatus::MaxIters`](../crates/vic3-prices/src/result.rs) by design — check termination flags / KKT, not residual alone (Note: **I5** may evolve accordingly. See [`invariants.md`](invariants.md)).
 
 ---
 
@@ -125,7 +125,7 @@ That **market** auxiliary is what enables sparse/fast linear algebra. Joint must
 
 ## 7. Implementation notes (`basin`)
 
-Target Joint path: Basin trust-region reflective with **sparse** Jacobian (arrowhead pattern. Basin/`faer` sparse types or structured FD on nonzeros / explicit Schur—never dense full \(N\)).
+Target Joint path: Basin trust-region reflective with **structured** Jacobian via [`basin-arrowhead`](../crates/basin-arrowhead) (block hub + per-state `G×G` tiles, Schur/Woodbury on the damped Gram — never a dense or full `n×n` CSC `JᵀJ` hot path).
 
 Nested path today: dense FD on \(r\) only ([`solve.rs`](../crates/vic3-prices/src/solve.rs))—legacy until Joint replaces it.
 
