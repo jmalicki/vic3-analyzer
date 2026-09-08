@@ -178,6 +178,23 @@ fn national_points_per_day_from_cs_buildings<'a>(
     }
 }
 
+/// First finite non-negative `country_construction_add` among `methods`.
+///
+/// Method-list form of [`construction_add_for_cs_building`], for callers that
+/// hold PM ids without a [`vic3_prices::WorldBuilding`] (e.g. a planning branch
+/// that overrode the Construction Sector's methods).
+pub fn construction_add_from_methods<'a>(
+    methods: impl IntoIterator<Item = &'a String>,
+    defs: &GameDefs,
+) -> Option<f64> {
+    methods.into_iter().find_map(|pm_id| {
+        defs.production_methods
+            .get(pm_id)
+            .and_then(|pm| pm.country_construction_add)
+            .filter(|v| v.is_finite() && *v >= 0.0)
+    })
+}
+
 /// Resolve `country_construction_add` for one Construction Sector building.
 ///
 /// Walks [`vic3_prices::WorldBuilding::production_methods`] (required, must be
@@ -186,19 +203,11 @@ pub fn construction_add_for_cs_building(
     building: &vic3_prices::WorldBuilding,
     defs: &GameDefs,
 ) -> Result<f64, MissingConstructionSectorPm> {
-    for pm_id in &building.production_methods {
-        if let Some(add) = defs
-            .production_methods
-            .get(pm_id)
-            .and_then(|pm| pm.country_construction_add)
-            .filter(|v| v.is_finite() && *v >= 0.0)
-        {
-            return Ok(add);
+    construction_add_from_methods(&building.production_methods, defs).ok_or_else(|| {
+        MissingConstructionSectorPm {
+            building_id: building.id,
+            methods: building.production_methods.clone(),
         }
-    }
-    Err(MissingConstructionSectorPm {
-        building_id: building.id,
-        methods: building.production_methods.clone(),
     })
 }
 
