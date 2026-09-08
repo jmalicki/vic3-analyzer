@@ -1309,8 +1309,15 @@ mod tests {
         a.self_adjoint_eigenvalues(Side::Lower).ok()
     }
 
+    /// `None` once the spectrum stops being meaningful: an overflowing Coleman–Li `d²`
+    /// puts a non-finite entry on the diagonal, and backends differ on whether that is
+    /// reported as a decomposition error or as NaN eigenvalues. `f64::min` skips NaN, so
+    /// the fold has to be guarded rather than trusted.
     fn min_max_eigenvalues(a: &Mat<f64>) -> Option<(f64, f64)> {
         let evals = self_adjoint_eigenvalues_oracle(a)?;
+        if evals.is_empty() || evals.iter().any(|v| !v.is_finite()) {
+            return None;
+        }
         let min = evals.iter().copied().fold(f64::INFINITY, f64::min);
         let max = evals.iter().copied().fold(f64::NEG_INFINITY, f64::max);
         Some((min, max))
@@ -1542,10 +1549,14 @@ mod tests {
             s.mu,
         );
         // EVD may not converge on the singular matrix; Cholesky failure is the oracle.
-        assert!(
-            s.min_eigenvalue.is_none() || s.min_eigenvalue.unwrap() < 1e-10,
-            "expected near-zero min λ when EVD converges",
-        );
+        // `JᵀJ` is PSD, so λ_min of the damped Gram is at least the smallest damping
+        // entry and an absolute bound on it says nothing; only λ_min/λ_max does.
+        if let (Some(min), Some(max)) = (s.min_eigenvalue, s.max_eigenvalue) {
+            assert!(
+                min < 1e-10 * max,
+                "expected min λ negligible against max λ (min={min}, max={max})",
+            );
+        }
     }
 
     /// Restoring iter-one `μ` at iter-six `x` still fails: `(upper_i − x_i)` is already too small.
