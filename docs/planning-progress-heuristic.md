@@ -285,6 +285,30 @@ Special cases:
 Non-construction GDP progress that can run alongside builds is credited on the
 **timeline / residual $G$**, not counted as a construction slot.
 
+#### Shipped today: $R^{*}$ is a construction-only proxy
+
+Everything above in this section is the **intended** model. `aggregate_rate_curr`
+does not enumerate options, sort $r_{(j)}$, or model non-build tracks. It reduces
+the open meter gap through `residual_days_from_gap`, which forms a single
+aggregate rate out of construction throughput alone:
+
+$$
+R^{*} \approx \frac{\Delta_{\mathrm{ref}}}{T_{\mathrm{eta}}}\, S_{\mathrm{build}},
+\qquad
+\Delta_{\mathrm{ref}}^{\mathrm{gdp}}
+  = \max\bigl(0.005\,\lvert \mathrm{gdp} \rvert,\ 0.05\,G,\ 1\bigr)
+$$
+
+where $T_{\mathrm{eta}}$ is `construction_eta_days(CapacityOrSlot)` and
+$S_{\mathrm{build}}$ is `max_parallel_construction_jobs`. $\Delta_{\mathrm{ref}}$
+is a **scale stand-in**, not any candidate's real $\Delta_i$ — which is why the
+symbol table calls `aggregate_rate_curr` a proxy.
+
+Two consequences worth stating plainly: no individual option ever contributes its
+own rate to $R^{*}$, and `SwitchPm` has no track at all. The "prefer immediate
+$\Delta$ credit" line in the option-kinds list above is **intent, not shipped
+behavior** — PM switches are uncredited here and in the cheap bag alike.
+
 ### In-flight credit
 
 Jobs already queued (builds, …), and jobs predicted just queued by a 0-day
@@ -357,6 +381,13 @@ $$
   = T_b + \frac{\max\bigl(0,\ G_t - \widetilde{\Delta\mathrm{gdp}}(b)\bigr)}{R^{*}_t}
 $$
 
+$\widetilde{\Delta\mathrm{gdp}}$ sums the building's default-PM **outputs** at
+current prices and deliberately does **not** subtract inputs: `modeled_gdp` is
+gross output at local prices, so netting out the input bill would estimate value
+added — a different quantity, measured against a gross-output gap, and a
+one-sided penalty on every consuming building. Full reasoning lives on
+`cheap_gdp_delta_guesstimate`; do not "fix" it here.
+
 Construction Sector (guesstimate — construction-unit scale of follow-on on
 $\mathrm{state}_t$. Ignores CS $\widetilde{\Delta\mathrm{gdp}}$ /
 $\widehat{\Delta\mathrm{gdp}}$):
@@ -366,11 +397,41 @@ $$
   = T_{\mathrm{CS}} + \frac{C}{C + \Delta C}\, H_{\mathrm{follow}}
 $$
 
+When $C \approx 0$ there is no ratio to scale by, so the **first** Construction
+Sector falls back to $T_{\mathrm{CS}} + H_{\mathrm{follow}}$ — the same key an
+ordinary build with no GDP credit gets, despite being the action that unblocks
+all later construction.
+
+Everything else, `SwitchPm` included:
+
+$$
+\mathrm{score}_{\mathrm{cheap}}(a) = e(a) + H_{\mathrm{follow}}
+$$
+
+No $\widetilde{\Delta\mathrm{gdp}}$ credit is applied on this arm. PM switches
+are 0-day, so every `SwitchPm` in a bag scores exactly $H_{\mathrm{follow}}$ and
+they all tie — the cheap key cannot separate a switch that doubles output from
+one that barely moves. They sort ahead of builds and the choice is deferred to
+emit, which does run a full solve.
+
+**Credit gate.** The $\widetilde{\Delta\mathrm{gdp}}$ subtraction in the
+ordinary-build formula applies only when *every* open leaf is a GDP leaf
+(`allow_cheap_gdp_credit`). If any tech / law / interest / fiscal leaf still has
+a gap, builds fall back to $T_b + H_{\mathrm{follow}}$, so a wood-camp
+guesstimate cannot erase an unrelated residual. On mixed goals that means every
+build ranks by build time alone.
+
 **Deficiencies vs emit / formal greedy** (also in code comments on
-`cheap_bag_score`): CS scale ≠ actual slots + CS finish day. Cheap GDP
-guesstimate ≠ full price solve. Bag does not re-run greedy. The delayed /
-follow-on portion can score **lower (better)** than this heuristic once slots,
-prices, and greedy order are real.
+`cheap_bag_score`):
+
+- CS scale ≠ actual slots + CS finish day, and the first CS gets no scaling.
+- Cheap GDP guesstimate ≠ full price solve. It values output at pre-build
+  prices, so added supply that would push its own good's price down is
+  over-credited.
+- `SwitchPm` and other non-build actions get no meter credit, so they tie.
+- Bag does not re-run greedy.
+- The delayed / follow-on portion can score **lower (better)** than this
+  heuristic once slots, prices, and greedy order are real.
 
 ### Emit (expensive)
 
