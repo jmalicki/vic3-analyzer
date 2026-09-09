@@ -565,7 +565,7 @@ mod tests {
             },
         );
         if !defs.building_types_order.iter().any(|id| id == building) {
-            defs.building_types_order.push(building.into());
+            defs.push_building_type_order(building);
         }
         defs.production_method_groups.insert(pmg, vec![pm.clone()]);
         defs.production_methods.insert(

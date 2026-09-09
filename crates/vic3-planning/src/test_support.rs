@@ -64,7 +64,7 @@ fn next_building_id(world: &World) -> u32 {
 
 fn ensure_building_type_order(defs: &mut GameDefs, building: &str) {
     if !defs.building_types_order.iter().any(|id| id == building) {
-        defs.building_types_order.push(building.into());
+        defs.push_building_type_order(building);
     }
 }
 
