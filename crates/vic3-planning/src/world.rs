@@ -1211,6 +1211,7 @@ mod tests {
             countries: Vec::new(),
             inputs: Default::default(),
             residual: 0.0,
+            capped_residual: 0.0,
             status: SolveStatus::Converged,
             limitations: Vec::new(),
             state_qualifications: Vec::new(),

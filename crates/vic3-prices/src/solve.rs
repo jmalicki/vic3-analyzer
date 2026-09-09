@@ -220,6 +220,7 @@ fn equilibrate_nested(
             SolveOutcome {
                 goods: Vec::new(),
                 residual: 0.0,
+                capped_residual: 0.0,
                 status: SolveStatus::Converged,
                 relative: Vec::new(),
                 building_revenues: Vec::new(),
@@ -235,6 +236,7 @@ fn equilibrate_nested(
             SolveOutcome {
                 goods: Vec::new(),
                 residual: f64::INFINITY,
+                capped_residual: f64::INFINITY,
                 status: SolveStatus::Failed,
                 relative: Vec::new(),
                 building_revenues: Vec::new(),
@@ -306,17 +308,24 @@ fn equilibrate_nested(
     problem.damp_toward_formula(&mut rel, WARM_START_ALPHA, polish);
     problem.clamp_rel(&mut rel);
 
-    let (rows, residual, snapshot) = problem.evaluate(&rel);
-    let status = if residual < opts.residual_eps {
-        SolveStatus::Converged
-    } else if failed {
-        SolveStatus::Failed
-    } else if matches!(termination, Some(TerminationReason::NoImprovement)) {
-        // Backstop fired: neither ‖R‖ < ε nor stationarity was reached, and the
-        // polish did not rescue it. Report that rather than implying a budget ran out.
-        SolveStatus::Stalled
-    } else {
-        SolveStatus::MaxIters
+    let (rows, residual, capped_residual, snapshot) = problem.evaluate(&rel);
+    // The status *is* Basin's termination reason; we do not layer a second notion
+    // of success on top. Only four reasons are reachable given the criteria we
+    // attach (`max_iter`, TRF's `tol_grad`, `NoImprovement`, solver failure), and
+    // `TerminationReason` is `#[non_exhaustive]`, hence the catch-all.
+    //
+    // `Converged` is therefore Basin's own notion, and is not a promise about
+    // `capped_residual`: the joint strategy can reach it while still ~1e-2 from
+    // the game's price rule, having no successive-substitution polish. How good
+    // the answer is is a separate question that `capped_residual` answers.
+    let status = match termination {
+        Some(TerminationReason::SolverFailed) => SolveStatus::Failed,
+        Some(TerminationReason::SolverConverged) => SolveStatus::Converged,
+        Some(TerminationReason::NoImprovement) => SolveStatus::Stalled,
+        Some(_) => SolveStatus::MaxIters,
+        // `price_range == 0` collapses the box to the single point `r = 1`, so no
+        // solver runs: the only feasible point is trivially the optimum.
+        None => SolveStatus::Converged,
     };
 
     let building_revenues = building_revenues_from_cache(cache, defs, &rows, Some(&snapshot));
@@ -330,6 +339,7 @@ fn equilibrate_nested(
         SolveOutcome {
             goods: rows,
             residual,
+            capped_residual,
             status,
             relative: rel,
             building_revenues,
@@ -668,24 +678,27 @@ impl PriceResidual<'_> {
     /// 1. A vector of `GoodPrice` rows summarizing base, price, buy, and sell volumes per good.
     /// 2. The scalar objective value (the root sum of squared residuals `‖R‖`).
     /// 3. The `ShopSnapshot` containing local price/consumption details across states.
-    fn evaluate(&self, rel: &[f64]) -> (Vec<GoodPrice>, f64, ShopSnapshot) {
+    fn evaluate(&self, rel: &[f64]) -> (Vec<GoodPrice>, f64, f64, ShopSnapshot) {
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         let prices = self.prices_from_rel(rel);
         let snapshot = self.snapshot_at(&prices, &mut scratch);
         let pop_buy = &snapshot.world_pop_buy;
-        let residual = self
-            .goods
-            .iter()
-            .zip(rel.iter())
-            .map(|(&id, rrel)| {
+        // Raw residual targets unclipped τ (the solver's objective); the capped
+        // one targets `clamp(τ)`, which is the game's own price rule, so a good
+        // pinned at a cap it cannot pass contributes zero.
+        let (sum_sq, capped_sum_sq) = self.goods.iter().zip(rel.iter()).enumerate().fold(
+            (0.0_f64, 0.0_f64),
+            |(raw_acc, capped_acc), (i, (&id, rrel))| {
                 let buy = self.cache.frozen_buy[id] + pop_buy[id];
                 let sell = self.cache.frozen_sell[id];
                 let formula = unclipped_target_relative_price(buy, sell, self.price_range);
-                rrel - formula
-            })
-            .map(|x| x * x)
-            .sum::<f64>()
-            .sqrt();
+                let raw = rrel - formula;
+                let capped = rrel - formula.clamp(self.lower[i], self.upper[i]);
+                (raw_acc + raw * raw, capped_acc + capped * capped)
+            },
+        );
+        let residual = sum_sq.sqrt();
+        let capped_residual = capped_sum_sq.sqrt();
         let rows = self
             .goods
             .iter()
@@ -704,7 +717,7 @@ impl PriceResidual<'_> {
                 })
             })
             .collect();
-        (rows, residual, snapshot)
+        (rows, residual, capped_residual, snapshot)
     }
 }
 

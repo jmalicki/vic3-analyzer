@@ -115,7 +115,7 @@ Preview mutation applied to a cloned world (extra levels, then production method
 ```json
 {
   "type": "object",
-  "required": ["scope", "goods", "countries", "states", "state_goods", "buildings", "building_types", "building_groups", "state_pops", "inputs", "residual", "status", "limitations"],
+  "required": ["scope", "goods", "countries", "states", "state_goods", "buildings", "building_types", "building_groups", "state_pops", "inputs", "residual", "capped_residual", "status", "limitations"],
   "properties": {
     "scope": { "const": "whole_save_synthetic" },
     "goods": {
@@ -210,6 +210,7 @@ Preview mutation applied to a cloned world (extra levels, then production method
       }
     },
     "residual": { "type": "number" },
+    "capped_residual": { "type": "number" },
     "status": { "enum": ["converged", "max_iters", "stalled", "failed"] },
     "limitations": { "type": "array", "items": { "type": "string" } },
     "relative": {
@@ -221,7 +222,17 @@ Preview mutation applied to a cloned world (extra levels, then production method
 }
 ```
 
-`status = converged` implies `residual < SolveOpts.residual_eps` (I5).
+`status = converged` means the solver reached a constrained optimum, or the
+answer is within `SolveOpts.residual_eps` of the game's own price rule
+(`capped_residual`). It does **not** imply a small `residual`.
+
+`residual` is `‖r − τ_unclipped‖₂`, the solver's objective. It is a diagnostic
+only: τ is deliberately unclipped so the optimizer has a gradient toward the
+price caps, so on a save with capped goods it stays large no matter how good the
+solve, and it has no zero point to measure against. `capped_residual` compares
+against `clamp(τ)` instead, which is identically the game's clipped price rule
+`1 + ρ·clamp(ratio, −1, 1)`, so a good pinned at a cap it cannot pass contributes
+zero. That one is zero at a correct answer and answers "how far off are we".
 `status = stalled` is **not** a successful solve: the iterate stopped improving
 before reaching either `residual_eps` or first-order stationarity, so the prices
 are wherever the solver gave up. It is distinct from `max_iters` because the

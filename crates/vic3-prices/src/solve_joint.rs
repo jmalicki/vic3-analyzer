@@ -233,7 +233,7 @@ impl<'a> PriceResidualJoint<'a> {
     ///
     /// Snapshot stores both free pure-state prices `σ` and derived locals
     /// `p = blend(m, market, σ)` so emit can publish a coherent `StateGood` row.
-    fn evaluate(&self, x: &Col<f64>) -> (Vec<GoodPrice>, f64, ShopSnapshot) {
+    fn evaluate(&self, x: &Col<f64>) -> (Vec<GoodPrice>, f64, f64, ShopSnapshot) {
         let g = self.n_goods();
         let market_rel: Vec<f64> = (0..g).map(|i| x[i]).collect();
         let market_prices = self.prices_from_rel(&market_rel);
@@ -293,12 +293,22 @@ impl<'a> PriceResidualJoint<'a> {
         }
         snapshot.world_pop_buy = world_pop_buy.clone();
 
-        let residual = self
-            .residual_at(x)
-            .iter()
-            .map(|v| v * v)
-            .sum::<f64>()
-            .sqrt();
+        // Raw residual targets unclipped τ (the solver's objective); the capped one
+        // targets `clamp(τ)`, the game's own price rule, so a component pinned at a
+        // bound it cannot pass contributes zero. Recover τ from `R`: the market
+        // block is `R = r − τ`, the pure-state block `R = (σ − τ_state) / base_g`,
+        // so `scale` converts a residual component back into the units of `x`.
+        let res = self.residual_at(x);
+        let (sum_sq, capped_sum_sq) =
+            (0..res.nrows()).fold((0.0_f64, 0.0_f64), |(raw_acc, capped_acc), i| {
+                let raw = res[i];
+                let scale = if i < g { 1.0 } else { self.bases[(i - g) % g] };
+                let tau = x[i] - raw * scale;
+                let capped = (x[i] - tau.clamp(self.lower[i], self.upper[i])) / scale;
+                (raw_acc + raw * raw, capped_acc + capped * capped)
+            });
+        let residual = sum_sq.sqrt();
+        let capped_residual = capped_sum_sq.sqrt();
 
         let rows = self
             .goods
@@ -319,7 +329,7 @@ impl<'a> PriceResidualJoint<'a> {
             })
             .collect();
 
-        (rows, residual, snapshot)
+        (rows, residual, capped_residual, snapshot)
     }
 }
 
@@ -501,6 +511,7 @@ pub(crate) fn equilibrate_joint(
             SolveOutcome {
                 goods: Vec::new(),
                 residual: 0.0,
+                capped_residual: 0.0,
                 status: SolveStatus::Converged,
                 relative: Vec::new(),
                 building_revenues: Vec::new(),
@@ -516,6 +527,7 @@ pub(crate) fn equilibrate_joint(
             SolveOutcome {
                 goods: Vec::new(),
                 residual: f64::INFINITY,
+                capped_residual: f64::INFINITY,
                 status: SolveStatus::Failed,
                 relative: Vec::new(),
                 building_revenues: Vec::new(),
@@ -604,18 +616,19 @@ pub(crate) fn equilibrate_joint(
     };
 
     x.clone_from(outcome.param());
-    let (rows, residual, snapshot) = problem.evaluate(&x);
+    let (rows, residual, capped_residual, snapshot) = problem.evaluate(&x);
     let building_revenues =
         crate::report::building_revenues_from_cache(cache, defs, &rows, Some(&snapshot));
 
-    // `SolveStatus::Converged` means market-clearing residual ‖R‖ < eps (same as
-    // nested). Basin may stop at a face-active KKT with ‖R‖ still large when
-    // unclipped τ lies outside the price box — that is intended (disequilibrium /
-    // capped prices; see docs/prices-equilibrium.md). Map that to MaxIters, not Failed.
+    // Basin is the authority on whether it reached a constrained optimum. The raw
+    // ‖R‖ stays large whenever unclipped τ lies outside the price box (capped /
+    // disequilibrium prices; see docs/prices-equilibrium.md), so it is the capped
+    // residual that says whether the answer matches the game's price rule.
     let status = match outcome.reason {
         TerminationReason::SolverFailed => SolveStatus::Failed,
-        _ if residual <= opts.residual_eps => SolveStatus::Converged,
-        // Backstop, not convergence: no stationarity and no cleared market.
+        TerminationReason::SolverConverged => SolveStatus::Converged,
+        // Backstop, not convergence: the solve stopped improving without reaching
+        // first-order optimality.
         TerminationReason::NoImprovement => SolveStatus::Stalled,
         _ => SolveStatus::MaxIters,
     };
@@ -624,6 +637,7 @@ pub(crate) fn equilibrate_joint(
         SolveOutcome {
             goods: rows,
             residual,
+            capped_residual,
             status,
             relative: (0..g).map(|i| x[i]).collect(),
             building_revenues,

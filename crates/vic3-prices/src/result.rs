@@ -67,7 +67,13 @@ pub struct SolveStats {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SolveOpts {
-    /// Residual threshold for [`SolveStatus::Converged`] (I5). Default `1e-6`.
+    /// Reference threshold for judging [`PricesResult::capped_residual`].
+    /// Default `1e-6`.
+    ///
+    /// No longer decides [`SolveStatus`], which now reports Basin's own
+    /// termination reason rather than a residual test layered on top. Kept as the
+    /// documented "close enough" bar for callers comparing `capped_residual`, and
+    /// used for the degenerate `price_range == 0` case where no solver runs.
     #[serde(default = "default_residual_eps")]
     pub residual_eps: f64,
     /// Combined successive-substitution + Basin iteration cap. Default `100`.
@@ -210,18 +216,23 @@ impl From<WhatIfOpts> for WorldDelta {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SolveStatus {
-    /// Residual below [`SolveOpts::residual_eps`]: orders clear inside the price box.
+    /// Basin stopped at a constrained optimum (its own `SolverConverged`:
+    /// first-order optimality on the box).
+    ///
+    /// This is the *solver's* notion, reported as-is. It bounds neither
+    /// [`PricesResult::residual`] (goods pinned at a price cap keep that large by
+    /// construction) nor [`PricesResult::capped_residual`] (the joint strategy can
+    /// converge ~1e-2 from the game's price rule, lacking the
+    /// successive-substitution polish). Judge the answer with `capped_residual`.
     Converged,
-    /// Iteration budget exhausted, or Basin stopped at a face-active KKT with
-    /// residual still ≥ ε. The latter is expected when unclipped target relative
-    /// price τ lies outside `[1±ρ]` (capped / disequilibrium clearing).
+    /// Basin hit its iteration budget without reaching a constrained optimum.
+    /// [`PricesResult::capped_residual`] says how far off the answer is.
     MaxIters,
-    /// **Not a successful solve.** The stall backstop stopped the run: the
-    /// iterate stopped improving without reaching either `residual_eps` or
-    /// first-order stationarity, so this is neither a cleared market nor a KKT
-    /// point — the prices are wherever the solver gave up. Distinguished from
-    /// [`Self::MaxIters`] because the budget was *not* the binding constraint;
-    /// raising `max_iters` will not help, the solve is degenerate.
+    /// **Not a successful solve.** Basin's stall backstop fired: the iterate
+    /// stopped improving without reaching first-order optimality, so the prices
+    /// are wherever the solver gave up. Distinguished from [`Self::MaxIters`]
+    /// because the budget was *not* the binding constraint — raising `max_iters`
+    /// will not help. [`PricesResult::capped_residual`] says how far off it is.
     Stalled,
     /// Basin reported failure and successive substitution did not recover.
     Failed,
@@ -833,8 +844,23 @@ fn materialize_state_pop(tables: &EmitTables, row: &CompactStatePop) -> StatePop
 #[derive(Debug, Clone, PartialEq)]
 pub struct SolveOutcome {
     pub goods: Vec<GoodPrice>,
-    /// `‖r − r_formula(orders(r))‖₂`. Always present (I5).
+    /// `‖r − τ_unclipped‖₂`, the solver's own objective value.
+    ///
+    /// **Diagnostic only — do not depend on its meaning.** τ is deliberately
+    /// *unclipped* so the optimizer has a gradient toward the price caps, which
+    /// means this is the distance to a target that may lie outside the price box
+    /// and so has no zero point: a perfect solve on a save with capped goods
+    /// still scores large. Use [`Self::capped_residual`] to judge an answer.
     pub residual: f64,
+    /// `‖r − clamp(τ_unclipped, 1−ρ, 1+ρ)‖₂`: distance to the price the game
+    /// itself would compute.
+    ///
+    /// `clamp(1 + ρ·ratio)` is identically `1 + ρ·clamp(ratio, −1, 1)`, the
+    /// game's own clipped price rule, so a good pinned at a cap whose target is
+    /// beyond it contributes zero — it is already at its best feasible value.
+    /// Unlike [`Self::residual`] this is zero at a correct answer, so it answers
+    /// "how far off are we" when the status is not `converged`.
+    pub capped_residual: f64,
     pub status: SolveStatus,
     /// Relative prices `price / base` in the same order as [`Self::goods`].
     pub relative: Vec<f64>,
@@ -878,8 +904,23 @@ pub struct PricesResult {
     pub state_needs: Vec<StateNeed>,
     /// Where the orders behind these prices came from.
     pub inputs: MarketInputs,
-    /// `‖r − r_formula(orders(r))‖₂`. Always present (I5).
+    /// `‖r − τ_unclipped‖₂`, the solver's own objective value.
+    ///
+    /// **Diagnostic only — do not depend on its meaning.** τ is deliberately
+    /// *unclipped* so the optimizer has a gradient toward the price caps, which
+    /// means this is the distance to a target that may lie outside the price box
+    /// and so has no zero point: a perfect solve on a save with capped goods
+    /// still scores large. Use [`Self::capped_residual`] to judge an answer.
     pub residual: f64,
+    /// `‖r − clamp(τ_unclipped, 1−ρ, 1+ρ)‖₂`: distance to the price the game
+    /// itself would compute.
+    ///
+    /// `clamp(1 + ρ·ratio)` is identically `1 + ρ·clamp(ratio, −1, 1)`, the
+    /// game's own clipped price rule, so a good pinned at a cap whose target is
+    /// beyond it contributes zero — it is already at its best feasible value.
+    /// Unlike [`Self::residual`] this is zero at a correct answer, so it answers
+    /// "how far off are we" when the status is not `converged`.
+    pub capped_residual: f64,
     pub status: SolveStatus,
     pub limitations: Vec<String>,
     /// Relative prices `price / base` in the same order as [`Self::goods`].

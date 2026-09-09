@@ -56,6 +56,7 @@ pub(crate) fn report_from_solve(
         state_needs: detail.state_needs,
         inputs,
         residual: outcome.residual,
+        capped_residual: outcome.capped_residual,
         status: outcome.status,
         limitations: solve_limitations(),
         relative: outcome.relative.clone(),

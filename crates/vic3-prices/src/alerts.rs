@@ -2373,6 +2373,7 @@ mod tests {
             }],
             inputs: MarketInputs::default(),
             residual: 0.0,
+            capped_residual: 0.0,
             status: SolveStatus::Converged,
             limitations: vec![
                 "Employment, wages, and trade volumes are frozen except explicit what-if deltas."
