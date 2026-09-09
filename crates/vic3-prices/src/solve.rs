@@ -4,9 +4,12 @@
 //!
 //! 1. Build access-scaled frozen non-pop orders and state shops (pops at local
 //!    prices; buildings + post-1.9 trade frozen).
-//! 2. If a valid `warm_rel` is provided, use it as the starting point. Otherwise,
-//!    warm-start by interpolating towards the unclipped target relative price
-//!    using successive substitution: `r ← (1−α)r + α τ(c(r))` (where `α = 0.5`).
+//! 2. Warm-start by interpolating towards the unclipped target relative price
+//!    using successive substitution: `r ← (1−α)r + α τ(c(r))` (where `α = 0.5`),
+//!    starting from a valid `warm_rel` when one is provided and from `1.0`
+//!    otherwise. Seeding the iteration is worth far more than skipping it: the
+//!    fixed point contracts cheaply, while every iteration handed back to TRF
+//!    costs a Jacobian and a linear solve.
 //! 3. Run the Basin trust-region-reflective (TRF) optimizer to minimize the
 //!    difference between the current relative prices and the target prices
 //!    (`‖r − τ(orders(r))‖²`), bounded by the allowed price range.
@@ -261,12 +264,11 @@ fn equilibrate_nested(
     };
 
     let mut rel = vec![1.0; n];
-    let mut warm_iters = opts.max_iters.clamp(1, 16);
+    let warm_iters = opts.max_iters.clamp(1, 16);
     if let Some(warm) = opts.warm_rel.as_ref() {
         if warm.len() == n {
             rel.clone_from(warm);
             problem.clamp_rel(&mut rel);
-            warm_iters = 0;
         }
     }
     if warm_iters > 0 {

@@ -645,12 +645,15 @@ pub fn loaded_plan_json(plan_opts_json: &str) -> Result<String, ApiError> {
     let goal = vic3_planning::parse(&plan_opts.goal)?;
     with_loaded_analysis(|loaded| {
         let country = country_tag(&loaded.world)?;
-        let state = PlanningState::from_world_with_prices(
+        let mut state = PlanningState::from_world_with_prices(
             &loaded.world,
             country,
             &loaded.prices,
             &loaded.defs,
         )?;
+        if !loaded.prices.relative.is_empty() {
+            state.warm_relative = loaded.prices.relative.clone();
+        }
         let economy = EconomyContext::new(
             loaded.world.clone(),
             loaded.defs.clone(),
@@ -805,7 +808,10 @@ pub fn plan_json(
     let prices = solve(&world, &defs, solve_opts.clone());
     let country = country_tag(&world)?;
     drop(save);
-    let state = PlanningState::from_world_with_prices(&world, country, &prices, &defs)?;
+    let mut state = PlanningState::from_world_with_prices(&world, country, &prices, &defs)?;
+    if !prices.relative.is_empty() {
+        state.warm_relative = prices.relative.clone();
+    }
     let goal = vic3_planning::parse(&plan_opts.goal)?;
     let economy = EconomyContext::new(world, defs, solve_opts.clone());
     let result = vic3_planning::plan_with_economy(
