@@ -39,9 +39,10 @@
 #![allow(dead_code)] // some helpers are bag_rank / test-only today
 
 use crate::construction::{
-    allocation_cap_points_per_day, construction_add_for_cs_building, construction_eta_days,
-    construction_work_points_for_enqueue, government_construction_share_from_laws,
-    max_parallel_construction_jobs, ConstructionEtaMode, BUILDING_CONSTRUCTION_SECTOR,
+    allocation_cap_points_per_day, construction_add_for_cs_building, construction_add_from_methods,
+    construction_eta_days, construction_work_points_for_enqueue,
+    government_construction_share_from_laws, max_parallel_construction_jobs, ConstructionEtaMode,
+    BUILDING_CONSTRUCTION_SECTOR,
 };
 use crate::goals::{Goal, Rel, SimpleSubgoal};
 use crate::sim::{Action, EconomyContext, SimConfig};
@@ -554,16 +555,32 @@ impl<'a> CheapBagCurr<'a> {
 /// Sector).
 ///
 /// Walks the building’s default production methods, sums `output_qty * price`
-/// (current planning price, else defs base price). **Does not** subtract
-/// inputs, model staffing, or run a price/GDP solve -- emit recomputes after
-/// speculative complete.
+/// (current planning price, else defs base price). Does not model staffing or
+/// run a price/GDP solve -- emit recomputes after speculative complete.
 ///
 /// If the building is missing / yields nothing, falls back to a small fraction
 /// of `|state.gdp|` so ranking still has a positive credit.
 ///
+/// # Output-only is deliberate -- do not subtract inputs
+///
+/// `EconomyContext::modeled_gdp` sums `outputs * local_price` over owned
+/// buildings; input orders never enter it. Subtracting the input bill here
+/// would estimate **value added** -- a quantity no planner meter consumes --
+/// and then net it against a [`meter_gap_curr`] denominated in gross output.
+///
+/// It would also be wrong in a fixed direction rather than merely noisy. The
+/// penalty is the entire input bill on every consuming building, so extraction
+/// outranks manufacturing regardless of which actually raises modeled GDP more.
+/// And it inverts the sign of the real indirect effect: input demand pushes
+/// upstream prices up, which raises the revenue of existing domestic producers.
+/// Under this GDP definition input consumption is a small **positive** term,
+/// not a debit.
+///
 /// **Deficiencies vs emit / formal greedy** (keep in sync with bag-score comments):
 /// - Not a full price/GDP solve.
-/// - Ignores input costs, staffing, and market clearance.
+/// - Values output at pre-build prices; the added supply pushes that good’s own
+///   price down, so this over-credits.
+/// - Ignores staffing and market clearance.
 /// - Follow-on days after this credit can score **lower (better)** than this
 ///   guesstimate implies once real slots, prices, and greedy order apply.
 pub fn cheap_gdp_delta_guesstimate(
@@ -630,40 +647,18 @@ pub fn cheap_gdp_delta_guesstimate(
 /// Cheap analytic points delta from defs / world CS PM
 /// (`country_construction_add`). Emit and greedy rebuild use the real
 /// construction-point sync after the build completes instead of this estimate.
+///
+/// Reads `base_world` plus the branch's PM override rather than materializing
+/// `apply_planning_to_world` (a full `World` clone): only the Construction
+/// Sector row's production methods feed this number, and the add is per level,
+/// so building level deltas cannot change it.
 pub fn cheap_construction_sector_points_delta(
     state: &PlanningState,
     economy: &EconomyContext,
 ) -> f64 {
-    let world = economy.apply_planning_to_world(state);
-
-    let cs_type_id = economy.defs.building_index_of(BUILDING_CONSTRUCTION_SECTOR);
-
-    // Prefer the live CS building’s PM on the applied world when one exists.
-    let from_world_cs = world
-        .buildings
-        .iter()
-        .find(|building| cs_type_id.is_some_and(|id| building.building_type_id == id))
-        .and_then(|building| construction_add_for_cs_building(building, &economy.defs).ok());
-
-    // Else fall back to the first CS production method’s country_construction_add in defs.
-    let from_defs_pm = economy
-        .defs
-        .building_types
-        .get(BUILDING_CONSTRUCTION_SECTOR)
-        .and_then(|building_type| {
-            building_type
-                .production_method_groups
-                .iter()
-                .find_map(|group_id| {
-                    let pm_ids = economy.defs.production_method_groups.get(group_id)?;
-                    let pm_id = pm_ids.first()?;
-                    let pm = economy.defs.production_methods.get(pm_id)?;
-                    pm.country_construction_add
-                        .filter(|value| value.is_finite() && *value >= 0.0)
-                })
-        });
-
-    let add = from_world_cs.or(from_defs_pm).unwrap_or(0.0);
+    let add = branch_cs_construction_add(state, economy)
+        .or_else(|| defs_cs_construction_add(economy))
+        .unwrap_or(0.0);
     let share = government_construction_share_from_laws(state.laws.iter().map(String::as_str));
     let delta = add * share;
     if delta.is_finite() && delta > 0.0 {
@@ -671,6 +666,38 @@ pub fn cheap_construction_sector_points_delta(
     } else {
         0.0
     }
+}
+
+/// `country_construction_add` from the branch's first Construction Sector.
+///
+/// `None` when the base world has no Construction Sector. A branch that queued
+/// one has no row here, but `apply_planning_to_world` would have synthesized it
+/// from the first PM of each group -- exactly what [`defs_cs_construction_add`]
+/// walks, so the fallback yields the same add.
+fn branch_cs_construction_add(state: &PlanningState, economy: &EconomyContext) -> Option<f64> {
+    let cs_type_id = economy
+        .defs
+        .building_index_of(BUILDING_CONSTRUCTION_SECTOR)?;
+    let building = economy
+        .base_world
+        .buildings
+        .iter()
+        .find(|building| building.building_type_id == cs_type_id)?;
+    match state.pm_overrides.get(&building.id) {
+        Some(methods) => construction_add_from_methods(methods, &economy.defs),
+        None => construction_add_for_cs_building(building, &economy.defs).ok(),
+    }
+}
+
+/// `country_construction_add` from the first Construction Sector PM in defs.
+fn defs_cs_construction_add(economy: &EconomyContext) -> Option<f64> {
+    let defs = &economy.defs;
+    let building_type = defs.building_types.get(BUILDING_CONSTRUCTION_SECTOR)?;
+    let first_pm_per_group = building_type
+        .production_method_groups
+        .iter()
+        .filter_map(|group_id| defs.production_method_groups.get(group_id)?.first());
+    construction_add_from_methods(first_pm_per_group, defs)
 }
 
 /// Estimated calendar days to finish one newly queued building at the current
@@ -703,8 +730,11 @@ fn estimated_build_days(
 ///   Emit ([`emit_bag_score`]) runs a full residual on the completed world and
 ///   therefore sees post-complete GDP as well as throughput.
 /// - **Ordinary build:** estimated build days + follow-on days after crediting
-///   [`cheap_gdp_delta_guesstimate`] against the bag’s meter gap.
-/// - **Other actions:** `edge_days +` follow-on residual on the current state.
+///   [`cheap_gdp_delta_guesstimate`] against the bag’s meter gap -- but only
+///   when [`BagResidualCurr::allow_cheap_gdp_credit`] holds (GDP-only open
+///   leaves); otherwise the full follow-on residual stands.
+/// - **Other actions**, including `SwitchPm`: `edge_days +` follow-on residual
+///   on the current state, with no meter credit.
 ///
 /// Queue edges are often 0 calendar days; `build_days` stands in for completion
 /// time in the ranking key while path cost still uses the real 0-then-wait
@@ -717,8 +747,14 @@ fn estimated_build_days(
 ///   key (construction-goods demand can still move GDP; emit’s full residual
 ///   after speculative complete sees that). Also omits actual slots, CS finish
 ///   day, and a post-CS residual schedule (those appear on emit / greedy rebuild).
+///   With no throughput yet (`points_now ≈ 0`) there is no ratio to scale by, so
+///   the **first** CS gets an unscaled follow-on.
 /// - Ordinary builds: credits a cheap GDP guesstimate, not a full price/GDP
-///   solve.
+///   solve, and values output at pre-build prices (added supply would push that
+///   good’s own price down, so the credit runs high).
+/// - `SwitchPm` and other non-build actions get no credit at all. PM switches
+///   are 0-day, so every one of them scores exactly the follow-on residual and
+///   they tie; emit’s full solve is what actually separates them.
 /// - Bag does not re-run greedy; formal upper-bound rebuild does (and honors
 ///   in-flight CS).
 /// - The delayed / follow-on portion can score differently than this heuristic
@@ -929,6 +965,48 @@ mod tests {
         assert!(
             (points_delta - 5.0).abs() < 1e-9,
             "expected government share 1.0 * country_construction_add 5 -> 5, got {points_delta}"
+        );
+    }
+
+    /// A branch PM override on the Construction Sector must change the points delta.
+    ///
+    /// The delta reads `base_world` directly instead of materializing
+    /// `apply_planning_to_world`, so `pm_overrides` has to be applied by hand.
+    #[test]
+    fn cheap_cs_points_delta_uses_branch_pm_override() {
+        use vic3_defs::ProductionMethod;
+
+        let mut mini = logging_and_cs_economy();
+        let alt_pm = "pm_steel_frame_buildings";
+        mini.economy.defs.production_methods.insert(
+            alt_pm.into(),
+            ProductionMethod {
+                name: alt_pm.into(),
+                country_construction_add: Some(9.0),
+                ..ProductionMethod::default()
+            },
+        );
+        let cs_type_id = mini
+            .economy
+            .defs
+            .building_index_of(BUILDING_CONSTRUCTION_SECTOR)
+            .expect("construction sector type");
+        let cs_id = mini
+            .economy
+            .base_world
+            .buildings
+            .iter()
+            .find(|building| building.building_type_id == cs_type_id)
+            .expect("construction sector building")
+            .id;
+
+        let mut state_curr = ger_state().gdp(1000.0).points(5.0).wood_price(30.0).get();
+        state_curr.pm_overrides.insert(cs_id, vec![alt_pm.into()]);
+
+        let points_delta = cheap_construction_sector_points_delta(&state_curr, &mini.economy);
+        assert!(
+            (points_delta - 9.0).abs() < 1e-9,
+            "override PM add 9 should win over the base CS PM add 5, got {points_delta}"
         );
     }
 
