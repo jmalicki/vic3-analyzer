@@ -26,6 +26,7 @@ const summary: SaveSummary = {
 const prices: PricesResult = {
   goods: [{ name: 'iron', base: 40, price: 42, buy: 1, sell: 1 }],
   residual: 0,
+  capped_residual: 0,
   status: 'converged',
   limitations: [],
 }

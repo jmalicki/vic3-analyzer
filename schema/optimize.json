@@ -160,12 +160,17 @@
       "oneOf": [
         {
           "const": "converged",
-          "description": "Residual below [`SolveOpts::residual_eps`]: orders clear inside the price box.",
+          "description": "Basin stopped at a constrained optimum (its own `SolverConverged`:\nfirst-order optimality on the box).\n\nThis is the *solver's* notion, reported as-is. It bounds neither\n[`PricesResult::residual`] (goods pinned at a price cap keep that large by\nconstruction) nor [`PricesResult::capped_residual`] (the joint strategy can\nconverge ~1e-2 from the game's price rule, lacking the\nsuccessive-substitution polish). Judge the answer with `capped_residual`.",
           "type": "string"
         },
         {
           "const": "max_iters",
-          "description": "Iteration budget exhausted, or Basin stopped at a face-active KKT with\nresidual still ≥ ε. The latter is expected when unclipped target relative\nprice τ lies outside `[1±ρ]` (capped / disequilibrium clearing).",
+          "description": "Basin hit its iteration budget without reaching a constrained optimum.\n[`PricesResult::capped_residual`] says how far off the answer is.",
+          "type": "string"
+        },
+        {
+          "const": "stalled",
+          "description": "**Not a successful solve.** Basin's stall backstop fired: the iterate\nstopped improving without reaching first-order optimality, so the prices\nare wherever the solver gave up. Distinguished from [`Self::MaxIters`]\nbecause the budget was *not* the binding constraint — raising `max_iters`\nwill not help. [`PricesResult::capped_residual`] says how far off it is.",
           "type": "string"
         },
         {
