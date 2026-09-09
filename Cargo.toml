@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/basin-arrowhead",
     "crates/vic3-load",
     "crates/vic3-defs",
     "crates/vic3-prices",
@@ -25,7 +26,9 @@ rust-version = "1.98"
 [workspace.dependencies]
 anyhow = "1"
 arc-swap = "1.9"
-basin = { version = "1.7", features = ["faer"] }
+# feat/pub-trf-damping-traits: public damping traits + optional BCL reflection
+basin = { git = "https://github.com/jmalicki/basin", rev = "c4589c092035e8282b0945ef6a9e8acd9a7079b6", features = ["faer"] }
+basin-arrowhead = { path = "crates/basin-arrowhead" }
 faer = "0.24"
 bcdec_rs = "0.2"
 chumsky = "0.13"

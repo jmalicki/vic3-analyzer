@@ -1,0 +1,18 @@
+[package]
+name = "basin-arrowhead"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+description = "Block-arrowhead Jacobian / Gram for Basin Trf with G-hub Schur SPD solves"
+
+[lints]
+workspace = true
+
+[dependencies]
+basin.workspace = true
+faer.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
