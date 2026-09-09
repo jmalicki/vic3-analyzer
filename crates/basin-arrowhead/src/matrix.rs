@@ -491,8 +491,30 @@ impl MatTransposeVec<Col<f64>> for ArrowheadMat {
     fn mat_transpose_vec(&self, x: &Col<f64>) -> Col<f64> {
         assert_eq!(self.mode, Mode::Jacobian);
         assert_eq!(x.nrows(), self.n());
-        let n = self.n();
-        Col::from_fn(n, |j| (0..n).map(|i| self.get(i, j) * x[i]).sum())
+        let g = self.g;
+        let mut y = Col::<f64>::zeros(self.n());
+        for j in 0..g {
+            let mut sum = 0.0;
+            for i in 0..g {
+                sum += self.market_r[(i, j)] * x[i];
+            }
+            y[j] = sum;
+        }
+        for (st, (ar, ac)) in self.state_r.iter().zip(self.state_sigma.iter()).enumerate() {
+            let base = g + st * g;
+            let sigma = &self.market_sigma[st];
+            for j in 0..g {
+                let mut hub = 0.0;
+                let mut block = 0.0;
+                for i in 0..g {
+                    hub += ar[(i, j)] * x[base + i];
+                    block += sigma[(i, j)] * x[i] + ac[(i, j)] * x[base + i];
+                }
+                y[j] += hub;
+                y[base + j] = block;
+            }
+        }
+        y
     }
 }
 
@@ -755,21 +777,28 @@ mod tests {
 
     #[test]
     fn mat_transpose_vec_matches_dense() {
-        let jac = random_jacobian(3, 2, 2);
-        let j = jac.to_dense();
-        let r = Col::from_fn(jac.n(), |i| (i as f64 + 1.0) * 0.07);
-        let g = jac.mat_transpose_vec(&r);
-        let mut g_dense = Col::<f64>::zeros(jac.n());
-        matmul(
-            g_dense.as_mut().as_mat_mut(),
-            Accum::Replace,
-            j.transpose(),
-            r.as_mat(),
-            1.0,
-            Par::Seq,
-        );
-        for i in 0..jac.n() {
-            assert!((g[i] - g_dense[i]).abs() < 1e-12, "col {i}");
+        // Several state counts: the block walk indexes each state's slice off
+        // `g + st * g`, so a base-offset slip only shows up past the first block.
+        for (g_dim, states) in [(3, 1), (3, 2), (4, 5)] {
+            let jac = random_jacobian(g_dim, states, 2);
+            let j = jac.to_dense();
+            let r = Col::from_fn(jac.n(), |i| (i as f64 + 1.0) * 0.07);
+            let g = jac.mat_transpose_vec(&r);
+            let mut g_dense = Col::<f64>::zeros(jac.n());
+            matmul(
+                g_dense.as_mut().as_mat_mut(),
+                Accum::Replace,
+                j.transpose(),
+                r.as_mat(),
+                1.0,
+                Par::Seq,
+            );
+            for i in 0..jac.n() {
+                assert!(
+                    (g[i] - g_dense[i]).abs() < 1e-12,
+                    "g={g_dim} s={states} col {i}"
+                );
+            }
         }
     }
 
