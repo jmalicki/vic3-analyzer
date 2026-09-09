@@ -71,49 +71,49 @@ impl fmt::Display for BuildingTypeId {
 /// [`crate::load_from_path`], [`crate::DefsBuilder`], [`crate::decode_blob`], or
 /// a struct literal — has to remember to populate it.
 ///
-/// `building_types_order` is a public field, so it can also grow after the map
-/// was built. Lookups therefore only trust the map while it still agrees with
-/// the order table and otherwise fall back to a scan, and the `&mut GameDefs`
-/// helpers that edit the order drop the map to restore O(1). A stale map can
-/// never hand out a wrong index.
+/// `building_types_order` is a public field, so it can also be edited after the
+/// map was built. The map is therefore never taken at its word: a hit counts
+/// only while it still names the same building type, and a miss falls back to
+/// the scan, because a miss cannot distinguish "absent" from "the order changed
+/// under us". A stale map can only cost a scan, never return a wrong index. The
+/// `&mut GameDefs` helpers that edit the order drop the map to keep misses O(1).
 ///
 /// [`OnceLock`] rather than a lock: this is written once and read constantly, and
 /// [`crate::GameDefs`] has to stay `Sync` for the `Arc<GameDefs>` that
 /// `vic3-sql` hands to DataFusion providers.
 ///
+/// Assumes each script id appears in `building_types_order` at most once, which
+/// every writer maintains and [`BuildingTypeId`] already requires of a dense
+/// index. Given duplicates, a validated hit can report a later position than
+/// [`Iterator::position`] would; the debug assertion catches that.
+///
 /// Derived data: skipped by serde, cloned by handle, and always equal.
 #[derive(Debug, Default, Clone)]
-pub struct BuildingTypeIndex(OnceLock<BuiltIndex>);
-
-#[derive(Debug, Clone)]
-struct BuiltIndex {
-    /// Length of the `building_types_order` this map was built from.
-    order_len: usize,
-    by_script_id: Arc<HashMap<String, BuildingTypeId>>,
-}
+pub struct BuildingTypeIndex(OnceLock<Arc<HashMap<String, BuildingTypeId>>>);
 
 impl BuildingTypeIndex {
     /// Position of `building_type` in `order`.
     ///
-    /// Equivalent to `order.iter().position(|id| id == building_type)`, in O(1).
+    /// Equivalent to `order.iter().position(|id| id == building_type)`, and O(1)
+    /// whenever the map is current.
     pub(crate) fn position(&self, order: &[String], building_type: &str) -> Option<BuildingTypeId> {
-        let built = self.0.get_or_init(|| BuiltIndex::build(order));
-        let found = if built.order_len == order.len() {
-            match built.by_script_id.get(building_type).copied() {
-                // Trust a hit only while it still names the same building type.
+        let found = match self
+            .0
+            .get_or_init(|| Arc::new(build(order)))
+            .get(building_type)
+        {
+            // Trust a hit only while it still names the same building type.
+            Some(&id)
+                if order
+                    .get(id.as_usize())
+                    .is_some_and(|name| name == building_type) =>
+            {
                 Some(id)
-                    if order
-                        .get(id.as_usize())
-                        .is_some_and(|name| name == building_type) =>
-                {
-                    Some(id)
-                }
-                Some(_) => scan(order, building_type),
-                None => None,
             }
-        } else {
-            // `building_types_order` changed after the map was built.
-            scan(order, building_type)
+            // A miss means either the id is absent or `building_types_order` was
+            // edited after the map was built. Only a scan tells them apart, so
+            // never report a miss on the map's word alone.
+            _ => scan(order, building_type),
         };
         debug_assert_eq!(
             found,
@@ -125,26 +125,22 @@ impl BuildingTypeIndex {
 
     /// Drop the map so the next lookup rebuilds it.
     ///
-    /// Call after editing [`crate::GameDefs::building_types_order`].
+    /// Purely an optimization — lookups stay correct against a stale map — but
+    /// it keeps misses off the scan path after the order changes.
     pub(crate) fn clear(&mut self) {
         self.0.take();
     }
 }
 
-impl BuiltIndex {
-    fn build(order: &[String]) -> Self {
-        let mut by_script_id = HashMap::with_capacity(order.len());
-        for (position, id) in order.iter().enumerate() {
-            // First one wins, matching the `position()` scan this replaces.
-            by_script_id
-                .entry(id.clone())
-                .or_insert_with(|| BuildingTypeId::from_usize(position));
-        }
-        Self {
-            order_len: order.len(),
-            by_script_id: Arc::new(by_script_id),
-        }
+fn build(order: &[String]) -> HashMap<String, BuildingTypeId> {
+    let mut by_script_id = HashMap::with_capacity(order.len());
+    for (position, id) in order.iter().enumerate() {
+        // First one wins, matching the `position()` scan this replaces.
+        by_script_id
+            .entry(id.clone())
+            .or_insert_with(|| BuildingTypeId::from_usize(position));
     }
+    by_script_id
 }
 
 fn scan(order: &[String], building_type: &str) -> Option<BuildingTypeId> {
@@ -269,6 +265,33 @@ mod tests {
         assert_eq!(
             defs.building_index_of("building_zzz"),
             Some(BuildingTypeId::from_usize(1)),
+        );
+    }
+
+    /// `building_types_order` is public, so an entry can be swapped for a new
+    /// script id without changing the length — invisible to the built map.
+    /// The replacement still has to resolve, and the id it replaced must not.
+    #[test]
+    fn index_follows_a_same_length_edit_to_the_public_order() {
+        let mut defs = GameDefs::default();
+        defs.ensure_building_type("building_a");
+        defs.ensure_building_type("building_b");
+        // Build the map against the original order.
+        assert_eq!(
+            defs.building_index_of("building_b"),
+            Some(BuildingTypeId::from_usize(1)),
+        );
+
+        defs.building_types_order[1] = "building_c".into();
+
+        assert_eq!(
+            defs.building_index_of("building_c"),
+            Some(BuildingTypeId::from_usize(1)),
+        );
+        assert_eq!(defs.building_index_of("building_b"), None);
+        assert_eq!(
+            defs.building_index_of("building_a"),
+            Some(BuildingTypeId::from_usize(0)),
         );
     }
 
