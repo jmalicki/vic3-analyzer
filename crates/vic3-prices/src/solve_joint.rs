@@ -53,10 +53,13 @@ use crate::formula::{local_price, target_price, unclipped_target_relative_price}
 use crate::result::{GoodPrice, SolveOpts, SolveOutcome, SolveStats, SolveStatus};
 use crate::shop_cache::ShopCache;
 use crate::solve::{
-    empty_stats, market_goods, ShopSnapshot, KKT_TOL, STALL_PATIENCE, STALL_REL_TOL,
+    empty_stats, kkt_tol, market_goods, ShopSnapshot, STALL_PATIENCE, STALL_REL_TOL,
 };
 
-/// Central finite-difference step for Jacobian columns that use explicit FD.
+/// Finite-difference step for Jacobian columns that use explicit FD.
+///
+/// As in the nested solver, this sets the accuracy ceiling: the convergence
+/// tolerance is derived from it via [`kkt_tol`], so the two are linked.
 const FD_STEP: f64 = 1e-7;
 
 /// Basin problem: joint market + per-state pure-state price residuals.
@@ -582,10 +585,13 @@ pub(crate) fn equilibrate_joint(
     // still have large scaled KKT drive Coleman–Li `d² → ∞` and `SolverFailed`.
     // Stationarity is the convergence test; the stall counter only catches solves
     // that never get there, and reports itself as unsuccessful.
-    let stall_tol = STALL_REL_TOL * problem.cost_scale(&x);
+    // `cost = ½‖r‖²`, so `‖r‖ = sqrt(2·cost)`.
+    let cost = problem.cost_scale(&x);
+    let stall_tol = STALL_REL_TOL * cost;
+    let grad_tol = kkt_tol(FD_STEP, (2.0 * cost).sqrt());
     let result = Executor::from_start(
         problem.clone(),
-        Trf::new().with_reflection(true).with_tol_grad(KKT_TOL),
+        Trf::new().with_reflection(true).with_tol_grad(grad_tol),
         x.clone(),
     )
     .max_iter(basin_iters)

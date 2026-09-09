@@ -55,21 +55,47 @@ const FD_STEP: f64 = 1e-7;
 const LOCAL_ITERS: u32 = 16;
 const LOCAL_EPS: f64 = 1e-10;
 
-/// First-order optimality tolerance: the primary convergence test.
+/// Margin over the finite-difference gradient floor in [`kkt_tol`].
+///
+/// Small on purpose: large enough to clear the noise (the floor is an
+/// order-of-magnitude estimate, not a bound), small enough that the stationarity
+/// claim still means something.
+pub(crate) const KKT_FD_SAFETY: f64 = 4.0;
+
+/// First-order optimality tolerance: the primary convergence test, **derived
+/// from the finite-difference step** rather than chosen independently.
 ///
 /// TRF stops with [`TerminationReason::SolverConverged`] once the Coleman–Li
 /// scaled KKT norm `‖v ⊙ Jᵀr‖_∞` falls to this bound. That measure is zero at
-/// any KKT point, interior *or* face-active, and it costs nothing: TRF already
-/// has `J` and `r` in hand each iteration. Plain `‖∇f‖` would be the wrong test
-/// here, since the gradient need not vanish at a constrained optimum — it points
-/// into the active face, the normal end state once goods pin to the price caps.
+/// any KKT point, interior *or* face-active, and costs nothing: TRF already has
+/// `J` and `r` in hand. Plain `‖∇f‖` would be the wrong test, since the gradient
+/// need not vanish at a constrained optimum — it points into the active face,
+/// the normal end state once goods pin to the price caps.
 ///
-/// Set explicitly rather than left implicit: this is the definition of a
-/// converged solve, and it is the same value scipy's `least_squares` uses for
-/// `gtol`. Kept tight deliberately — stopping on a loose stationarity claim
-/// would silently degrade prices, whereas failing to reach it costs only the
-/// iterations the stall backstop then trims.
-pub(crate) const KKT_TOL: f64 = 1e-8;
+/// # Why this is tied to `FD_STEP`
+///
+/// Both Jacobians here are *forward* finite differences (see [`FD_STEP`] and its
+/// twin in `solve_joint`), so each entry carries an absolute error of about
+/// `FD_STEP/2` from truncation. The gradient `Jᵀr` inherits roughly
+/// `‖r‖ · FD_STEP` of that error, and **no stationarity measure below that floor
+/// is meaningful — it is finite-difference noise, not optimality.** Asking for a
+/// tighter bound than the Jacobian can resolve just guarantees the solve never
+/// certifies, burns its whole budget, and reports a stall it cannot escape.
+///
+/// Measured on Prussia 1836: `‖r‖ ≈ 16.5`, so the predicted floor is
+/// `16.5 · 1e-7 ≈ 1.7e-6`, and sweeping the tolerance brackets the actual
+/// plateau of the scaled KKT norm to `(2e-6, 5e-6]`. Prediction and measurement
+/// agree within 2x, which is why the two constants are wired together here.
+///
+/// **Tightening convergence therefore requires tightening the Jacobian**, by
+/// shrinking `FD_STEP`, moving to central differences, or supplying an analytic
+/// Jacobian. Lowering this alone would be a lie.
+///
+/// `residual_norm` floors at `1.0` so a nearly cleared market (`‖r‖ → 0`) cannot
+/// drive the tolerance below the absolute FD noise level.
+pub(crate) fn kkt_tol(fd_step: f64, residual_norm: f64) -> f64 {
+    KKT_FD_SAFETY * fd_step * residual_norm.max(1.0)
+}
 
 /// Consecutive non-improving TRF iterations tolerated by the stall backstop.
 ///
@@ -252,10 +278,13 @@ fn equilibrate_nested(
         let basin_iters = u64::from(opts.max_iters.saturating_sub(warm_iters));
         // Stationarity is the convergence test; the stall counter only catches
         // solves that never get there, and reports itself as unsuccessful.
-        let stall_tol = STALL_REL_TOL * problem.cost_scale(&rel);
+        // `cost = ½‖r‖²`, so `‖r‖ = sqrt(2·cost)`.
+        let cost = problem.cost_scale(&rel);
+        let stall_tol = STALL_REL_TOL * cost;
+        let grad_tol = kkt_tol(FD_STEP, (2.0 * cost).sqrt());
         match Executor::from_start(
             problem.clone(),
-            Trf::new().with_tol_grad(KKT_TOL),
+            Trf::new().with_tol_grad(grad_tol),
             rel.clone(),
         )
         .max_iter(basin_iters)
