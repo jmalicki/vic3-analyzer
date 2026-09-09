@@ -156,6 +156,7 @@ impl StagingDefs {
             pop_types: self.pop_types,
             production_method_groups: self.production_method_groups,
             technologies: self.technologies,
+            building_type_index: crate::BuildingTypeIndex::default(),
         };
         crate::loc::polish_labels(&mut defs.labels);
         let good_index: HashMap<String, GoodId> = defs

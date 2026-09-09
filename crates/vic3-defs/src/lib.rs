@@ -66,7 +66,7 @@ mod substitution;
 mod types;
 
 pub use blob::{decode_blob, encode_blob, BLOB_VERSION};
-pub use building_types::BuildingTypeId;
+pub use building_types::{BuildingTypeId, BuildingTypeIndex};
 pub use coa::{select_coa, select_flag_coa};
 pub use error::DefsError;
 pub use goods::{GoodId, GoodsVec};

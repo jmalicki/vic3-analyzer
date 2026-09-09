@@ -143,6 +143,7 @@ mod tests {
             pop_types: BTreeMap::new(),
             production_method_groups: BTreeMap::new(),
             technologies: BTreeMap::new(),
+            building_type_index: crate::BuildingTypeIndex::default(),
         };
         defs.rebuild_package_ladder();
         defs
@@ -154,6 +155,30 @@ mod tests {
         let bytes = encode_blob(&defs).expect("encode");
         let decoded = decode_blob(&bytes).expect("decode");
         assert_eq!(decoded, defs);
+    }
+
+    /// The building type index is `#[serde(skip)]`, so a decoded blob starts
+    /// with an empty one. Lookups have to build it on demand instead of
+    /// reporting every building type as unknown.
+    #[test]
+    fn decoded_blob_resolves_building_types() {
+        let mut defs = sample_defs();
+        defs.ensure_building_type("building_shipyard");
+        defs.ensure_building_type("building_wheat_farm");
+        let bytes = encode_blob(&defs).expect("encode");
+
+        let decoded = decode_blob(&bytes).expect("decode");
+
+        assert_eq!(
+            decoded.building_index_of("building_wheat_farm"),
+            defs.building_index_of("building_wheat_farm"),
+        );
+        assert_eq!(
+            decoded.resolve_building_type_index("building_shipyards"),
+            decoded.building_index_of("building_shipyard"),
+            "aliases must resolve through a freshly decoded blob too",
+        );
+        assert_eq!(decoded.building_index_of("building_not_a_thing"), None);
     }
 
     #[test]

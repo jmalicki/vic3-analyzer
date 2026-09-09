@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BuildingTypeId, GoodId, NeedId, NeedsVec, DEFAULT_PRICE_RANGE};
+use crate::{BuildingTypeId, BuildingTypeIndex, GoodId, NeedId, NeedsVec, DEFAULT_PRICE_RANGE};
 
 /// Parsed Victoria 3 definitions used by the price solver and wasm UI.
 ///
@@ -76,6 +76,12 @@ pub struct GameDefs {
     /// Empty when those files were not in the selected game files.
     #[serde(default)]
     pub technologies: BTreeMap<String, Technology>,
+    /// O(1) lookup table for [`Self::building_types_order`], built on demand.
+    ///
+    /// Derived from `building_types_order`; not part of the definition data and
+    /// never serialized. Public only so struct literals keep working.
+    #[serde(skip)]
+    pub building_type_index: BuildingTypeIndex,
 }
 
 impl Default for GameDefs {
@@ -101,6 +107,7 @@ impl Default for GameDefs {
             pop_types: BTreeMap::new(),
             production_method_groups: BTreeMap::new(),
             technologies: BTreeMap::new(),
+            building_type_index: BuildingTypeIndex::default(),
         }
     }
 }
@@ -123,11 +130,11 @@ impl GameDefs {
     }
 
     /// Index of `building_type` in [`Self::building_types_order`], if known.
+    ///
+    /// O(1) via [`Self::building_type_index`].
     pub fn building_index_of(&self, building_type: &str) -> Option<BuildingTypeId> {
-        self.building_types_order
-            .iter()
-            .position(|id| id == building_type)
-            .map(BuildingTypeId::from_usize)
+        self.building_type_index
+            .position(&self.building_types_order, building_type)
     }
 
     /// Resolve a building type script key, including known Paradox aliases.
@@ -249,6 +256,8 @@ impl GameDefs {
     /// is for tests that assemble a `building_types` map after the fact.
     pub fn rebuild_building_types_order(&mut self) {
         self.building_types_order = self.building_types.keys().cloned().collect();
+        // Reordering can keep the length, which the index cannot detect itself.
+        self.building_type_index.clear();
     }
 
     /// Insert a minimal building type if missing, then return its dense index.
@@ -261,7 +270,7 @@ impl GameDefs {
             return idx;
         }
         if self.building_types.contains_key(building_type) {
-            self.building_types_order.push(building_type.to_string());
+            self.push_building_type_order(building_type);
             return BuildingTypeId::from_usize(self.building_types_order.len() - 1);
         }
         self.building_types.insert(
@@ -274,8 +283,17 @@ impl GameDefs {
                 required_construction: None,
             },
         );
-        self.building_types_order.push(building_type.to_string());
+        self.push_building_type_order(building_type);
         BuildingTypeId::from_usize(self.building_types_order.len() - 1)
+    }
+
+    /// Append `building_type` to [`Self::building_types_order`] and drop the
+    /// stale [`Self::building_type_index`].
+    ///
+    /// Prefer this over pushing onto the field directly so lookups stay O(1).
+    pub fn push_building_type_order(&mut self, building_type: &str) {
+        self.building_types_order.push(building_type.to_string());
+        self.building_type_index.clear();
     }
 }
 

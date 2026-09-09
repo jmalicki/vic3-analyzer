@@ -162,11 +162,6 @@ pub(crate) fn default_building_io_per_level(
     (inputs, outputs)
 }
 
-fn row_matches_building_type(defs: &GameDefs, row: &WorldBuilding, building: &str) -> bool {
-    defs.resolve_building_type_index(building)
-        .is_some_and(|want| row.building_type_id == want)
-}
-
 /// Synthetic fully-staffed row for a type absent from the base world (greenfield).
 fn synthetic_world_building(
     defs: &GameDefs,
@@ -337,11 +332,11 @@ impl EconomyContext {
             if *levels == 0 {
                 continue;
             }
+            // Resolve once per delta, not once per world row.
+            let want = self.defs.resolve_building_type_index(building);
             let mut found = false;
             for row in &mut world.buildings {
-                if row_matches_building_type(&self.defs, row, building)
-                    && row.state == Some(*state_id)
-                {
+                if Some(row.building_type_id) == want && row.state == Some(*state_id) {
                     row.add_extra_levels(*levels);
                     found = true;
                 }
@@ -378,11 +373,11 @@ impl EconomyContext {
             if *levels == 0 {
                 continue;
             }
+            // Resolve once per delta, not once per world row.
+            let want = self.defs.resolve_building_type_index(building);
             let mut found = false;
             for row in &self.base_world.buildings {
-                if row_matches_building_type(&self.defs, row, building)
-                    && row.state == Some(*state_id)
-                {
+                if Some(row.building_type_id) == want && row.state == Some(*state_id) {
                     found = true;
                     let (old_i, old_o) = row.goods_io(&self.defs);
                     let mut bumped = row.clone();
@@ -485,10 +480,12 @@ impl EconomyContext {
         if owned.is_empty() {
             return Vec::new();
         }
+        // Resolve once, not once per world row.
+        let want = self.defs.resolve_building_type_index(building);
         let mut have: BTreeSet<u32> = world
             .buildings
             .iter()
-            .filter(|row| row_matches_building_type(&self.defs, row, building))
+            .filter(|row| Some(row.building_type_id) == want)
             .filter_map(|row| row.state.filter(|sid| owned.contains(sid)))
             .collect();
         for job in &state.constructions {
