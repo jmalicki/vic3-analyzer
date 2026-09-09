@@ -77,8 +77,8 @@ pub struct SolveOpts {
     /// Previous relative prices (`price / base`) in goods-with-base-price order.
     ///
     /// When present and the length matches the internal goods vector, the
-    /// successive-substitution warm start is skipped and Basin starts from this
-    /// vector (clamped to bounds). A length mismatch is ignored (cold start).
+    /// successive-substitution warm start begins from this vector (clamped to
+    /// bounds) rather than from `1.0`. A length mismatch is ignored (cold start).
     ///
     /// Source: prior [`PricesResult::relative`]. `vic3-api` mutate / apply-delta
     /// set this automatically from the loaded baseline solve.
