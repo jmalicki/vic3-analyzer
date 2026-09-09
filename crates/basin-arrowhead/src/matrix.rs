@@ -4,7 +4,7 @@ use basin::{
 };
 use faer::linalg::matmul::matmul;
 use faer::linalg::solvers::{Llt, Solve};
-use faer::{Accum, Col, Mat, Par, Side};
+use faer::{Accum, Col, Mat, MatRef, Par, Side};
 
 /// Block-arrowhead Jacobian / Gram for joint price equilibrium.
 ///
@@ -253,45 +253,28 @@ impl ArrowheadMat {
 
     /// Apply the hub Schur complement `S = (H+D_hub) − Σ K B⁻¹ Kᵀ` to `v` without
     /// forming `K B⁻¹ Kᵀ` explicitly (avoids catastrophic cancellation).
-    fn schur_apply(&self, v: &Col<f64>, state_factors: &[Llt<f64>]) -> Col<f64> {
-        let g = self.g;
-        let mut out = Col::<f64>::zeros(g);
-        for i in 0..g {
-            let mut sum = self.extra_diag[i] * v[i];
-            for j in 0..g {
-                sum += self.hub[(i, j)] * v[j];
-            }
-            out[i] = sum;
-        }
-        for (st, llt) in state_factors.iter().enumerate() {
-            let mut kt_v = Col::<f64>::zeros(g);
-            for j in 0..g {
-                let mut s = 0.0;
-                for i in 0..g {
-                    s += self.hub_sigma[st][(i, j)] * v[i];
-                }
-                kt_v[j] = s;
-            }
-            llt.solve_in_place(kt_v.as_mut());
-            let mut kw = Col::<f64>::zeros(g);
-            matvec_square(&self.hub_sigma[st], &kt_v, &mut kw);
-            for i in 0..g {
-                out[i] -= kw[i];
-            }
-        }
-        out
-    }
-
+    /// Hub Schur complement `H + diag(extra) − Σ_s K_s A_s⁻¹ K_sᵀ`.
+    ///
+    /// Each state contributes one `g × g` triangular solve and one matmul, so the
+    /// whole complement is formed with blocked kernels rather than by pushing `g`
+    /// unit vectors through the arrowhead one at a time.
     fn build_schur_hub(&self, state_factors: &[Llt<f64>]) -> Mat<f64> {
         let g = self.g;
-        let mut schur = Mat::<f64>::zeros(g, g);
-        for j in 0..g {
-            let mut e = Col::<f64>::zeros(g);
-            e[j] = 1.0;
-            let col = self.schur_apply(&e, state_factors);
-            for i in 0..g {
-                schur[(i, j)] = col[i];
-            }
+        let mut schur = self.hub.clone();
+        for i in 0..g {
+            schur[(i, i)] += self.extra_diag[i];
+        }
+        for (st, llt) in state_factors.iter().enumerate() {
+            let mut a_inv_kt = self.hub_sigma[st].transpose().to_owned();
+            llt.solve_in_place(a_inv_kt.as_mut());
+            matmul(
+                schur.as_mut(),
+                Accum::Add,
+                self.hub_sigma[st].as_ref(),
+                a_inv_kt.as_ref(),
+                -1.0,
+                Par::Seq,
+            );
         }
         schur
     }
@@ -335,66 +318,89 @@ impl ArrowheadMat {
         Ok((state_factors, hub_llt))
     }
 
-    fn solve_arrowhead(
+    /// Solve the arrowhead system for every column of `rhs` at once.
+    ///
+    /// The per-state work is the same as a single-column back-substitution, but each
+    /// state's factor is applied to all `k` right-hand sides in one blocked solve, so
+    /// the factor is touched once instead of `k` times.
+    fn solve_arrowhead_many(
         &self,
-        y: &Col<f64>,
+        rhs: MatRef<'_, f64>,
         state_factors: &[Llt<f64>],
         hub_llt: &Llt<f64>,
-    ) -> Col<f64> {
+    ) -> Mat<f64> {
         let g = self.g;
-        let n = self.n();
-        let mut out = Col::<f64>::zeros(n);
+        let k = rhs.ncols();
+        let mut out = Mat::<f64>::zeros(self.n(), k);
 
-        let mut w = vec![Col::<f64>::zeros(g); self.s];
+        let mut w = Vec::with_capacity(self.s);
         for (st, llt) in state_factors.iter().enumerate() {
-            let base = g + st * g;
-            w[st] = col_slice(y, base, g);
-            llt.solve_in_place(w[st].as_mut());
+            let mut block = rhs.submatrix(g + st * g, 0, g, k).to_owned();
+            llt.solve_in_place(block.as_mut());
+            w.push(block);
         }
 
-        let mut y_hub = col_slice(y, 0, g);
+        let mut x_r = rhs.submatrix(0, 0, g, k).to_owned();
         for (st, ws) in w.iter().enumerate() {
-            let mut kw = Col::<f64>::zeros(g);
-            matvec_square(&self.hub_sigma[st], ws, &mut kw);
+            matmul(
+                x_r.as_mut(),
+                Accum::Add,
+                self.hub_sigma[st].as_ref(),
+                ws.as_ref(),
+                -1.0,
+                Par::Seq,
+            );
+        }
+        hub_llt.solve_in_place(x_r.as_mut());
+        for j in 0..k {
             for i in 0..g {
-                y_hub[i] -= kw[i];
+                out[(i, j)] = x_r[(i, j)];
             }
         }
-        let mut x_r = y_hub;
-        hub_llt.solve_in_place(x_r.as_mut());
-        for i in 0..g {
-            out[i] = x_r[i];
-        }
 
+        let mut corr = Mat::<f64>::zeros(g, k);
         for (st, llt) in state_factors.iter().enumerate() {
+            matmul(
+                corr.as_mut(),
+                Accum::Replace,
+                self.hub_sigma[st].transpose(),
+                x_r.as_ref(),
+                1.0,
+                Par::Seq,
+            );
+            llt.solve_in_place(corr.as_mut());
             let base = g + st * g;
-            let mut inv_kt_x = Col::from_fn(g, |i| {
-                let mut sum = 0.0;
-                for j in 0..g {
-                    sum += self.hub_sigma[st][(j, i)] * x_r[j];
+            for j in 0..k {
+                for i in 0..g {
+                    out[(base + i, j)] = w[st][(i, j)] - corr[(i, j)];
                 }
-                sum
-            });
-            llt.solve_in_place(inv_kt_x.as_mut());
-            for i in 0..g {
-                out[base + i] = w[st][i] - inv_kt_x[i];
             }
         }
         out
     }
 
-    fn market_row_as_col(&self, row: usize) -> Col<f64> {
+    /// `[b | Mᵀ]`, the single batch of right-hand sides that [`Self::solve_spd`] needs:
+    /// the caller's vector plus the `g` market rows driving the Woodbury correction.
+    fn woodbury_rhs(&self, b: &Col<f64>) -> Mat<f64> {
         let g = self.g;
-        let n = self.n();
-        Col::from_fn(n, |j| {
-            if j < g {
-                self.market_r[(row, j)]
-            } else {
-                let st = (j - g) / g;
-                let c = j - g - st * g;
-                self.market_sigma[st][(row, c)]
+        let mut rhs = Mat::<f64>::zeros(self.n(), g + 1);
+        for i in 0..self.n() {
+            rhs[(i, 0)] = b[i];
+        }
+        for i in 0..g {
+            for j in 0..g {
+                rhs[(i, j + 1)] = self.market_r[(j, i)];
             }
-        })
+        }
+        for (st, block) in self.market_sigma.iter().enumerate() {
+            let base = g + st * g;
+            for i in 0..g {
+                for j in 0..g {
+                    rhs[(base + i, j + 1)] = block[(j, i)];
+                }
+            }
+        }
+        rhs
     }
 
     /// Set one Jacobian entry `(row, col)` following the [coordinate layout](Self).
@@ -597,39 +603,43 @@ impl LinearSolveSpd<Col<f64>> for ArrowheadMat {
         assert_eq!(b.nrows(), self.n());
 
         let (state_factors, hub_llt) = self.factor_arrowhead()?;
-        let t = self.solve_arrowhead(b, &state_factors, &hub_llt);
+
+        // One batched arrowhead solve covers both the caller's right-hand side and
+        // all `g` Woodbury columns.
+        let g = self.g;
+        let n = self.n();
+        let solved =
+            self.solve_arrowhead_many(self.woodbury_rhs(b).as_ref(), &state_factors, &hub_llt);
+        let t = solved.col(0).to_owned();
 
         if self.s == 0 && self.g == 0 {
             return Ok(t);
         }
 
-        let g = self.g;
-        let n = self.n();
-        let mut y_cols = Mat::<f64>::zeros(n, g);
-        for j in 0..g {
-            let m_col = self.market_row_as_col(j);
-            let col = self.solve_arrowhead(&m_col, &state_factors, &hub_llt);
-            for i in 0..n {
-                y_cols[(i, j)] = col[i];
-            }
-        }
+        let y_cols = solved.as_ref().submatrix(0, 1, n, g);
 
-        let mut m_mat = Mat::<f64>::zeros(g, n);
-        for i in 0..g {
-            let row = self.market_row_as_col(i);
-            for k in 0..n {
-                m_mat[(i, k)] = row[k];
-            }
-        }
+        // `M · Y` block-wise: `M`'s market rows are already stored as the `g × g`
+        // blocks `market_r` and `market_sigma[s]`, so accumulate over cache-resident
+        // blocks instead of materialising the `g × n` dense copy.
         let mut my = Mat::<f64>::zeros(g, g);
         matmul(
             my.as_mut(),
             Accum::Replace,
-            m_mat.as_ref(),
-            y_cols.as_ref(),
+            self.market_r.as_ref(),
+            y_cols.submatrix(0, 0, g, g),
             1.0,
             Par::Seq,
         );
+        for (st, block) in self.market_sigma.iter().enumerate() {
+            matmul(
+                my.as_mut(),
+                Accum::Add,
+                block.as_ref(),
+                y_cols.submatrix(g + st * g, 0, g, g),
+                1.0,
+                Par::Seq,
+            );
+        }
         for i in 0..g {
             my[(i, i)] += 1.0;
         }
@@ -652,21 +662,6 @@ impl LinearSolveSpd<Col<f64>> for ArrowheadMat {
             x[i] -= yz[i];
         }
         Ok(x)
-    }
-}
-
-fn col_slice(v: &Col<f64>, start: usize, len: usize) -> Col<f64> {
-    Col::from_fn(len, |i| v[start + i])
-}
-
-fn matvec_square(a: &Mat<f64>, x: &Col<f64>, out: &mut Col<f64>) {
-    let g = x.nrows();
-    for i in 0..g {
-        let mut sum = 0.0;
-        for j in 0..g {
-            sum += a[(i, j)] * x[j];
-        }
-        out[i] = sum;
     }
 }
 
