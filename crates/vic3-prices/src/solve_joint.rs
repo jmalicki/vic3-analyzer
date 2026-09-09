@@ -40,7 +40,10 @@ use std::cell::Cell;
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use basin::{BoxConstraints, CostFunction, Executor, Jacobian, Residual, TerminationReason, Trf};
+use basin::{
+    BoxConstraints, CostFunction, Executor, Jacobian, NoImprovement, Residual, TerminationReason,
+    Trf,
+};
 use basin_arrowhead::ArrowheadMat;
 use faer::col::Col;
 use vic3_defs::{GameDefs, GoodId, GoodsVec};
@@ -49,7 +52,9 @@ use crate::consumption::add_wage_bins;
 use crate::formula::{local_price, target_price, unclipped_target_relative_price};
 use crate::result::{GoodPrice, SolveOpts, SolveOutcome, SolveStats, SolveStatus};
 use crate::shop_cache::ShopCache;
-use crate::solve::{empty_stats, market_goods, ShopSnapshot};
+use crate::solve::{
+    empty_stats, market_goods, ShopSnapshot, KKT_TOL, STALL_PATIENCE, STALL_REL_TOL,
+};
 
 /// Central finite-difference step for Jacobian columns that use explicit FD.
 const FD_STEP: f64 = 1e-7;
@@ -116,6 +121,21 @@ impl<'a> PriceResidualJoint<'a> {
     /// `p_s = blend(m_s, market(r), σ_s)`.
     fn residual_at(&self, x: &Col<f64>) -> Col<f64> {
         self.eval_residual(x, None)
+    }
+
+    /// Cost `½‖R‖²` at `x`, used to scale [`STALL_REL_TOL`] to the problem.
+    ///
+    /// Deliberately not [`CostFunction::cost`]: this is solver setup rather than
+    /// an optimizer evaluation, so it must not inflate the reported
+    /// `n_residual_evals`. Falls back to `1.0` for a non-finite or zero cost, so
+    /// the tolerance stays a usable absolute number.
+    fn cost_scale(&self, x: &Col<f64>) -> f64 {
+        let cost = 0.5 * self.residual_at(x).iter().map(|v| v * v).sum::<f64>();
+        if cost.is_finite() && cost > 0.0 {
+            cost
+        } else {
+            1.0
+        }
     }
 
     /// Evaluates `R(x)` and optionally records per-state pop-buy volumes.
@@ -560,9 +580,17 @@ pub(crate) fn equilibrate_joint(
     let basin_iters = u64::from(opts.max_iters);
     // BCL §2 reflection: without it, coordinates that hit the box while others
     // still have large scaled KKT drive Coleman–Li `d² → ∞` and `SolverFailed`.
-    let result = Executor::from_start(problem.clone(), Trf::new().with_reflection(true), x.clone())
-        .max_iter(basin_iters)
-        .run();
+    // Stationarity is the convergence test; the stall counter only catches solves
+    // that never get there, and reports itself as unsuccessful.
+    let stall_tol = STALL_REL_TOL * problem.cost_scale(&x);
+    let result = Executor::from_start(
+        problem.clone(),
+        Trf::new().with_reflection(true).with_tol_grad(KKT_TOL),
+        x.clone(),
+    )
+    .max_iter(basin_iters)
+    .terminate_on(NoImprovement::new(STALL_PATIENCE, stall_tol))
+    .run();
 
     let outcome = match result {
         Ok(o) => o,
@@ -580,8 +608,9 @@ pub(crate) fn equilibrate_joint(
     // capped prices; see docs/prices-equilibrium.md). Map that to MaxIters, not Failed.
     let status = match outcome.reason {
         TerminationReason::SolverFailed => SolveStatus::Failed,
-        TerminationReason::MaxIter if residual > opts.residual_eps => SolveStatus::MaxIters,
         _ if residual <= opts.residual_eps => SolveStatus::Converged,
+        // Backstop, not convergence: no stationarity and no cleared market.
+        TerminationReason::NoImprovement => SolveStatus::Stalled,
         _ => SolveStatus::MaxIters,
     };
 

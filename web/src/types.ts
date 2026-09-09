@@ -168,7 +168,7 @@ export interface PricesResult {
   state_needs?: StateNeed[]
   inputs?: MarketInputs
   residual: number
-  status: 'converged' | 'max_iters' | 'failed'
+  status: 'converged' | 'max_iters' | 'stalled' | 'failed'
   limitations: string[]
   gdp?: number
   sol?: number

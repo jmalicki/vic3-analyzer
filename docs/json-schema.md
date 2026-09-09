@@ -210,7 +210,7 @@ Preview mutation applied to a cloned world (extra levels, then production method
       }
     },
     "residual": { "type": "number" },
-    "status": { "enum": ["converged", "max_iters", "failed"] },
+    "status": { "enum": ["converged", "max_iters", "stalled", "failed"] },
     "limitations": { "type": "array", "items": { "type": "string" } },
     "relative": {
       "type": "array",
@@ -222,6 +222,11 @@ Preview mutation applied to a cloned world (extra levels, then production method
 ```
 
 `status = converged` implies `residual < SolveOpts.residual_eps` (I5).
+`status = stalled` is **not** a successful solve: the iterate stopped improving
+before reaching either `residual_eps` or first-order stationarity, so the prices
+are wherever the solver gave up. It is distinct from `max_iters` because the
+iteration budget was not the binding constraint — raising `max_iters` will not
+help a stalled solve.
 `state_goods.price` blends `market_price` and `state_price` using
 `effective_mapi = 0.75 * market_access`. Wage pops shop at that local price
 inside the residual. Access then scales their orders into the single market.

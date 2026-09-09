@@ -95,10 +95,14 @@ fn toy_economy_solve_converges() {
             result.residual,
             strategy
         );
+        // The toy economy does not reach stationarity or `residual_eps` under
+        // either strategy: it used to exhaust the iteration budget, and now the
+        // stall backstop stops it at the same iterate. `Stalled` is the honest
+        // label for that, so accept it alongside the budget-exhausted case.
         assert!(
             matches!(
                 result.status,
-                SolveStatus::Converged | SolveStatus::MaxIters
+                SolveStatus::Converged | SolveStatus::MaxIters | SolveStatus::Stalled
             ),
             "unexpected status {:?} residual={} (strategy: {:?})",
             result.status,

@@ -36,7 +36,8 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use basin::{
-    BoxConstraints, CostFunction, DenseMatrix, Executor, Jacobian, Residual, TerminationReason, Trf,
+    BoxConstraints, CostFunction, DenseMatrix, Executor, Jacobian, NoImprovement, Residual,
+    TerminationReason, Trf,
 };
 use vic3_defs::{GameDefs, GoodId, GoodsVec};
 
@@ -53,6 +54,49 @@ const WARM_START_ALPHA: f64 = 0.5;
 const FD_STEP: f64 = 1e-7;
 const LOCAL_ITERS: u32 = 16;
 const LOCAL_EPS: f64 = 1e-10;
+
+/// First-order optimality tolerance: the primary convergence test.
+///
+/// TRF stops with [`TerminationReason::SolverConverged`] once the Coleman–Li
+/// scaled KKT norm `‖v ⊙ Jᵀr‖_∞` falls to this bound. That measure is zero at
+/// any KKT point, interior *or* face-active, and it costs nothing: TRF already
+/// has `J` and `r` in hand each iteration. Plain `‖∇f‖` would be the wrong test
+/// here, since the gradient need not vanish at a constrained optimum — it points
+/// into the active face, the normal end state once goods pin to the price caps.
+///
+/// Set explicitly rather than left implicit: this is the definition of a
+/// converged solve, and it is the same value scipy's `least_squares` uses for
+/// `gtol`. Kept tight deliberately — stopping on a loose stationarity claim
+/// would silently degrade prices, whereas failing to reach it costs only the
+/// iterations the stall backstop then trims.
+pub(crate) const KKT_TOL: f64 = 1e-8;
+
+/// Consecutive non-improving TRF iterations tolerated by the stall backstop.
+///
+/// Both solvers previously ran to `max_iters` unconditionally: `residual_eps`
+/// only labels a finished solve (I5), it never stopped one. On a whole-save
+/// Prussia 1836 solve that meant 78–88 of 100 iterations ran after the iterate
+/// had gone bitwise frozen.
+///
+/// This is a backstop for degenerate solves that never reach [`KKT_TOL`], not
+/// the convergence test, so it is generous. Firing it is *not* success: the
+/// solve reports [`SolveStatus::Stalled`] rather than claiming convergence.
+pub(crate) const STALL_PATIENCE: u64 = 10;
+
+/// Minimum cost improvement counted as progress by the stall backstop,
+/// relative to the cost entering the TRF phase.
+///
+/// Not zero: with an exact-equality test, a single rounding-level wobble in the
+/// cost resets the patience counter, so a solve wandering in floating-point
+/// noise would never trip the backstop.
+///
+/// The window is wide enough to pick a safe value. On the traced Prussia solve
+/// the cost is ≈134, one ulp is ≈3e-14 (2e-16 relative), while the smallest
+/// *genuine* improvement observed was Δ‖r‖ = 6.3e-12, i.e. Δcost ≈ 1.0e-10 or
+/// 7.7e-13 relative — those improvements then grew geometrically for ~18
+/// iterations, so aborting them would cost several digits. `1e-14` sits ~77x
+/// below the smallest real improvement and ~45x above a single ulp.
+pub(crate) const STALL_REL_TOL: f64 = 1e-14;
 
 /// Find relative prices `r` minimizing `‖r − τ(orders(r))‖²`
 /// with box bounds `r ∈ [1 − PRICE_RANGE, 1 + PRICE_RANGE]`.
@@ -206,9 +250,17 @@ fn equilibrate_nested(
     let mut termination = None;
     if price_range > 0.0 {
         let basin_iters = u64::from(opts.max_iters.saturating_sub(warm_iters));
-        match Executor::from_start(problem.clone(), Trf::new(), rel.clone())
-            .max_iter(basin_iters)
-            .run()
+        // Stationarity is the convergence test; the stall counter only catches
+        // solves that never get there, and reports itself as unsuccessful.
+        let stall_tol = STALL_REL_TOL * problem.cost_scale(&rel);
+        match Executor::from_start(
+            problem.clone(),
+            Trf::new().with_tol_grad(KKT_TOL),
+            rel.clone(),
+        )
+        .max_iter(basin_iters)
+        .terminate_on(NoImprovement::new(STALL_PATIENCE, stall_tol))
+        .run()
         {
             Ok(outcome) => {
                 rel.clone_from(outcome.param());
@@ -230,6 +282,10 @@ fn equilibrate_nested(
         SolveStatus::Converged
     } else if failed {
         SolveStatus::Failed
+    } else if matches!(termination, Some(TerminationReason::NoImprovement)) {
+        // Backstop fired: neither ‖R‖ < ε nor stationarity was reached, and the
+        // polish did not rescue it. Report that rather than implying a budget ran out.
+        SolveStatus::Stalled
     } else {
         SolveStatus::MaxIters
     };
@@ -521,6 +577,27 @@ impl PriceResidual<'_> {
             .zip(rel)
             .map(|(formula, r)| r - formula)
             .collect()
+    }
+
+    /// Cost `½‖R‖²` at `rel`, used to scale [`STALL_REL_TOL`] to the problem.
+    ///
+    /// Deliberately not [`CostFunction::cost`]: this is solver setup rather than
+    /// an optimizer evaluation, so it must not inflate the reported
+    /// `n_residual_evals`. Falls back to `1.0` for a non-finite or zero cost, so
+    /// the tolerance stays a usable absolute number.
+    fn cost_scale(&self, rel: &[f64]) -> f64 {
+        let mut scratch = SettleScratch::new(self.cache.base_prices.len());
+        let cost = 0.5
+            * self
+                .residual_at(rel, &mut scratch)
+                .iter()
+                .map(|v| v * v)
+                .sum::<f64>();
+        if cost.is_finite() && cost > 0.0 {
+            cost
+        } else {
+            1.0
+        }
     }
 
     /// Clamps the given relative prices `r_g` into the solver's valid box `[1 - ρ, 1 + ρ]`.

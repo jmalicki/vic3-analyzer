@@ -407,6 +407,11 @@
           "type": "string"
         },
         {
+          "const": "stalled",
+          "description": "**Not a successful solve.** The stall backstop stopped the run: the\niterate stopped improving without reaching either `residual_eps` or\nfirst-order stationarity, so this is neither a cleared market nor a KKT\npoint — the prices are wherever the solver gave up. Distinguished from\n[`Self::MaxIters`] because the budget was *not* the binding constraint;\nraising `max_iters` will not help, the solve is degenerate.",
+          "type": "string"
+        },
+        {
           "const": "failed",
           "description": "Basin reported failure and successive substitution did not recover.",
           "type": "string"

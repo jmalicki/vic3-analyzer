@@ -216,6 +216,13 @@ pub enum SolveStatus {
     /// residual still ≥ ε. The latter is expected when unclipped target relative
     /// price τ lies outside `[1±ρ]` (capped / disequilibrium clearing).
     MaxIters,
+    /// **Not a successful solve.** The stall backstop stopped the run: the
+    /// iterate stopped improving without reaching either `residual_eps` or
+    /// first-order stationarity, so this is neither a cleared market nor a KKT
+    /// point — the prices are wherever the solver gave up. Distinguished from
+    /// [`Self::MaxIters`] because the budget was *not* the binding constraint;
+    /// raising `max_iters` will not help, the solve is degenerate.
+    Stalled,
     /// Basin reported failure and successive substitution did not recover.
     Failed,
 }
@@ -225,6 +232,7 @@ impl fmt::Display for SolveStatus {
         f.write_str(match self {
             Self::Converged => "converged",
             Self::MaxIters => "max_iters",
+            Self::Stalled => "stalled",
             Self::Failed => "failed",
         })
     }
