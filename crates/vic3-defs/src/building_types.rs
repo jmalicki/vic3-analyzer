@@ -82,6 +82,11 @@ impl fmt::Display for BuildingTypeId {
 /// [`crate::GameDefs`] has to stay `Sync` for the `Arc<GameDefs>` that
 /// `vic3-sql` hands to DataFusion providers.
 ///
+/// Assumes each script id appears in `building_types_order` at most once, which
+/// every writer maintains and [`BuildingTypeId`] already requires of a dense
+/// index. Given duplicates, a validated hit can report a later position than
+/// [`Iterator::position`] would; the debug assertion catches that.
+///
 /// Derived data: skipped by serde, cloned by handle, and always equal.
 #[derive(Debug, Default, Clone)]
 pub struct BuildingTypeIndex(OnceLock<Arc<HashMap<String, BuildingTypeId>>>);
