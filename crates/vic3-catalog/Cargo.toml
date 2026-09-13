@@ -11,7 +11,7 @@ description = "Save catalog scan and shared desktop/MCP app config"
 workspace = true
 
 [dependencies]
-dirs = "6"
+dirs = "7"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
