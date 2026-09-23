@@ -14,6 +14,7 @@ const current: PricesResult = {
     { name: 'grain', label: 'Grain', base: 20, price: 18, buy: 4, sell: 8 },
   ],
   residual: 0.02,
+  capped_residual: 0.02,
   status: 'converged',
   limitations: [],
 }
@@ -24,6 +25,7 @@ const preview: PricesResult = {
     { name: 'grain', label: 'Grain', base: 20, price: 19.25, buy: 4, sell: 8 },
   ],
   residual: 0.001,
+  capped_residual: 0.001,
   status: 'converged',
   limitations: [],
 }

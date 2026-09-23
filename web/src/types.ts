@@ -168,7 +168,10 @@ export interface PricesResult {
   state_needs?: StateNeed[]
   inputs?: MarketInputs
   residual: number
-  status: 'converged' | 'max_iters' | 'failed'
+  /** Distance to the game's own clipped price rule; 0 at a correct answer.
+   *  Judge a solve on this, not on `residual`. */
+  capped_residual: number
+  status: 'converged' | 'max_iters' | 'stalled' | 'failed'
   limitations: string[]
   gdp?: number
   sol?: number

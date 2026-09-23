@@ -398,12 +398,17 @@
       "oneOf": [
         {
           "const": "converged",
-          "description": "Residual below [`SolveOpts::residual_eps`]: orders clear inside the price box.",
+          "description": "Basin stopped at a constrained optimum (its own `SolverConverged`:\nfirst-order optimality on the box).\n\nThis is the *solver's* notion, reported as-is. It bounds neither\n[`PricesResult::residual`] (goods pinned at a price cap keep that large by\nconstruction) nor [`PricesResult::capped_residual`] (the joint strategy can\nconverge ~1e-2 from the game's price rule, lacking the\nsuccessive-substitution polish). Judge the answer with `capped_residual`.",
           "type": "string"
         },
         {
           "const": "max_iters",
-          "description": "Iteration budget exhausted, or Basin stopped at a face-active KKT with\nresidual still ≥ ε. The latter is expected when unclipped target relative\nprice τ lies outside `[1±ρ]` (capped / disequilibrium clearing).",
+          "description": "Basin hit its iteration budget without reaching a constrained optimum.\n[`PricesResult::capped_residual`] says how far off the answer is.",
+          "type": "string"
+        },
+        {
+          "const": "stalled",
+          "description": "**Not a successful solve.** Basin's stall backstop fired: the iterate\nstopped improving without reaching first-order optimality, so the prices\nare wherever the solver gave up. Distinguished from [`Self::MaxIters`]\nbecause the budget was *not* the binding constraint — raising `max_iters`\nwill not help. [`PricesResult::capped_residual`] says how far off it is.",
           "type": "string"
         },
         {
@@ -758,6 +763,11 @@
       },
       "type": "array"
     },
+    "capped_residual": {
+      "description": "`‖r − clamp(τ_unclipped, 1−ρ, 1+ρ)‖₂`: distance to the price the game\nitself would compute.\n\n`clamp(1 + ρ·ratio)` is identically `1 + ρ·clamp(ratio, −1, 1)`, the\ngame's own clipped price rule, so a good pinned at a cap whose target is\nbeyond it contributes zero — it is already at its best feasible value.\nUnlike [`Self::residual`] this is zero at a correct answer, so it answers\n\"how far off are we\" when the status is not `converged`.",
+      "format": "double",
+      "type": "number"
+    },
     "countries": {
       "items": {
         "$ref": "#/$defs/CountryInfo"
@@ -789,7 +799,7 @@
       "type": "array"
     },
     "residual": {
-      "description": "`‖r − r_formula(orders(r))‖₂`. Always present (I5).",
+      "description": "`‖r − τ_unclipped‖₂`, the solver's own objective value.\n\n**Diagnostic only — do not depend on its meaning.** τ is deliberately\n*unclipped* so the optimizer has a gradient toward the price caps, which\nmeans this is the distance to a target that may lie outside the price box\nand so has no zero point: a perfect solve on a save with capped goods\nstill scores large. Use [`Self::capped_residual`] to judge an answer.",
       "format": "double",
       "type": "number"
     },
@@ -843,6 +853,7 @@
     "state_pops",
     "inputs",
     "residual",
+    "capped_residual",
     "status",
     "limitations"
   ],

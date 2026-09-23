@@ -1064,9 +1064,14 @@ mod tests {
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(32))]
 
-        /// I5: residual is always reported; `status = converged` ⇒ residual < ε.
+        /// I5: both residuals are always reported, and the capped one never
+        /// exceeds the raw one (it targets `clamp(τ)` rather than τ).
+        ///
+        /// No longer asserts anything from `status`: that mirrors Basin's
+        /// termination reason, which is a statement about why the solver stopped,
+        /// not a bound on the answer. Judge the answer with `capped_residual`.
         #[test]
-        fn i5_converged_implies_residual_below_eps(
+        fn i5_residuals_are_reported_and_ordered(
             wood_sell in 1.0f64..=200.0,
             coal_sell in 1.0f64..=200.0,
             size_a in 1_000.0f64..=20_000.0,
@@ -1102,9 +1107,9 @@ mod tests {
             let result = solve(&world, &defs, opts.clone());
             prop_assert!(result.residual.is_finite());
             prop_assert!(result.residual >= 0.0);
-            if result.status == SolveStatus::Converged {
-                prop_assert!(result.residual < opts.residual_eps);
-            }
+            prop_assert!(result.capped_residual.is_finite());
+            prop_assert!(result.capped_residual >= 0.0);
+            prop_assert!(result.capped_residual <= result.residual + 1e-9);
             prop_assert_eq!(result.limitations.len(), LIMITATIONS.len());
         }
 

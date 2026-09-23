@@ -36,7 +36,8 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use basin::{
-    BoxConstraints, CostFunction, DenseMatrix, Executor, Jacobian, Residual, TerminationReason, Trf,
+    BoxConstraints, CostFunction, DenseMatrix, Executor, Jacobian, NoImprovement, Residual,
+    TerminationReason, Trf,
 };
 use vic3_defs::{GameDefs, GoodId, GoodsVec};
 
@@ -53,6 +54,75 @@ const WARM_START_ALPHA: f64 = 0.5;
 const FD_STEP: f64 = 1e-7;
 const LOCAL_ITERS: u32 = 16;
 const LOCAL_EPS: f64 = 1e-10;
+
+/// Margin over the finite-difference gradient floor in [`kkt_tol`].
+///
+/// Small on purpose: large enough to clear the noise (the floor is an
+/// order-of-magnitude estimate, not a bound), small enough that the stationarity
+/// claim still means something.
+pub(crate) const KKT_FD_SAFETY: f64 = 4.0;
+
+/// First-order optimality tolerance: the primary convergence test, **derived
+/// from the finite-difference step** rather than chosen independently.
+///
+/// TRF stops with [`TerminationReason::SolverConverged`] once the Coleman–Li
+/// scaled KKT norm `‖v ⊙ Jᵀr‖_∞` falls to this bound. That measure is zero at
+/// any KKT point, interior *or* face-active, and costs nothing: TRF already has
+/// `J` and `r` in hand. Plain `‖∇f‖` would be the wrong test, since the gradient
+/// need not vanish at a constrained optimum — it points into the active face,
+/// the normal end state once goods pin to the price caps.
+///
+/// # Why this is tied to `FD_STEP`
+///
+/// Both Jacobians here are *forward* finite differences (see [`FD_STEP`] and its
+/// twin in `solve_joint`), so each entry carries an absolute error of about
+/// `FD_STEP/2` from truncation. The gradient `Jᵀr` inherits roughly
+/// `‖r‖ · FD_STEP` of that error, and **no stationarity measure below that floor
+/// is meaningful — it is finite-difference noise, not optimality.** Asking for a
+/// tighter bound than the Jacobian can resolve just guarantees the solve never
+/// certifies, burns its whole budget, and reports a stall it cannot escape.
+///
+/// Measured on Prussia 1836: `‖r‖ ≈ 16.5`, so the predicted floor is
+/// `16.5 · 1e-7 ≈ 1.7e-6`, and sweeping the tolerance brackets the actual
+/// plateau of the scaled KKT norm to `(2e-6, 5e-6]`. Prediction and measurement
+/// agree within 2x, which is why the two constants are wired together here.
+///
+/// **Tightening convergence therefore requires tightening the Jacobian**, by
+/// shrinking `FD_STEP`, moving to central differences, or supplying an analytic
+/// Jacobian. Lowering this alone would be a lie.
+///
+/// `residual_norm` floors at `1.0` so a nearly cleared market (`‖r‖ → 0`) cannot
+/// drive the tolerance below the absolute FD noise level.
+pub(crate) fn kkt_tol(fd_step: f64, residual_norm: f64) -> f64 {
+    KKT_FD_SAFETY * fd_step * residual_norm.max(1.0)
+}
+
+/// Consecutive non-improving TRF iterations tolerated by the stall backstop.
+///
+/// Both solvers previously ran to `max_iters` unconditionally: `residual_eps`
+/// only labels a finished solve (I5), it never stopped one. On a whole-save
+/// Prussia 1836 solve that meant 78–88 of 100 iterations ran after the iterate
+/// had gone bitwise frozen.
+///
+/// This is a backstop for degenerate solves that never reach [`KKT_TOL`], not
+/// the convergence test, so it is generous. Firing it is *not* success: the
+/// solve reports [`SolveStatus::Stalled`] rather than claiming convergence.
+pub(crate) const STALL_PATIENCE: u64 = 10;
+
+/// Minimum cost improvement counted as progress by the stall backstop,
+/// relative to the cost entering the TRF phase.
+///
+/// Not zero: with an exact-equality test, a single rounding-level wobble in the
+/// cost resets the patience counter, so a solve wandering in floating-point
+/// noise would never trip the backstop.
+///
+/// The window is wide enough to pick a safe value. On the traced Prussia solve
+/// the cost is ≈134, one ulp is ≈3e-14 (2e-16 relative), while the smallest
+/// *genuine* improvement observed was Δ‖r‖ = 6.3e-12, i.e. Δcost ≈ 1.0e-10 or
+/// 7.7e-13 relative — those improvements then grew geometrically for ~18
+/// iterations, so aborting them would cost several digits. `1e-14` sits ~77x
+/// below the smallest real improvement and ~45x above a single ulp.
+pub(crate) const STALL_REL_TOL: f64 = 1e-14;
 
 /// Find relative prices `r` minimizing `‖r − τ(orders(r))‖²`
 /// with box bounds `r ∈ [1 − PRICE_RANGE, 1 + PRICE_RANGE]`.
@@ -150,6 +220,7 @@ fn equilibrate_nested(
             SolveOutcome {
                 goods: Vec::new(),
                 residual: 0.0,
+                capped_residual: 0.0,
                 status: SolveStatus::Converged,
                 relative: Vec::new(),
                 building_revenues: Vec::new(),
@@ -165,6 +236,7 @@ fn equilibrate_nested(
             SolveOutcome {
                 goods: Vec::new(),
                 residual: f64::INFINITY,
+                capped_residual: f64::INFINITY,
                 status: SolveStatus::Failed,
                 relative: Vec::new(),
                 building_revenues: Vec::new(),
@@ -206,9 +278,20 @@ fn equilibrate_nested(
     let mut termination = None;
     if price_range > 0.0 {
         let basin_iters = u64::from(opts.max_iters.saturating_sub(warm_iters));
-        match Executor::from_start(problem.clone(), Trf::new(), rel.clone())
-            .max_iter(basin_iters)
-            .run()
+        // Stationarity is the convergence test; the stall counter only catches
+        // solves that never get there, and reports itself as unsuccessful.
+        // `cost = ½‖r‖²`, so `‖r‖ = sqrt(2·cost)`.
+        let cost = problem.cost_scale(&rel);
+        let stall_tol = STALL_REL_TOL * cost;
+        let grad_tol = kkt_tol(FD_STEP, (2.0 * cost).sqrt());
+        match Executor::from_start(
+            problem.clone(),
+            Trf::new().with_tol_grad(grad_tol),
+            rel.clone(),
+        )
+        .max_iter(basin_iters)
+        .terminate_on(NoImprovement::new(STALL_PATIENCE, stall_tol))
+        .run()
         {
             Ok(outcome) => {
                 rel.clone_from(outcome.param());
@@ -225,13 +308,24 @@ fn equilibrate_nested(
     problem.damp_toward_formula(&mut rel, WARM_START_ALPHA, polish);
     problem.clamp_rel(&mut rel);
 
-    let (rows, residual, snapshot) = problem.evaluate(&rel);
-    let status = if residual < opts.residual_eps {
-        SolveStatus::Converged
-    } else if failed {
-        SolveStatus::Failed
-    } else {
-        SolveStatus::MaxIters
+    let (rows, residual, capped_residual, snapshot) = problem.evaluate(&rel);
+    // The status *is* Basin's termination reason; we do not layer a second notion
+    // of success on top. Only four reasons are reachable given the criteria we
+    // attach (`max_iter`, TRF's `tol_grad`, `NoImprovement`, solver failure), and
+    // `TerminationReason` is `#[non_exhaustive]`, hence the catch-all.
+    //
+    // `Converged` is therefore Basin's own notion, and is not a promise about
+    // `capped_residual`: the joint strategy can reach it while still ~1e-2 from
+    // the game's price rule, having no successive-substitution polish. How good
+    // the answer is is a separate question that `capped_residual` answers.
+    let status = match termination {
+        Some(TerminationReason::SolverFailed) => SolveStatus::Failed,
+        Some(TerminationReason::SolverConverged) => SolveStatus::Converged,
+        Some(TerminationReason::NoImprovement) => SolveStatus::Stalled,
+        Some(_) => SolveStatus::MaxIters,
+        // `price_range == 0` collapses the box to the single point `r = 1`, so no
+        // solver runs: the only feasible point is trivially the optimum.
+        None => SolveStatus::Converged,
     };
 
     let building_revenues = building_revenues_from_cache(cache, defs, &rows, Some(&snapshot));
@@ -245,6 +339,7 @@ fn equilibrate_nested(
         SolveOutcome {
             goods: rows,
             residual,
+            capped_residual,
             status,
             relative: rel,
             building_revenues,
@@ -523,6 +618,27 @@ impl PriceResidual<'_> {
             .collect()
     }
 
+    /// Cost `½‖R‖²` at `rel`, used to scale [`STALL_REL_TOL`] to the problem.
+    ///
+    /// Deliberately not [`CostFunction::cost`]: this is solver setup rather than
+    /// an optimizer evaluation, so it must not inflate the reported
+    /// `n_residual_evals`. Falls back to `1.0` for a non-finite or zero cost, so
+    /// the tolerance stays a usable absolute number.
+    fn cost_scale(&self, rel: &[f64]) -> f64 {
+        let mut scratch = SettleScratch::new(self.cache.base_prices.len());
+        let cost = 0.5
+            * self
+                .residual_at(rel, &mut scratch)
+                .iter()
+                .map(|v| v * v)
+                .sum::<f64>();
+        if cost.is_finite() && cost > 0.0 {
+            cost
+        } else {
+            1.0
+        }
+    }
+
     /// Clamps the given relative prices `r_g` into the solver's valid box `[1 - ρ, 1 + ρ]`.
     ///
     /// # Arguments
@@ -562,24 +678,27 @@ impl PriceResidual<'_> {
     /// 1. A vector of `GoodPrice` rows summarizing base, price, buy, and sell volumes per good.
     /// 2. The scalar objective value (the root sum of squared residuals `‖R‖`).
     /// 3. The `ShopSnapshot` containing local price/consumption details across states.
-    fn evaluate(&self, rel: &[f64]) -> (Vec<GoodPrice>, f64, ShopSnapshot) {
+    fn evaluate(&self, rel: &[f64]) -> (Vec<GoodPrice>, f64, f64, ShopSnapshot) {
         let mut scratch = SettleScratch::new(self.cache.base_prices.len());
         let prices = self.prices_from_rel(rel);
         let snapshot = self.snapshot_at(&prices, &mut scratch);
         let pop_buy = &snapshot.world_pop_buy;
-        let residual = self
-            .goods
-            .iter()
-            .zip(rel.iter())
-            .map(|(&id, rrel)| {
+        // Raw residual targets unclipped τ (the solver's objective); the capped
+        // one targets `clamp(τ)`, which is the game's own price rule, so a good
+        // pinned at a cap it cannot pass contributes zero.
+        let (sum_sq, capped_sum_sq) = self.goods.iter().zip(rel.iter()).enumerate().fold(
+            (0.0_f64, 0.0_f64),
+            |(raw_acc, capped_acc), (i, (&id, rrel))| {
                 let buy = self.cache.frozen_buy[id] + pop_buy[id];
                 let sell = self.cache.frozen_sell[id];
                 let formula = unclipped_target_relative_price(buy, sell, self.price_range);
-                rrel - formula
-            })
-            .map(|x| x * x)
-            .sum::<f64>()
-            .sqrt();
+                let raw = rrel - formula;
+                let capped = rrel - formula.clamp(self.lower[i], self.upper[i]);
+                (raw_acc + raw * raw, capped_acc + capped * capped)
+            },
+        );
+        let residual = sum_sq.sqrt();
+        let capped_residual = capped_sum_sq.sqrt();
         let rows = self
             .goods
             .iter()
@@ -598,7 +717,7 @@ impl PriceResidual<'_> {
                 })
             })
             .collect();
-        (rows, residual, snapshot)
+        (rows, residual, capped_residual, snapshot)
     }
 }
 

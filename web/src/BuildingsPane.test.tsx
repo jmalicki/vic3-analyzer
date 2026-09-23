@@ -97,6 +97,7 @@ const result: PricesResult = {
     { id: 3, name: 'building_badger_mill', label: 'Badger Mill' },
   ],
   residual: 0,
+  capped_residual: 0,
   status: 'converged',
   limitations: [],
 }

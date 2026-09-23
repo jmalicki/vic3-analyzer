@@ -40,7 +40,10 @@ use std::cell::Cell;
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use basin::{BoxConstraints, CostFunction, Executor, Jacobian, Residual, TerminationReason, Trf};
+use basin::{
+    BoxConstraints, CostFunction, Executor, Jacobian, NoImprovement, Residual, TerminationReason,
+    Trf,
+};
 use basin_arrowhead::ArrowheadMat;
 use faer::col::Col;
 use vic3_defs::{GameDefs, GoodId, GoodsVec};
@@ -49,9 +52,14 @@ use crate::consumption::add_wage_bins;
 use crate::formula::{local_price, target_price, unclipped_target_relative_price};
 use crate::result::{GoodPrice, SolveOpts, SolveOutcome, SolveStats, SolveStatus};
 use crate::shop_cache::ShopCache;
-use crate::solve::{empty_stats, market_goods, ShopSnapshot};
+use crate::solve::{
+    empty_stats, kkt_tol, market_goods, ShopSnapshot, STALL_PATIENCE, STALL_REL_TOL,
+};
 
-/// Central finite-difference step for Jacobian columns that use explicit FD.
+/// Finite-difference step for Jacobian columns that use explicit FD.
+///
+/// As in the nested solver, this sets the accuracy ceiling: the convergence
+/// tolerance is derived from it via [`kkt_tol`], so the two are linked.
 const FD_STEP: f64 = 1e-7;
 
 /// Basin problem: joint market + per-state pure-state price residuals.
@@ -116,6 +124,21 @@ impl<'a> PriceResidualJoint<'a> {
     /// `p_s = blend(m_s, market(r), σ_s)`.
     fn residual_at(&self, x: &Col<f64>) -> Col<f64> {
         self.eval_residual(x, None)
+    }
+
+    /// Cost `½‖R‖²` at `x`, used to scale [`STALL_REL_TOL`] to the problem.
+    ///
+    /// Deliberately not [`CostFunction::cost`]: this is solver setup rather than
+    /// an optimizer evaluation, so it must not inflate the reported
+    /// `n_residual_evals`. Falls back to `1.0` for a non-finite or zero cost, so
+    /// the tolerance stays a usable absolute number.
+    fn cost_scale(&self, x: &Col<f64>) -> f64 {
+        let cost = 0.5 * self.residual_at(x).iter().map(|v| v * v).sum::<f64>();
+        if cost.is_finite() && cost > 0.0 {
+            cost
+        } else {
+            1.0
+        }
     }
 
     /// Evaluates `R(x)` and optionally records per-state pop-buy volumes.
@@ -210,7 +233,7 @@ impl<'a> PriceResidualJoint<'a> {
     ///
     /// Snapshot stores both free pure-state prices `σ` and derived locals
     /// `p = blend(m, market, σ)` so emit can publish a coherent `StateGood` row.
-    fn evaluate(&self, x: &Col<f64>) -> (Vec<GoodPrice>, f64, ShopSnapshot) {
+    fn evaluate(&self, x: &Col<f64>) -> (Vec<GoodPrice>, f64, f64, ShopSnapshot) {
         let g = self.n_goods();
         let market_rel: Vec<f64> = (0..g).map(|i| x[i]).collect();
         let market_prices = self.prices_from_rel(&market_rel);
@@ -270,12 +293,22 @@ impl<'a> PriceResidualJoint<'a> {
         }
         snapshot.world_pop_buy = world_pop_buy.clone();
 
-        let residual = self
-            .residual_at(x)
-            .iter()
-            .map(|v| v * v)
-            .sum::<f64>()
-            .sqrt();
+        // Raw residual targets unclipped τ (the solver's objective); the capped one
+        // targets `clamp(τ)`, the game's own price rule, so a component pinned at a
+        // bound it cannot pass contributes zero. Recover τ from `R`: the market
+        // block is `R = r − τ`, the pure-state block `R = (σ − τ_state) / base_g`,
+        // so `scale` converts a residual component back into the units of `x`.
+        let res = self.residual_at(x);
+        let (sum_sq, capped_sum_sq) =
+            (0..res.nrows()).fold((0.0_f64, 0.0_f64), |(raw_acc, capped_acc), i| {
+                let raw = res[i];
+                let scale = if i < g { 1.0 } else { self.bases[(i - g) % g] };
+                let tau = x[i] - raw * scale;
+                let capped = (x[i] - tau.clamp(self.lower[i], self.upper[i])) / scale;
+                (raw_acc + raw * raw, capped_acc + capped * capped)
+            });
+        let residual = sum_sq.sqrt();
+        let capped_residual = capped_sum_sq.sqrt();
 
         let rows = self
             .goods
@@ -296,7 +329,7 @@ impl<'a> PriceResidualJoint<'a> {
             })
             .collect();
 
-        (rows, residual, snapshot)
+        (rows, residual, capped_residual, snapshot)
     }
 }
 
@@ -478,6 +511,7 @@ pub(crate) fn equilibrate_joint(
             SolveOutcome {
                 goods: Vec::new(),
                 residual: 0.0,
+                capped_residual: 0.0,
                 status: SolveStatus::Converged,
                 relative: Vec::new(),
                 building_revenues: Vec::new(),
@@ -493,6 +527,7 @@ pub(crate) fn equilibrate_joint(
             SolveOutcome {
                 goods: Vec::new(),
                 residual: f64::INFINITY,
+                capped_residual: f64::INFINITY,
                 status: SolveStatus::Failed,
                 relative: Vec::new(),
                 building_revenues: Vec::new(),
@@ -560,9 +595,20 @@ pub(crate) fn equilibrate_joint(
     let basin_iters = u64::from(opts.max_iters);
     // BCL §2 reflection: without it, coordinates that hit the box while others
     // still have large scaled KKT drive Coleman–Li `d² → ∞` and `SolverFailed`.
-    let result = Executor::from_start(problem.clone(), Trf::new().with_reflection(true), x.clone())
-        .max_iter(basin_iters)
-        .run();
+    // Stationarity is the convergence test; the stall counter only catches solves
+    // that never get there, and reports itself as unsuccessful.
+    // `cost = ½‖r‖²`, so `‖r‖ = sqrt(2·cost)`.
+    let cost = problem.cost_scale(&x);
+    let stall_tol = STALL_REL_TOL * cost;
+    let grad_tol = kkt_tol(FD_STEP, (2.0 * cost).sqrt());
+    let result = Executor::from_start(
+        problem.clone(),
+        Trf::new().with_reflection(true).with_tol_grad(grad_tol),
+        x.clone(),
+    )
+    .max_iter(basin_iters)
+    .terminate_on(NoImprovement::new(STALL_PATIENCE, stall_tol))
+    .run();
 
     let outcome = match result {
         Ok(o) => o,
@@ -570,18 +616,20 @@ pub(crate) fn equilibrate_joint(
     };
 
     x.clone_from(outcome.param());
-    let (rows, residual, snapshot) = problem.evaluate(&x);
+    let (rows, residual, capped_residual, snapshot) = problem.evaluate(&x);
     let building_revenues =
         crate::report::building_revenues_from_cache(cache, defs, &rows, Some(&snapshot));
 
-    // `SolveStatus::Converged` means market-clearing residual ‖R‖ < eps (same as
-    // nested). Basin may stop at a face-active KKT with ‖R‖ still large when
-    // unclipped τ lies outside the price box — that is intended (disequilibrium /
-    // capped prices; see docs/prices-equilibrium.md). Map that to MaxIters, not Failed.
+    // Basin is the authority on whether it reached a constrained optimum. The raw
+    // ‖R‖ stays large whenever unclipped τ lies outside the price box (capped /
+    // disequilibrium prices; see docs/prices-equilibrium.md), so it is the capped
+    // residual that says whether the answer matches the game's price rule.
     let status = match outcome.reason {
         TerminationReason::SolverFailed => SolveStatus::Failed,
-        TerminationReason::MaxIter if residual > opts.residual_eps => SolveStatus::MaxIters,
-        _ if residual <= opts.residual_eps => SolveStatus::Converged,
+        TerminationReason::SolverConverged => SolveStatus::Converged,
+        // Backstop, not convergence: the solve stopped improving without reaching
+        // first-order optimality.
+        TerminationReason::NoImprovement => SolveStatus::Stalled,
         _ => SolveStatus::MaxIters,
     };
 
@@ -589,6 +637,7 @@ pub(crate) fn equilibrate_joint(
         SolveOutcome {
             goods: rows,
             residual,
+            capped_residual,
             status,
             relative: (0..g).map(|i| x[i]).collect(),
             building_revenues,

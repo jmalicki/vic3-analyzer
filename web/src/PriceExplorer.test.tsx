@@ -131,6 +131,7 @@ const result: PricesResult = {
     },
   ],
   residual: 0,
+  capped_residual: 0,
   status: 'converged',
   limitations: [],
 }

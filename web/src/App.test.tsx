@@ -44,6 +44,7 @@ const result = JSON.stringify({
   ],
   building_types: [{ id: 0, name: 'building_rye_farm', label: 'Rye Farms' }],
   residual: 0.00001,
+  capped_residual: 0.00001,
   status: 'converged',
   limitations: ['Employment and production methods stay frozen.'],
 })
@@ -73,6 +74,7 @@ const planResult = JSON.stringify({
     },
   ],
   residual: 0.00001,
+  capped_residual: 0.00001,
   limitations: ['Research duration is fixed by the compact simulator.'],
 })
 
@@ -476,6 +478,7 @@ describe('prices UI', () => {
         day_cost: dayCost,
         actions: [],
         residual: 0,
+        capped_residual: 0,
         limitations: [],
       },
       limitations: [],
@@ -960,6 +963,7 @@ describe('prices UI', () => {
       JSON.stringify({
         ...JSON.parse(result),
         residual: 0.4,
+        capped_residual: 0.4,
         goods: [{ name: 'iron', base: 40, price: 40, buy: 120, sell: 100 }],
       }),
     )
