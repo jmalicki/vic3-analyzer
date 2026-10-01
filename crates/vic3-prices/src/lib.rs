@@ -43,8 +43,9 @@
 //!   when Basin reports failure or after a bound-clamped TRF finish.
 //! - **Basin `Trf`** (trust-region-reflective, dense Vec Jacobian) finishes the
 //!   bound-constrained NLS. Wasm-safe (no BLAS). When [`SolveOpts::warm_rel`]
-//!   matches the goods vector length, Basin starts from that vector and skips
-//!   successive substitution (CLI `mutate` / wasm apply-delta do this).
+//!   matches the goods vector length, the successive-substitution warm start
+//!   runs from that vector instead of from `1.0` (CLI `mutate` / wasm
+//!   apply-delta do this).
 //!
 //! Residual and [`LIMITATIONS`] are always part of the answer (I5).
 //!
@@ -166,8 +167,8 @@ pub fn apply_delta(world: &World, delta: &WorldDelta) -> World {
 /// Apply [`WorldDelta`] to a clone of `world` and re-solve. `world` is unchanged.
 ///
 /// Prefer passing the baseline [`PricesResult::relative`] as
-/// [`SolveOpts::warm_rel`] so Basin skips successive substitution (what
-/// `vic3-api` mutate / apply-delta paths do).
+/// [`SolveOpts::warm_rel`] so the solve starts near the previous equilibrium
+/// (what `vic3-api` mutate / apply-delta paths do).
 ///
 /// # Arguments
 ///
